@@ -19,10 +19,12 @@
     }
   },
   "include": [
+    "actions/**/*",
     "app/**/*",
     "server/**/*",
     "shared/**/*",
     "scripts/**/*",
+    "test/**/*",
     "vite.config.ts",
     "react-router.config.ts",
     ".react-router/types/**/*",

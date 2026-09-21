@@ -11,7 +11,12 @@ import {
   useCommandMenuShortcut,
 } from "@agent-native/core/client/navigation";
 import { getThemeInitScript } from "@agent-native/core/client/theme";
-import { IconHierarchy2, IconSun, IconMoon } from "@tabler/icons-react";
+import {
+  IconFlame,
+  IconSettings,
+  IconSun,
+  IconMoon,
+} from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTheme } from "next-themes";
 import { useCallback, useState } from "react";
@@ -21,7 +26,6 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
-  useLocation,
   useNavigate,
 } from "react-router";
 import type { LinksFunction } from "react-router";
@@ -119,40 +123,24 @@ function AppContent() {
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const navigate = useNavigate();
   const t = useT();
-  const location = useLocation();
-  const isChatThread = location.pathname.startsWith("/chat/");
   useCommandMenuShortcut(useCallback(() => setCmdkOpen(true), []));
   return (
     <>
       <CommandMenu open={cmdkOpen} onOpenChange={setCmdkOpen}>
         <CommandMenu.Group heading={t("root.commandActions")}>
-          {isChatThread ? (
-            <CommandMenu.Item
-              onSelect={() =>
-                window.dispatchEvent(new Event("agent-chat:new-chat"))
-              }
-            >
-              {t("chat.newChat")}
-            </CommandMenu.Item>
-          ) : null}
-          {!isChatThread && location.pathname !== "/home" ? (
-            <CommandMenu.Item onSelect={() => navigate("/home")}>
-              {t("navigation.chat")}
-            </CommandMenu.Item>
-          ) : null}
           <CommandMenu.Item
-            onSelect={() => navigate("/settings/agent")}
-            keywords={[
-              "agent",
-              "context",
-              "files",
-              "connections",
-              "jobs",
-              "access",
-            ]}
+            onSelect={() => navigate("/")}
+            keywords={["sessions", "grill", "interview"]}
           >
-            <IconHierarchy2 size={16} />
-            {t("settings.openAgentSettings")}
+            <IconFlame size={16} />
+            {t("navigation.sessions")}
+          </CommandMenu.Item>
+          <CommandMenu.Item
+            onSelect={() => navigate("/settings")}
+            keywords={["settings", "preferences", "model"]}
+          >
+            <IconSettings size={16} />
+            {t("navigation.settings")}
           </CommandMenu.Item>
         </CommandMenu.Group>
         <CommandMenu.Group heading={t("root.commandAppearance")}>
@@ -168,23 +156,11 @@ function AppContent() {
 
 export default function Root() {
   const [queryClient] = useState(() => createAgentNativeQueryClient());
-  const location = useLocation();
-  const isMarketingPath = location.pathname === "/";
   return (
     <AppToolkitProvider>
-      <AppProviders
-        queryClient={queryClient}
-        isPublicPath={isMarketingPath}
-        i18n={{ catalog: i18nCatalog }}
-      >
-        {isMarketingPath ? (
-          <Outlet />
-        ) : (
-          <>
-            <DbSyncSetup />
-            <AppContent />
-          </>
-        )}
+      <AppProviders queryClient={queryClient} i18n={{ catalog: i18nCatalog }}>
+        <DbSyncSetup />
+        <AppContent />
       </AppProviders>
     </AppToolkitProvider>
   );

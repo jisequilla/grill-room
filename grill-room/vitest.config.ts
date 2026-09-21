@@ -12,6 +12,9 @@ export default defineConfig({
     },
   },
   test: {
+    // Pins DATABASE_URL to an in-memory PGlite before any module can open the
+    // developer's local database. See test/db.ts for the harness itself.
+    setupFiles: ["./test/setup.ts"],
     exclude: [
       "**/node_modules/**",
       "**/.git/**",

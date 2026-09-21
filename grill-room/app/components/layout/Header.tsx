@@ -1,4 +1,3 @@
-import { AgentToggleButton } from "@agent-native/core/client/agent-chat";
 import { useT } from "@agent-native/core/client/i18n";
 import {
   useHeaderTitle,
@@ -10,9 +9,8 @@ import { useLocation } from "react-router";
 import { APP_TITLE } from "@/lib/app-config";
 
 const pageTitleKeys: Record<string, string> = {
-  "/home": "navigation.chat",
+  "/": "navigation.sessions",
   "/observability": "navigation.observability",
-  "/agent": "settings.agentTitle",
   "/settings": "navigation.settings",
 };
 
@@ -51,10 +49,7 @@ export function Header({ onOpenMobileSidebar }: HeaderProps) {
           </h1>
         )}
       </div>
-      <div className="flex items-center gap-2 shrink-0">
-        {actions}
-        <AgentToggleButton />
-      </div>
+      <div className="flex items-center gap-2 shrink-0">{actions}</div>
     </header>
   );
 }

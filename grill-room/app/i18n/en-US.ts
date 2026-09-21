@@ -52,11 +52,16 @@ const messages = {
     navigationDescription: "Main navigation",
     observability: "Observability",
     openNavigation: "Open navigation",
+    sessions: "Sessions",
     settings: "Settings",
     team: "Team",
   },
   pages: {
     databaseTitle: "Database",
+    sessionsTitle: "Sessions",
+    sessionsEmpty: "No sessions yet.",
+    sessionWorkspaceTitle: "Session",
+    sessionOutputTitle: "Output",
     observabilityPageTitle: "Agent Observability",
     teamTitle: "Team",
     teamCreateOrgDescription:
