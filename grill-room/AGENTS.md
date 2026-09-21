@@ -59,12 +59,13 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `get-default-model` | The global default interviewer model new sessions pre-fill with; `fable` when unset. |
 | `set-default-model` | Set that default. |
 | `get-setting` / `set-setting` | Read and write one app-wide setting. |
-| `get-tree` | A session's whole design tree: every decision, what it depends on, its answer, and its derived state. |
+| `get-tree` | A session's whole design tree: every decision, what it depends on, its answer, its previous answers, and its derived state. |
 | `get-current-round` | The round a session is answering, with each card's question, recommendation, derived state, and saved draft — plus whether the interviewer is working, idle, or failed. |
 | `list-rounds` | Every round of a session in order, with the questions asked and the answers given. |
 | `request-next-round` | Ask the interviewer for the next round, validate the proposal against the tree, and open the round. |
 | `save-draft-answer` | Save one card's draft answer, so a half-answered round survives a reload. |
-| `submit-round` | Settle an open round's decisions and ask for the next round. Refuses a round with unanswered cards. |
+| `submit-round` | Settle an open round's decisions, review whatever a reopened answer put in doubt, and ask for the next round. Refuses a round with unanswered cards. |
+| `reopen-decision` | Reopen a settled decision: its answer becomes history, it is asked again straight away, and everything under it goes stale until the interviewer reconfirms or re-asks it. |
 | `navigate` | Move the UI to a view or path, through application state. |
 | `view-screen` | What the user is looking at. Call it first when the visible context matters. |
 | `provider-api-request` | Call Slack's Web API through the workspace connection. |

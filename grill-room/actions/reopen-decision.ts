@@ -9,6 +9,20 @@ import { treeFacts } from "../server/stale-review.js";
 import { deriveTreeStates } from "../server/tree.js";
 import getCurrentRound from "./get-current-round.js";
 
+/**
+ * The moment of the reopen, which must fall strictly after every answer it puts
+ * in doubt: staleness is a comparison of timestamps, and a whole interview can
+ * run inside one millisecond when something other than a person drives it.
+ */
+function reopenStamp(rows: readonly { settledAt: string | null }[]): string {
+  const settled = rows
+    .map((row) => (row.settledAt ? Date.parse(row.settledAt) : 0))
+    .filter((ms) => Number.isFinite(ms));
+  const latest = settled.length > 0 ? Math.max(...settled) : 0;
+
+  return new Date(Math.max(Date.now(), latest + 1)).toISOString();
+}
+
 export default defineAction({
   description:
     "Reopen a settled decision: its answer becomes history, the decision returns to the frontier, and every decision downstream of it is marked stale. The question is put straight back to the user, as a new card on the open round or a round of its own. Allowed in any session state; a session that had proposed or confirmed done returns to interviewing.",
@@ -60,7 +74,7 @@ export default defineAction({
       );
     }
 
-    const now = new Date().toISOString();
+    const now = reopenStamp(rows);
 
     await db.insert(schema.decisionHistory).values({
       id: randomUUID(),

@@ -233,7 +233,7 @@ async function restoreReopenMarks(submittedRoundId: string): Promise<void> {
       .sort();
     const lastDisturbed = disturbed[disturbed.length - 1];
 
-    if (lastDisturbed == null || lastDisturbed > row.settledAt) continue;
+    if (lastDisturbed == null) continue;
 
     await db
       .update(schema.decisions)
@@ -399,9 +399,18 @@ export async function runDueStaleReviews(input: {
   async function applyReviews(result: ReviewStaleResult): Promise<void> {
     const current = await loadDecisions();
     const byKey = new Map(current.map((row) => [portKey(row), row]));
-    // One stamp for the whole review: a reconfirmed decision must not read as
-    // settled before a decision re-asked beside it was disturbed.
-    const now = new Date().toISOString();
+    // One stamp for the whole review, and never earlier than the reopen it
+    // answers: a reconfirmed decision that read as older than the reopen would
+    // still derive as stale, and the review would be due all over again. Two
+    // decisions re-asked and reconfirmed together share the stamp, so neither
+    // makes the other stale.
+    const now = current.reduce(
+      (latest, row) =>
+        row.reopenedAt != null && row.reopenedAt > latest
+          ? row.reopenedAt
+          : latest,
+      new Date().toISOString(),
+    );
 
     for (const review of result.reviews) {
       const row = byKey.get(review.decisionKey);
