@@ -114,6 +114,19 @@ export const decisions = table(
     /** Set whenever this decision is reopened; compared against dependents' `settledAt`. */
     reopenedAt: text("reopened_at"),
     /**
+     * Set when a push back's response withdraws, replaces, or restructures this
+     * decision. A withdrawn decision leaves the tree: excluded from derivation,
+     * rounds and the frontier, and a dependency link pointing at it counts as
+     * satisfied.
+     */
+    withdrawnAt: text("withdrawn_at"),
+    /**
+     * Set when the user adds this decision themselves, cleared once the
+     * interviewer places it in the tree with its dependencies. Awaiting
+     * placement, it is excluded from rounds and the frontier.
+     */
+    awaitingPlacementSince: text("awaiting_placement_since"),
+    /**
      * True while the interviewer has asked for this decision but no round has
      * opened on it yet. One-at-a-time mode drains these one round at a time.
      */

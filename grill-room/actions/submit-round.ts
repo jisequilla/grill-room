@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { runDueStaleReviews } from "../server/stale-review.js";
+import { isSettlingAnswerKind } from "../server/tree.js";
 import requestNextRound from "./request-next-round.js";
 
 export default defineAction({
@@ -62,13 +63,17 @@ export default defineAction({
     const now = new Date().toISOString();
 
     for (const placement of placements) {
+      // A steering move (unknown, pushed back, deferred, prototype flagged)
+      // is a real answer but does not settle the decision: everything
+      // downstream stays blocked until it is resolved into one that does.
+      const settles = isSettlingAnswerKind(placement.draftAnswerKind);
       await db
         .update(schema.decisions)
         .set({
           currentAnswer: placement.draftAnswer,
           answerKind: placement.draftAnswerKind,
-          settledAt: now,
-          reopenedAt: null,
+          settledAt: settles ? now : null,
+          ...(settles ? { reopenedAt: null } : {}),
           updatedAt: now,
         })
         .where(eq(schema.decisions.id, placement.decisionId));
