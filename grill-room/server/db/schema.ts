@@ -12,7 +12,10 @@ export const SESSION_MODELS = ["fable", "opus", "sonnet"] as const;
 export type SessionModel = (typeof SESSION_MODELS)[number];
 
 /** Whether a session presents a round as one card set or one question at a time. */
-export const SESSION_ANSWERING_MODES = ["whole-round", "one-at-a-time"] as const;
+export const SESSION_ANSWERING_MODES = [
+  "whole-round",
+  "one-at-a-time",
+] as const;
 export type SessionAnsweringMode = (typeof SESSION_ANSWERING_MODES)[number];
 
 /** Lifecycle of a session: interviewing, awaiting the user's done confirmation, or confirmed. */
@@ -64,13 +67,13 @@ export const TICKET_STATUSES = ["ready", "in-progress", "done"] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
 /** App-wide preferences that are not tied to a single session. */
-export const globalSettings = table("global_settings", {
+export const globalSettings = table("gr_global_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
 
 /** One grilling interview. The root of a session's decision tree, rounds, spec, and tickets. */
-export const sessions = table("sessions", {
+export const sessions = table("gr_sessions", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
   idea: text("idea").notNull(),
@@ -101,7 +104,7 @@ export const sessions = table("sessions", {
  * `reopenedAt` are the raw facts that derivation compares, not a cached state.
  */
 export const decisions = table(
-  "decisions",
+  "gr_decisions",
   {
     id: text("id").primaryKey(),
     sessionId: text("session_id")
@@ -140,8 +143,8 @@ export const decisions = table(
     updatedAt: text("updated_at").notNull(),
   },
   (decisionsTable) => ({
-    sessionIdx: index("idx_decisions_session").on(decisionsTable.sessionId),
-    uniqueSessionKey: uniqueIndex("idx_decisions_session_key").on(
+    sessionIdx: index("gr_idx_decisions_session").on(decisionsTable.sessionId),
+    uniqueSessionKey: uniqueIndex("gr_idx_decisions_session_key").on(
       decisionsTable.sessionId,
       decisionsTable.key,
     ),
@@ -150,7 +153,7 @@ export const decisions = table(
 
 /** A previous answer of a decision, kept when it is reopened, re-asked, or reconfirmed. */
 export const decisionHistory = table(
-  "decision_history",
+  "gr_decision_history",
   {
     id: text("id").primaryKey(),
     decisionId: text("decision_id")
@@ -163,7 +166,7 @@ export const decisionHistory = table(
     recordedAt: text("recorded_at").notNull(),
   },
   (decisionHistoryTable) => ({
-    decisionIdx: index("idx_decision_history_decision").on(
+    decisionIdx: index("gr_idx_decision_history_decision").on(
       decisionHistoryTable.decisionId,
     ),
   }),
@@ -171,7 +174,7 @@ export const decisionHistory = table(
 
 /** An ordered set of decisions asked together. One-at-a-time mode holds a single decision. */
 export const rounds = table(
-  "rounds",
+  "gr_rounds",
   {
     id: text("id").primaryKey(),
     sessionId: text("session_id")
@@ -186,13 +189,13 @@ export const rounds = table(
     submittedAt: text("submitted_at"),
   },
   (roundsTable) => ({
-    sessionIdx: index("idx_rounds_session").on(roundsTable.sessionId),
+    sessionIdx: index("gr_idx_rounds_session").on(roundsTable.sessionId),
   }),
 );
 
 /** Join table ordering the decisions asked within one round. */
 export const roundDecisions = table(
-  "round_decisions",
+  "gr_round_decisions",
   {
     id: text("id").primaryKey(),
     roundId: text("round_id")
@@ -212,8 +215,10 @@ export const roundDecisions = table(
     draftAnswerKind: text("draft_answer_kind", { enum: DECISION_ANSWER_KINDS }),
   },
   (roundDecisionsTable) => ({
-    roundIdx: index("idx_round_decisions_round").on(roundDecisionsTable.roundId),
-    uniqueRoundDecision: uniqueIndex("idx_round_decisions_unique").on(
+    roundIdx: index("gr_idx_round_decisions_round").on(
+      roundDecisionsTable.roundId,
+    ),
+    uniqueRoundDecision: uniqueIndex("gr_idx_round_decisions_unique").on(
       roundDecisionsTable.roundId,
       roundDecisionsTable.decisionId,
     ),
@@ -221,7 +226,7 @@ export const roundDecisions = table(
 );
 
 /** The synthesized markdown spec for a session. One row per session. */
-export const specs = table("specs", {
+export const specs = table("gr_specs", {
   id: text("id").primaryKey(),
   sessionId: text("session_id")
     .notNull()
@@ -236,7 +241,7 @@ export const specs = table("specs", {
 
 /** One implementation ticket broken out of a session's confirmed spec. */
 export const tickets = table(
-  "tickets",
+  "gr_tickets",
   {
     id: text("id").primaryKey(),
     sessionId: text("session_id")
@@ -246,19 +251,21 @@ export const tickets = table(
     slug: text("slug").notNull(),
     title: text("title").notNull(),
     body: text("body").notNull(),
-    status: text("status", { enum: TICKET_STATUSES }).notNull().default("ready"),
+    status: text("status", { enum: TICKET_STATUSES })
+      .notNull()
+      .default("ready"),
     /** JSON array of ticket ids that block this one. */
     blockedByJson: text("blocked_by_json").notNull().default("[]"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
   (ticketsTable) => ({
-    sessionIdx: index("idx_tickets_session").on(ticketsTable.sessionId),
+    sessionIdx: index("gr_idx_tickets_session").on(ticketsTable.sessionId),
   }),
 );
 
 /** The build outcome of one ticket, logged by the orchestrating agent. */
-export const buildRecords = table("build_records", {
+export const buildRecords = table("gr_build_records", {
   id: text("id").primaryKey(),
   ticketId: text("ticket_id")
     .notNull()
