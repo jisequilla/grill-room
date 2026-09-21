@@ -226,6 +226,16 @@ Real credential values belong only in local `.env` files, deployment configurati
 
 When adding app data, define tables with `@agent-native/core/db/schema` helpers and use Drizzle's query builder for reads/writes. Keep SQL PostgreSQL-compatible and reserve raw SQL for additive migrations, health checks, or carefully scoped maintenance.
 
+### App tables carry a `gr_` prefix
+
+The app shares its database with the framework, which creates well over a hundred generically named tables of its own — `sessions`, `settings`, `documents`, `resources`, `tools`. A collision is silent: the app's `CREATE TABLE IF NOT EXISTS` becomes a no-op against the framework's table, and the failure surfaces migrations later as a foreign key to a column that does not exist.
+
+Every app table, index, and the migrations bookkeeping table therefore carries the SQL name prefix `gr_`. Drizzle's export names in `server/db/schema.ts` do not — `schema.sessions` is the `gr_sessions` table — so query code is unaffected. `test/table-names.test.ts` fails if a new table breaks the rule.
+
+### Migrations
+
+`server/db/migrations.ts` holds the schema as an ordered list of additive entries. Append with a new `version` and a stable `name`; never renumber, rename, or edit an entry that has shipped. An entry may contain several statements separated by semicolons: both the startup plugin and the test harness apply the list through the framework's migration runner, which splits them.
+
 | Variable        | Required                     | Description                                                                   |
 | --------------- | ---------------------------- | ----------------------------------------------------------------------------- |
 | `DATABASE_URL`  | Production yes, local dev no | PostgreSQL or PGlite database URL (local dev default: `pglite:./data/pglite`) |

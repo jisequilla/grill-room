@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import createSession from "../actions/create-session.js";
 import setSetting from "../actions/set-setting.js";
 import {
+  applyMigrations,
   getDb,
   rebuildTestSchema,
   resetTestDatabase,
@@ -106,6 +107,55 @@ describe("per-test isolation", () => {
     );
     expect(rows).toEqual([]);
     expect(await getDb().select().from(schema.sessions)).toEqual([]);
+  });
+});
+
+// The harness once ran each entry through a single prepared statement, so an
+// entry holding two statements failed here and worked in `pnpm dev`. It now
+// goes through the framework's own runner, which splits them.
+describe("what a migration entry may contain", () => {
+  useTestDatabase();
+
+  it("accepts an entry holding more than one statement", async () => {
+    await applyMigrations(
+      [
+        {
+          version: 1,
+          name: "multi-statement-probe",
+          sql: `CREATE TABLE gr_probe_one (id TEXT PRIMARY KEY);
+                CREATE TABLE gr_probe_two (id TEXT PRIMARY KEY REFERENCES gr_probe_one(id))`,
+        },
+      ],
+      "gr_probe_migrations",
+    );
+
+    const { rows } = await getDbExec().execute(
+      `SELECT tablename FROM pg_tables
+       WHERE schemaname = 'public' AND tablename IN ('gr_probe_one', 'gr_probe_two')
+       ORDER BY tablename`,
+    );
+    expect(
+      rows.map((row) => String((row as { tablename: unknown }).tablename)),
+    ).toEqual(["gr_probe_one", "gr_probe_two"]);
+
+    await rebuildTestSchema();
+  });
+
+  it("reports a failing migration as a rejected promise, not a dead worker", async () => {
+    await expect(
+      applyMigrations(
+        [
+          {
+            version: 1,
+            name: "broken-probe",
+            sql: `CREATE TABLE gr_broken (id TEXT REFERENCES gr_nonexistent(id))`,
+          },
+        ],
+        "gr_broken_migrations",
+      ),
+    ).rejects.toThrow();
+
+    await rebuildTestSchema();
   });
 });
 

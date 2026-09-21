@@ -26,10 +26,10 @@ export const MIGRATIONS_TABLE = "gr_migrations";
  * a shipped entry is never edited, renamed, or renumbered; schema changes are
  * appended as new entries.
  *
- * One statement per entry: the test harness (test/db.ts) runs each entry's sql
- * through a single prepared-statement execute() and cannot split a
- * multi-statement blob the way the production migration runner does, so every
- * entry below carries exactly one DDL statement.
+ * An entry may hold several statements separated by semicolons. Both the
+ * startup plugin and the test harness apply this list through the framework's
+ * migration runner, which does the splitting, so what works in one works in
+ * the other. The entries below happen to be one statement each.
  */
 export const appMigrations: MigrationEntry[] = [
   {

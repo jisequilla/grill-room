@@ -21,41 +21,19 @@
  *     it is asserted directly, over the migrations, the Drizzle schema, and the
  *     tables that actually end up in the database.
  */
-import {
-  getDbExec,
-  getRuntimeDatabaseUrl,
-  runMigrations,
-  withMigrationRuntime,
-} from "@agent-native/core/db";
+import { getDbExec, getRuntimeDatabaseUrl } from "@agent-native/core/db";
 import { BETTER_AUTH_MIGRATIONS } from "@agent-native/core/server";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { schema } from "../server/db/index.js";
 import { appMigrations, MIGRATIONS_TABLE } from "../server/db/migrations.js";
+import { applyMigrations } from "./db.js";
 import { IN_MEMORY_DATABASE_URL } from "./setup.js";
 
 const APP_TABLE_PREFIX = "gr_";
 
 /** Drizzle records a table's SQL name under this symbol; `getTableName` reads it. */
 const DRIZZLE_NAME = Symbol.for("drizzle:Name");
-
-/**
- * Apply a migration list the way production does, including the runner's
- * multi-statement splitting. `withMigrationRuntime` claims migration duty so a
- * failure is rethrown here instead of taking the worker down with
- * `process.exit(1)`.
- */
-async function applyMigrations(
-  entries: typeof appMigrations,
-  table: string,
-): Promise<void> {
-  // `runMigrations` returns a Nitro plugin; the plugin argument is unused by
-  // the migration path, so the test calls it with a placeholder.
-  const plugin = runMigrations(entries, { table });
-  await withMigrationRuntime(async () => {
-    await plugin(undefined);
-  });
-}
 
 async function listPublicTables(): Promise<string[]> {
   const { rows } = await getDbExec().execute(

@@ -42,7 +42,13 @@
  * not, because nothing in this app does that. A test that needs its own DDL
  * should call `rebuildTestSchema()` afterwards.
  */
-import { getDbExec, getRuntimeDatabaseUrl } from "@agent-native/core/db";
+import {
+  getDbExec,
+  getRuntimeDatabaseUrl,
+  type MigrationEntry,
+  runMigrations,
+  withMigrationRuntime,
+} from "@agent-native/core/db";
 import { beforeEach } from "vitest";
 
 import { getDb, schema } from "../server/db/index.js";
@@ -62,8 +68,27 @@ const BOOKKEEPING_TABLES = new Set([
  */
 let schemaBuilt = false;
 
-function statementFor(sql: (typeof appMigrations)[number]["sql"]) {
-  return typeof sql === "string" ? sql : sql.postgres;
+/**
+ * Apply a migration list the way the server does at startup.
+ *
+ * This is the framework's own runner, not a reimplementation of it, so the
+ * harness accepts exactly what production accepts — notably an entry holding
+ * several statements, which the runner splits and an earlier hand-rolled loop
+ * rejected as a single prepared statement.
+ *
+ * `withMigrationRuntime` claims migration duty for the call. Without it the
+ * runner swallows a failure and calls `process.exit(1)`, which in vitest means
+ * a worker vanishing rather than a test failing.
+ */
+export async function applyMigrations(
+  entries: MigrationEntry[],
+  table: string,
+): Promise<void> {
+  const plugin = runMigrations(entries, { table });
+  // The runner returns a Nitro plugin; it never touches the app it is handed.
+  await withMigrationRuntime(async () => {
+    await plugin(undefined);
+  });
 }
 
 function assertInMemory(): void {
@@ -83,12 +108,7 @@ export async function rebuildTestSchema(): Promise<void> {
   await exec.execute("DROP SCHEMA IF EXISTS public CASCADE");
   await exec.execute("CREATE SCHEMA public");
 
-  const ordered = [...appMigrations].sort((a, b) => a.version - b.version);
-  for (const migration of ordered) {
-    const statement = statementFor(migration.sql);
-    if (statement) await exec.execute(statement);
-    await migration.run?.(exec);
-  }
+  await applyMigrations(appMigrations, MIGRATIONS_TABLE);
   schemaBuilt = true;
 }
 
