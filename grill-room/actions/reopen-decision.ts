@@ -5,8 +5,8 @@ import { and, desc, eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { treeFacts } from "../server/stale-review.js";
-import { deriveTreeStates } from "../server/tree.js";
+import { deriveTreeStates, treeFacts } from "../server/tree.js";
+import { failIfTurnInProgress } from "../server/turn.js";
 import getCurrentRound from "./get-current-round.js";
 
 /**
@@ -52,12 +52,10 @@ export default defineAction({
 
     if (!session) fail(`Session not found: ${sessionId}`, { statusCode: 404 });
 
-    if (session.turnStatus === "working") {
-      fail(
-        "The interviewer is working on this session. Wait for the turn to finish before reopening a decision.",
-        { errorCode: "turn-in-progress", statusCode: 409 },
-      );
-    }
+    failIfTurnInProgress(
+      session,
+      "The interviewer is working on this session. Wait for the turn to finish before reopening a decision.",
+    );
 
     const rows = await db
       .select()

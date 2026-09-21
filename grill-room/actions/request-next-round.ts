@@ -5,73 +5,36 @@ import { and, desc, eq, inArray } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import type { DecisionAnswerKind } from "../server/db/schema.js";
-import {
-  getInterviewer,
-  isInterviewerError,
-} from "../server/interviewer/index.js";
+import { getInterviewer } from "../server/interviewer/index.js";
 import type {
-  AnswerKind,
-  DecisionSnapshot,
-  DecisionState,
   ProposeRoundResult,
   SubmittedAnswer,
   UserAddedDecision,
 } from "../server/interviewer/index.js";
 import {
   deferredFrontierIds,
-  deriveTreeStates,
   neverAnsweredFrontierIds,
-  parseStringArray,
+  toTreeDecision,
   validateProposal,
   type DecisionRow,
   type KeyedTreeDecision,
 } from "../server/tree.js";
+import {
+  askUntilAccepted,
+  decisionSnapshots,
+  failIfTurnInProgress,
+  MAX_TURN_RETRIES,
+  portAnswerKind,
+  portKey,
+  runTurn,
+  TurnRejected,
+} from "../server/turn.js";
 import getCurrentRound from "./get-current-round.js";
-
-/**
- * How many times a rejected proposal is sent back with its reasons before the
- * user sees an error. Three attempts in total: one, then two retries.
- */
-const MAX_PROPOSAL_RETRIES = 2;
-
-/** Every proposal in one turn was invalid. Distinct from an interviewer fault. */
-class ProposalRejected extends Error {}
-
-function dependencyKeys(row: DecisionRow, keyById: Map<string, string>) {
-  return parseStringArray(row.dependsOnJson).flatMap((id) => {
-    const key = keyById.get(id);
-    return key ? [key] : [];
-  });
-}
-
-/** The port's answer vocabulary spells a disposition as its target. */
-function portAnswerKind(row: {
-  answerKind: DecisionAnswerKind | null;
-  dispositionTarget: DecisionRow["dispositionTarget"];
-}): AnswerKind | null {
-  if (!row.answerKind) return null;
-  if (row.answerKind !== "dispositioned") return row.answerKind;
-  return row.dispositionTarget ?? "out-of-scope";
-}
-
-/** A row, reduced to the facts `deriveTreeStates` and its callers need. */
-function toTreeFields(row: DecisionRow) {
-  return {
-    id: row.id,
-    dependsOn: parseStringArray(row.dependsOnJson),
-    answerKind: row.answerKind,
-    settledAt: row.settledAt,
-    reopenedAt: row.reopenedAt,
-    withdrawnAt: row.withdrawnAt,
-    awaitingPlacementSince: row.awaitingPlacementSince,
-  };
-}
 
 /** A row, as `validateProposal` needs an existing decision: tree facts plus its question. */
 function toKeyedTreeDecision(row: DecisionRow): KeyedTreeDecision {
   return {
-    ...toTreeFields(row),
+    ...toTreeDecision(row),
     key: row.key,
     title: row.questionTitle,
     body: row.questionBody,
@@ -85,7 +48,7 @@ function pendingUserAddedDecisions(rows: DecisionRow[]): UserAddedDecision[] {
       (row) => row.introducedBy === "user" && row.awaitingPlacementSince != null,
     )
     .map((row) => ({
-      key: row.key ?? row.id,
+      key: portKey(row),
       title: row.questionTitle,
       body: row.questionBody,
     }));
@@ -108,12 +71,10 @@ export default defineAction({
 
     if (!session) fail(`Session not found: ${sessionId}`, { statusCode: 404 });
 
-    if (session.turnStatus === "working") {
-      fail(
-        "The interviewer is already working on this session. Wait for the turn to finish.",
-        { errorCode: "turn-in-progress", statusCode: 409 },
-      );
-    }
+    failIfTurnInProgress(
+      session,
+      "The interviewer is already working on this session. Wait for the turn to finish.",
+    );
 
     // An open round is the answer to this request: asking again while one is
     // unanswered would throw away the drafts in it.
@@ -147,7 +108,7 @@ export default defineAction({
      * own — so this reads the tree's actual state instead.
      */
     const nextRoundCandidates = (rows: DecisionRow[]) => {
-      const treeRows = rows.map(toTreeFields);
+      const treeRows = rows.map(toTreeDecision);
       const ids = [
         ...neverAnsweredFrontierIds(treeRows),
         ...deferredFrontierIds(treeRows),
@@ -170,7 +131,7 @@ export default defineAction({
     let pending = isOneAtATime ? nextRoundCandidates(rows) : [];
 
     if (!isOneAtATime || pending.length === 0) {
-      await runTurn();
+      await runProposalTurn();
       rows = await loadDecisions();
       pending = nextRoundCandidates(rows);
     }
@@ -250,163 +211,56 @@ export default defineAction({
      * keeps breaking the tree's rules. Nothing is written until a proposal is
      * accepted whole, so a rejected one leaves the tree exactly as it was.
      */
-    async function runTurn(): Promise<void> {
-      const startedAt = new Date().toISOString();
-      await db
-        .update(schema.sessions)
-        .set({
-          turnStatus: "working",
-          turnStartedAt: startedAt,
-          turnErrorCode: null,
-          turnErrorMessage: null,
-          updatedAt: startedAt,
-        })
-        .where(eq(schema.sessions.id, sessionId));
-
-      let accepted: { result: ProposeRoundResult; conversationId: string };
-      try {
-        accepted = await propose();
-      } catch (error) {
-        const [code, message] = isInterviewerError(error)
-          ? [error.code, error.message]
-          : error instanceof ProposalRejected
-            ? ["invalid-proposal", error.message]
-            : ["failed", "The interviewer turn failed."];
-
-        await db
-          .update(schema.sessions)
-          .set({
-            turnStatus: "failed",
-            turnErrorCode: code,
-            turnErrorMessage: message,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(schema.sessions.id, sessionId));
-
-        if (isInterviewerError(error) || error instanceof ProposalRejected) {
-          // Deliberately not a retryable status: a turn costs a minute of a
-          // shared subscription, so retrying is the user's call, not the
-          // client's.
-          fail(message, { errorCode: code, statusCode: 400 });
-        }
-        throw error;
-      }
-
-      await store(accepted.result, accepted.conversationId);
+    function runProposalTurn(): Promise<void> {
+      return runTurn({
+        sessionId,
+        failedMessage: "The interviewer turn failed.",
+        take: async () => {
+          const accepted = await propose();
+          await store(accepted.result);
+          return accepted.conversationId;
+        },
+      });
     }
 
     async function propose() {
       const interviewer = getInterviewer();
       const latestAnswers = await answersOfLastSubmittedRound();
-      let conversationId = session!.conversationId;
-      let rejectionReason: string | null = null;
+      // The tree cannot change between attempts: nothing is written until one
+      // is accepted. Refusal only needs the proposal read against it.
+      let against: KeyedTreeDecision[] = [];
 
-      for (let attempt = 0; attempt <= MAX_PROPOSAL_RETRIES; attempt += 1) {
-        const current = await loadDecisions();
-        const turn = await interviewer.proposeRound({
-          kind: "propose-round",
-          context: {
-            idea: session!.idea,
-            title: session!.title,
-            model: session!.model,
-            answeringMode: session!.answeringMode,
-            conversationId,
-            decisions: await snapshots(current),
-          },
-          latestAnswers,
-          userAddedDecisions: pendingUserAddedDecisions(current),
-          rejectionReason,
-        });
-
-        conversationId = turn.conversationId;
-
-        const validation = validateProposal(
-          current.map(toKeyedTreeDecision),
-          turn.result.proposedDecisions,
-          {
-            pushBackResponses: turn.result.pushBackResponses,
-            userDecisionPlacements: turn.result.userDecisionPlacements,
-          },
-        );
-
-        if (validation.ok) {
-          return { result: turn.result, conversationId: turn.conversationId };
-        }
-
-        rejectionReason = validation.reasons.join(" ");
-      }
-
-      throw new ProposalRejected(
-        `The interviewer proposed a round that does not fit the design tree ${MAX_PROPOSAL_RETRIES + 1} times. Last reason: ${rejectionReason}`,
-      );
-    }
-
-    /**
-     * The tree as the interviewer reads it, keys and all. A withdrawn decision
-     * has left the tree and is left out entirely; a decision the user added is
-     * left out too, until it is placed — it reaches the interviewer through
-     * `userAddedDecisions` instead, since it has no dependencies to show yet.
-     */
-    async function snapshots(
-      current: DecisionRow[],
-    ): Promise<DecisionSnapshot[]> {
-      const keyById = new Map(
-        current.flatMap((row) => (row.key ? [[row.id, row.key] as const] : [])),
-      );
-      const states = deriveTreeStates(current.map(toTreeFields));
-
-      const history = current.length
-        ? await db
-            .select()
-            .from(schema.decisionHistory)
-            .where(
-              inArray(
-                schema.decisionHistory.decisionId,
-                current.map((row) => row.id),
-              ),
-            )
-            .orderBy(schema.decisionHistory.recordedAt)
-        : [];
-
-      return current
-        .filter((row) => row.withdrawnAt == null && row.awaitingPlacementSince == null)
-        .map((row) => {
-          const kind = portAnswerKind(row);
-          const rawState = states.get(row.id);
-          const state: DecisionState =
-            rawState === "settled" ||
-            rawState === "frontier" ||
-            rawState === "blocked" ||
-            rawState === "stale"
-              ? rawState
-              : "blocked";
-          return {
-            key: row.key ?? row.id,
-            title: row.questionTitle,
-            body: row.questionBody,
-            choices: parseStringArray(row.offeredChoicesJson),
-            recommendedAnswer: row.recommendedAnswer ?? "",
-            dependsOn: dependencyKeys(row, keyById),
-            state,
-            answer: kind ? { kind, text: row.currentAnswer ?? "" } : null,
-            previousAnswers: history
-              .filter((entry) => entry.decisionId === row.id)
-              .flatMap((entry) =>
-                entry.answerKind
-                  ? [
-                      {
-                        kind: portAnswerKind({
-                          answerKind: entry.answerKind,
-                          dispositionTarget: null,
-                        }) as AnswerKind,
-                        text: entry.answer ?? "",
-                      },
-                    ]
-                  : [],
-              ),
-            introducedBy: row.introducedBy,
-          };
-        });
+      return askUntilAccepted<ProposeRoundResult>({
+        conversationId: session!.conversationId,
+        ask: async ({ conversationId, rejectionReason }) => {
+          const current = await loadDecisions();
+          against = current.map(toKeyedTreeDecision);
+          return interviewer.proposeRound({
+            kind: "propose-round",
+            context: {
+              idea: session!.idea,
+              title: session!.title,
+              model: session!.model,
+              answeringMode: session!.answeringMode,
+              conversationId,
+              decisions: await decisionSnapshots(current),
+            },
+            latestAnswers,
+            userAddedDecisions: pendingUserAddedDecisions(current),
+            rejectionReason,
+          });
+        },
+        reasonsToRefuse: (result) =>
+          validateProposal(against, result.proposedDecisions, {
+            pushBackResponses: result.pushBackResponses,
+            userDecisionPlacements: result.userDecisionPlacements,
+          }).reasons,
+        exhausted: (lastReason) =>
+          new TurnRejected(
+            "invalid-proposal",
+            `The interviewer proposed a round that does not fit the design tree ${MAX_TURN_RETRIES + 1} times. Last reason: ${lastReason}`,
+          ),
+      });
     }
 
     async function answersOfLastSubmittedRound(): Promise<SubmittedAnswer[]> {
@@ -449,11 +303,7 @@ export default defineAction({
         const kind = row ? portAnswerKind(row) : null;
         if (!row || !kind) return [];
         return [
-          {
-            decisionKey: row.key ?? row.id,
-            kind,
-            text: row.currentAnswer ?? "",
-          },
+          { decisionKey: portKey(row), kind, text: row.currentAnswer ?? "" },
         ];
       });
     }
@@ -462,10 +312,7 @@ export default defineAction({
      * Store an accepted proposal. A done proposal is a later ticket's concern
      * and is ignored here rather than failing the turn.
      */
-    async function store(
-      result: ProposeRoundResult,
-      conversationId: string,
-    ): Promise<void> {
+    async function store(result: ProposeRoundResult): Promise<void> {
       const stamp = Date.now();
       const now = new Date(stamp).toISOString();
       const currentRows = await loadDecisions();
@@ -566,17 +413,6 @@ export default defineAction({
           })
           .where(eq(schema.decisions.id, row.id));
       }
-
-      await db
-        .update(schema.sessions)
-        .set({
-          conversationId,
-          turnStatus: "idle",
-          turnErrorCode: null,
-          turnErrorMessage: null,
-          updatedAt: now,
-        })
-        .where(eq(schema.sessions.id, sessionId));
     }
   },
 });

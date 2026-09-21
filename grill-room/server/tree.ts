@@ -80,7 +80,7 @@ export interface TreeDecision {
 }
 
 /** Every transitive dependency of `id`. Cycle-safe, and tolerates dangling ids. */
-function transitiveDependencies(
+export function transitiveDependencies(
   id: string,
   byId: ReadonlyMap<string, TreeDecision>,
 ): Set<string> {
@@ -266,21 +266,29 @@ export function parseStringArray(json: string): string[] {
   }
 }
 
+/** A stored row, reduced to the facts derivation and selection work from. */
+export function toTreeDecision(row: DecisionRow): TreeDecision {
+  return {
+    id: row.id,
+    dependsOn: parseStringArray(row.dependsOnJson),
+    answerKind: row.answerKind,
+    settledAt: row.settledAt,
+    reopenedAt: row.reopenedAt,
+    withdrawnAt: row.withdrawnAt,
+    awaitingPlacementSince: row.awaitingPlacementSince,
+  };
+}
+
+/** {@link toTreeDecision} over a whole session's rows. */
+export function treeFacts(rows: readonly DecisionRow[]): TreeDecision[] {
+  return rows.map(toTreeDecision);
+}
+
 /** Turns stored rows into the shape read actions return, states included. */
 export function describeDecisions(
   rows: readonly DecisionRow[],
 ): DecisionView[] {
-  const states = deriveTreeStates(
-    rows.map((row) => ({
-      id: row.id,
-      dependsOn: parseStringArray(row.dependsOnJson),
-      answerKind: row.answerKind,
-      settledAt: row.settledAt,
-      reopenedAt: row.reopenedAt,
-      withdrawnAt: row.withdrawnAt,
-      awaitingPlacementSince: row.awaitingPlacementSince,
-    })),
-  );
+  const states = deriveTreeStates(treeFacts(rows));
 
   return rows.map((row) => ({
     id: row.id,

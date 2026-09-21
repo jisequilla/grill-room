@@ -14,41 +14,25 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { fail } from "@agent-native/core/action";
 import { eq, inArray } from "@agent-native/core/db/schema";
 
 import { getDb, schema } from "./db/index.js";
-import type { DecisionAnswerKind } from "./db/schema.js";
-import { getInterviewer, isInterviewerError } from "./interviewer/index.js";
-import type {
-  AnswerKind,
-  DecisionSnapshot,
-  ReviewStaleResult,
-} from "./interviewer/index.js";
+import { getInterviewer } from "./interviewer/index.js";
+import type { ReviewStaleResult } from "./interviewer/index.js";
 import {
   deriveTreeStates,
-  parseStringArray,
-  type DecisionRow,
+  transitiveDependencies,
+  treeFacts,
   type TreeDecision,
 } from "./tree.js";
-
-/**
- * How many times a review that does not rule on exactly the decisions it was
- * given is sent back with the reason. The same bound `request-next-round` uses
- * for a rejected proposal: three attempts in total.
- */
-const MAX_REVIEW_RETRIES = 2;
-
-/** A review that never ruled on the right decisions. Distinct from an interviewer fault. */
-class ReviewRejected extends Error {}
-
-/** One review turn's worth of work: a reopened decision and what it put in doubt. */
-export interface DueStaleReview {
-  /** The decision that was reopened and has since been answered again. */
-  reopenedId: string;
-  /** The stale decisions hanging off it, in the order they were given. */
-  staleIds: string[];
-}
+import {
+  askUntilAccepted,
+  decisionSnapshots,
+  MAX_TURN_RETRIES,
+  portKey,
+  runTurn,
+  TurnRejected,
+} from "./turn.js";
 
 /**
  * Where a verdict's reason is kept. `gr_decision_history` has no column for it,
@@ -58,34 +42,12 @@ export interface DueStaleReview {
  */
 export const REVIEW_REASON_MARKER = "\n\n---\nStale review";
 
-/** Every transitive dependency of `id`. Cycle-safe, and tolerates dangling ids. */
-function transitiveDependencyIds(
-  id: string,
-  byId: ReadonlyMap<string, TreeDecision>,
-): string[] {
-  const seen = new Set<string>();
-  const queue = [...(byId.get(id)?.dependsOn ?? [])];
-
-  while (queue.length > 0) {
-    const next = queue.shift();
-    if (next === undefined || seen.has(next)) continue;
-    seen.add(next);
-    const node = byId.get(next);
-    if (node) queue.push(...node.dependsOn);
-  }
-
-  return [...seen];
-}
-
-/** The facts derivation and selection work from. */
-export function treeFacts(rows: readonly DecisionRow[]): TreeDecision[] {
-  return rows.map((row) => ({
-    id: row.id,
-    dependsOn: parseStringArray(row.dependsOnJson),
-    answerKind: row.answerKind,
-    settledAt: row.settledAt,
-    reopenedAt: row.reopenedAt,
-  }));
+/** One review turn's worth of work: a reopened decision and what it put in doubt. */
+export interface DueStaleReview {
+  /** The decision that was reopened and has since been answered again. */
+  reopenedId: string;
+  /** The stale decisions hanging off it, in the order they were given. */
+  staleIds: string[];
 }
 
 /**
@@ -110,7 +72,7 @@ export function dueStaleReviews(
     const since = decision.settledAt ?? "";
     let chosen: TreeDecision | undefined;
 
-    for (const ancestorId of transitiveDependencyIds(decision.id, byId)) {
+    for (const ancestorId of transitiveDependencies(decision.id, byId)) {
       const ancestor = byId.get(ancestorId);
       const reopenedAt = ancestor?.reopenedAt;
       if (!ancestor || reopenedAt == null || reopenedAt <= since) continue;
@@ -176,21 +138,6 @@ export function reviewRejectionReasons(
   }
 
   return reasons;
-}
-
-/** The port's answer vocabulary spells a disposition as its target. */
-function portAnswerKind(row: {
-  answerKind: DecisionAnswerKind | null;
-  dispositionTarget: DecisionRow["dispositionTarget"];
-}): AnswerKind | null {
-  if (!row.answerKind) return null;
-  if (row.answerKind !== "dispositioned") return row.answerKind;
-  return row.dispositionTarget ?? "out-of-scope";
-}
-
-/** The key the interviewer knows a decision by. */
-function portKey(row: DecisionRow): string {
-  return row.key ?? row.id;
 }
 
 /**
@@ -278,66 +225,25 @@ export async function runDueStaleReviews(input: {
 
   if (!session) return;
 
-  // The same bookkeeping `request-next-round` does around a turn, written out
-  // again rather than shared: both files are being changed by other work, and
-  // one place to unify them is easier to find than a half-made seam.
-  const startedAt = new Date().toISOString();
-  await db
-    .update(schema.sessions)
-    .set({
-      turnStatus: "working",
-      turnStartedAt: startedAt,
-      turnErrorCode: null,
-      turnErrorMessage: null,
-      updatedAt: startedAt,
-    })
-    .where(eq(schema.sessions.id, sessionId));
+  await runTurn({
+    sessionId,
+    failedMessage: "The stale review turn failed.",
+    take: async () => {
+      let conversationId = session.conversationId;
 
-  let conversationId = session.conversationId;
+      // Each turn takes its group out of the stale set, so the list shrinks;
+      // the bound only stops a pathological tree from looping.
+      for (let guard = rows.length + 1; due.length > 0 && guard > 0; guard -= 1) {
+        const turn = await reviewOne(due[0] as DueStaleReview, conversationId);
+        conversationId = turn.conversationId;
+        await applyReviews(turn.result);
+        rows = await loadDecisions();
+        due = dueStaleReviews(treeFacts(rows));
+      }
 
-  try {
-    // Each turn takes its group out of the stale set, so the list shrinks; the
-    // bound only stops a pathological tree from looping.
-    for (let guard = rows.length + 1; due.length > 0 && guard > 0; guard -= 1) {
-      const turn = await reviewOne(due[0] as DueStaleReview, conversationId);
-      conversationId = turn.conversationId;
-      await applyReviews(turn.result);
-      rows = await loadDecisions();
-      due = dueStaleReviews(treeFacts(rows));
-    }
-  } catch (error) {
-    const [code, message] = isInterviewerError(error)
-      ? [error.code, error.message]
-      : error instanceof ReviewRejected
-        ? ["invalid-review", error.message]
-        : ["failed", "The stale review turn failed."];
-
-    await db
-      .update(schema.sessions)
-      .set({
-        turnStatus: "failed",
-        turnErrorCode: code,
-        turnErrorMessage: message,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.sessions.id, sessionId));
-
-    if (isInterviewerError(error) || error instanceof ReviewRejected) {
-      fail(message, { errorCode: code, statusCode: 400 });
-    }
-    throw error;
-  }
-
-  await db
-    .update(schema.sessions)
-    .set({
-      conversationId,
-      turnStatus: "idle",
-      turnErrorCode: null,
-      turnErrorMessage: null,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.sessions.id, sessionId));
+      return conversationId ?? "";
+    },
+  });
 
   /**
    * One review turn, retried with the app's reasons while the interviewer rules
@@ -349,46 +255,37 @@ export async function runDueStaleReviews(input: {
     resumeFrom: string | null,
   ): Promise<{ result: ReviewStaleResult; conversationId: string }> {
     const interviewer = getInterviewer();
-    let conversation = resumeFrom;
-    let rejectionReason: string | null = null;
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const keyOf = (id: string) => {
+      const row = byId.get(id);
+      return row ? portKey(row) : id;
+    };
+    const staleKeys = group.staleIds.map(keyOf);
 
-    for (let attempt = 0; attempt <= MAX_REVIEW_RETRIES; attempt += 1) {
-      const current = await loadDecisions();
-      const byId = new Map(current.map((row) => [row.id, row]));
-      const keyOf = (id: string) => {
-        const row = byId.get(id);
-        return row ? portKey(row) : id;
-      };
-      const staleKeys = group.staleIds.map(keyOf);
-
-      const turn = await interviewer.reviewStale({
-        kind: "review-stale",
-        context: {
-          idea: session!.idea,
-          title: session!.title,
-          model: session!.model,
-          answeringMode: session!.answeringMode,
-          conversationId: conversation,
-          decisions: await snapshots(current),
-        },
-        reopenedDecisionKey: keyOf(group.reopenedId),
-        staleDecisionKeys: staleKeys,
-        rejectionReason,
-      });
-
-      conversation = turn.conversationId;
-
-      const reasons = reviewRejectionReasons(staleKeys, turn.result);
-      if (reasons.length === 0) {
-        return { result: turn.result, conversationId: turn.conversationId };
-      }
-
-      rejectionReason = reasons.join(" ");
-    }
-
-    throw new ReviewRejected(
-      `The interviewer reviewed the stale decisions wrongly ${MAX_REVIEW_RETRIES + 1} times. Last reason: ${rejectionReason}`,
-    );
+    return askUntilAccepted<ReviewStaleResult>({
+      conversationId: resumeFrom,
+      ask: async ({ conversationId, rejectionReason }) =>
+        interviewer.reviewStale({
+          kind: "review-stale",
+          context: {
+            idea: session!.idea,
+            title: session!.title,
+            model: session!.model,
+            answeringMode: session!.answeringMode,
+            conversationId,
+            decisions: await decisionSnapshots(await loadDecisions()),
+          },
+          reopenedDecisionKey: keyOf(group.reopenedId),
+          staleDecisionKeys: staleKeys,
+          rejectionReason,
+        }),
+      reasonsToRefuse: (result) => reviewRejectionReasons(staleKeys, result),
+      exhausted: (lastReason) =>
+        new TurnRejected(
+          "invalid-review",
+          `The interviewer reviewed the stale decisions wrongly ${MAX_TURN_RETRIES + 1} times. Last reason: ${lastReason}`,
+        ),
+    });
   }
 
   /**
@@ -450,60 +347,6 @@ export async function runDueStaleReviews(input: {
         })
         .where(eq(schema.decisions.id, row.id));
     }
-  }
-
-  /** The tree as the interviewer reads it, keys and all. */
-  async function snapshots(
-    current: DecisionRow[],
-  ): Promise<DecisionSnapshot[]> {
-    const keyById = new Map(current.map((row) => [row.id, portKey(row)]));
-    const states = deriveTreeStates(treeFacts(current));
-
-    const history = current.length
-      ? await db
-          .select()
-          .from(schema.decisionHistory)
-          .where(
-            inArray(
-              schema.decisionHistory.decisionId,
-              current.map((row) => row.id),
-            ),
-          )
-          .orderBy(schema.decisionHistory.recordedAt)
-      : [];
-
-    return current.map((row) => {
-      const kind = portAnswerKind(row);
-      return {
-        key: portKey(row),
-        title: row.questionTitle,
-        body: row.questionBody,
-        choices: parseStringArray(row.offeredChoicesJson),
-        recommendedAnswer: row.recommendedAnswer ?? "",
-        dependsOn: parseStringArray(row.dependsOnJson).flatMap((id) => {
-          const key = keyById.get(id);
-          return key ? [key] : [];
-        }),
-        state: states.get(row.id) ?? "blocked",
-        answer: kind ? { kind, text: row.currentAnswer ?? "" } : null,
-        previousAnswers: history
-          .filter((entry) => entry.decisionId === row.id)
-          .flatMap((entry) =>
-            entry.answerKind
-              ? [
-                  {
-                    kind: portAnswerKind({
-                      answerKind: entry.answerKind,
-                      dispositionTarget: null,
-                    }) as AnswerKind,
-                    text: entry.answer ?? "",
-                  },
-                ]
-              : [],
-          ),
-        introducedBy: row.introducedBy,
-      };
-    });
   }
 }
 
