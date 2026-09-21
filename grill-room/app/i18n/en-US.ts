@@ -15,6 +15,10 @@ const messages = {
     agentDescription:
       "Manage the agent's model, API keys, automations, voice, and other controls.",
     openAgentSettings: "Manage agent",
+    defaultModelTitle: "Default model",
+    defaultModelDescription:
+      "New sessions pre-fill their model picker with this.",
+    defaultModelUpdateFailed: "Could not update the default model.",
   },
   chat: {
     archiveChat: "Archive Chat",
@@ -72,6 +76,36 @@ const messages = {
     commandAppearance: "Appearance",
     commandSearch: "Search",
     toggleTheme: "Toggle theme",
+  },
+  sessions: {
+    newSession: "New session",
+    createTitle: "New session",
+    titleLabel: "Title",
+    titlePlaceholder: "Marathon tracker",
+    ideaLabel: "Idea",
+    ideaPlaceholder: "A PWA for 16-week marathon training",
+    modelLabel: "Model",
+    answeringModeLabel: "Answering mode",
+    answeringModeWholeRound: "Whole round",
+    answeringModeOneAtATime: "One at a time",
+    modelFable: "Fable",
+    modelOpus: "Opus",
+    modelSonnet: "Sonnet",
+    cancel: "Cancel",
+    create: "Create",
+    creating: "Creating…",
+    createFailed: "Could not create the session.",
+    emptyAction: "Start a session",
+    deleteSession: "Delete session",
+    deleteConfirmTitle: "Delete this session?",
+    deleteConfirmDescription:
+      "This removes its decisions, rounds, spec, and tickets. This cannot be undone.",
+    delete: "Delete",
+    deleting: "Deleting…",
+    deleteFailed: "Could not delete the session.",
+    stateInterviewing: "Interviewing",
+    stateDoneProposed: "Awaiting confirmation",
+    stateConfirmed: "Confirmed",
   },
 };
 

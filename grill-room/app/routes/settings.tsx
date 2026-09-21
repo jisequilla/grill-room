@@ -11,6 +11,7 @@ import { TeamPage } from "@agent-native/core/client/team-page";
 import { useSetPageTitle } from "@agent-native/toolkit/app-shell";
 import { useMemo } from "react";
 
+import { DefaultModelPicker } from "@/components/sessions/default-model-picker";
 import { APP_TITLE } from "@/lib/app-config";
 
 export function meta() {
@@ -29,6 +30,12 @@ export default function SettingsRoute() {
         label: t("settings.languageTitle"),
         keywords: "language locale translation i18n",
         hash: "language",
+      },
+      {
+        id: "default-model",
+        label: t("settings.defaultModelTitle"),
+        keywords: "model interviewer fable opus sonnet grilling",
+        hash: "default-model",
       },
     ],
     [t],
@@ -54,6 +61,19 @@ export default function SettingsRoute() {
               control={
                 <div className="w-56">
                   <LanguagePicker label={t("settings.languageLabel")} />
+                </div>
+              }
+            />
+          </SettingsGroup>
+
+          <SettingsGroup>
+            <SettingsRow
+              id="default-model"
+              label={t("settings.defaultModelTitle")}
+              description={t("settings.defaultModelDescription")}
+              control={
+                <div className="w-40">
+                  <DefaultModelPicker />
                 </div>
               }
             />
