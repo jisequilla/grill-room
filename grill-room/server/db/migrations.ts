@@ -168,4 +168,49 @@ export const appMigrations: MigrationEntry[] = [
       updated_at TEXT NOT NULL
     )`,
   },
+  {
+    version: 16,
+    name: "decisions-key-column",
+    sql: `ALTER TABLE decisions ADD COLUMN IF NOT EXISTS key TEXT`,
+  },
+  {
+    version: 17,
+    name: "decisions-session-key-unique-index",
+    sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_decisions_session_key ON decisions(session_id, key)`,
+  },
+  {
+    version: 18,
+    name: "decisions-pending-ask-column",
+    sql: `ALTER TABLE decisions ADD COLUMN IF NOT EXISTS pending_ask BOOLEAN NOT NULL DEFAULT FALSE`,
+  },
+  {
+    version: 19,
+    name: "round-decisions-draft-answer-column",
+    sql: `ALTER TABLE round_decisions ADD COLUMN IF NOT EXISTS draft_answer TEXT`,
+  },
+  {
+    version: 20,
+    name: "round-decisions-draft-answer-kind-column",
+    sql: `ALTER TABLE round_decisions ADD COLUMN IF NOT EXISTS draft_answer_kind TEXT`,
+  },
+  {
+    version: 21,
+    name: "sessions-turn-status-column",
+    sql: `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS turn_status TEXT NOT NULL DEFAULT 'idle'`,
+  },
+  {
+    version: 22,
+    name: "sessions-turn-error-code-column",
+    sql: `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS turn_error_code TEXT`,
+  },
+  {
+    version: 23,
+    name: "sessions-turn-error-message-column",
+    sql: `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS turn_error_message TEXT`,
+  },
+  {
+    version: 24,
+    name: "sessions-turn-started-at-column",
+    sql: `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS turn_started_at TEXT`,
+  },
 ];
