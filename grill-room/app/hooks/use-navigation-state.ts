@@ -6,7 +6,7 @@ import { TAB_ID } from "@/lib/tab-id";
 export interface NavigationState {
   view: string;
   path?: string;
-  threadId?: string;
+  sessionId?: string;
 }
 
 export function useNavigationState() {
@@ -14,11 +14,11 @@ export function useNavigationState() {
     browserTabId: TAB_ID,
     requestSource: TAB_ID,
     getNavigationState: ({ pathname }) => {
-      const threadId = threadIdFromPath(pathname);
+      const sessionId = sessionIdFromPath(pathname);
       return {
         view: viewForPath(pathname),
         path: appPath(pathname),
-        ...(threadId ? { threadId } : {}),
+        ...(sessionId ? { sessionId } : {}),
       };
     },
     getCommandPath: (command) =>
@@ -26,8 +26,8 @@ export function useNavigationState() {
   });
 }
 
-function threadIdFromPath(pathname: string): string | null {
-  const match = pathname.match(/^\/chat\/([^/]+)/);
+function sessionIdFromPath(pathname: string): string | null {
+  const match = pathname.match(/^\/sessions\/([^/]+)/);
   if (!match) return null;
   try {
     const value = decodeURIComponent(match[1]).trim();
@@ -38,7 +38,8 @@ function threadIdFromPath(pathname: string): string | null {
 }
 
 function viewForPath(pathname: string): string {
-  if (isChatPath(pathname)) return "chat";
+  if (/^\/sessions\/[^/]+\/output/.test(pathname)) return "session-output";
+  if (pathname.startsWith("/sessions/")) return "session";
   if (pathname.startsWith("/database")) return "database";
   if (pathname.startsWith("/extensions")) return "extensions";
   if (pathname.startsWith("/observability")) return "observability";
@@ -47,15 +48,14 @@ function viewForPath(pathname: string): string {
   }
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/team")) return "settings";
-  return "chat";
+  return "sessions";
 }
 
 function pathForView(view?: string): string {
   switch (view) {
-    case "chat":
+    case "sessions":
     case "home":
-    case "ask":
-      return "/home";
+      return "/";
     case "database":
       return "/database";
     case "extensions":
@@ -69,16 +69,18 @@ function pathForView(view?: string): string {
     case "team":
       return "/settings/organization";
     default:
-      return "/home";
+      return "/";
   }
 }
 
 function pathForCommand(command: any): string {
-  const path = pathForView(command?.view);
-  if (path !== "/home") return path;
-  const threadId =
-    typeof command?.threadId === "string" ? command.threadId.trim() : "";
-  return threadId ? `/chat/${encodeURIComponent(threadId)}` : path;
+  const sessionId =
+    typeof command?.sessionId === "string" ? command.sessionId.trim() : "";
+  if (sessionId) {
+    const base = `/sessions/${encodeURIComponent(sessionId)}`;
+    return command?.view === "session-output" ? `${base}/output` : base;
+  }
+  return pathForView(command?.view);
 }
 
 function routerPath(path: string): string {
@@ -89,8 +91,4 @@ function routerPath(path: string): string {
     return path.slice(basePath.length) || "/";
   }
   return path;
-}
-
-function isChatPath(pathname: string): boolean {
-  return pathname === "/home" || pathname.startsWith("/chat/");
 }

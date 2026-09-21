@@ -4,13 +4,13 @@
  * Writes a navigate command to application state which the UI reads and auto-deletes.
  *
  * Usage:
- *   pnpm action navigate --view=chat
+ *   pnpm action navigate --view=sessions
  *   pnpm action navigate --path=/some/route
  *
  * Options:
- *   --view   View name to navigate to
- *   --path   URL path to navigate to
- *   --threadId Chat thread ID to open on the chat route
+ *   --view      View name to navigate to
+ *   --path      URL path to navigate to
+ *   --sessionId Grilling session to open on a session route
  */
 
 import { defineAction } from "@agent-native/core/action";
@@ -23,7 +23,10 @@ export default defineAction({
   schema: z.object({
     view: z.string().optional().describe("View name to navigate to"),
     path: z.string().optional().describe("URL path to navigate to"),
-    threadId: z.string().optional().describe("Chat thread ID to open"),
+    sessionId: z
+      .string()
+      .optional()
+      .describe("Grilling session id to open on a session route"),
   }),
   http: false,
   run: async (args) => {
@@ -33,7 +36,7 @@ export default defineAction({
     const nav: Record<string, string> = {};
     if (args.view) nav.view = args.view;
     if (args.path) nav.path = args.path;
-    if (args.threadId) nav.threadId = args.threadId;
+    if (args.sessionId) nav.sessionId = args.sessionId;
     nav._writeId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await writeAppStateForCurrentTab("navigate", nav);
     return `Navigating to ${args.view || args.path}`;
