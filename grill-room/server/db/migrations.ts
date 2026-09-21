@@ -229,4 +229,14 @@ export const appMigrations: MigrationEntry[] = [
     name: "sessions-turn-started-at-column",
     sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS turn_started_at TEXT`,
   },
+  {
+    version: 25,
+    name: "decisions-withdrawn-at-column",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS withdrawn_at TEXT`,
+  },
+  {
+    version: 26,
+    name: "decisions-awaiting-placement-since-column",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS awaiting_placement_since TEXT`,
+  },
 ];
