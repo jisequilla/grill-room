@@ -7,19 +7,19 @@ import { ROUND_ANSWER_KINDS } from "../server/tree.js";
 
 export default defineAction({
   description:
-    'Save a draft answer for one card of the open round, so a half-answered round survives a reload. Answer kind is "accepted-recommendation" (the answer text defaults to the recommendation) or "own-answer" (the answer text is required).',
+    'Save a draft answer for one card of the open round, so a half-answered round survives a reload. Answer kind is "accepted-recommendation" (defaults the text to the recommendation), "own-answer" (text required), "unknown" (I don\'t know; no text required), "pushed-back" (a reason is required), "deferred" (ask again later; no text required), or "prototype-flagged" (needs a prototype; text is an optional note).',
   schema: z.object({
     decisionId: z.string().min(1).describe("Decision id, the card answered"),
     answerKind: z
       .enum(ROUND_ANSWER_KINDS)
       .describe(
-        'How the card was answered: "accepted-recommendation" or "own-answer"',
+        'How the card was answered: "accepted-recommendation", "own-answer", "unknown", "pushed-back", "deferred", or "prototype-flagged"',
       ),
     answer: z
       .string()
       .optional()
       .describe(
-        "The answer text. Required for own-answer; defaults to the recommended answer when the recommendation is accepted.",
+        "The answer text. Required for own-answer and pushed-back (its reason); optional elsewhere; defaults to the recommended answer when the recommendation is accepted.",
       ),
   }),
   run: async ({ decisionId, answerKind, answer }) => {
@@ -62,6 +62,13 @@ export default defineAction({
     if (answerKind === "own-answer" && text.trim() === "") {
       fail("An own answer needs some text.", {
         errorCode: "empty_answer",
+        statusCode: 400,
+      });
+    }
+
+    if (answerKind === "pushed-back" && text.trim() === "") {
+      fail("A push back needs a reason.", {
+        errorCode: "empty_reason",
         statusCode: 400,
       });
     }
