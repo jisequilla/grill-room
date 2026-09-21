@@ -8,6 +8,7 @@ import {
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
+import addDecision from "./add-decision.js";
 import createSession from "./create-session.js";
 import getCurrentRound from "./get-current-round.js";
 import getSession from "./get-session.js";
@@ -232,6 +233,32 @@ describe("reopen-decision", () => {
     await expect(
       reopenDecision.run({ decisionId: opened.round!.decisions[0]!.id }),
     ).rejects.toThrow(/Only a decision that has been settled can be reopened/);
+  });
+
+  it("refuses a decision a push back's response withdrew", async () => {
+    const { sessionId } = await aSettledChain();
+    const withdrawn = await decisionId(sessionId, "storage");
+    await getDb()
+      .update(schema.decisions)
+      .set({ withdrawnAt: new Date().toISOString() })
+      .where(eq(schema.decisions.id, withdrawn));
+
+    await expect(
+      reopenDecision.run({ decisionId: withdrawn }),
+    ).rejects.toThrow(/can be reopened\. "Question storage" is withdrawn\./);
+  });
+
+  it("refuses a decision the user added that the interviewer has not placed yet", async () => {
+    const session = await aSession();
+    const added = await addDecision.run({
+      sessionId: session.id,
+      title: "Should we support offline mode?",
+      body: "Came to me in the shower.",
+    });
+
+    await expect(
+      reopenDecision.run({ decisionId: added.id }),
+    ).rejects.toThrow(/is unplaced\./);
   });
 
   it("refuses while the interviewer is working", async () => {

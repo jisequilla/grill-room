@@ -8,6 +8,8 @@ import {
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
+import addDecision from "./add-decision.js";
+import answerDecision from "./answer-decision.js";
 import createSession from "./create-session.js";
 import getCurrentRound from "./get-current-round.js";
 import getSession from "./get-session.js";
@@ -470,9 +472,10 @@ describe("submit-round", () => {
 /**
  * Reopening a settled decision puts every decision under it in doubt. The
  * interviewer is not troubled with that until the reopened question has an
- * answer again — which is a round submission, and so is covered here.
+ * answer again, which happens on the way out of a round submission — and, when
+ * the answer arrives outside a round, on the next request for one.
  */
-describe("submit-round stale review", () => {
+describe("stale review", () => {
   useTestDatabase();
   afterEach(resetInterviewer);
 
@@ -737,6 +740,169 @@ describe("submit-round stale review", () => {
       "settled",
       "settled",
     ]);
+  });
+
+  it("never rules on a withdrawn decision, and looks straight through it to what it held up", async () => {
+    const { sessionId, interviewer } = await aSettledChain(
+      nothingMore,
+      review({ key: "sync", verdict: "reconfirm" }),
+      nothingMore,
+    );
+
+    const before = await treeBy(sessionId);
+    // A push back's response takes a decision out of the tree. sync still
+    // hangs off it, and through it off shape.
+    await getDb()
+      .update(schema.decisions)
+      .set({ withdrawnAt: new Date().toISOString() })
+      .where(eq(schema.decisions.id, before.storage!.id));
+
+    await reopenDecision.run({ decisionId: before.shape!.id });
+    await answerOpenRound(sessionId, "A page, after all");
+
+    const asked = interviewer.requests.find(
+      (request) => request.kind === "review-stale",
+    );
+    expect(asked).toMatchObject({
+      reopenedDecisionKey: "shape",
+      staleDecisionKeys: ["sync"],
+    });
+    // A withdrawn decision has left the tree, so the interviewer is not shown
+    // it either.
+    expect(asked?.context.decisions.map((decision) => decision.key)).toEqual([
+      "shape",
+      "sync",
+    ]);
+
+    const tree = await treeBy(sessionId);
+    expect([tree.shape?.state, tree.storage?.state, tree.sync?.state]).toEqual([
+      "settled",
+      "withdrawn",
+      "settled",
+    ]);
+  });
+
+  it("reviews around a decision the user added that is still awaiting placement", async () => {
+    const { sessionId, interviewer } = await aSettledChain(nothingMore);
+    const added = await addDecision.run({
+      sessionId,
+      title: "Should we support offline mode?",
+      body: "Came to me in the shower.",
+    });
+
+    interviewer.push(
+      review(
+        { key: "storage", verdict: "reconfirm" },
+        { key: "sync", verdict: "reconfirm" },
+      ),
+      {
+        kind: "propose-round",
+        result: {
+          proposedDecisions: [],
+          pushBackResponses: [],
+          userDecisionPlacements: [
+            {
+              key: added.key as string,
+              title: added.questionTitle,
+              body: added.questionBody,
+              choices: [],
+              recommendedAnswer: "Not for the first version.",
+              dependsOn: [],
+              ask: true,
+            },
+          ],
+          done: null,
+        },
+      },
+    );
+
+    await reopenDecision.run({ decisionId: (await treeBy(sessionId)).shape!.id });
+    const next = await answerOpenRound(sessionId, "A page, after all");
+
+    const asked = interviewer.requests.find(
+      (request) => request.kind === "review-stale",
+    );
+    expect(asked).toMatchObject({ staleDecisionKeys: ["storage", "sync"] });
+    // Unplaced, so it has no dependencies to show: the interviewer meets it
+    // through `userAddedDecisions` on the proposal instead.
+    expect(asked?.context.decisions.map((decision) => decision.key)).toEqual([
+      "shape",
+      "storage",
+      "sync",
+    ]);
+    expect(
+      interviewer.requests[interviewer.requests.length - 1],
+    ).toMatchObject({
+      kind: "propose-round",
+      userAddedDecisions: [{ key: added.key }],
+    });
+
+    const tree = await treeBy(sessionId);
+    expect([tree.shape?.state, tree.storage?.state, tree.sync?.state]).toEqual([
+      "settled",
+      "settled",
+      "settled",
+    ]);
+    expect(next.round?.decisions.map((card) => card.key)).toEqual([added.key]);
+  });
+
+  it("holds the review until a reopened decision has a real answer, wherever that answer comes from", async () => {
+    const { sessionId, interviewer } = await aSettledChain(
+      nothingMore,
+      nothingMore,
+    );
+    const shapeId = (await treeBy(sessionId)).shape!.id;
+
+    await reopenDecision.run({ decisionId: shapeId });
+    const open = await getCurrentRound.run({ sessionId });
+    await saveDraftAnswer.run({ decisionId: shapeId, answerKind: "unknown" });
+    await submitRound.run({ id: open.round!.id });
+
+    // A steering move leaves the question open, so there is still nothing for
+    // the interviewer to judge the dependents against.
+    expect(
+      interviewer.requests.filter((request) => request.kind === "review-stale"),
+    ).toEqual([]);
+    expect(
+      Object.entries(await treeBy(sessionId)).map(([key, decision]) => [
+        key,
+        decision?.state,
+      ]),
+    ).toEqual([
+      ["shape", "frontier"],
+      ["storage", "stale"],
+      ["sync", "stale"],
+    ]);
+
+    // The real answer arrives outside a round. `answer-decision` never calls
+    // the interviewer, so the review cannot run here.
+    const before = interviewer.requests.length;
+    await answerDecision.run({
+      decisionId: shapeId,
+      answer: "A page, after all",
+    });
+    expect(interviewer.requests).toHaveLength(before);
+    expect((await treeBy(sessionId)).storage?.state).toBe("stale");
+
+    // Asking for the next round is what settles the debt.
+    interviewer.push(
+      review(
+        { key: "storage", verdict: "reconfirm" },
+        { key: "sync", verdict: "reconfirm" },
+      ),
+      nothingMore,
+    );
+    await requestNextRound.run({ sessionId });
+
+    const tree = await treeBy(sessionId);
+    expect([tree.shape?.state, tree.storage?.state, tree.sync?.state]).toEqual([
+      "settled",
+      "settled",
+      "settled",
+    ]);
+    expect(
+      interviewer.requests.filter((request) => request.kind === "review-stale"),
+    ).toHaveLength(1);
   });
 
   it("leaves stale decisions alone while the reopened one is still unanswered", async () => {
