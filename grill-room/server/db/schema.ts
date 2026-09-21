@@ -7,64 +7,43 @@ import {
   uniqueIndex,
 } from "@agent-native/core/db/schema";
 
-/** Interviewer models a session can be run with. Default is `fable`. */
-export const SESSION_MODELS = ["fable", "opus", "sonnet"] as const;
-export type SessionModel = (typeof SESSION_MODELS)[number];
-
-/** Whether a session presents a round as one card set or one question at a time. */
-export const SESSION_ANSWERING_MODES = [
-  "whole-round",
-  "one-at-a-time",
-] as const;
-export type SessionAnsweringMode = (typeof SESSION_ANSWERING_MODES)[number];
-
-/** Lifecycle of a session: interviewing, awaiting the user's done confirmation, or confirmed. */
-export const SESSION_STATES = [
-  "interviewing",
-  "done-proposed",
-  "confirmed",
-] as const;
-export type SessionState = (typeof SESSION_STATES)[number];
-
-/** How a decision's current answer was arrived at. `null` means no answer yet. */
-export const DECISION_ANSWER_KINDS = [
-  "accepted-recommendation",
-  "own-answer",
-  "unknown",
-  "pushed-back",
-  "deferred",
-  "prototype-flagged",
-  "dispositioned",
-] as const;
-export type DecisionAnswerKind = (typeof DECISION_ANSWER_KINDS)[number];
-
-/** Where a "dispositioned" decision was resolved to. */
-export const DECISION_DISPOSITION_TARGETS = [
-  "out-of-scope",
-  "open-question",
-] as const;
-export type DecisionDispositionTarget =
-  (typeof DECISION_DISPOSITION_TARGETS)[number];
-
-/** Who put a decision into the tree. */
-export const DECISION_INTRODUCED_BY = ["interviewer", "user"] as const;
-export type DecisionIntroducedBy = (typeof DECISION_INTRODUCED_BY)[number];
-
-/** Whether a round has been submitted to the interviewer yet. */
-export const ROUND_SUBMISSION_STATES = ["open", "submitted"] as const;
-export type RoundSubmissionState = (typeof ROUND_SUBMISSION_STATES)[number];
+import {
+  DECISION_ANSWER_KINDS,
+  DECISION_DISPOSITION_TARGETS,
+  DECISION_INTRODUCED_BY,
+  ROUND_SUBMISSION_STATES,
+  SESSION_ANSWERING_MODES,
+  SESSION_MODELS,
+  SESSION_STATES,
+  SESSION_TURN_STATUSES,
+  TICKET_STATUSES,
+} from "../../shared/session-constants.js";
 
 /**
- * Where a session's interviewer turn stands. A turn takes about a minute, so
- * this is stored rather than held in memory: a client that reloads mid-turn
- * reads `working`, and a `failed` turn can be retried without losing why.
+ * The column enumerations live in `shared/`, which the browser bundle can
+ * import without dragging Drizzle in with them. They are re-exported here so
+ * server code can reach them from the schema it is already importing.
  */
-export const SESSION_TURN_STATUSES = ["idle", "working", "failed"] as const;
-export type SessionTurnStatus = (typeof SESSION_TURN_STATUSES)[number];
-
-/** Lifecycle of an exported ticket. */
-export const TICKET_STATUSES = ["ready", "in-progress", "done"] as const;
-export type TicketStatus = (typeof TICKET_STATUSES)[number];
+export {
+  DECISION_ANSWER_KINDS,
+  type DecisionAnswerKind,
+  DECISION_DISPOSITION_TARGETS,
+  type DecisionDispositionTarget,
+  DECISION_INTRODUCED_BY,
+  type DecisionIntroducedBy,
+  ROUND_SUBMISSION_STATES,
+  type RoundSubmissionState,
+  SESSION_ANSWERING_MODES,
+  type SessionAnsweringMode,
+  SESSION_MODELS,
+  type SessionModel,
+  SESSION_STATES,
+  type SessionState,
+  SESSION_TURN_STATUSES,
+  type SessionTurnStatus,
+  TICKET_STATUSES,
+  type TicketStatus,
+} from "../../shared/session-constants.js";
 
 /** App-wide preferences that are not tied to a single session. */
 export const globalSettings = table("gr_global_settings", {
