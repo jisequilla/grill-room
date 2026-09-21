@@ -71,15 +71,20 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `list-loose-ends` | Every decision blocking confirmation of a session — unknown, deferred, prototype flagged or pushed back and not withdrawn, stale, unplaced, or never answered — each with a reason naming its category. Empty once nothing blocks confirming. |
 | `disposition-decision` | Resolve a loose end by moving it out of scope or into the notes as a named open question, instead of a real answer. Settles the decision (as dispositioned) without calling the interviewer; refuses a decision that is not a loose end, or one that is stale or unplaced. |
 | `confirm-session` | Confirm a session whose done proposal is pending. Refuses outside `done-proposed`, refuses with the list of loose ends while any remain, and refuses while a turn is working. |
+| `synthesize-spec` | Synthesize the session's spec from its settled decisions, following the upstream to-spec template verbatim. Allowed only for a confirmed session with no turn working. Dispositioned decisions feed Out of Scope and Further Notes. Regenerating replaces the markdown and returns the spec row. |
+| `get-spec` | A session's spec, or null when none has been synthesized yet, plus a `ticketsCurrent` flag: whether any generated tickets still match it. |
+| `break-into-tickets` | Break the session's current spec into implementation tickets, replacing any it already has. Allowed only for a confirmed session with a current spec and no turn working. Refuses to replace tickets carrying a build record unless `force` is set. Returns the same shape as `list-tickets`. |
+| `list-tickets` | A session's tickets in number order, each with `blockedBy` resolved to ticket numbers, plus the same `ticketsCurrent` flag as `get-spec`. |
 | `navigate` | Move the UI to a view or path, through application state. |
 | `view-screen` | What the user is looking at. Call it first when the visible context matters. |
 | `provider-api-request` | Call Slack's Web API through the workspace connection. |
 
-`request-next-round` and `submit-round` both wait on a Claude CLI turn, which
-takes about a minute and can take several. The client action hooks time out at
-60 s by default, so UI code calling either one must pass a `timeoutMs` of
-several minutes; the default cancels a turn that was about to succeed and
-leaves the session's `turn_status` reading `working`.
+`request-next-round`, `submit-round`, `synthesize-spec`, and `break-into-tickets`
+all wait on a Claude CLI turn, which takes about a minute and can take several.
+The client action hooks time out at 60 s by default, so UI code calling any of
+them must pass a `timeoutMs` of several minutes; the default cancels a turn
+that was about to succeed and leaves the session's `turn_status` reading
+`working`.
 
 ## Application State
 
