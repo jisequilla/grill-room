@@ -15,6 +15,14 @@ import requestNextRound from "./request-next-round.js";
 import saveDraftAnswer from "./save-draft-answer.js";
 import submitRound from "./submit-round.js";
 
+/*
+ * `get-current-round` is covered here rather than in its own file. The harness
+ * builds one database per test file, and the suite already runs more files than
+ * this machine has cores: past that point the per-file build outruns vitest's
+ * hook timeout and unrelated files fail. Reads that only report what this
+ * action wrote therefore travel with it.
+ */
+
 /** One proposed decision, with everything but the point of the test defaulted. */
 function proposed(
   overrides: Partial<{
@@ -412,5 +420,41 @@ describe("request-next-round", () => {
     expect(
       (await getCurrentRound.run({ sessionId: session.id })).round?.decisions[0],
     ).toMatchObject({ key: "storage", state: "frontier" });
+  });
+});
+
+describe("get-current-round", () => {
+  useTestDatabase();
+
+  it("throws for a session id that does not exist", async () => {
+    await expect(getCurrentRound.run({ sessionId: "missing" })).rejects.toThrow(
+      "Session not found: missing",
+    );
+  });
+
+  it("reports no round and an idle turn before the interview starts", async () => {
+    const session = await aSession();
+
+    expect(await getCurrentRound.run({ sessionId: session.id })).toEqual({
+      sessionId: session.id,
+      turnStatus: "idle",
+      turnStartedAt: null,
+      turnError: null,
+      round: null,
+    });
+  });
+
+  it("reports a working turn so a reload mid-turn shows the interviewer is busy", async () => {
+    const session = await aSession();
+    await getDb()
+      .update(schema.sessions)
+      .set({ turnStatus: "working", turnStartedAt: "2026-01-01T00:00:00.000Z" })
+      .where(eq(schema.sessions.id, session.id));
+
+    expect(await getCurrentRound.run({ sessionId: session.id })).toMatchObject({
+      turnStatus: "working",
+      turnStartedAt: "2026-01-01T00:00:00.000Z",
+      round: null,
+    });
   });
 });
