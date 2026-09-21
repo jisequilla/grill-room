@@ -376,6 +376,48 @@ describe("request-next-round", () => {
       expect(second.round?.decisions.map((card) => card.key)).toEqual(["tone"]);
       expect(interviewer.requests).toHaveLength(1);
     });
+
+    it("serves a decision unblocked by settling the round as its own round, without asking again", async () => {
+      const session = await aSession({ answeringMode: "one-at-a-time" });
+      const interviewer = scriptInterviewer([
+        round(
+          proposed({ key: "shape" }),
+          proposed({
+            key: "storage",
+            title: "Where does the data live?",
+            dependsOn: ["shape"],
+            ask: false,
+          }),
+        ),
+      ]);
+
+      const first = await requestNextRound.run({ sessionId: session.id });
+      expect(first.round?.decisions.map((card) => card.key)).toEqual(["shape"]);
+
+      await saveDraftAnswer.run({
+        decisionId: first.round!.decisions[0]!.id,
+        answerKind: "accepted-recommendation",
+      });
+      const second = await submitRound.run({ id: first.round!.id });
+
+      expect(second.round?.decisions.map((card) => card.key)).toEqual([
+        "storage",
+      ]);
+      expect(interviewer.requests).toHaveLength(1);
+    });
+  });
+
+  it("ends with no open round when the interviewer has nothing to propose", async () => {
+    const session = await aSession();
+    scriptInterviewer([round()]);
+
+    const result = await requestNextRound.run({ sessionId: session.id });
+
+    expect(result.round).toBeNull();
+    expect(result.turnStatus).toBe("idle");
+    expect((await getTree.run({ sessionId: session.id })).decisions).toEqual(
+      [],
+    );
   });
 
   it("shows the interviewer the settled tree on the next turn", async () => {

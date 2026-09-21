@@ -268,6 +268,102 @@ describe("submit-round", () => {
       (await getTree.run({ sessionId: session.id })).decisions,
     ).toHaveLength(1);
   });
+
+  it("pulls a decision that was blocked into the round once it unblocks, alongside a newly proposed one", async () => {
+    const { session, round } = await aSessionMidRound(
+      proposal(
+        { key: "shape", title: "What shape?" },
+        {
+          key: "storage",
+          title: "Where does the data live?",
+          dependsOn: ["shape"],
+          ask: false,
+        },
+      ),
+      proposal({
+        key: "tone",
+        title: "How blunt?",
+        dependsOn: ["shape"],
+      }),
+    );
+
+    expect(round.decisions.map((card) => card.key)).toEqual(["shape"]);
+
+    await saveDraftAnswer.run({
+      decisionId: round.decisions[0]!.id,
+      answerKind: "accepted-recommendation",
+    });
+    const next = await submitRound.run({ id: round.id });
+
+    // storage predates tone in the tree, so it leads the round even though
+    // tone is what the fresh proposal actually contributed.
+    expect(next.round?.decisions.map((card) => card.key)).toEqual([
+      "storage",
+      "tone",
+    ]);
+    expect(
+      (await getTree.run({ sessionId: session.id })).decisions,
+    ).toHaveLength(3);
+  });
+
+  it("still opens the round on the newly-unblocked decision when the next proposal adds nothing", async () => {
+    const { round } = await aSessionMidRound(
+      proposal(
+        { key: "shape", title: "What shape?" },
+        {
+          key: "storage",
+          title: "Where does the data live?",
+          dependsOn: ["shape"],
+          ask: false,
+        },
+      ),
+      proposal(),
+    );
+
+    await saveDraftAnswer.run({
+      decisionId: round.decisions[0]!.id,
+      answerKind: "accepted-recommendation",
+    });
+    const next = await submitRound.run({ id: round.id });
+
+    expect(next.round?.decisions.map((card) => card.key)).toEqual(["storage"]);
+  });
+
+  it("keeps a decision blocked on the newly-unblocked one out of the round", async () => {
+    const { session, round } = await aSessionMidRound(
+      proposal(
+        { key: "shape", title: "What shape?" },
+        {
+          key: "storage",
+          title: "Where does the data live?",
+          dependsOn: ["shape"],
+          ask: false,
+        },
+      ),
+      proposal({
+        key: "sync",
+        title: "How does it sync?",
+        dependsOn: ["storage"],
+        ask: false,
+      }),
+    );
+
+    await saveDraftAnswer.run({
+      decisionId: round.decisions[0]!.id,
+      answerKind: "accepted-recommendation",
+    });
+    const next = await submitRound.run({ id: round.id });
+
+    expect(next.round?.decisions.map((card) => card.key)).toEqual(["storage"]);
+    const tree = await getTree.run({ sessionId: session.id });
+    expect(
+      tree.decisions.map((decision) => [decision.key, decision.state]),
+    ).toEqual([
+      ["shape", "settled"],
+      ["storage", "frontier"],
+      ["sync", "blocked"],
+    ]);
+  });
 });
 
 describe("list-rounds", () => {

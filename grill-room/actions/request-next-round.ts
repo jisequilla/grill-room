@@ -19,6 +19,7 @@ import type {
 import {
   deriveTreeStates,
   isSettlingAnswerKind,
+  neverAnsweredFrontierIds,
   parseStringArray,
   validateProposal,
   type DecisionRow,
@@ -53,7 +54,7 @@ function portAnswerKind(row: {
 
 export default defineAction({
   description:
-    "Ask the interviewer for the session's next round of questions, validate the proposal against the design tree, and open the round. Starts the interview when the session has no decisions yet. In one-at-a-time mode it opens the next single question from an existing proposal without calling the interviewer again.",
+    "Ask the interviewer for the session's next round of questions, validate the proposal against the design tree, and open the round. Starts the interview when the session has no decisions yet. In one-at-a-time mode it opens the next single never-answered frontier question — whether newly proposed or just unblocked by an earlier answer — without calling the interviewer again while one is still available.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
   }),
@@ -97,37 +98,50 @@ export default defineAction({
         .where(eq(schema.decisions.sessionId, sessionId))
         .orderBy(schema.decisions.createdAt);
 
-    /** Decisions the interviewer asked for that no round has opened on yet. */
-    const askable = (rows: DecisionRow[]) => {
-      const states = deriveTreeStates(
-        rows.map((row) => ({
-          id: row.id,
-          dependsOn: parseStringArray(row.dependsOnJson),
-          answerKind: row.answerKind,
-          settledAt: row.settledAt,
-          reopenedAt: row.reopenedAt,
-        })),
+    /**
+     * Every decision that belongs in the next round, oldest first: whatever
+     * the last proposal marked to ask, plus any older decision that was
+     * blocked and has since become frontier because its dependency settled.
+     * `pendingAsk` is not consulted here — it only records what a proposal
+     * asked for, and says nothing about a decision the tree unblocked on its
+     * own — so this reads the tree's actual state instead.
+     */
+    const nextRoundCandidates = (rows: DecisionRow[]) => {
+      const ids = new Set(
+        neverAnsweredFrontierIds(
+          rows.map((row) => ({
+            id: row.id,
+            dependsOn: parseStringArray(row.dependsOnJson),
+            answerKind: row.answerKind,
+            settledAt: row.settledAt,
+            reopenedAt: row.reopenedAt,
+          })),
+        ),
       );
-      return rows.filter(
-        (row) => row.pendingAsk && states.get(row.id) === "frontier",
-      );
+      return rows.filter((row) => ids.has(row.id));
     };
 
-    let rows = await loadDecisions();
-    let pending = askable(rows);
+    const isOneAtATime = session.answeringMode === "one-at-a-time";
 
-    if (pending.length === 0) {
+    let rows = await loadDecisions();
+    // In whole-round mode every round consumes its entire pending set (see
+    // `asking` below), so anything still to ask always needs a fresh
+    // proposal; one-at-a-time mode only re-asks the interviewer once its
+    // queue — proposal leftovers and newly-unblocked decisions alike — is
+    // empty.
+    let pending = isOneAtATime ? nextRoundCandidates(rows) : [];
+
+    if (!isOneAtATime || pending.length === 0) {
       await runTurn();
       rows = await loadDecisions();
-      pending = askable(rows);
+      pending = nextRoundCandidates(rows);
     }
 
     if (pending.length === 0) return getCurrentRound.run({ sessionId });
 
     // One at a time means one card per round; the rest stay pending and open
     // as later rounds without troubling the interviewer again.
-    const asking =
-      session.answeringMode === "one-at-a-time" ? pending.slice(0, 1) : pending;
+    const asking = isOneAtATime ? pending.slice(0, 1) : pending;
     const now = new Date().toISOString();
     const roundId = randomUUID();
 
