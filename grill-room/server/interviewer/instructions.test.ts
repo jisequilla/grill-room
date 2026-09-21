@@ -92,6 +92,15 @@ describe("the prompt for a turn", () => {
     expect(prompt).toContain("propose the next round");
   });
 
+  it("never starts with a dash, which the command line reads as an option", () => {
+    // The grilling skill opens with `---`. A prompt that begins with it is
+    // rejected as an unknown option before the turn starts.
+    for (const request of [aProposeRoundRequest(), aSynthesizeSpecRequest()]) {
+      expect(buildPrompt(request).startsWith("-")).toBe(false);
+      expect(buildPrompt(request, { primed: true }).startsWith("-")).toBe(false);
+    }
+  });
+
   it("explains itself when the conversation had to be restarted", () => {
     const request = aProposeRoundRequest();
 

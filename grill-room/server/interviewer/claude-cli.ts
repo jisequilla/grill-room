@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { InterviewerError } from "./errors.js";
 import { buildPrompt } from "./prompt.js";
 import { jsonSchemaFor, resultSchemas } from "./schemas.js";
-import type { RequestKind, ResultFor } from "./schemas.js";
+import type { ResultFor } from "./schemas.js";
 import type {
   BreakIntoTicketsRequest,
   Interviewer,

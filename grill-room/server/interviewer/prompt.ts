@@ -12,6 +12,15 @@ import type {
  * fallback after a failed resume equivalent rather than degraded.
  */
 
+/**
+ * The prompt is passed as a command line argument, and the grilling skill opens
+ * with `---`. Without a line ahead of it the argument parser reads the whole
+ * prompt as an unknown option and the turn fails before it starts, so the
+ * prompt always opens with this framing line.
+ */
+const OPENING_LINE =
+  "You are conducting a grilling interview inside the Grill Room app. Your instructions follow verbatim, then the state of the interview, then your task for this turn.";
+
 function renderDecision(decision: DecisionSnapshot): string {
   const lines = [
     `- [${decision.key}] (${decision.state}, added by ${decision.introducedBy}) ${decision.title}`,
@@ -232,6 +241,8 @@ export function buildPrompt(
     : "";
 
   return [
+    OPENING_LINE,
+    "",
     interviewerInstructions(),
     "",
     "---",
