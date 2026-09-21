@@ -1,8 +1,10 @@
+import { eq } from "@agent-native/core/db/schema";
 import { describe, expect, it } from "vitest";
 
-import { useTestDatabase } from "../test/db.js";
+import { getDb, schema, useTestDatabase } from "../test/db.js";
 import addDecision from "./add-decision.js";
 import createSession from "./create-session.js";
+import getSession from "./get-session.js";
 import getTree from "./get-tree.js";
 
 function aSession() {
@@ -75,5 +77,41 @@ describe("add-decision", () => {
     });
 
     expect(added.questionBody).toEqual("");
+  });
+
+  it("returns a done-proposed session to interviewing and clears the summary", async () => {
+    const session = await aSession();
+    await getDb()
+      .update(schema.sessions)
+      .set({ state: "done-proposed", doneSummary: "Nothing left, we thought." })
+      .where(eq(schema.sessions.id, session.id));
+
+    await addDecision.run({
+      sessionId: session.id,
+      title: "Should we support offline mode?",
+    });
+
+    expect(await getSession.run({ id: session.id })).toMatchObject({
+      state: "interviewing",
+      doneSummary: null,
+    });
+  });
+
+  it("returns a confirmed session to interviewing and clears the summary", async () => {
+    const session = await aSession();
+    await getDb()
+      .update(schema.sessions)
+      .set({ state: "confirmed", doneSummary: "Nothing left, we thought." })
+      .where(eq(schema.sessions.id, session.id));
+
+    await addDecision.run({
+      sessionId: session.id,
+      title: "Should we support offline mode?",
+    });
+
+    expect(await getSession.run({ id: session.id })).toMatchObject({
+      state: "interviewing",
+      doneSummary: null,
+    });
   });
 });

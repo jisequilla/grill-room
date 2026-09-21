@@ -193,8 +193,84 @@ describe("reopen-decision", () => {
     ).toHaveLength(4);
   });
 
-  it("returns a session that had proposed done to interviewing", async () => {
+  it("returns a session that had proposed done to interviewing, and clears the summary", async () => {
     const { sessionId } = await aSettledChain();
+    await getDb()
+      .update(schema.sessions)
+      .set({
+        state: "done-proposed",
+        doneSummary: "Nothing left, we thought.",
+      })
+      .where(eq(schema.sessions.id, sessionId));
+
+    await reopenDecision.run({
+      decisionId: await decisionId(sessionId, "shape"),
+    });
+
+    expect(await getSession.run({ id: sessionId })).toMatchObject({
+      state: "interviewing",
+      doneSummary: null,
+    });
+  });
+
+  it("returns a confirmed session to interviewing, so a late realisation is not locked out, and clears the summary", async () => {
+    const { sessionId } = await aSettledChain();
+    await getDb()
+      .update(schema.sessions)
+      .set({
+        state: "confirmed",
+        doneSummary: "Nothing left, we thought.",
+      })
+      .where(eq(schema.sessions.id, sessionId));
+
+    await reopenDecision.run({
+      decisionId: await decisionId(sessionId, "sync"),
+    });
+
+    expect(await getSession.run({ id: sessionId })).toMatchObject({
+      state: "interviewing",
+      doneSummary: null,
+    });
+  });
+
+  it("marks an existing spec not current when reopening a decision in a confirmed session", async () => {
+    const { sessionId } = await aSettledChain();
+    const now = new Date().toISOString();
+    await getDb().insert(schema.specs).values({
+      id: "spec-1",
+      sessionId,
+      markdown: "# Grill Room\n",
+      current: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await getDb()
+      .update(schema.sessions)
+      .set({ state: "confirmed" })
+      .where(eq(schema.sessions.id, sessionId));
+
+    await reopenDecision.run({
+      decisionId: await decisionId(sessionId, "shape"),
+    });
+
+    const [spec] = await getDb()
+      .select()
+      .from(schema.specs)
+      .where(eq(schema.specs.sessionId, sessionId));
+    expect(spec).toMatchObject({ current: false });
+  });
+
+  it("leaves the spec alone when reopening a decision in a done-proposed session", async () => {
+    const { sessionId } = await aSettledChain();
+    const now = new Date().toISOString();
+    await getDb().insert(schema.specs).values({
+      id: "spec-1",
+      sessionId,
+      markdown: "# Grill Room\n",
+      current: true,
+      createdAt: now,
+      updatedAt: now,
+    });
     await getDb()
       .update(schema.sessions)
       .set({ state: "done-proposed" })
@@ -204,25 +280,11 @@ describe("reopen-decision", () => {
       decisionId: await decisionId(sessionId, "shape"),
     });
 
-    expect(await getSession.run({ id: sessionId })).toMatchObject({
-      state: "interviewing",
-    });
-  });
-
-  it("returns a confirmed session to interviewing, so a late realisation is not locked out", async () => {
-    const { sessionId } = await aSettledChain();
-    await getDb()
-      .update(schema.sessions)
-      .set({ state: "confirmed" })
-      .where(eq(schema.sessions.id, sessionId));
-
-    await reopenDecision.run({
-      decisionId: await decisionId(sessionId, "sync"),
-    });
-
-    expect(await getSession.run({ id: sessionId })).toMatchObject({
-      state: "interviewing",
-    });
+    const [spec] = await getDb()
+      .select()
+      .from(schema.specs)
+      .where(eq(schema.specs.sessionId, sessionId));
+    expect(spec).toMatchObject({ current: true });
   });
 
   it("refuses a decision that was never settled", async () => {

@@ -231,6 +231,73 @@ export function deferredFrontierIds(
     .map((decision) => decision.id);
 }
 
+/**
+ * Which category of loose end a decision belongs to. The four answer-kind
+ * reasons mirror {@link LOOSE_END_ANSWER_KINDS}; `stale` and `unplaced` mirror
+ * the derived states of the same name; `never-answered` is a decision with no
+ * answer at all, on the frontier or still blocked.
+ */
+export type LooseEndReason =
+  | "unknown"
+  | "pushed-back"
+  | "deferred"
+  | "prototype-flagged"
+  | "stale"
+  | "unplaced"
+  | "never-answered";
+
+/**
+ * Which loose-end category `decision` falls under, given its already-derived
+ * `state`, or null when it is not one. A real answer (settled, including
+ * dispositioned) and a decision that has left the tree (withdrawn) are never
+ * loose ends; `stale` and `unplaced` take priority over an answer-kind reason,
+ * though in practice neither state co-occurs with a loose-end answer kind.
+ */
+export function looseEndReason(
+  decision: TreeDecision,
+  state: DerivedDecisionState,
+): LooseEndReason | null {
+  if (state === "stale") return "stale";
+  if (state === "unplaced") return "unplaced";
+  if (state === "withdrawn" || state === "settled") return null;
+
+  if (
+    decision.answerKind != null &&
+    (LOOSE_END_ANSWER_KINDS as readonly string[]).includes(decision.answerKind)
+  ) {
+    return decision.answerKind as LooseEndReason;
+  }
+
+  if (
+    decision.answerKind == null &&
+    (state === "frontier" || state === "blocked")
+  ) {
+    return "never-answered";
+  }
+
+  return null;
+}
+
+/**
+ * Every decision blocking confirmation, by id, with the category it falls
+ * under. Used by `list-loose-ends` and by `confirm-session`'s refusal.
+ */
+export function classifyLooseEnds(
+  decisions: readonly TreeDecision[],
+): Map<string, LooseEndReason> {
+  const states = deriveTreeStates(decisions);
+  const result = new Map<string, LooseEndReason>();
+
+  for (const decision of decisions) {
+    const state = states.get(decision.id);
+    if (state === undefined) continue;
+    const reason = looseEndReason(decision, state);
+    if (reason) result.set(decision.id, reason);
+  }
+
+  return result;
+}
+
 /** A stored decision, exactly as the table holds it. */
 export type DecisionRow = typeof decisions.$inferSelect;
 
@@ -398,10 +465,13 @@ function keysOnCycles(
  * that is not on the frontier once the proposal's own new decisions are part
  * of the tree, a pending push back with no response, a response that re-asks
  * the pushed-back decision unchanged, a user-added decision the proposal
- * leaves without a placement, and a placement for anything else.
+ * leaves without a placement, a placement for anything else, and — when
+ * `done` is set — a decision that would still belong in the next round, or a
+ * proposed or placed decision still marked to be asked.
  *
  * `pushBackResponses` and `userDecisionPlacements` default to empty, so a
- * caller with nothing pending to check against them can omit both.
+ * caller with nothing pending to check against them can omit both; `done`
+ * defaults to false, so a caller that never proposes done can omit it too.
  */
 export function validateProposal(
   existing: readonly KeyedTreeDecision[],
@@ -409,10 +479,12 @@ export function validateProposal(
   extra: {
     pushBackResponses?: readonly ProposedPushBackResponse[];
     userDecisionPlacements?: readonly ProposedDecision[];
+    done?: boolean;
   } = {},
 ): ProposalValidation {
   const pushBackResponses = extra.pushBackResponses ?? [];
   const userDecisionPlacements = extra.userDecisionPlacements ?? [];
+  const done = extra.done ?? false;
   const reasons: string[] = [];
 
   const existingIdByKey = new Map<string, string>();
@@ -614,6 +686,38 @@ export function validateProposal(
     if (unchanged) {
       reasons.push(
         `The response to pushed-back decision "${response.decisionKey}" re-asks it unchanged. Withdraw it, replace it with something different, or restructure the part of the tree it sat in.`,
+      );
+    }
+  }
+
+  // A done proposal is only accepted once nothing would be asked: no
+  // never-answered or due-for-return decision on the frontier once this
+  // proposal lands, and nothing this proposal itself marks to ask.
+  if (done) {
+    const stillToAsk = combined.filter((decision) => {
+      if (decision.answerKind !== null && decision.answerKind !== "deferred") {
+        return false;
+      }
+      return states.get(decision.id) === "frontier";
+    });
+    if (stillToAsk.length > 0) {
+      const labels = stillToAsk
+        .map((decision) => labelled.get(decision.id)?.label ?? decision.id)
+        .sort();
+      reasons.push(
+        `The interview is not actually done: ${labels.map((label) => `"${label}"`).join(", ")} would still be asked in a round. Ask them, or leave \`done\` null until they are.`,
+      );
+    }
+
+    const stillAsking = [
+      ...proposed.filter((decision) => decision.ask),
+      ...userDecisionPlacements.filter((placement) => placement.ask),
+    ];
+    if (stillAsking.length > 0) {
+      reasons.push(
+        `The interview cannot be done while this proposal still asks ${stillAsking
+          .map((decision) => `"${decision.key}"`)
+          .join(", ")}. Set \`ask\` to false for each, or leave \`done\` null.`,
       );
     }
   }

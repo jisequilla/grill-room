@@ -100,12 +100,20 @@ export default defineAction({
       .where(eq(schema.decisions.id, decisionId));
 
     if (session.state !== "interviewing") {
-      // Ticket 07 hangs the rest of this off here: a spec and tickets built
-      // from the old answer are out of date the moment it is reopened.
       await db
         .update(schema.sessions)
-        .set({ state: "interviewing", updatedAt: now })
+        .set({ state: "interviewing", doneSummary: null, updatedAt: now })
         .where(eq(schema.sessions.id, sessionId));
+
+      // A spec built from the old answer is out of date the moment it is
+      // reopened. Tickets carry no such flag yet; that is a later ticket's
+      // concern.
+      if (session.state === "confirmed") {
+        await db
+          .update(schema.specs)
+          .set({ current: false, updatedAt: now })
+          .where(eq(schema.specs.sessionId, sessionId));
+      }
     }
 
     const [open] = await db

@@ -7,7 +7,7 @@ import { describeDecisions } from "../server/tree.js";
 
 export default defineAction({
   description:
-    "Read the round a session is currently answering, with each card's question, recommended answer, derived state, and saved draft. Also reports whether the interviewer is working, idle, or failed.",
+    "Read the round a session is currently answering, with each card's question, recommended answer, derived state, and saved draft. Also reports the session's state, its done-proposal summary when it has one, and whether the interviewer is working, idle, or failed.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
   }),
@@ -25,6 +25,8 @@ export default defineAction({
 
     const turn = {
       sessionId,
+      state: session.state,
+      doneSummary: session.doneSummary,
       turnStatus: session.turnStatus,
       turnStartedAt: session.turnStartedAt,
       turnError: session.turnErrorCode

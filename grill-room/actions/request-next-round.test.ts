@@ -738,6 +738,135 @@ describe("request-next-round", () => {
       (await getCurrentRound.run({ sessionId: session.id })).round?.decisions[0],
     ).toMatchObject({ key: "storage", state: "frontier" });
   });
+
+  describe("done proposals", () => {
+    it("accepts a done proposal that leaves nothing to ask, stores the summary, and opens no round", async () => {
+      const session = await aSession();
+      scriptInterviewer([
+        {
+          kind: "propose-round",
+          result: {
+            proposedDecisions: [],
+            pushBackResponses: [],
+            userDecisionPlacements: [],
+            done: { summary: "Everything about grill-room is settled." },
+          },
+        },
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(result.round).toBeNull();
+      expect(result.state).toBe("done-proposed");
+      expect(result.doneSummary).toBe(
+        "Everything about grill-room is settled.",
+      );
+      expect(await getSession.run({ id: session.id })).toMatchObject({
+        state: "done-proposed",
+        doneSummary: "Everything about grill-room is settled.",
+      });
+    });
+
+    it("rejects a done proposal that still asks something, and retries with the reason", async () => {
+      const session = await aSession();
+      const interviewer = scriptInterviewer([
+        {
+          kind: "propose-round",
+          result: {
+            proposedDecisions: [proposed({ key: "shape", ask: true })],
+            pushBackResponses: [],
+            userDecisionPlacements: [],
+            done: { summary: "Nothing left." },
+          },
+        },
+        round(proposed({ key: "shape" })),
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests).toHaveLength(2);
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining("cannot be done"),
+      });
+      expect(result.state).toBe("interviewing");
+      expect(result.round?.decisions.map((card) => card.key)).toEqual([
+        "shape",
+      ]);
+    });
+
+    it("rejects a done proposal that leaves an existing decision still to ask, and gives up after two retries storing nothing", async () => {
+      const session = await aSession();
+      const now = new Date().toISOString();
+      await getDb().insert(schema.decisions).values({
+        id: "decision-tone",
+        sessionId: session.id,
+        key: "tone",
+        questionTitle: "How blunt should it be?",
+        dependsOnJson: "[]",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const bad = {
+        kind: "propose-round" as const,
+        result: {
+          proposedDecisions: [],
+          pushBackResponses: [],
+          userDecisionPlacements: [],
+          done: { summary: "Nothing left." },
+        },
+      };
+      const interviewer = scriptInterviewer([bad, bad, bad]);
+
+      await expect(
+        requestNextRound.run({ sessionId: session.id }),
+      ).rejects.toThrow(/does not fit the design tree 3 times/);
+
+      expect(interviewer.requests).toHaveLength(3);
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining("not actually done"),
+      });
+      expect(await getSession.run({ id: session.id })).toMatchObject({
+        state: "interviewing",
+        doneSummary: null,
+        turnStatus: "failed",
+        turnErrorCode: "invalid-proposal",
+      });
+      expect(
+        (await getTree.run({ sessionId: session.id })).decisions,
+      ).toMatchObject([{ key: "tone" }]);
+    });
+
+    it("opens a round and returns a done-proposed session to interviewing without asking the interviewer again, once one-at-a-time can serve an existing frontier decision", async () => {
+      const session = await aSession({ answeringMode: "one-at-a-time" });
+      const now = new Date().toISOString();
+      await getDb().insert(schema.decisions).values({
+        id: "decision-tone",
+        sessionId: session.id,
+        key: "tone",
+        questionTitle: "How blunt should it be?",
+        dependsOnJson: "[]",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await getDb()
+        .update(schema.sessions)
+        .set({
+          state: "done-proposed",
+          doneSummary: "Nothing left, we thought.",
+        })
+        .where(eq(schema.sessions.id, session.id));
+      const interviewer = scriptInterviewer([]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests).toHaveLength(0);
+      expect(result.round?.decisions.map((card) => card.key)).toEqual([
+        "tone",
+      ]);
+      expect(result.state).toBe("interviewing");
+      expect(result.doneSummary).toBeNull();
+    });
+  });
 });
 
 describe("get-current-round", () => {
@@ -754,6 +883,8 @@ describe("get-current-round", () => {
 
     expect(await getCurrentRound.run({ sessionId: session.id })).toEqual({
       sessionId: session.id,
+      state: "interviewing",
+      doneSummary: null,
       turnStatus: "idle",
       turnStartedAt: null,
       turnError: null,

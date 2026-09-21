@@ -150,6 +150,16 @@ export default defineAction({
     const now = new Date().toISOString();
     const roundId = randomUUID();
 
+    // A round is about to open, so the interview is continuing: a session
+    // that had proposed (or, via a reopen elsewhere, confirmed) done returns
+    // to interviewing, and the stale summary is dropped with it.
+    if (session.state !== "interviewing") {
+      await db
+        .update(schema.sessions)
+        .set({ state: "interviewing", doneSummary: null, updatedAt: now })
+        .where(eq(schema.sessions.id, sessionId));
+    }
+
     // A deferred decision re-entering a round is a fresh ask: its deferral is
     // recorded to history first, then its answer kind resets to null so its
     // card comes up unanswered, same as a decision asked for the first time.
@@ -260,6 +270,7 @@ export default defineAction({
           validateProposal(against, result.proposedDecisions, {
             pushBackResponses: result.pushBackResponses,
             userDecisionPlacements: result.userDecisionPlacements,
+            done: result.done != null,
           }).reasons,
         exhausted: (lastReason) =>
           new TurnRejected(
@@ -315,8 +326,10 @@ export default defineAction({
     }
 
     /**
-     * Store an accepted proposal. A done proposal is a later ticket's concern
-     * and is ignored here rather than failing the turn.
+     * Store an accepted proposal. When it carries `done`, `reasonsToRefuse`
+     * has already checked that nothing would be asked once it lands, so the
+     * session moves straight to `done-proposed` with the summary: the
+     * pending-candidate check just below finds nothing, and no round opens.
      */
     async function store(result: ProposeRoundResult): Promise<void> {
       const stamp = Date.now();
@@ -420,6 +433,17 @@ export default defineAction({
             updatedAt: now,
           })
           .where(eq(schema.decisions.id, row.id));
+      }
+
+      if (result.done) {
+        await db
+          .update(schema.sessions)
+          .set({
+            state: "done-proposed",
+            doneSummary: result.done.summary,
+            updatedAt: now,
+          })
+          .where(eq(schema.sessions.id, sessionId));
       }
     }
   },
