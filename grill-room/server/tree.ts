@@ -134,6 +134,33 @@ export function frontierDecisionIds(
     .map((decision) => decision.id);
 }
 
+/**
+ * The ids of every decision that belongs in the session's next round: on the
+ * frontier, and never answered at all. This is what actually needs asking,
+ * regardless of when or why the decision was added to the tree — a decision a
+ * proposal marked `ask: false` because a dependency was still open belongs
+ * here too, the moment that dependency settles and the frontier reaches it.
+ *
+ * Deliberately narrower than "frontier": a decision with a non-settling
+ * answer (pushed back, deferred, unknown) is also frontier-derived, since it
+ * left the decision open, but re-surfacing those is a later ticket's concern,
+ * not this one's.
+ *
+ * Preserves the order given, so a caller that loads decisions oldest-first
+ * gets oldest-first output.
+ */
+export function neverAnsweredFrontierIds(
+  decisions: readonly TreeDecision[],
+): string[] {
+  const states = deriveTreeStates(decisions);
+  return decisions
+    .filter(
+      (decision) =>
+        decision.answerKind === null && states.get(decision.id) === "frontier",
+    )
+    .map((decision) => decision.id);
+}
+
 /** A stored decision, exactly as the table holds it. */
 export type DecisionRow = typeof decisions.$inferSelect;
 
