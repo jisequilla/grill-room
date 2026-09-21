@@ -3,6 +3,7 @@ import { eq, inArray } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
+import { runDueStaleReviews } from "../server/stale-review.js";
 import requestNextRound from "./request-next-round.js";
 
 export default defineAction({
@@ -77,6 +78,11 @@ export default defineAction({
       .update(schema.rounds)
       .set({ submissionState: "submitted", submittedAt: now })
       .where(eq(schema.rounds.id, id));
+
+    await runDueStaleReviews({
+      sessionId: round.sessionId,
+      submittedRoundId: id,
+    });
 
     return requestNextRound.run({ sessionId: round.sessionId });
   },
