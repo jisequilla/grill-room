@@ -51,6 +51,14 @@ export type DecisionIntroducedBy = (typeof DECISION_INTRODUCED_BY)[number];
 export const ROUND_SUBMISSION_STATES = ["open", "submitted"] as const;
 export type RoundSubmissionState = (typeof ROUND_SUBMISSION_STATES)[number];
 
+/**
+ * Where a session's interviewer turn stands. A turn takes about a minute, so
+ * this is stored rather than held in memory: a client that reloads mid-turn
+ * reads `working`, and a `failed` turn can be retried without losing why.
+ */
+export const SESSION_TURN_STATUSES = ["idle", "working", "failed"] as const;
+export type SessionTurnStatus = (typeof SESSION_TURN_STATUSES)[number];
+
 /** Lifecycle of an exported ticket. */
 export const TICKET_STATUSES = ["ready", "in-progress", "done"] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
@@ -75,6 +83,14 @@ export const sessions = table("sessions", {
     .default("interviewing"),
   conversationId: text("conversation_id"),
   exportTargetFolder: text("export_target_folder"),
+  /** Where the current interviewer turn stands. See {@link SESSION_TURN_STATUSES}. */
+  turnStatus: text("turn_status", { enum: SESSION_TURN_STATUSES })
+    .notNull()
+    .default("idle"),
+  /** The {@link import("../interviewer/errors.js").InterviewerErrorCode} of a failed turn, or `invalid-proposal`. */
+  turnErrorCode: text("turn_error_code"),
+  turnErrorMessage: text("turn_error_message"),
+  turnStartedAt: text("turn_started_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -91,6 +107,11 @@ export const decisions = table(
     sessionId: text("session_id")
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
+    /**
+     * The stable key the interviewer identifies this decision by, unique within
+     * the session. The interviewer speaks keys; every table links by id.
+     */
+    key: text("key"),
     questionTitle: text("question_title").notNull(),
     questionBody: text("question_body").notNull().default(""),
     /** JSON array of strings: the choices the interviewer offered, if any. */
@@ -110,11 +131,20 @@ export const decisions = table(
     settledAt: text("settled_at"),
     /** Set whenever this decision is reopened; compared against dependents' `settledAt`. */
     reopenedAt: text("reopened_at"),
+    /**
+     * True while the interviewer has asked for this decision but no round has
+     * opened on it yet. One-at-a-time mode drains these one round at a time.
+     */
+    pendingAsk: boolean("pending_ask").notNull().default(false),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
   (decisionsTable) => ({
     sessionIdx: index("idx_decisions_session").on(decisionsTable.sessionId),
+    uniqueSessionKey: uniqueIndex("idx_decisions_session_key").on(
+      decisionsTable.sessionId,
+      decisionsTable.key,
+    ),
   }),
 );
 
@@ -172,6 +202,14 @@ export const roundDecisions = table(
       .notNull()
       .references(() => decisions.id, { onDelete: "cascade" }),
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * The answer as given in this round: a draft while the round is open, and
+     * the record of what was submitted once it closes. Held here rather than on
+     * the decision so it is scoped to the round that asked the question, and
+     * survives a reload.
+     */
+    draftAnswer: text("draft_answer"),
+    draftAnswerKind: text("draft_answer_kind", { enum: DECISION_ANSWER_KINDS }),
   },
   (roundDecisionsTable) => ({
     roundIdx: index("idx_round_decisions_round").on(roundDecisionsTable.roundId),
