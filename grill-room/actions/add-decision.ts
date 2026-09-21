@@ -38,6 +38,16 @@ export default defineAction({
 
     const now = new Date().toISOString();
 
+    // A decision the user thinks of is the interview continuing: a session
+    // that had proposed or confirmed done returns to interviewing, and the
+    // stale summary is dropped with it.
+    if (session.state !== "interviewing") {
+      await db
+        .update(schema.sessions)
+        .set({ state: "interviewing", doneSummary: null, updatedAt: now })
+        .where(eq(schema.sessions.id, sessionId));
+    }
+
     const [row] = await db
       .insert(schema.decisions)
       .values({

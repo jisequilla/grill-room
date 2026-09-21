@@ -63,6 +63,8 @@ export const sessions = table("gr_sessions", {
   state: text("state", { enum: SESSION_STATES })
     .notNull()
     .default("interviewing"),
+  /** The done proposal's summary of every settled decision. Set with `state: "done-proposed"`, cleared whenever the session returns to interviewing. */
+  doneSummary: text("done_summary"),
   conversationId: text("conversation_id"),
   exportTargetFolder: text("export_target_folder"),
   /** Where the current interviewer turn stands. See {@link SESSION_TURN_STATUSES}. */

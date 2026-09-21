@@ -244,4 +244,9 @@ export const appMigrations: MigrationEntry[] = [
     name: "decision-history-interviewer-reason-column",
     sql: `ALTER TABLE gr_decision_history ADD COLUMN IF NOT EXISTS interviewer_reason TEXT`,
   },
+  {
+    version: 28,
+    name: "sessions-done-summary-column",
+    sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS done_summary TEXT`,
+  },
 ];
