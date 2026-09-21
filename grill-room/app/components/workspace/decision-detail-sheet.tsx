@@ -1,0 +1,274 @@
+import {
+  actionErrorMessage,
+  useActionMutation,
+} from "@agent-native/core/client/hooks";
+import { useT } from "@agent-native/core/client/i18n";
+import { IconArrowBackUp, IconPencilCheck } from "@tabler/icons-react";
+import { useState } from "react";
+import { toast } from "sonner";
+
+import {
+  DecisionStateBadge,
+  LooseEndBadge,
+} from "@/components/workspace/decision-state-badge";
+import { ReopenDecisionAlert } from "@/components/workspace/reopen-decision-alert";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  ANSWER_KIND_LABEL_KEY,
+  isLooseEnd,
+  type TreeDecision,
+} from "@/lib/decisions";
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-1.5">
+      <h4 className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        {title}
+      </h4>
+      {children}
+    </section>
+  );
+}
+
+/** Gives a loose end a real answer, outside a round and without the interviewer. */
+function AnswerNow({ decision }: { decision: TreeDecision }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+
+  const { mutate, isPending } = useActionMutation("answer-decision", {
+    onSuccess: () => {
+      setOpen(false);
+      setText("");
+    },
+    onError: (error: unknown) => {
+      toast.error(actionErrorMessage(error) ?? t("workspace.answerFailed"));
+    },
+  });
+
+  if (!open) {
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => setOpen(true)}
+      >
+        <IconPencilCheck className="size-4" />
+        {t("workspace.answerNow")}
+      </Button>
+    );
+  }
+
+  return (
+    <div className="w-full space-y-2 rounded-lg border bg-muted/30 p-3">
+      <Label htmlFor="answer-now" className="text-xs">
+        {t("workspace.answerNowTitle")}
+      </Label>
+      <Textarea
+        id="answer-now"
+        value={text}
+        rows={3}
+        autoFocus
+        placeholder={t("workspace.ownAnswerPlaceholder")}
+        onChange={(event) => setText(event.target.value)}
+      />
+      <p className="text-xs text-muted-foreground">
+        {t("workspace.answerNowDescription")}
+      </p>
+      <div className="flex justify-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => setOpen(false)}
+        >
+          {t("workspace.cancel")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          disabled={isPending || text.trim().length === 0}
+          onClick={() =>
+            mutate({ decisionId: decision.id, answer: text.trim() })
+          }
+        >
+          {isPending && <Spinner className="size-4" />}
+          {t("workspace.save")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One decision, read in full: its question, the answer it holds now, what it
+ * hangs off, and the story of what it used to say.
+ */
+export function DecisionDetailSheet({
+  decision,
+  decisions,
+  open,
+  onOpenChange,
+}: {
+  decision: TreeDecision | null;
+  decisions: readonly TreeDecision[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const t = useT();
+
+  if (!decision) return null;
+
+  const byId = new Map(decisions.map((entry) => [entry.id, entry]));
+  const dependencies = decision.dependsOn.flatMap((id) => {
+    const parent = byId.get(id);
+    return parent ? [parent] : [];
+  });
+  const canReopen = decision.state === "settled" || decision.state === "stale";
+  const loose = isLooseEnd(decision);
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-lg"
+      >
+        <SheetHeader className="space-y-3 text-left">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <DecisionStateBadge state={decision.state} />
+            {loose ? <LooseEndBadge /> : null}
+            {decision.introducedBy === "user" ? (
+              <span className="text-[10px] tracking-wide text-muted-foreground uppercase">
+                {t("workspace.addDecision")}
+              </span>
+            ) : null}
+          </div>
+          <SheetTitle className="text-base leading-snug text-balance">
+            {decision.questionTitle}
+          </SheetTitle>
+          {decision.questionBody ? (
+            <SheetDescription className="leading-relaxed">
+              {decision.questionBody}
+            </SheetDescription>
+          ) : null}
+        </SheetHeader>
+
+        <div className="space-y-5 py-5">
+          <Section title={t("workspace.currentAnswer")}>
+            {decision.answer ? (
+              <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
+                <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                  {t(ANSWER_KIND_LABEL_KEY[decision.answer.kind])}
+                </p>
+                {decision.answer.text ? (
+                  <p className="mt-1 text-sm break-words whitespace-pre-wrap">
+                    {decision.answer.text}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">
+                {t("workspace.noAnswerYet")}
+              </p>
+            )}
+          </Section>
+
+          <Section title={t("workspace.dependsOn")}>
+            {dependencies.length > 0 ? (
+              <ul className="space-y-1">
+                {dependencies.map((parent) => (
+                  <li
+                    key={parent.id}
+                    className="flex items-start gap-2 text-sm"
+                  >
+                    <DecisionStateBadge
+                      state={parent.state}
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0 flex-1">
+                      {parent.questionTitle}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">
+                {t("workspace.dependsOnNothing")}
+              </p>
+            )}
+          </Section>
+
+          <Separator />
+
+          <Section title={t("workspace.history")}>
+            {decision.previousAnswers.length > 0 ? (
+              <ol className="space-y-2">
+                {decision.previousAnswers.map((entry, index) => (
+                  <li
+                    key={`${entry.recordedAt}-${index}`}
+                    className="rounded-lg border-l-2 border-muted bg-muted/20 py-2 pr-3 pl-3"
+                  >
+                    <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                      {entry.kind
+                        ? t(ANSWER_KIND_LABEL_KEY[entry.kind])
+                        : t("workspace.noAnswerRecorded")}
+                    </p>
+                    {entry.text ? (
+                      <p className="mt-0.5 text-sm break-words whitespace-pre-wrap">
+                        {entry.text}
+                      </p>
+                    ) : null}
+                    {entry.interviewerReason ? (
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        <span className="font-medium">
+                          {t("workspace.interviewerReason")}:
+                        </span>{" "}
+                        {entry.interviewerReason}
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">
+                {t("workspace.noHistory")}
+              </p>
+            )}
+          </Section>
+        </div>
+
+        {canReopen || loose ? (
+          <div className="mt-auto flex flex-wrap items-center gap-2 border-t pt-4">
+            {canReopen ? (
+              <ReopenDecisionAlert decision={decision} decisions={decisions}>
+                <Button type="button" size="sm" variant="outline">
+                  <IconArrowBackUp className="size-4" />
+                  {t("workspace.reopen")}
+                </Button>
+              </ReopenDecisionAlert>
+            ) : null}
+            {loose ? <AnswerNow decision={decision} /> : null}
+          </div>
+        ) : null}
+      </SheetContent>
+    </Sheet>
+  );
+}

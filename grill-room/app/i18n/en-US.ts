@@ -107,6 +107,141 @@ const messages = {
     stateDoneProposed: "Awaiting confirmation",
     stateConfirmed: "Confirmed",
   },
+  workspace: {
+    roundHeading: "This round",
+    treeHeading: "Design tree",
+    historyHeading: "Previous rounds",
+
+    startTitle: "Nothing asked yet",
+    startDescription:
+      "The interviewer reads your idea and opens with the decisions it can ask about now.",
+    startAction: "Start the interview",
+
+    nextRoundTitle: "Waiting on the next round",
+    nextRoundDescription:
+      "Every open question is answered. Ask the interviewer what comes next.",
+    nextRoundAction: "Ask for the next round",
+
+    workingTitle: "The interviewer is thinking",
+    workingDescription:
+      "A turn takes a minute or two. Leave or reload freely — it keeps running.",
+    workingElapsed: "{{elapsed}} elapsed",
+
+    failedTitle: "The turn did not finish",
+    retry: "Try again",
+    retrying: "Trying again…",
+    errorRateLimited: "Your Claude usage limit was hit.",
+    errorRateLimitedHint:
+      "Nothing is broken and nothing was lost. Try again once the limit resets.",
+    errorCliMissing: "The Claude Code command line was not found.",
+    errorCliMissingHint:
+      "Install it and make sure `claude` is on this machine's PATH, then try again.",
+    errorNotLoggedIn: "The Claude Code command line is not logged in.",
+    errorNotLoggedInHint:
+      "Run `claude` once in a terminal and sign in, then try again.",
+    errorMalformed: "The interviewer returned something unusable.",
+    errorGeneric: "The interviewer could not complete the turn.",
+
+    doneProposedBanner:
+      "The interviewer proposes that you are done. Review and confirm on the output screen.",
+    confirmedBanner:
+      "This session is confirmed. Reopening any decision returns it to interviewing.",
+
+    recommended: "Recommended",
+    noRecommendation: "No recommendation",
+    choices: "Offered choices",
+    accept: "Accept",
+    accepted: "Recommendation accepted",
+    writeOwn: "Write my own",
+    ownAnswerLabel: "Your answer",
+    ownAnswerPlaceholder: "What you have decided, in your own words",
+    unknown: "I don't know",
+    pushBack: "Push back",
+    pushBackLabel: "Why this question is wrong",
+    pushBackPlaceholder: "Wrong premise, wrong level of detail, scope drift…",
+    defer: "Defer",
+    prototype: "Needs a prototype",
+    prototypeLabel: "Note (optional)",
+    prototypePlaceholder: "What the prototype has to tell you",
+    save: "Save",
+    cancel: "Cancel",
+    change: "Change",
+    answeredBadge: "Answered",
+    unansweredBadge: "Not answered",
+    draftFailed: "Could not save that answer.",
+
+    progress: "{{answered}} of {{total}} answered",
+    submitRound: "Submit round",
+    submitting: "Submitting…",
+    submitFailed: "Could not submit the round.",
+
+    addDecision: "Add my own decision",
+    addDecisionDescription:
+      "The interviewer places it in the tree on its next turn.",
+    addDecisionTitleLabel: "Question",
+    addDecisionTitlePlaceholder: "How do we handle offline use?",
+    addDecisionBodyLabel: "Detail (optional)",
+    addDecisionBodyPlaceholder: "Anything the interviewer should know",
+    add: "Add",
+    adding: "Adding…",
+    addFailed: "Could not add the decision.",
+
+    answeringMode: "Answering mode",
+
+    treeEmpty: "No decisions yet.",
+    unplacedGroup: "Waiting for the interviewer to place",
+    moreDependencies_one: "+{{count}} more",
+    moreDependencies_other: "+{{count}} more",
+    alsoDependsOn: "Also depends on",
+    dependsOn: "Depends on",
+    dependsOnNothing: "Nothing — this is a root decision",
+    currentAnswer: "Current answer",
+    noAnswerYet: "Not answered yet",
+    history: "History",
+    noHistory: "No previous answers.",
+    interviewerReason: "Interviewer",
+    looseEnd: "Loose end",
+
+    stateSettled: "Settled",
+    stateFrontier: "Frontier",
+    stateBlocked: "Blocked",
+    stateStale: "Stale",
+    stateWithdrawn: "Withdrawn",
+    stateUnplaced: "Unplaced",
+
+    kindAcceptedRecommendation: "Accepted the recommendation",
+    kindOwnAnswer: "Own answer",
+    kindUnknown: "I don't know",
+    kindPushedBack: "Pushed back",
+    kindDeferred: "Deferred",
+    kindPrototypeFlagged: "Needs a prototype",
+    kindDispositioned: "Dispositioned",
+
+    reopen: "Reopen",
+    reopenTitle: "Reopen this decision?",
+    reopenDescription_one:
+      "Its answer moves to history and it is asked again. {{count}} decision downstream of it is marked stale until the interviewer reconfirms or re-asks it.",
+    reopenDescription_other:
+      "Its answer moves to history and it is asked again. {{count}} decisions downstream of it are marked stale until the interviewer reconfirms or re-asks them.",
+    reopenDescriptionNone:
+      "Its answer moves to history and it is asked again. Nothing depends on it, so nothing goes stale.",
+    reopenConfirm: "Reopen",
+    reopening: "Reopening…",
+    reopenFailed: "Could not reopen that decision.",
+
+    answerNow: "Answer now",
+    answerNowTitle: "Answer this loose end",
+    answerNowDescription:
+      "This settles the decision without calling the interviewer.",
+    answerFailed: "Could not save that answer.",
+
+    roundLabel: "Round {{number}}",
+    roundOpen: "Open",
+    roundCardCount_one: "{{count}} question",
+    roundCardCount_other: "{{count}} questions",
+    historyEmpty: "No rounds yet.",
+    noAnswerRecorded: "No answer recorded",
+  },
 };
 
 export default messages;
