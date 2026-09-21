@@ -249,4 +249,9 @@ export const appMigrations: MigrationEntry[] = [
     name: "sessions-done-summary-column",
     sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS done_summary TEXT`,
   },
+  {
+    version: 29,
+    name: "specs-tickets-generated-at-column",
+    sql: `ALTER TABLE gr_specs ADD COLUMN IF NOT EXISTS tickets_generated_at TEXT`,
+  },
 ];
