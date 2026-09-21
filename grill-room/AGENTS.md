@@ -45,6 +45,36 @@ For a custom app, keep `server/plugins/config.ts` aligned with the product
 brand. Its `app.name` is used in transactional emails, and its optional
 `app.logoUrl` can point to an absolute HTTPS logo URL.
 
+## Actions
+
+The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
+
+| Action | Purpose |
+| --- | --- |
+| `create-session` | Start a grilling session from a loose idea, defaulting the interviewer model to the global default. |
+| `list-sessions` | Every session with its title, state, and last activity, most recently active first. |
+| `get-session` | One session by id, so resuming lands where it left off. |
+| `delete-session` | A session and everything under it: decisions, history, rounds, spec, tickets, build records. |
+| `set-session-answering-mode` | Switch a session between whole-round and one-at-a-time answering. |
+| `get-default-model` | The global default interviewer model new sessions pre-fill with; `fable` when unset. |
+| `set-default-model` | Set that default. |
+| `get-setting` / `set-setting` | Read and write one app-wide setting. |
+| `get-tree` | A session's whole design tree: every decision, what it depends on, its answer, and its derived state. |
+| `get-current-round` | The round a session is answering, with each card's question, recommendation, derived state, and saved draft — plus whether the interviewer is working, idle, or failed. |
+| `list-rounds` | Every round of a session in order, with the questions asked and the answers given. |
+| `request-next-round` | Ask the interviewer for the next round, validate the proposal against the tree, and open the round. |
+| `save-draft-answer` | Save one card's draft answer, so a half-answered round survives a reload. |
+| `submit-round` | Settle an open round's decisions and ask for the next round. Refuses a round with unanswered cards. |
+| `navigate` | Move the UI to a view or path, through application state. |
+| `view-screen` | What the user is looking at. Call it first when the visible context matters. |
+| `provider-api-request` | Call Slack's Web API through the workspace connection. |
+
+`request-next-round` and `submit-round` both wait on a Claude CLI turn, which
+takes about a minute and can take several. The client action hooks time out at
+60 s by default, so UI code calling either one must pass a `timeoutMs` of
+several minutes; the default cancels a turn that was about to succeed and
+leaves the session's `turn_status` reading `working`.
+
 ## Application State
 
 - `navigation` describes the current view and selected entity ids. The default

@@ -7,70 +7,52 @@ import {
   uniqueIndex,
 } from "@agent-native/core/db/schema";
 
-/** Interviewer models a session can be run with. Default is `fable`. */
-export const SESSION_MODELS = ["fable", "opus", "sonnet"] as const;
-export type SessionModel = (typeof SESSION_MODELS)[number];
-
-/** Whether a session presents a round as one card set or one question at a time. */
-export const SESSION_ANSWERING_MODES = ["whole-round", "one-at-a-time"] as const;
-export type SessionAnsweringMode = (typeof SESSION_ANSWERING_MODES)[number];
-
-/** Lifecycle of a session: interviewing, awaiting the user's done confirmation, or confirmed. */
-export const SESSION_STATES = [
-  "interviewing",
-  "done-proposed",
-  "confirmed",
-] as const;
-export type SessionState = (typeof SESSION_STATES)[number];
-
-/** How a decision's current answer was arrived at. `null` means no answer yet. */
-export const DECISION_ANSWER_KINDS = [
-  "accepted-recommendation",
-  "own-answer",
-  "unknown",
-  "pushed-back",
-  "deferred",
-  "prototype-flagged",
-  "dispositioned",
-] as const;
-export type DecisionAnswerKind = (typeof DECISION_ANSWER_KINDS)[number];
-
-/** Where a "dispositioned" decision was resolved to. */
-export const DECISION_DISPOSITION_TARGETS = [
-  "out-of-scope",
-  "open-question",
-] as const;
-export type DecisionDispositionTarget =
-  (typeof DECISION_DISPOSITION_TARGETS)[number];
-
-/** Who put a decision into the tree. */
-export const DECISION_INTRODUCED_BY = ["interviewer", "user"] as const;
-export type DecisionIntroducedBy = (typeof DECISION_INTRODUCED_BY)[number];
-
-/** Whether a round has been submitted to the interviewer yet. */
-export const ROUND_SUBMISSION_STATES = ["open", "submitted"] as const;
-export type RoundSubmissionState = (typeof ROUND_SUBMISSION_STATES)[number];
+import {
+  DECISION_ANSWER_KINDS,
+  DECISION_DISPOSITION_TARGETS,
+  DECISION_INTRODUCED_BY,
+  ROUND_SUBMISSION_STATES,
+  SESSION_ANSWERING_MODES,
+  SESSION_MODELS,
+  SESSION_STATES,
+  SESSION_TURN_STATUSES,
+  TICKET_STATUSES,
+} from "../../shared/session-constants.js";
 
 /**
- * Where a session's interviewer turn stands. A turn takes about a minute, so
- * this is stored rather than held in memory: a client that reloads mid-turn
- * reads `working`, and a `failed` turn can be retried without losing why.
+ * The column enumerations live in `shared/`, which the browser bundle can
+ * import without dragging Drizzle in with them. They are re-exported here so
+ * server code can reach them from the schema it is already importing.
  */
-export const SESSION_TURN_STATUSES = ["idle", "working", "failed"] as const;
-export type SessionTurnStatus = (typeof SESSION_TURN_STATUSES)[number];
-
-/** Lifecycle of an exported ticket. */
-export const TICKET_STATUSES = ["ready", "in-progress", "done"] as const;
-export type TicketStatus = (typeof TICKET_STATUSES)[number];
+export {
+  DECISION_ANSWER_KINDS,
+  type DecisionAnswerKind,
+  DECISION_DISPOSITION_TARGETS,
+  type DecisionDispositionTarget,
+  DECISION_INTRODUCED_BY,
+  type DecisionIntroducedBy,
+  ROUND_SUBMISSION_STATES,
+  type RoundSubmissionState,
+  SESSION_ANSWERING_MODES,
+  type SessionAnsweringMode,
+  SESSION_MODELS,
+  type SessionModel,
+  SESSION_STATES,
+  type SessionState,
+  SESSION_TURN_STATUSES,
+  type SessionTurnStatus,
+  TICKET_STATUSES,
+  type TicketStatus,
+} from "../../shared/session-constants.js";
 
 /** App-wide preferences that are not tied to a single session. */
-export const globalSettings = table("global_settings", {
+export const globalSettings = table("gr_global_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
 
 /** One grilling interview. The root of a session's decision tree, rounds, spec, and tickets. */
-export const sessions = table("sessions", {
+export const sessions = table("gr_sessions", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
   idea: text("idea").notNull(),
@@ -101,7 +83,7 @@ export const sessions = table("sessions", {
  * `reopenedAt` are the raw facts that derivation compares, not a cached state.
  */
 export const decisions = table(
-  "decisions",
+  "gr_decisions",
   {
     id: text("id").primaryKey(),
     sessionId: text("session_id")
@@ -140,8 +122,8 @@ export const decisions = table(
     updatedAt: text("updated_at").notNull(),
   },
   (decisionsTable) => ({
-    sessionIdx: index("idx_decisions_session").on(decisionsTable.sessionId),
-    uniqueSessionKey: uniqueIndex("idx_decisions_session_key").on(
+    sessionIdx: index("gr_idx_decisions_session").on(decisionsTable.sessionId),
+    uniqueSessionKey: uniqueIndex("gr_idx_decisions_session_key").on(
       decisionsTable.sessionId,
       decisionsTable.key,
     ),
@@ -150,7 +132,7 @@ export const decisions = table(
 
 /** A previous answer of a decision, kept when it is reopened, re-asked, or reconfirmed. */
 export const decisionHistory = table(
-  "decision_history",
+  "gr_decision_history",
   {
     id: text("id").primaryKey(),
     decisionId: text("decision_id")
@@ -163,7 +145,7 @@ export const decisionHistory = table(
     recordedAt: text("recorded_at").notNull(),
   },
   (decisionHistoryTable) => ({
-    decisionIdx: index("idx_decision_history_decision").on(
+    decisionIdx: index("gr_idx_decision_history_decision").on(
       decisionHistoryTable.decisionId,
     ),
   }),
@@ -171,7 +153,7 @@ export const decisionHistory = table(
 
 /** An ordered set of decisions asked together. One-at-a-time mode holds a single decision. */
 export const rounds = table(
-  "rounds",
+  "gr_rounds",
   {
     id: text("id").primaryKey(),
     sessionId: text("session_id")
@@ -186,13 +168,13 @@ export const rounds = table(
     submittedAt: text("submitted_at"),
   },
   (roundsTable) => ({
-    sessionIdx: index("idx_rounds_session").on(roundsTable.sessionId),
+    sessionIdx: index("gr_idx_rounds_session").on(roundsTable.sessionId),
   }),
 );
 
 /** Join table ordering the decisions asked within one round. */
 export const roundDecisions = table(
-  "round_decisions",
+  "gr_round_decisions",
   {
     id: text("id").primaryKey(),
     roundId: text("round_id")
@@ -212,8 +194,10 @@ export const roundDecisions = table(
     draftAnswerKind: text("draft_answer_kind", { enum: DECISION_ANSWER_KINDS }),
   },
   (roundDecisionsTable) => ({
-    roundIdx: index("idx_round_decisions_round").on(roundDecisionsTable.roundId),
-    uniqueRoundDecision: uniqueIndex("idx_round_decisions_unique").on(
+    roundIdx: index("gr_idx_round_decisions_round").on(
+      roundDecisionsTable.roundId,
+    ),
+    uniqueRoundDecision: uniqueIndex("gr_idx_round_decisions_unique").on(
       roundDecisionsTable.roundId,
       roundDecisionsTable.decisionId,
     ),
@@ -221,7 +205,7 @@ export const roundDecisions = table(
 );
 
 /** The synthesized markdown spec for a session. One row per session. */
-export const specs = table("specs", {
+export const specs = table("gr_specs", {
   id: text("id").primaryKey(),
   sessionId: text("session_id")
     .notNull()
@@ -236,7 +220,7 @@ export const specs = table("specs", {
 
 /** One implementation ticket broken out of a session's confirmed spec. */
 export const tickets = table(
-  "tickets",
+  "gr_tickets",
   {
     id: text("id").primaryKey(),
     sessionId: text("session_id")
@@ -246,19 +230,21 @@ export const tickets = table(
     slug: text("slug").notNull(),
     title: text("title").notNull(),
     body: text("body").notNull(),
-    status: text("status", { enum: TICKET_STATUSES }).notNull().default("ready"),
+    status: text("status", { enum: TICKET_STATUSES })
+      .notNull()
+      .default("ready"),
     /** JSON array of ticket ids that block this one. */
     blockedByJson: text("blocked_by_json").notNull().default("[]"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
   (ticketsTable) => ({
-    sessionIdx: index("idx_tickets_session").on(ticketsTable.sessionId),
+    sessionIdx: index("gr_idx_tickets_session").on(ticketsTable.sessionId),
   }),
 );
 
 /** The build outcome of one ticket, logged by the orchestrating agent. */
-export const buildRecords = table("build_records", {
+export const buildRecords = table("gr_build_records", {
   id: text("id").primaryKey(),
   ticketId: text("ticket_id")
     .notNull()
