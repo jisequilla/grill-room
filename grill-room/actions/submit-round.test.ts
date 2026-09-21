@@ -1,15 +1,19 @@
+import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   resetInterviewer,
   scriptInterviewer,
+  type FakeInterviewer,
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
-import { useTestDatabase } from "../test/db.js";
+import { getDb, schema, useTestDatabase } from "../test/db.js";
 import createSession from "./create-session.js";
 import getCurrentRound from "./get-current-round.js";
+import getSession from "./get-session.js";
 import getTree from "./get-tree.js";
 import listRounds from "./list-rounds.js";
+import reopenDecision from "./reopen-decision.js";
 import requestNextRound from "./request-next-round.js";
 import saveDraftAnswer from "./save-draft-answer.js";
 import submitRound from "./submit-round.js";
@@ -363,6 +367,304 @@ describe("submit-round", () => {
       ["storage", "frontier"],
       ["sync", "blocked"],
     ]);
+  });
+});
+
+/**
+ * Reopening a settled decision puts every decision under it in doubt. The
+ * interviewer is not troubled with that until the reopened question has an
+ * answer again — which is a round submission, and so is covered here.
+ */
+describe("submit-round stale review", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  const nothingMore = proposal();
+
+  function review(
+    ...verdicts: {
+      key: string;
+      verdict: "reconfirm" | "re-ask";
+      reason?: string;
+      title?: string;
+      body?: string;
+      choices?: string[];
+      recommendedAnswer?: string;
+    }[]
+  ): ScriptedTurn {
+    return {
+      kind: "review-stale",
+      result: {
+        reviews: verdicts.map((verdict) => ({
+          decisionKey: verdict.key,
+          verdict: verdict.verdict,
+          reason: verdict.reason ?? `What ${verdict.key} rests on moved.`,
+          title: verdict.title ?? null,
+          body: verdict.body ?? null,
+          choices: verdict.choices ?? [],
+          recommendedAnswer: verdict.recommendedAnswer ?? null,
+        })),
+      },
+    };
+  }
+
+  /** Answers every card of the open round the same way, and submits it. */
+  async function answerOpenRound(sessionId: string, answer: string) {
+    const open = await getCurrentRound.run({ sessionId });
+    for (const card of open.round?.decisions ?? []) {
+      await saveDraftAnswer.run({
+        decisionId: card.id,
+        answerKind: "own-answer",
+        answer,
+      });
+    }
+    return submitRound.run({ id: open.round!.id });
+  }
+
+  /** shape -> storage -> sync, each asked and answered in its own round. */
+  async function aSettledChain(...trailing: ScriptedTurn[]): Promise<{
+    sessionId: string;
+    interviewer: FakeInterviewer;
+  }> {
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A local app that grills me about an idea until it is decided.",
+    });
+    const interviewer = scriptInterviewer([
+      proposal({ key: "shape", title: "What shape?" }),
+      proposal({
+        key: "storage",
+        title: "Where does the data live?",
+        dependsOn: ["shape"],
+      }),
+      proposal({
+        key: "sync",
+        title: "How does it sync?",
+        dependsOn: ["storage"],
+      }),
+      ...trailing,
+    ]);
+
+    await requestNextRound.run({ sessionId: session.id });
+    await answerOpenRound(session.id, "A workspace");
+    await answerOpenRound(session.id, "On disk");
+    await answerOpenRound(session.id, "Poll");
+
+    return { sessionId: session.id, interviewer };
+  }
+
+  type TreeDecisionView = Awaited<
+    ReturnType<typeof getTree.run>
+  >["decisions"][number];
+
+  async function treeBy(
+    sessionId: string,
+  ): Promise<Record<string, TreeDecisionView | undefined>> {
+    const tree = await getTree.run({ sessionId });
+    return Object.fromEntries(
+      tree.decisions.map((decision) => [decision.key, decision]),
+    );
+  }
+
+  it("reviews what the reopened answer put in doubt before asking for a new round", async () => {
+    const { sessionId, interviewer } = await aSettledChain(
+      nothingMore,
+      review(
+        { key: "storage", verdict: "reconfirm" },
+        { key: "sync", verdict: "reconfirm" },
+      ),
+      nothingMore,
+    );
+
+    const reopened = (await treeBy(sessionId)).shape!;
+    await reopenDecision.run({ decisionId: reopened.id });
+    await answerOpenRound(sessionId, "A page, after all");
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "propose-round",
+      "propose-round",
+      "propose-round",
+      "propose-round",
+      "review-stale",
+      "propose-round",
+    ]);
+    expect(interviewer.requests[4]).toMatchObject({
+      kind: "review-stale",
+      reopenedDecisionKey: "shape",
+      staleDecisionKeys: ["storage", "sync"],
+      rejectionReason: null,
+    });
+
+    const tree = await treeBy(sessionId);
+    expect([tree.shape?.state, tree.storage?.state, tree.sync?.state]).toEqual([
+      "settled",
+      "settled",
+      "settled",
+    ]);
+    expect(tree.storage?.answer).toEqual({ text: "On disk", kind: "own-answer" });
+  });
+
+  it("applies a mixed review: one reconfirmed, one re-asked with a new question", async () => {
+    const { sessionId } = await aSettledChain(
+      nothingMore,
+      review(
+        { key: "storage", verdict: "reconfirm", reason: "Disk either way." },
+        {
+          key: "sync",
+          verdict: "re-ask",
+          reason: "A page syncs differently.",
+          title: "How does a page stay current?",
+          body: "The old answer assumed a workspace.",
+          choices: ["Poll", "Push"],
+          recommendedAnswer: "Push",
+        },
+      ),
+      nothingMore,
+    );
+
+    const reopened = (await treeBy(sessionId)).shape!;
+    await reopenDecision.run({ decisionId: reopened.id });
+    const next = await answerOpenRound(sessionId, "A page, after all");
+
+    const tree = await treeBy(sessionId);
+    expect(tree.storage).toMatchObject({
+      state: "settled",
+      answer: { text: "On disk", kind: "own-answer" },
+    });
+    expect(tree.sync).toMatchObject({
+      state: "frontier",
+      answer: null,
+      settledAt: null,
+      questionTitle: "How does a page stay current?",
+      questionBody: "The old answer assumed a workspace.",
+      choices: ["Poll", "Push"],
+      recommendedAnswer: "Push",
+    });
+    expect(
+      tree.sync?.previousAnswers.map((entry) => [entry.text, entry.kind]),
+    ).toEqual([["Poll", "own-answer"]]);
+    expect(
+      tree.storage?.previousAnswers.map((entry) => [entry.text, entry.kind]),
+    ).toEqual([["On disk", "own-answer"]]);
+    // The re-asked question rejoins the tree through the ordinary frontier
+    // rule, so the next round asks it again.
+    expect(next.round?.decisions.map((card) => card.key)).toEqual(["sync"]);
+
+    // Why each verdict was reached is kept with the answer it superseded.
+    const recorded = await getDb()
+      .select()
+      .from(schema.decisionHistory)
+      .where(eq(schema.decisionHistory.decisionId, tree.sync!.id));
+    expect(recorded[0]?.questionBody).toContain("A page syncs differently.");
+  });
+
+  it("leaves stale decisions alone while the reopened one is still unanswered", async () => {
+    const { sessionId, interviewer } = await aSettledChain(
+      proposal({ key: "tone", title: "How blunt?" }),
+      nothingMore,
+    );
+
+    // Reopened but not yet answered: the round being submitted is about
+    // something else entirely.
+    const shape = (await treeBy(sessionId)).shape!;
+    await getDb()
+      .update(schema.decisions)
+      .set({
+        currentAnswer: null,
+        answerKind: null,
+        settledAt: null,
+        reopenedAt: new Date(Date.now() + 1000).toISOString(),
+      })
+      .where(eq(schema.decisions.id, shape.id));
+
+    await answerOpenRound(sessionId, "Blunt");
+
+    expect(
+      interviewer.requests.filter((request) => request.kind === "review-stale"),
+    ).toEqual([]);
+    const tree = await treeBy(sessionId);
+    expect([tree.storage?.state, tree.sync?.state]).toEqual(["stale", "stale"]);
+  });
+
+  it("sends an incomplete review back with the reason and applies the corrected one", async () => {
+    const { sessionId, interviewer } = await aSettledChain(
+      nothingMore,
+      review({ key: "storage", verdict: "reconfirm" }),
+      review(
+        { key: "storage", verdict: "reconfirm" },
+        { key: "sync", verdict: "reconfirm" },
+      ),
+      nothingMore,
+    );
+
+    const reopened = (await treeBy(sessionId)).shape!;
+    await reopenDecision.run({ decisionId: reopened.id });
+    await answerOpenRound(sessionId, "A page, after all");
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "propose-round",
+      "propose-round",
+      "propose-round",
+      "propose-round",
+      "review-stale",
+      "review-stale",
+      "propose-round",
+    ]);
+    expect(interviewer.requests[5]).toMatchObject({
+      rejectionReason: expect.stringContaining(
+        'Decision "sync" is stale and was not ruled on',
+      ),
+    });
+    const tree = await treeBy(sessionId);
+    expect([tree.storage?.state, tree.sync?.state]).toEqual([
+      "settled",
+      "settled",
+    ]);
+  });
+
+  it("gives up after two retries, changes nothing, and records the failed turn", async () => {
+    const overComplete = review(
+      { key: "storage", verdict: "reconfirm" },
+      { key: "sync", verdict: "reconfirm" },
+      { key: "shape", verdict: "re-ask" },
+    );
+    const { sessionId, interviewer } = await aSettledChain(
+      nothingMore,
+      overComplete,
+      overComplete,
+      overComplete,
+    );
+
+    const reopened = (await treeBy(sessionId)).shape!;
+    await reopenDecision.run({ decisionId: reopened.id });
+
+    await expect(answerOpenRound(sessionId, "A page, after all")).rejects.toThrow(
+      /reviewed the stale decisions wrongly 3 times/,
+    );
+
+    expect(
+      interviewer.requests.filter((request) => request.kind === "review-stale"),
+    ).toHaveLength(3);
+    expect(interviewer.requests[4]).toMatchObject({
+      rejectionReason: null,
+    });
+    expect(interviewer.requests[5]).toMatchObject({
+      rejectionReason: expect.stringContaining(
+        'Decision "shape" was ruled on but is not one of the stale decisions',
+      ),
+    });
+    expect(await getSession.run({ id: sessionId })).toMatchObject({
+      turnStatus: "failed",
+      turnErrorCode: "invalid-review",
+    });
+
+    const tree = await treeBy(sessionId);
+    expect(tree.storage).toMatchObject({
+      state: "stale",
+      answer: { text: "On disk", kind: "own-answer" },
+      previousAnswers: [],
+    });
+    expect(tree.sync).toMatchObject({ state: "stale", previousAnswers: [] });
   });
 });
 
