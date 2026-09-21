@@ -354,8 +354,14 @@ describe("request-next-round", () => {
         .select()
         .from(schema.decisionHistory)
         .where(eq(schema.decisionHistory.decisionId, "decision-shape"));
+      // The user's reason for pushing back stays the answer; the interviewer's
+      // response to it is kept beside it, not on top of it.
       expect(history).toMatchObject([
-        { answer: "Dropping it; scope moved on.", answerKind: "pushed-back" },
+        {
+          answer: "Too vague.",
+          answerKind: "pushed-back",
+          interviewerReason: "Dropping it; scope moved on.",
+        },
       ]);
     });
 

@@ -39,14 +39,6 @@ import {
   TurnRejected,
 } from "./turn.js";
 
-/**
- * Where a verdict's reason is kept. `gr_decision_history` has no column for it,
- * and this ticket adds no migration, so it is appended to the history row's
- * copy of the question body — a field nothing reads back. Move it to a column
- * of its own the next time the schema moves.
- */
-export const REVIEW_REASON_MARKER = "\n\n---\nStale review";
-
 /** One review turn's worth of work: a reopened decision and what it put in doubt. */
 export interface DueStaleReview {
   /** The decision that was reopened and has since been answered again. */
@@ -268,9 +260,11 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
         id: randomUUID(),
         decisionId: row.id,
         questionTitle: row.questionTitle,
-        questionBody: withReason(row.questionBody, review.verdict, review.reason),
+        questionBody: row.questionBody,
         answer: row.currentAnswer,
         answerKind: row.answerKind,
+        interviewerReason:
+          review.reason.trim() === "" ? null : review.reason,
         recordedAt: now,
       });
 
@@ -299,10 +293,4 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
         .where(eq(schema.decisions.id, row.id));
     }
   }
-}
-
-/** The history row's copy of the question, with why the decision was revisited. */
-function withReason(body: string, verdict: string, reason: string): string {
-  if (reason.trim() === "") return body;
-  return `${body}${REVIEW_REASON_MARKER} (${verdict}): ${reason}`;
 }

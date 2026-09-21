@@ -647,12 +647,19 @@ describe("submit-round stale review", () => {
     // rule, so the next round asks it again.
     expect(next.round?.decisions.map((card) => card.key)).toEqual(["sync"]);
 
-    // Why each verdict was reached is kept with the answer it superseded.
+    // Why each verdict was reached is kept with the answer it superseded, and
+    // reads back through the tree.
     const recorded = await getDb()
       .select()
       .from(schema.decisionHistory)
       .where(eq(schema.decisionHistory.decisionId, tree.sync!.id));
-    expect(recorded[0]?.questionBody).toContain("A page syncs differently.");
+    expect(recorded[0]?.interviewerReason).toBe("A page syncs differently.");
+    expect(tree.sync?.previousAnswers).toMatchObject([
+      { text: "Poll", interviewerReason: "A page syncs differently." },
+    ]);
+    expect(tree.storage?.previousAnswers).toMatchObject([
+      { text: "On disk", interviewerReason: "Disk either way." },
+    ]);
   });
 
   it("leaves nothing stale once every dependent has been ruled on", async () => {

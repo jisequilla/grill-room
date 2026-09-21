@@ -239,4 +239,9 @@ export const appMigrations: MigrationEntry[] = [
     name: "decisions-awaiting-placement-since-column",
     sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS awaiting_placement_since TEXT`,
   },
+  {
+    version: 27,
+    name: "decision-history-interviewer-reason-column",
+    sql: `ALTER TABLE gr_decision_history ADD COLUMN IF NOT EXISTS interviewer_reason TEXT`,
+  },
 ];

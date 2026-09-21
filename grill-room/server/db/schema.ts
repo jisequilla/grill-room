@@ -155,6 +155,13 @@ export const decisionHistory = table(
     questionBody: text("question_body").notNull().default(""),
     answer: text("answer"),
     answerKind: text("answer_kind", { enum: DECISION_ANSWER_KINDS }),
+    /**
+     * What the interviewer said about superseding this answer: why a stale
+     * decision was reconfirmed or re-asked, why a pushed-back one was
+     * withdrawn, replaced, or restructured. Null when the entry was the user's
+     * own doing, which is every reopen and every deferral.
+     */
+    interviewerReason: text("interviewer_reason"),
     recordedAt: text("recorded_at").notNull(),
   },
   (decisionHistoryTable) => ({

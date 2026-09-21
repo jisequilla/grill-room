@@ -146,6 +146,8 @@ describe("reopen-decision", () => {
       {
         text: "A workspace",
         kind: "own-answer",
+        // The user reopened it; the interviewer had nothing to say about that.
+        interviewerReason: null,
         recordedAt: expect.stringMatching(/^\d{4}-/),
       },
     ]);

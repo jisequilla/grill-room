@@ -7,7 +7,7 @@ import { describeDecisions } from "../server/tree.js";
 
 export default defineAction({
   description:
-    "Read a session's whole design tree: every decision with what it depends on, its answer, its previous answers, and its state (settled, frontier, blocked, or stale) as the app computes it.",
+    "Read a session's whole design tree: every decision with what it depends on, its answer, its previous answers and why the interviewer superseded each of them, and its state (settled, frontier, blocked, stale, withdrawn, or unplaced) as the app computes it.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
   }),
@@ -29,8 +29,10 @@ export default defineAction({
       .where(eq(schema.decisions.sessionId, sessionId))
       .orderBy(schema.decisions.createdAt);
 
-    // What the decision used to say, kept whenever it was reopened, re-asked or
-    // reconfirmed. Oldest first, so a decision reads as the story of itself.
+    // What the decision used to say, and what the interviewer said about
+    // superseding it. Kept whenever the decision was reopened, re-asked,
+    // reconfirmed, deferred or pushed back; oldest first, so a decision reads
+    // as the story of itself.
     const history = rows.length
       ? await db
           .select()
@@ -53,6 +55,7 @@ export default defineAction({
           .map((entry) => ({
             text: entry.answer,
             kind: entry.answerKind,
+            interviewerReason: entry.interviewerReason,
             recordedAt: entry.recordedAt,
           })),
       })),

@@ -371,9 +371,10 @@ export default defineAction({
         );
       }
 
-      // Push backs: the pushed-back decision leaves the tree, its explanation
-      // kept in decision history. A replacement or restructuring arrives as an
-      // ordinary entry of `proposedDecisions`, already inserted above.
+      // Push backs: the pushed-back decision leaves the tree, the user's reason
+      // for pushing back and the interviewer's answer to it both kept in
+      // decision history. A replacement or restructuring arrives as an ordinary
+      // entry of `proposedDecisions`, already inserted above.
       for (const response of result.pushBackResponses) {
         const row = rowByKey.get(response.decisionKey);
         if (!row) continue;
@@ -383,8 +384,9 @@ export default defineAction({
           decisionId: row.id,
           questionTitle: row.questionTitle,
           questionBody: row.questionBody,
-          answer: response.explanation,
+          answer: row.currentAnswer,
           answerKind: row.answerKind,
+          interviewerReason: response.explanation,
           recordedAt: now,
         });
 
