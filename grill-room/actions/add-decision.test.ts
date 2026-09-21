@@ -114,4 +114,60 @@ describe("add-decision", () => {
       doneSummary: null,
     });
   });
+
+  it("marks an existing spec not current when adding a decision to a confirmed session", async () => {
+    const session = await aSession();
+    const now = new Date().toISOString();
+    await getDb().insert(schema.specs).values({
+      id: "spec-1",
+      sessionId: session.id,
+      markdown: "# Grill Room\n",
+      current: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await getDb()
+      .update(schema.sessions)
+      .set({ state: "confirmed" })
+      .where(eq(schema.sessions.id, session.id));
+
+    await addDecision.run({
+      sessionId: session.id,
+      title: "Should we support offline mode?",
+    });
+
+    const [spec] = await getDb()
+      .select()
+      .from(schema.specs)
+      .where(eq(schema.specs.sessionId, session.id));
+    expect(spec).toMatchObject({ current: false });
+  });
+
+  it("leaves the spec alone when adding a decision to a done-proposed session", async () => {
+    const session = await aSession();
+    const now = new Date().toISOString();
+    await getDb().insert(schema.specs).values({
+      id: "spec-1",
+      sessionId: session.id,
+      markdown: "# Grill Room\n",
+      current: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await getDb()
+      .update(schema.sessions)
+      .set({ state: "done-proposed" })
+      .where(eq(schema.sessions.id, session.id));
+
+    await addDecision.run({
+      sessionId: session.id,
+      title: "Should we support offline mode?",
+    });
+
+    const [spec] = await getDb()
+      .select()
+      .from(schema.specs)
+      .where(eq(schema.specs.sessionId, session.id));
+    expect(spec).toMatchObject({ current: true });
+  });
 });

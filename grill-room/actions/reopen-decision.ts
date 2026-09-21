@@ -5,6 +5,7 @@ import { and, desc, eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
+import { returnSessionToInterviewing } from "../server/session-state.js";
 import { deriveTreeStates, treeFacts } from "../server/tree.js";
 import { failIfTurnInProgress } from "../server/turn.js";
 import getCurrentRound from "./get-current-round.js";
@@ -100,20 +101,7 @@ export default defineAction({
       .where(eq(schema.decisions.id, decisionId));
 
     if (session.state !== "interviewing") {
-      await db
-        .update(schema.sessions)
-        .set({ state: "interviewing", doneSummary: null, updatedAt: now })
-        .where(eq(schema.sessions.id, sessionId));
-
-      // A spec built from the old answer is out of date the moment it is
-      // reopened. Tickets carry no such flag yet; that is a later ticket's
-      // concern.
-      if (session.state === "confirmed") {
-        await db
-          .update(schema.specs)
-          .set({ current: false, updatedAt: now })
-          .where(eq(schema.specs.sessionId, sessionId));
-      }
+      await returnSessionToInterviewing(session, now);
     }
 
     const [open] = await db

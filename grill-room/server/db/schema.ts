@@ -236,6 +236,13 @@ export const specs = table("gr_specs", {
   markdown: text("markdown").notNull(),
   /** False once a decision the spec was built from is reopened or re-settled. */
   current: boolean("current").notNull().default(true),
+  /**
+   * When tickets were last generated from this spec. Tickets are current iff
+   * this spec is `current` and this is not earlier than `updatedAt` — set here
+   * rather than on the tickets themselves, so regenerating the spec alone is
+   * enough to mark them out of date.
+   */
+  ticketsGeneratedAt: text("tickets_generated_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
