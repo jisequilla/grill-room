@@ -13,16 +13,19 @@ import {
 import type {
   AnswerKind,
   DecisionSnapshot,
+  DecisionState,
   ProposeRoundResult,
   SubmittedAnswer,
+  UserAddedDecision,
 } from "../server/interviewer/index.js";
 import {
+  deferredFrontierIds,
   deriveTreeStates,
-  isSettlingAnswerKind,
   neverAnsweredFrontierIds,
   parseStringArray,
   validateProposal,
   type DecisionRow,
+  type KeyedTreeDecision,
 } from "../server/tree.js";
 import getCurrentRound from "./get-current-round.js";
 
@@ -50,6 +53,42 @@ function portAnswerKind(row: {
   if (!row.answerKind) return null;
   if (row.answerKind !== "dispositioned") return row.answerKind;
   return row.dispositionTarget ?? "out-of-scope";
+}
+
+/** A row, reduced to the facts `deriveTreeStates` and its callers need. */
+function toTreeFields(row: DecisionRow) {
+  return {
+    id: row.id,
+    dependsOn: parseStringArray(row.dependsOnJson),
+    answerKind: row.answerKind,
+    settledAt: row.settledAt,
+    reopenedAt: row.reopenedAt,
+    withdrawnAt: row.withdrawnAt,
+    awaitingPlacementSince: row.awaitingPlacementSince,
+  };
+}
+
+/** A row, as `validateProposal` needs an existing decision: tree facts plus its question. */
+function toKeyedTreeDecision(row: DecisionRow): KeyedTreeDecision {
+  return {
+    ...toTreeFields(row),
+    key: row.key,
+    title: row.questionTitle,
+    body: row.questionBody,
+  };
+}
+
+/** User-added decisions still awaiting the interviewer's placement, oldest first. */
+function pendingUserAddedDecisions(rows: DecisionRow[]): UserAddedDecision[] {
+  return rows
+    .filter(
+      (row) => row.introducedBy === "user" && row.awaitingPlacementSince != null,
+    )
+    .map((row) => ({
+      key: row.key ?? row.id,
+      title: row.questionTitle,
+      body: row.questionBody,
+    }));
 }
 
 export default defineAction({
@@ -99,26 +138,25 @@ export default defineAction({
         .orderBy(schema.decisions.createdAt);
 
     /**
-     * Every decision that belongs in the next round, oldest first: whatever
-     * the last proposal marked to ask, plus any older decision that was
-     * blocked and has since become frontier because its dependency settled.
+     * Every decision that belongs in the next round: whatever the last
+     * proposal marked to ask, plus any older decision that was blocked and has
+     * since become frontier because its dependency settled, in that order,
+     * followed by any deferred decision whose moment has come back around.
      * `pendingAsk` is not consulted here — it only records what a proposal
      * asked for, and says nothing about a decision the tree unblocked on its
      * own — so this reads the tree's actual state instead.
      */
     const nextRoundCandidates = (rows: DecisionRow[]) => {
-      const ids = new Set(
-        neverAnsweredFrontierIds(
-          rows.map((row) => ({
-            id: row.id,
-            dependsOn: parseStringArray(row.dependsOnJson),
-            answerKind: row.answerKind,
-            settledAt: row.settledAt,
-            reopenedAt: row.reopenedAt,
-          })),
-        ),
-      );
-      return rows.filter((row) => ids.has(row.id));
+      const treeRows = rows.map(toTreeFields);
+      const ids = [
+        ...neverAnsweredFrontierIds(treeRows),
+        ...deferredFrontierIds(treeRows),
+      ];
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      return ids.flatMap((id) => {
+        const row = byId.get(id);
+        return row ? [row] : [];
+      });
     };
 
     const isOneAtATime = session.answeringMode === "one-at-a-time";
@@ -144,6 +182,40 @@ export default defineAction({
     const asking = isOneAtATime ? pending.slice(0, 1) : pending;
     const now = new Date().toISOString();
     const roundId = randomUUID();
+
+    // A deferred decision re-entering a round is a fresh ask: its deferral is
+    // recorded to history first, then its answer kind resets to null so its
+    // card comes up unanswered, same as a decision asked for the first time.
+    const returningDeferred = asking.filter(
+      (row) => row.answerKind === "deferred",
+    );
+    if (returningDeferred.length > 0) {
+      await db.insert(schema.decisionHistory).values(
+        returningDeferred.map((row) => ({
+          id: randomUUID(),
+          decisionId: row.id,
+          questionTitle: row.questionTitle,
+          questionBody: row.questionBody,
+          answer: row.currentAnswer,
+          answerKind: row.answerKind,
+          recordedAt: now,
+        })),
+      );
+      await db
+        .update(schema.decisions)
+        .set({
+          answerKind: null,
+          currentAnswer: null,
+          settledAt: null,
+          updatedAt: now,
+        })
+        .where(
+          inArray(
+            schema.decisions.id,
+            returningDeferred.map((row) => row.id),
+          ),
+        );
+    }
 
     await db.insert(schema.rounds).values({
       id: roundId,
@@ -242,22 +314,19 @@ export default defineAction({
             decisions: await snapshots(current),
           },
           latestAnswers,
-          userAddedDecisions: [],
+          userAddedDecisions: pendingUserAddedDecisions(current),
           rejectionReason,
         });
 
         conversationId = turn.conversationId;
 
         const validation = validateProposal(
-          current.map((row) => ({
-            id: row.id,
-            key: row.key,
-            dependsOn: parseStringArray(row.dependsOnJson),
-            answerKind: row.answerKind,
-            settledAt: row.settledAt,
-            reopenedAt: row.reopenedAt,
-          })),
+          current.map(toKeyedTreeDecision),
           turn.result.proposedDecisions,
+          {
+            pushBackResponses: turn.result.pushBackResponses,
+            userDecisionPlacements: turn.result.userDecisionPlacements,
+          },
         );
 
         if (validation.ok) {
@@ -272,22 +341,19 @@ export default defineAction({
       );
     }
 
-    /** The tree as the interviewer reads it, keys and all. */
+    /**
+     * The tree as the interviewer reads it, keys and all. A withdrawn decision
+     * has left the tree and is left out entirely; a decision the user added is
+     * left out too, until it is placed — it reaches the interviewer through
+     * `userAddedDecisions` instead, since it has no dependencies to show yet.
+     */
     async function snapshots(
       current: DecisionRow[],
     ): Promise<DecisionSnapshot[]> {
       const keyById = new Map(
         current.flatMap((row) => (row.key ? [[row.id, row.key] as const] : [])),
       );
-      const states = deriveTreeStates(
-        current.map((row) => ({
-          id: row.id,
-          dependsOn: parseStringArray(row.dependsOnJson),
-          answerKind: row.answerKind,
-          settledAt: row.settledAt,
-          reopenedAt: row.reopenedAt,
-        })),
-      );
+      const states = deriveTreeStates(current.map(toTreeFields));
 
       const history = current.length
         ? await db
@@ -302,35 +368,45 @@ export default defineAction({
             .orderBy(schema.decisionHistory.recordedAt)
         : [];
 
-      return current.map((row) => {
-        const kind = portAnswerKind(row);
-        return {
-          key: row.key ?? row.id,
-          title: row.questionTitle,
-          body: row.questionBody,
-          choices: parseStringArray(row.offeredChoicesJson),
-          recommendedAnswer: row.recommendedAnswer ?? "",
-          dependsOn: dependencyKeys(row, keyById),
-          state: states.get(row.id) ?? "blocked",
-          answer: kind ? { kind, text: row.currentAnswer ?? "" } : null,
-          previousAnswers: history
-            .filter((entry) => entry.decisionId === row.id)
-            .flatMap((entry) =>
-              entry.answerKind
-                ? [
-                    {
-                      kind: portAnswerKind({
-                        answerKind: entry.answerKind,
-                        dispositionTarget: null,
-                      }) as AnswerKind,
-                      text: entry.answer ?? "",
-                    },
-                  ]
-                : [],
-            ),
-          introducedBy: row.introducedBy,
-        };
-      });
+      return current
+        .filter((row) => row.withdrawnAt == null && row.awaitingPlacementSince == null)
+        .map((row) => {
+          const kind = portAnswerKind(row);
+          const rawState = states.get(row.id);
+          const state: DecisionState =
+            rawState === "settled" ||
+            rawState === "frontier" ||
+            rawState === "blocked" ||
+            rawState === "stale"
+              ? rawState
+              : "blocked";
+          return {
+            key: row.key ?? row.id,
+            title: row.questionTitle,
+            body: row.questionBody,
+            choices: parseStringArray(row.offeredChoicesJson),
+            recommendedAnswer: row.recommendedAnswer ?? "",
+            dependsOn: dependencyKeys(row, keyById),
+            state,
+            answer: kind ? { kind, text: row.currentAnswer ?? "" } : null,
+            previousAnswers: history
+              .filter((entry) => entry.decisionId === row.id)
+              .flatMap((entry) =>
+                entry.answerKind
+                  ? [
+                      {
+                        kind: portAnswerKind({
+                          answerKind: entry.answerKind,
+                          dispositionTarget: null,
+                        }) as AnswerKind,
+                        text: entry.answer ?? "",
+                      },
+                    ]
+                  : [],
+              ),
+            introducedBy: row.introducedBy,
+          };
+        });
     }
 
     async function answersOfLastSubmittedRound(): Promise<SubmittedAnswer[]> {
@@ -383,18 +459,24 @@ export default defineAction({
     }
 
     /**
-     * Store an accepted proposal. Push backs, user decision placements and a
-     * done proposal are parts of later tickets and are ignored here rather
-     * than failing the turn.
+     * Store an accepted proposal. A done proposal is a later ticket's concern
+     * and is ignored here rather than failing the turn.
      */
     async function store(
       result: ProposeRoundResult,
       conversationId: string,
     ): Promise<void> {
       const stamp = Date.now();
+      const now = new Date(stamp).toISOString();
+      const currentRows = await loadDecisions();
       const keyById = new Map(
-        (await loadDecisions()).flatMap((row) =>
+        currentRows.flatMap((row) =>
           row.key ? [[row.key, row.id] as const] : [],
+        ),
+      );
+      const rowByKey = new Map(
+        currentRows.flatMap((row) =>
+          row.key ? [[row.key, row] as const] : [],
         ),
       );
 
@@ -404,6 +486,7 @@ export default defineAction({
           randomUUID(),
         ]),
       );
+      const resolveId = (key: string) => ids.get(key) ?? keyById.get(key);
 
       if (result.proposedDecisions.length > 0) {
         await db.insert(schema.decisions).values(
@@ -422,7 +505,7 @@ export default defineAction({
               recommendedAnswer: decision.recommendedAnswer,
               dependsOnJson: JSON.stringify(
                 decision.dependsOn.flatMap((key) => {
-                  const id = ids.get(key) ?? keyById.get(key);
+                  const id = resolveId(key);
                   return id ? [id] : [];
                 }),
               ),
@@ -435,6 +518,55 @@ export default defineAction({
         );
       }
 
+      // Push backs: the pushed-back decision leaves the tree, its explanation
+      // kept in decision history. A replacement or restructuring arrives as an
+      // ordinary entry of `proposedDecisions`, already inserted above.
+      for (const response of result.pushBackResponses) {
+        const row = rowByKey.get(response.decisionKey);
+        if (!row) continue;
+
+        await db.insert(schema.decisionHistory).values({
+          id: randomUUID(),
+          decisionId: row.id,
+          questionTitle: row.questionTitle,
+          questionBody: row.questionBody,
+          answer: response.explanation,
+          answerKind: row.answerKind,
+          recordedAt: now,
+        });
+
+        await db
+          .update(schema.decisions)
+          .set({ withdrawnAt: now, updatedAt: now })
+          .where(eq(schema.decisions.id, row.id));
+      }
+
+      // User-added decisions the interviewer placed: the existing
+      // awaiting-placement row takes its dependencies, recommendation and
+      // choices, and stops awaiting. Its title and body are the user's own and
+      // are left untouched.
+      for (const placement of result.userDecisionPlacements) {
+        const row = rowByKey.get(placement.key);
+        if (!row) continue;
+
+        await db
+          .update(schema.decisions)
+          .set({
+            recommendedAnswer: placement.recommendedAnswer,
+            offeredChoicesJson: JSON.stringify(placement.choices),
+            dependsOnJson: JSON.stringify(
+              placement.dependsOn.flatMap((key) => {
+                const id = resolveId(key);
+                return id ? [id] : [];
+              }),
+            ),
+            pendingAsk: placement.ask,
+            awaitingPlacementSince: null,
+            updatedAt: now,
+          })
+          .where(eq(schema.decisions.id, row.id));
+      }
+
       await db
         .update(schema.sessions)
         .set({
@@ -442,7 +574,7 @@ export default defineAction({
           turnStatus: "idle",
           turnErrorCode: null,
           turnErrorMessage: null,
-          updatedAt: new Date().toISOString(),
+          updatedAt: now,
         })
         .where(eq(schema.sessions.id, sessionId));
     }
