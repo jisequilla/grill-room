@@ -5,6 +5,7 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
+import { returnSessionToInterviewing } from "../server/session-state.js";
 import { describeDecisions } from "../server/tree.js";
 
 /** A short, readable key from the title, with a random suffix so it never collides. */
@@ -39,13 +40,11 @@ export default defineAction({
     const now = new Date().toISOString();
 
     // A decision the user thinks of is the interview continuing: a session
-    // that had proposed or confirmed done returns to interviewing, and the
-    // stale summary is dropped with it.
+    // that had proposed or confirmed done returns to interviewing, its done
+    // summary is dropped, and — leaving `confirmed` — its spec is marked not
+    // current.
     if (session.state !== "interviewing") {
-      await db
-        .update(schema.sessions)
-        .set({ state: "interviewing", doneSummary: null, updatedAt: now })
-        .where(eq(schema.sessions.id, sessionId));
+      await returnSessionToInterviewing(session, now);
     }
 
     const [row] = await db

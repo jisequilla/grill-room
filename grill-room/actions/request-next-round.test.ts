@@ -866,6 +866,41 @@ describe("request-next-round", () => {
       expect(result.state).toBe("interviewing");
       expect(result.doneSummary).toBeNull();
     });
+
+    it("marks an existing spec not current when a round opens on a confirmed session", async () => {
+      const session = await aSession({ answeringMode: "one-at-a-time" });
+      const now = new Date().toISOString();
+      await getDb().insert(schema.decisions).values({
+        id: "decision-tone",
+        sessionId: session.id,
+        key: "tone",
+        questionTitle: "How blunt should it be?",
+        dependsOnJson: "[]",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await getDb().insert(schema.specs).values({
+        id: "spec-1",
+        sessionId: session.id,
+        markdown: "# Grill Room\n",
+        current: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await getDb()
+        .update(schema.sessions)
+        .set({ state: "confirmed" })
+        .where(eq(schema.sessions.id, session.id));
+      scriptInterviewer([]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      const [spec] = await getDb()
+        .select()
+        .from(schema.specs)
+        .where(eq(schema.specs.sessionId, session.id));
+      expect(spec).toMatchObject({ current: false });
+    });
   });
 });
 

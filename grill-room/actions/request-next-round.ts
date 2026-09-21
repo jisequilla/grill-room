@@ -11,6 +11,7 @@ import type {
   SubmittedAnswer,
   UserAddedDecision,
 } from "../server/interviewer/index.js";
+import { returnSessionToInterviewing } from "../server/session-state.js";
 import { runDueStaleReviews } from "../server/stale-review.js";
 import {
   deferredFrontierIds,
@@ -152,12 +153,10 @@ export default defineAction({
 
     // A round is about to open, so the interview is continuing: a session
     // that had proposed (or, via a reopen elsewhere, confirmed) done returns
-    // to interviewing, and the stale summary is dropped with it.
+    // to interviewing, its done summary is dropped, and — leaving
+    // `confirmed` — its spec is marked not current.
     if (session.state !== "interviewing") {
-      await db
-        .update(schema.sessions)
-        .set({ state: "interviewing", doneSummary: null, updatedAt: now })
-        .where(eq(schema.sessions.id, sessionId));
+      await returnSessionToInterviewing(session, now);
     }
 
     // A deferred decision re-entering a round is a fresh ask: its deferral is
