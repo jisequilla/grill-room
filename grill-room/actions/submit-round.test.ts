@@ -1,3 +1,4 @@
+import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -5,7 +6,7 @@ import {
   scriptInterviewer,
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
-import { useTestDatabase } from "../test/db.js";
+import { getDb, schema, useTestDatabase } from "../test/db.js";
 import createSession from "./create-session.js";
 import getCurrentRound from "./get-current-round.js";
 import getTree from "./get-tree.js";
@@ -114,6 +115,37 @@ describe("save-draft-answer", () => {
         answer: "   ",
       }),
     ).rejects.toThrow(/own answer needs some text/);
+  });
+
+  it("refuses a push back with no reason", async () => {
+    const { round } = await aSessionMidRound(twoCards);
+
+    await expect(
+      saveDraftAnswer.run({
+        decisionId: round.decisions[0]!.id,
+        answerKind: "pushed-back",
+      }),
+    ).rejects.toThrow(/push back needs a reason/);
+  });
+
+  it("accepts unknown and deferred with no text, and a pushed-back reason", async () => {
+    const { round } = await aSessionMidRound(twoCards);
+
+    const unknown = await saveDraftAnswer.run({
+      decisionId: round.decisions[0]!.id,
+      answerKind: "unknown",
+    });
+    expect(unknown.draft).toEqual({ answer: "", answerKind: "unknown" });
+
+    const pushedBack = await saveDraftAnswer.run({
+      decisionId: round.decisions[1]!.id,
+      answerKind: "pushed-back",
+      answer: "This is the wrong level of detail.",
+    });
+    expect(pushedBack.draft).toEqual({
+      answer: "This is the wrong level of detail.",
+      answerKind: "pushed-back",
+    });
   });
 
   it("keeps drafts per card so a half-answered round survives a reload", async () => {
@@ -226,6 +258,72 @@ describe("submit-round", () => {
       expect.stringMatching(/^\d{4}-/),
     );
     expect(next.round?.decisions.map((card) => card.key)).toEqual(["storage"]);
+  });
+
+  it("does not settle a steering move, and keeps its dependents blocked", async () => {
+    const { session, round } = await aSessionMidRound(
+      proposal(
+        { key: "shape", title: "What shape?" },
+        {
+          key: "storage",
+          title: "Where does the data live?",
+          dependsOn: ["shape"],
+          ask: false,
+        },
+      ),
+      // Nothing new to propose: "shape" is not settled, so "storage" is not
+      // on the frontier yet and the interviewer has nothing it can ask.
+      proposal(),
+    );
+
+    await saveDraftAnswer.run({
+      decisionId: round.decisions[0]!.id,
+      answerKind: "unknown",
+    });
+    const next = await submitRound.run({ id: round.id });
+
+    expect(next.round).toBeNull();
+    const tree = await getTree.run({ sessionId: session.id });
+    expect(
+      tree.decisions.map((decision) => [
+        decision.key,
+        decision.state,
+        decision.answer,
+      ]),
+    ).toEqual([
+      ["shape", "frontier", { text: "", kind: "unknown" }],
+      ["storage", "blocked", null],
+    ]);
+    expect(tree.decisions[0]?.settledAt).toBeNull();
+  });
+
+  it("brings a deferred decision back once nothing else is pending, recording its deferral to history first", async () => {
+    const { session, round } = await aSessionMidRound(
+      proposal({ key: "shape", title: "What shape?" }),
+      proposal(),
+    );
+
+    await saveDraftAnswer.run({
+      decisionId: round.decisions[0]!.id,
+      answerKind: "deferred",
+    });
+    const next = await submitRound.run({ id: round.id });
+
+    // The deferred card is back, unanswered, as though asked for the first time.
+    expect(next.round?.decisions.map((card) => card.key)).toEqual(["shape"]);
+    expect(next.round?.decisions[0]?.answer).toBeNull();
+    expect(next.round?.decisions[0]?.draft).toBeNull();
+
+    const history = await getDb()
+      .select()
+      .from(schema.decisionHistory)
+      .where(eq(schema.decisionHistory.decisionId, round.decisions[0]!.id));
+    expect(history).toMatchObject([{ answerKind: "deferred", answer: "" }]);
+
+    const tree = await getTree.run({ sessionId: session.id });
+    expect(tree.decisions.map((decision) => [decision.key, decision.state])).toEqual(
+      [["shape", "frontier"]],
+    );
   });
 
   it("refuses a round that has already been submitted", async () => {

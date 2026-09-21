@@ -21,6 +21,9 @@ async function arrangeDecision(
     dispositionTarget?: "out-of-scope" | "open-question" | null;
     settledAt?: string | null;
     reopenedAt?: string | null;
+    withdrawnAt?: string | null;
+    awaitingPlacementSince?: string | null;
+    introducedBy?: "interviewer" | "user";
     createdAt: string;
   },
 ) {
@@ -37,6 +40,9 @@ async function arrangeDecision(
       dispositionTarget: decision.dispositionTarget ?? null,
       settledAt: decision.settledAt ?? null,
       reopenedAt: decision.reopenedAt ?? null,
+      withdrawnAt: decision.withdrawnAt ?? null,
+      awaitingPlacementSince: decision.awaitingPlacementSince ?? null,
+      introducedBy: decision.introducedBy ?? "interviewer",
       createdAt: decision.createdAt,
       updatedAt: decision.createdAt,
     });
@@ -219,5 +225,41 @@ describe("get-tree", () => {
       shape: "settled",
       storage: "settled",
     });
+  });
+
+  it("reports a withdrawn decision as withdrawn, and a dependency on it as satisfied", async () => {
+    const session = await aSession();
+    await arrangeDecision(session.id, {
+      id: "a",
+      key: "shape",
+      answerKind: "pushed-back",
+      answer: "Too vague.",
+      withdrawnAt: "2026-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    await arrangeDecision(session.id, {
+      id: "b",
+      key: "storage",
+      dependsOn: ["a"],
+      createdAt: "2026-01-01T00:00:01.000Z",
+    });
+
+    expect(await statesOf(session.id)).toEqual({
+      shape: "withdrawn",
+      storage: "frontier",
+    });
+  });
+
+  it("reports a user-added decision awaiting placement as unplaced, excluded from the frontier", async () => {
+    const session = await aSession();
+    await arrangeDecision(session.id, {
+      id: "a",
+      key: "offline-mode",
+      introducedBy: "user",
+      awaitingPlacementSince: "2026-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(await statesOf(session.id)).toEqual({ "offline-mode": "unplaced" });
   });
 });

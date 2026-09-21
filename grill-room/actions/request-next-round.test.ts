@@ -7,6 +7,7 @@ import {
   scriptInterviewer,
 } from "../server/interviewer/index.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
+import addDecision from "./add-decision.js";
 import createSession from "./create-session.js";
 import getCurrentRound from "./get-current-round.js";
 import getSession from "./get-session.js";
@@ -283,6 +284,274 @@ describe("request-next-round", () => {
         turnStatus: "failed",
         turnErrorCode: "invalid-proposal",
       });
+    });
+  });
+
+  describe("push backs", () => {
+    /** A decision the user has already pushed back on, with its reason. */
+    async function arrangePushedBackDecision(
+      sessionId: string,
+      decision: { id: string; key: string; title: string; body?: string; reason: string },
+    ) {
+      const now = new Date().toISOString();
+      await getDb()
+        .insert(schema.decisions)
+        .values({
+          id: decision.id,
+          sessionId,
+          key: decision.key,
+          questionTitle: decision.title,
+          questionBody: decision.body ?? "",
+          currentAnswer: decision.reason,
+          answerKind: "pushed-back",
+          dependsOnJson: "[]",
+          createdAt: now,
+          updatedAt: now,
+        });
+    }
+
+    it("rejects a proposal that leaves a pending push back unanswered, and accepts once it responds", async () => {
+      const session = await aSession();
+      await arrangePushedBackDecision(session.id, {
+        id: "decision-shape",
+        key: "shape",
+        title: "What shape?",
+        reason: "Too vague.",
+      });
+      const interviewer = scriptInterviewer([
+        round(),
+        {
+          kind: "propose-round",
+          result: {
+            proposedDecisions: [],
+            pushBackResponses: [
+              {
+                decisionKey: "shape",
+                response: "withdraw",
+                explanation: "Dropping it; scope moved on.",
+                replacementKey: null,
+              },
+            ],
+            userDecisionPlacements: [],
+            done: null,
+          },
+        },
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests).toHaveLength(2);
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining(
+          'Decision "shape" was pushed back and needs a response',
+        ),
+      });
+
+      const tree = await getTree.run({ sessionId: session.id });
+      expect(tree.decisions).toMatchObject([{ key: "shape", state: "withdrawn" }]);
+
+      const history = await getDb()
+        .select()
+        .from(schema.decisionHistory)
+        .where(eq(schema.decisionHistory.decisionId, "decision-shape"));
+      expect(history).toMatchObject([
+        { answer: "Dropping it; scope moved on.", answerKind: "pushed-back" },
+      ]);
+    });
+
+    it("rejects a push back response that re-asks the same decision unchanged", async () => {
+      const session = await aSession();
+      await arrangePushedBackDecision(session.id, {
+        id: "decision-shape",
+        key: "shape",
+        title: "What shape?",
+        body: "The first thing to settle.",
+        reason: "Too vague.",
+      });
+      const unchanged = {
+        kind: "propose-round" as const,
+        result: {
+          proposedDecisions: [
+            proposed({
+              key: "shape-2",
+              title: "What shape?",
+              body: "The first thing to settle.",
+            }),
+          ],
+          pushBackResponses: [
+            {
+              decisionKey: "shape",
+              response: "replace" as const,
+              explanation: "Replacing it.",
+              replacementKey: "shape-2",
+            },
+          ],
+          userDecisionPlacements: [],
+          done: null,
+        },
+      };
+      const interviewer = scriptInterviewer([unchanged, unchanged, unchanged]);
+
+      await expect(
+        requestNextRound.run({ sessionId: session.id }),
+      ).rejects.toThrow(/re-asks it unchanged/);
+      expect(interviewer.requests).toHaveLength(3);
+    });
+
+    it("accepts a replacement that genuinely differs from the pushed-back question", async () => {
+      const session = await aSession();
+      await arrangePushedBackDecision(session.id, {
+        id: "decision-shape",
+        key: "shape",
+        title: "What shape?",
+        body: "The first thing to settle.",
+        reason: "Too vague.",
+      });
+      scriptInterviewer([
+        {
+          kind: "propose-round",
+          result: {
+            proposedDecisions: [
+              proposed({
+                key: "shape-2",
+                title: "What shape, specifically?",
+                body: "A narrower question.",
+              }),
+            ],
+            pushBackResponses: [
+              {
+                decisionKey: "shape",
+                response: "replace",
+                explanation: "Narrowed it down.",
+                replacementKey: "shape-2",
+              },
+            ],
+            userDecisionPlacements: [],
+            done: null,
+          },
+        },
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      const tree = await getTree.run({ sessionId: session.id });
+      expect(
+        tree.decisions.map((decision) => [decision.key, decision.state]),
+      ).toEqual([
+        ["shape", "withdrawn"],
+        ["shape-2", "frontier"],
+      ]);
+      expect(result.round?.decisions.map((card) => card.key)).toEqual([
+        "shape-2",
+      ]);
+    });
+  });
+
+  describe("user-added decisions", () => {
+    it("sends a user-added decision to the interviewer and rejects a proposal that leaves it unplaced", async () => {
+      const session = await aSession();
+      const added = await addDecision.run({
+        sessionId: session.id,
+        title: "Should we support offline mode?",
+        body: "Came to me in the shower.",
+      });
+
+      const interviewer = scriptInterviewer([
+        round(),
+        {
+          kind: "propose-round",
+          result: {
+            proposedDecisions: [],
+            pushBackResponses: [],
+            userDecisionPlacements: [
+              proposed({
+                key: added.key as string,
+                dependsOn: [],
+                ask: true,
+                recommendedAnswer: "Not for the first version.",
+              }),
+            ],
+            done: null,
+          },
+        },
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests).toHaveLength(2);
+      expect(interviewer.requests[0]).toMatchObject({
+        userAddedDecisions: [
+          {
+            key: added.key,
+            title: "Should we support offline mode?",
+            body: "Came to me in the shower.",
+          },
+        ],
+      });
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining("needs a placement"),
+      });
+
+      const tree = await getTree.run({ sessionId: session.id });
+      expect(tree.decisions).toMatchObject([
+        { key: added.key, state: "frontier" },
+      ]);
+      expect(result.round?.decisions.map((card) => card.key)).toEqual([
+        added.key,
+      ]);
+    });
+
+    it("rejects a placement whose dependsOn dangles", async () => {
+      const session = await aSession();
+      const added = await addDecision.run({
+        sessionId: session.id,
+        title: "Add analytics?",
+        body: "",
+      });
+      const bad = {
+        kind: "propose-round" as const,
+        result: {
+          proposedDecisions: [],
+          pushBackResponses: [],
+          userDecisionPlacements: [
+            proposed({
+              key: added.key as string,
+              dependsOn: ["never-proposed"],
+              ask: false,
+            }),
+          ],
+          done: null,
+        },
+      };
+      const interviewer = scriptInterviewer([bad, bad, bad]);
+
+      await expect(
+        requestNextRound.run({ sessionId: session.id }),
+      ).rejects.toThrow(
+        /neither an existing decision nor part of this proposal/,
+      );
+      expect(interviewer.requests).toHaveLength(3);
+    });
+
+    it("rejects a placement that does not match any decision awaiting placement", async () => {
+      const session = await aSession();
+      const bad = {
+        kind: "propose-round" as const,
+        result: {
+          proposedDecisions: [],
+          pushBackResponses: [],
+          userDecisionPlacements: [
+            proposed({ key: "not-awaiting", dependsOn: [], ask: false }),
+          ],
+          done: null,
+        },
+      };
+      const interviewer = scriptInterviewer([bad, bad, bad]);
+
+      await expect(
+        requestNextRound.run({ sessionId: session.id }),
+      ).rejects.toThrow(/is not a decision awaiting placement/);
+      expect(interviewer.requests).toHaveLength(3);
     });
   });
 
