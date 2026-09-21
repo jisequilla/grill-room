@@ -34,8 +34,8 @@
  * `settings` are not present, so an action under test must reach its data
  * through `getDb()`.
  */
-import { closeDbExec, getDbExec, getRuntimeDatabaseUrl } from "@agent-native/core/db";
-import { afterAll, beforeEach } from "vitest";
+import { getDbExec, getRuntimeDatabaseUrl } from "@agent-native/core/db";
+import { beforeEach } from "vitest";
 
 import { getDb, schema } from "../server/db/index.js";
 import { appMigrations } from "../server/db/migrations.js";
@@ -72,14 +72,18 @@ export async function resetTestDatabase(): Promise<void> {
 }
 
 /**
- * Register the per-test database lifecycle. Call once inside a `describe`, or
- * at the top level of a test file.
+ * Register the per-test database lifecycle. Safe to call in more than one
+ * `describe` in the same file, or at the top level of a file.
+ *
+ * Deliberately no teardown. `closeDbExec()` closes the PGlite instance without
+ * invalidating the Drizzle handle that `createGetDb` memoized at module scope —
+ * the framework registers that invalidation hook on its pooled Postgres
+ * branches only. A second `describe` would then query a closed database. Vitest
+ * gives each test file its own worker process, so the instance is released when
+ * the file ends either way.
  */
 export function useTestDatabase(): void {
   beforeEach(resetTestDatabase);
-  afterAll(async () => {
-    await closeDbExec();
-  });
 }
 
 export { getDb, schema };
