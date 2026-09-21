@@ -203,9 +203,10 @@ export const roundDecisions = table(
       .references(() => decisions.id, { onDelete: "cascade" }),
     sortOrder: integer("sort_order").notNull().default(0),
     /**
-     * What the user has typed or picked but not yet submitted. Held here rather
-     * than on the decision so it is scoped to the round that asked it, and
-     * survives a reload for as long as that round stays open.
+     * The answer as given in this round: a draft while the round is open, and
+     * the record of what was submitted once it closes. Held here rather than on
+     * the decision so it is scoped to the round that asked the question, and
+     * survives a reload.
      */
     draftAnswer: text("draft_answer"),
     draftAnswerKind: text("draft_answer_kind", { enum: DECISION_ANSWER_KINDS }),
