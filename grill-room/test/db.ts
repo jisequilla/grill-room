@@ -33,31 +33,51 @@
  * app's own tables only — framework stores such as `application_state` and
  * `settings` are not present, so an action under test must reach its data
  * through `getDb()`.
+ *
+ * ## What a reset does, and does not, undo
+ *
+ * The schema is built once per test file; each test then gets its tables
+ * emptied, not rebuilt. Rows, and any sequence they advanced, are gone between
+ * tests. Schema a test creates itself — an extra table, an added column — is
+ * not, because nothing in this app does that. A test that needs its own DDL
+ * should call `rebuildTestSchema()` afterwards.
  */
 import { getDbExec, getRuntimeDatabaseUrl } from "@agent-native/core/db";
 import { beforeEach } from "vitest";
 
 import { getDb, schema } from "../server/db/index.js";
-import { appMigrations } from "../server/db/migrations.js";
+import { appMigrations, MIGRATIONS_TABLE } from "../server/db/migrations.js";
 import { IN_MEMORY_DATABASE_URL } from "./setup.js";
+
+/** Bookkeeping rows survive a reset; re-running migrations per test is the cost this avoids. */
+const BOOKKEEPING_TABLES = new Set([
+  MIGRATIONS_TABLE,
+  `${MIGRATIONS_TABLE}_named`,
+]);
+
+/**
+ * Whether this worker has built the schema yet. Vitest gives each test file its
+ * own module registry, so this is effectively once per file — which is also how
+ * often the PGlite instance behind it is created.
+ */
+let schemaBuilt = false;
 
 function statementFor(sql: (typeof appMigrations)[number]["sql"]) {
   return typeof sql === "string" ? sql : sql.postgres;
 }
 
-/**
- * Drop everything and rebuild the app's schema from its migrations.
- *
- * Cheap enough to run per test — the PGlite instance itself is created once per
- * test file and reused.
- */
-export async function resetTestDatabase(): Promise<void> {
+function assertInMemory(): void {
   const url = getRuntimeDatabaseUrl();
   if (url !== IN_MEMORY_DATABASE_URL) {
     throw new Error(
       `Refusing to reset a database that is not the in-memory test instance: ${url}`,
     );
   }
+}
+
+/** Drop everything and apply the app's migrations from scratch. */
+export async function rebuildTestSchema(): Promise<void> {
+  assertInMemory();
 
   const exec = getDbExec();
   await exec.execute("DROP SCHEMA IF EXISTS public CASCADE");
@@ -69,6 +89,39 @@ export async function resetTestDatabase(): Promise<void> {
     if (statement) await exec.execute(statement);
     await migration.run?.(exec);
   }
+  schemaBuilt = true;
+}
+
+async function emptyAppTables(): Promise<void> {
+  const exec = getDbExec();
+  const { rows } = await exec.execute(
+    `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`,
+  );
+  const tables = rows
+    .map((row) => String((row as { tablename: unknown }).tablename))
+    .filter((name) => !BOOKKEEPING_TABLES.has(name));
+  if (tables.length === 0) return;
+  await exec.execute(
+    `TRUNCATE TABLE ${tables.map((name) => `"${name}"`).join(", ")} RESTART IDENTITY CASCADE`,
+  );
+}
+
+/**
+ * Give the next test an empty database.
+ *
+ * The first call in a worker builds the schema; later calls only empty it. The
+ * split is what keeps the suite green as test files multiply: building it was
+ * never the expensive part (a full rebuild measures ~15-40 ms) but every
+ * millisecond of per-test CPU competes with other workers booting their own
+ * PGlite instance, which is the real cost. See `vitest.config.ts`.
+ */
+export async function resetTestDatabase(): Promise<void> {
+  assertInMemory();
+  if (!schemaBuilt) {
+    await rebuildTestSchema();
+    return;
+  }
+  await emptyAppTables();
 }
 
 /**
