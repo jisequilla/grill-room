@@ -229,7 +229,7 @@ The app runs entirely on my machine and uses my existing Claude subscription thr
 
 - This app is also the test subject of a proof of concept about splitting work between models: a top-tier model plans and verifies, cheaper models build from this spec. The proof of concept's own delegation log lives outside the app; the app's build records are a feature for future projects.
 - The app, the agents building it, and the orchestrating session all draw on one Claude subscription usage pool. A turn that fails from rate limiting must be reported to the user as such, distinctly from an interviewer error, so it is never mistaken for a defect.
-- A headless interviewer turn with structured output was measured at a few seconds; the interface should show progress but needs no streaming.
+- A trivial headless turn with structured output takes a few seconds, but a real first round of a dozen decisions was measured at over a minute. The interface must treat a turn as a long-running operation: a persistent working state that survives navigation and reload, no request timeout shorter than several minutes, and no blocking of the rest of the workspace while it runs. Streaming is still not required.
 - The framework is young and moves fast. The installed version is pinned; its bundled, version-matched documentation is the reference, not the public website.
 - The framework's setup commands can write a plaintext access token into project files. Nothing in this spec requires those commands; the project's MCP config file and environment file stay out of version control.
 - The installed copy of the grilling skill must remain byte-identical to upstream. Behaviour the app needs beyond it belongs in the app-specific addendum, never in the skill text.
