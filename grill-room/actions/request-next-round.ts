@@ -11,6 +11,7 @@ import type {
   SubmittedAnswer,
   UserAddedDecision,
 } from "../server/interviewer/index.js";
+import { runDueStaleReviews } from "../server/stale-review.js";
 import {
   deferredFrontierIds,
   neverAnsweredFrontierIds,
@@ -75,6 +76,11 @@ export default defineAction({
       session,
       "The interviewer is already working on this session. Wait for the turn to finish.",
     );
+
+    // Whatever a reopened answer put in doubt is judged first, so the tree is
+    // true before anything reads it: the cards of an open round, and any
+    // proposal asked for below. Costs nothing when nothing is stale.
+    await runDueStaleReviews(sessionId);
 
     // An open round is the answer to this request: asking again while one is
     // unanswered would throw away the drafts in it.

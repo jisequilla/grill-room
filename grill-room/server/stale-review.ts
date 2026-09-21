@@ -9,12 +9,17 @@
  * and settles again — or re-asking it with an updated question, which returns
  * it to the tree unanswered and lets the ordinary frontier rule pick it up.
  *
+ * `reopenedAt` is never cleared. It is the whole of what makes a dependent
+ * stale, so it has to outlive the reopened decision's new answer: the
+ * dependents stay in doubt from the reopen until this review gives each of
+ * them a `settledAt` later than it, or takes their answer away entirely.
+ *
  * Everything the review needs lives here rather than in the actions, so the
- * seam with `submit-round` is a single call.
+ * seam with `request-next-round` is a single call.
  */
 import { randomUUID } from "node:crypto";
 
-import { eq, inArray } from "@agent-native/core/db/schema";
+import { eq } from "@agent-native/core/db/schema";
 
 import { getDb, schema } from "./db/index.js";
 import { getInterviewer } from "./interviewer/index.js";
@@ -141,70 +146,16 @@ export function reviewRejectionReasons(
 }
 
 /**
- * Put back the reopen stamps that settling a round cleared.
- *
- * `submit-round` blanks `reopenedAt` on every card it settles, which for a
- * reopened decision is the very fact its dependents' staleness is derived
- * from. The reopen is recoverable because reopening also writes a history row,
- * and its timestamp is the moment of the reopen. Delete this once settling
- * stops clearing the stamp.
- */
-async function restoreReopenMarks(submittedRoundId: string): Promise<void> {
-  const db = getDb();
-
-  const placements = await db
-    .select()
-    .from(schema.roundDecisions)
-    .where(eq(schema.roundDecisions.roundId, submittedRoundId));
-
-  if (placements.length === 0) return;
-
-  const ids = placements.map((placement) => placement.decisionId);
-
-  const settled = await db
-    .select()
-    .from(schema.decisions)
-    .where(inArray(schema.decisions.id, ids));
-
-  const history = await db
-    .select()
-    .from(schema.decisionHistory)
-    .where(inArray(schema.decisionHistory.decisionId, ids));
-
-  for (const row of settled) {
-    if (row.reopenedAt != null || row.settledAt == null) continue;
-
-    const disturbed = history
-      .filter((entry) => entry.decisionId === row.id)
-      .map((entry) => entry.recordedAt)
-      .sort();
-    const lastDisturbed = disturbed[disturbed.length - 1];
-
-    if (lastDisturbed == null) continue;
-
-    await db
-      .update(schema.decisions)
-      .set({ reopenedAt: lastDisturbed })
-      .where(eq(schema.decisions.id, row.id));
-  }
-}
-
-/**
  * Run every stale review the session is due, and apply the verdicts.
  *
- * Called by `submit-round` once the round's answers are settled and before the
- * next round is requested, so a reopened decision's dependents are judged
- * before the interview moves on. Does nothing at all — not even a turn status
- * — when nothing is stale, which is every ordinary round.
+ * Called by `request-next-round` before it asks the interviewer for anything,
+ * so a reopened decision's dependents are judged before the interview moves
+ * on. That is the one place every path reaches: a round submission ends there,
+ * and so does a loose end answered outside a round. Does nothing at all — not
+ * even a turn status — when nothing is stale, which is every ordinary round.
  */
-export async function runDueStaleReviews(input: {
-  sessionId: string;
-  submittedRoundId: string;
-}): Promise<void> {
+export async function runDueStaleReviews(sessionId: string): Promise<void> {
   const db = getDb();
-  const { sessionId } = input;
-
-  await restoreReopenMarks(input.submittedRoundId);
 
   const loadDecisions = () =>
     db

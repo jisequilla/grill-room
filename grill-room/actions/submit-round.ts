@@ -3,7 +3,6 @@ import { eq, inArray } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { runDueStaleReviews } from "../server/stale-review.js";
 import { isSettlingAnswerKind } from "../server/tree.js";
 import requestNextRound from "./request-next-round.js";
 
@@ -66,6 +65,10 @@ export default defineAction({
       // A steering move (unknown, pushed back, deferred, prototype flagged)
       // is a real answer but does not settle the decision: everything
       // downstream stays blocked until it is resolved into one that does.
+      //
+      // `reopenedAt` is left alone. Answering a reopened decision does not
+      // undo the reopen: what hangs off it stays stale until the review gives
+      // each dependent a later `settledAt` or takes its answer away.
       const settles = isSettlingAnswerKind(placement.draftAnswerKind);
       await db
         .update(schema.decisions)
@@ -73,7 +76,6 @@ export default defineAction({
           currentAnswer: placement.draftAnswer,
           answerKind: placement.draftAnswerKind,
           settledAt: settles ? now : null,
-          ...(settles ? { reopenedAt: null } : {}),
           updatedAt: now,
         })
         .where(eq(schema.decisions.id, placement.decisionId));
@@ -84,11 +86,9 @@ export default defineAction({
       .set({ submissionState: "submitted", submittedAt: now })
       .where(eq(schema.rounds.id, id));
 
-    await runDueStaleReviews({
-      sessionId: round.sessionId,
-      submittedRoundId: id,
-    });
-
+    // The stale review runs inside `request-next-round`, ahead of the
+    // proposal: a reopened decision can also get its real answer outside a
+    // round, through `answer-decision`, and that path has no round to submit.
     return requestNextRound.run({ sessionId: round.sessionId });
   },
 });

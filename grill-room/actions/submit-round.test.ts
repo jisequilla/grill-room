@@ -655,6 +655,83 @@ describe("submit-round stale review", () => {
     expect(recorded[0]?.questionBody).toContain("A page syncs differently.");
   });
 
+  it("leaves nothing stale once every dependent has been ruled on", async () => {
+    const { sessionId, interviewer } = await aSettledChain(
+      nothingMore,
+      review(
+        { key: "storage", verdict: "reconfirm" },
+        { key: "sync", verdict: "re-ask", title: "How does a page sync?" },
+      ),
+      nothingMore,
+      nothingMore,
+    );
+
+    const reopened = (await treeBy(sessionId)).shape!;
+    await reopenDecision.run({ decisionId: reopened.id });
+    // The reopened answer, then the re-asked question the review handed back.
+    await answerOpenRound(sessionId, "A page, after all");
+    await answerOpenRound(sessionId, "It polls");
+
+    const tree = await treeBy(sessionId);
+    expect([tree.shape?.state, tree.storage?.state, tree.sync?.state]).toEqual([
+      "settled",
+      "settled",
+      "settled",
+    ]);
+    // Reconfirming and re-asking is the whole of the debt: the reopen stamp
+    // outlives the answer, but nothing is owed under it a second time.
+    expect(tree.shape?.reopenedAt).toEqual(expect.stringMatching(/^\d{4}-/));
+    expect(
+      interviewer.requests.filter((request) => request.kind === "review-stale"),
+    ).toHaveLength(1);
+  });
+
+  it("reviews again when the same decision is reopened a second time", async () => {
+    const bothReconfirmed = review(
+      { key: "storage", verdict: "reconfirm" },
+      { key: "sync", verdict: "reconfirm" },
+    );
+    const { sessionId, interviewer } = await aSettledChain(
+      nothingMore,
+      bothReconfirmed,
+      nothingMore,
+      bothReconfirmed,
+      nothingMore,
+    );
+
+    const shapeId = (await treeBy(sessionId)).shape!.id;
+
+    await reopenDecision.run({ decisionId: shapeId });
+    await answerOpenRound(sessionId, "A page, after all");
+    expect([
+      (await treeBy(sessionId)).storage?.state,
+      (await treeBy(sessionId)).sync?.state,
+    ]).toEqual(["settled", "settled"]);
+
+    await reopenDecision.run({ decisionId: shapeId });
+    expect([
+      (await treeBy(sessionId)).storage?.state,
+      (await treeBy(sessionId)).sync?.state,
+    ]).toEqual(["stale", "stale"]);
+
+    await answerOpenRound(sessionId, "A workspace again");
+
+    const reviews = interviewer.requests.filter(
+      (request) => request.kind === "review-stale",
+    );
+    expect(reviews).toHaveLength(2);
+    expect(reviews[1]).toMatchObject({
+      reopenedDecisionKey: "shape",
+      staleDecisionKeys: ["storage", "sync"],
+    });
+    const tree = await treeBy(sessionId);
+    expect([tree.shape?.state, tree.storage?.state, tree.sync?.state]).toEqual([
+      "settled",
+      "settled",
+      "settled",
+    ]);
+  });
+
   it("leaves stale decisions alone while the reopened one is still unanswered", async () => {
     const { sessionId, interviewer } = await aSettledChain(
       proposal({ key: "tone", title: "How blunt?" }),
