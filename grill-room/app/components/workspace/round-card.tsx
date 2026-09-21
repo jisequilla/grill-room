@@ -3,14 +3,7 @@ import {
   useActionMutation,
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
-import {
-  IconCheck,
-  IconClockPause,
-  IconFlask,
-  IconHelpCircle,
-  IconPencil,
-  IconThumbDown,
-} from "@tabler/icons-react";
+import { IconAlertCircle, IconCheck, IconPencil } from "@tabler/icons-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -24,6 +17,14 @@ import {
   type RoundCard as RoundCardData,
 } from "@/lib/decisions";
 import { cn } from "@/lib/utils";
+
+/** Draft answers that count as given but leave the decision unsettled. */
+const LOOSE_END_DRAFT_KINDS: readonly string[] = [
+  "unknown",
+  "pushed-back",
+  "deferred",
+  "prototype-flagged",
+];
 
 /** The steering moves that need the user to type something before they save. */
 type TypedMove = "own-answer" | "pushed-back" | "prototype-flagged";
@@ -74,6 +75,8 @@ export function RoundCard({
 
   const draft = card.draft;
   const busy = disabled || isPending;
+  const leavesOpen =
+    draft !== null && LOOSE_END_DRAFT_KINDS.includes(draft.answerKind);
 
   function save(answerKind: RoundAnswerKind, answer?: string) {
     if (busy) return;
@@ -115,11 +118,32 @@ export function RoundCard({
       </header>
 
       {draft ? (
-        <div className="mx-5 mb-4 rounded-lg border border-emerald-600/25 bg-emerald-600/[0.07] px-3.5 py-3 dark:border-emerald-400/25 dark:bg-emerald-400/[0.07]">
+        // The card counts as answered either way, but a steering move leaves
+        // the decision open, and dressing it in the same settled green as a
+        // real answer would say it did not.
+        <div
+          className={cn(
+            "mx-5 mb-4 rounded-lg border px-3.5 py-3",
+            leavesOpen
+              ? "border-orange-600/30 bg-orange-500/[0.08] dark:border-orange-400/30 dark:bg-orange-400/[0.07]"
+              : "border-emerald-600/25 bg-emerald-600/[0.07] dark:border-emerald-400/25 dark:bg-emerald-400/[0.07]",
+          )}
+        >
           <div className="flex items-start gap-3">
-            <IconCheck className="mt-0.5 size-4 shrink-0 text-emerald-700 dark:text-emerald-300" />
+            {leavesOpen ? (
+              <IconAlertCircle className="mt-0.5 size-4 shrink-0 text-orange-700 dark:text-orange-300" />
+            ) : (
+              <IconCheck className="mt-0.5 size-4 shrink-0 text-emerald-700 dark:text-emerald-300" />
+            )}
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-medium tracking-wide text-emerald-800 uppercase dark:text-emerald-300">
+              <p
+                className={cn(
+                  "text-[11px] font-medium tracking-wide uppercase",
+                  leavesOpen
+                    ? "text-orange-800 dark:text-orange-300"
+                    : "text-emerald-800 dark:text-emerald-300",
+                )}
+              >
                 {t(ANSWER_KIND_LABEL_KEY[draft.answerKind])}
               </p>
               {draft.answer ? (
@@ -235,61 +259,60 @@ export function RoundCard({
             </div>
           </div>
         ) : (
-          <div className="flex flex-wrap items-center gap-1.5 border-t pt-3">
+          <div className="flex flex-wrap items-center gap-0.5 border-t pt-3">
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              className="h-7 text-xs"
+              className="h-7 px-2 text-xs"
               disabled={busy}
               onClick={() => openMove("own-answer")}
             >
               <IconPencil className="size-3.5" />
               {t("workspace.writeOwn")}
             </Button>
-            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+            <span className="mx-1.5 h-4 w-px bg-border" aria-hidden />
+            {/* The steering moves carry no icons: they are the escape hatches,
+                and the one icon in the row belongs to the answer that is not
+                one. */}
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              className="h-7 text-xs text-muted-foreground"
+              className="h-7 px-2 text-xs font-normal text-muted-foreground"
               disabled={busy}
               onClick={() => save("unknown")}
             >
-              <IconHelpCircle className="size-3.5" />
               {t("workspace.unknown")}
             </Button>
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              className="h-7 text-xs text-muted-foreground"
+              className="h-7 px-2 text-xs font-normal text-muted-foreground"
               disabled={busy}
               onClick={() => openMove("pushed-back")}
             >
-              <IconThumbDown className="size-3.5" />
               {t("workspace.pushBack")}
             </Button>
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              className="h-7 text-xs text-muted-foreground"
+              className="h-7 px-2 text-xs font-normal text-muted-foreground"
               disabled={busy}
               onClick={() => save("deferred")}
             >
-              <IconClockPause className="size-3.5" />
               {t("workspace.defer")}
             </Button>
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              className="h-7 text-xs text-muted-foreground"
+              className="h-7 px-2 text-xs font-normal text-muted-foreground"
               disabled={busy}
               onClick={() => openMove("prototype-flagged")}
             >
-              <IconFlask className="size-3.5" />
               {t("workspace.prototype")}
             </Button>
           </div>

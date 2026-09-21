@@ -29,11 +29,6 @@ function RoundSection({ round, number }: { round: Round; number: number }) {
         <span className="text-xs text-muted-foreground">
           {t("workspace.roundCardCount", { count: round.decisions.length })}
         </span>
-        {round.submissionState === "open" ? (
-          <span className="ml-auto rounded-full border border-sky-600/30 bg-sky-600/10 px-1.5 py-px text-[10px] font-medium tracking-wide text-sky-700 uppercase dark:border-sky-400/25 dark:bg-sky-400/10 dark:text-sky-300">
-            {t("workspace.roundOpen")}
-          </span>
-        ) : null}
       </CollapsibleTrigger>
       <CollapsibleContent>
         <ul className="space-y-2 py-2 pr-2 pl-8">
@@ -66,11 +61,18 @@ function RoundSection({ round, number }: { round: Round; number: number }) {
   );
 }
 
-/** Previous rounds, collapsed, so the interview can be read back. */
+/**
+ * Previous rounds, collapsed, so the interview can be read back. The round
+ * still open is the one on screen above, so it is not repeated here — but it
+ * keeps its number, so what is listed matches what was asked.
+ */
 export function RoundHistory({ rounds }: { rounds: readonly Round[] }) {
   const t = useT();
+  const submitted = rounds
+    .map((round, index) => ({ round, number: index + 1 }))
+    .filter((entry) => entry.round.submissionState === "submitted");
 
-  if (rounds.length === 0) {
+  if (submitted.length === 0) {
     return (
       <p className="px-2 py-4 text-sm text-muted-foreground">
         {t("workspace.historyEmpty")}
@@ -80,8 +82,12 @@ export function RoundHistory({ rounds }: { rounds: readonly Round[] }) {
 
   return (
     <div className="space-y-px">
-      {rounds.map((round, index) => (
-        <RoundSection key={round.id} round={round} number={index + 1} />
+      {submitted.map((entry) => (
+        <RoundSection
+          key={entry.round.id}
+          round={entry.round}
+          number={entry.number}
+        />
       ))}
     </div>
   );

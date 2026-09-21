@@ -12,6 +12,25 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 
 type RoundResult = AgentNativeActionRegistry["get-current-round"]["result"];
+type Card = NonNullable<RoundResult["round"]>["decisions"][number];
+
+const LOOSE_END_DRAFT_KINDS: readonly string[] = [
+  "unknown",
+  "pushed-back",
+  "deferred",
+  "prototype-flagged",
+];
+
+/**
+ * Answered, answered-but-still-open, and unanswered, so the footer says at a
+ * glance what a submit would actually settle.
+ */
+function dotColour(draft: Card["draft"]): string {
+  if (!draft) return "bg-muted-foreground/25";
+  return LOOSE_END_DRAFT_KINDS.includes(draft.answerKind)
+    ? "bg-orange-500 dark:bg-orange-400"
+    : "bg-emerald-600 dark:bg-emerald-400";
+}
 
 export function RoundPanel({
   round,
@@ -101,11 +120,7 @@ export function RoundPanel({
             {cards.map((card) => (
               <span
                 key={card.id}
-                className={
-                  card.draft
-                    ? "h-1.5 w-5 rounded-full bg-emerald-600 dark:bg-emerald-400"
-                    : "h-1.5 w-5 rounded-full bg-muted-foreground/25"
-                }
+                className={`h-1.5 w-5 rounded-full ${dotColour(card.draft)}`}
               />
             ))}
           </div>

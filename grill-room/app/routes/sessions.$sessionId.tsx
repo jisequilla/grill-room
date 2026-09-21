@@ -159,11 +159,15 @@ export default function SessionWorkspaceRoute() {
   return (
     <TooltipProvider delayDuration={200}>
       <div className="mx-auto w-full max-w-7xl p-6">
-        <header className="flex flex-wrap items-center gap-3 pb-5">
-          <h2 className="text-lg font-semibold">{session.title}</h2>
+        {/* The shell header already carries the session's title. */}
+        <header className="flex flex-wrap items-center gap-2 pb-5">
           <SessionStateBadge state={session.state} />
           <span className="text-sm text-muted-foreground">
             {t(MODEL_LABEL_KEY[session.model as SessionModel])}
+          </span>
+          <span className="text-sm text-muted-foreground">·</span>
+          <span className="max-w-md truncate text-sm text-muted-foreground">
+            {session.idea}
           </span>
         </header>
 
