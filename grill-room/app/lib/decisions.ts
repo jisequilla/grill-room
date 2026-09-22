@@ -115,3 +115,19 @@ export function actionErrorCode(error: unknown): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * The `details` an action attached to a failure with `fail(message, {
+ * details })`, when it attached any. Same shape as {@link actionErrorCode}.
+ */
+export function actionErrorDetails(
+  error: unknown,
+): Record<string, unknown> | undefined {
+  if (error instanceof Error && "details" in error) {
+    const details = (error as { details?: unknown }).details;
+    if (details && typeof details === "object") {
+      return details as Record<string, unknown>;
+    }
+  }
+  return undefined;
+}

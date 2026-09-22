@@ -5,26 +5,10 @@ import {
   IconPlayerPlay,
   IconRefresh,
 } from "@tabler/icons-react";
-import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-
-/** Elapsed time as `1:07`, ticking once a second. */
-function useElapsed(since: string | null): string {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!since) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [since]);
-
-  if (!since) return "0:00";
-  const startedAt = new Date(since).getTime();
-  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-}
+import { useElapsed } from "@/lib/use-elapsed";
 
 function Panel({
   icon,
@@ -123,14 +107,14 @@ export function TurnWorkingPanel({ startedAt }: { startedAt: string | null }) {
  * user's machine rather than the app; each says so in its own words instead of
  * leaving the interviewer's message to carry it.
  */
-const HEADLINE_KEY_BY_CODE: Record<string, string> = {
+export const HEADLINE_KEY_BY_CODE: Record<string, string> = {
   "rate-limited": "workspace.errorRateLimited",
   "cli-missing": "workspace.errorCliMissing",
   "not-logged-in": "workspace.errorNotLoggedIn",
   "malformed-output": "workspace.errorMalformed",
 };
 
-const HINT_KEY_BY_CODE: Record<string, string> = {
+export const HINT_KEY_BY_CODE: Record<string, string> = {
   "rate-limited": "workspace.errorRateLimitedHint",
   "cli-missing": "workspace.errorCliMissingHint",
   "not-logged-in": "workspace.errorNotLoggedInHint",
