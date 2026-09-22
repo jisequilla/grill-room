@@ -1,13 +1,9 @@
 import { useT } from "@agent-native/core/client/i18n";
-import { useEffect, useState } from "react";
 
 import {
   DecisionStateBadge,
   LooseEndBadge,
 } from "@/components/workspace/decision-state-badge";
-import { ColumnsLayout } from "@/components/workspace/tree-layouts/columns-layout";
-import { NodeGraphLayout } from "@/components/workspace/tree-layouts/node-graph-layout";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Tooltip,
   TooltipContent,
@@ -18,22 +14,6 @@ import { buildTreeOutline, type OutlineRow } from "@/lib/tree-outline";
 import { cn } from "@/lib/utils";
 
 const INDENT_REM = 0.875;
-
-/**
- * The two prototype layouts alongside the indented outline, which stays the
- * default: throwaway alternatives for the user to react to, not a redesign.
- */
-type TreeLayoutKind = "outline" | "columns" | "graph";
-
-const TREE_LAYOUT_KINDS: readonly TreeLayoutKind[] = ["outline", "columns", "graph"];
-
-function isTreeLayoutKind(value: string | null): value is TreeLayoutKind {
-  return value !== null && (TREE_LAYOUT_KINDS as readonly string[]).includes(value);
-}
-
-/** Per-browser, not per-session: a layout preference is about how the user
- * likes to read any tree, not a fact about one idea. */
-const TREE_LAYOUT_STORAGE_KEY = "grill-room.tree-layout";
 
 function DecisionRow({
   decision,
@@ -123,25 +103,7 @@ export function DesignTree({
   onSelect: (decision: TreeDecision) => void;
 }) {
   const t = useT();
-  const [layout, setLayout] = useState<TreeLayoutKind>("outline");
   const { rows, unplaced } = buildTreeOutline(decisions);
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(TREE_LAYOUT_STORAGE_KEY);
-      if (isTreeLayoutKind(stored)) setLayout(stored);
-    } catch {
-      // Ignore storage access errors; the outline default still works.
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(TREE_LAYOUT_STORAGE_KEY, layout);
-    } catch {
-      // Ignore storage access errors.
-    }
-  }, [layout]);
 
   if (decisions.length === 0) {
     return (
@@ -152,87 +114,37 @@ export function DesignTree({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-end border-b px-2 py-1.5">
-        <ToggleGroup
-          type="single"
-          size="sm"
-          value={layout}
-          onValueChange={(value) => {
-            if (isTreeLayoutKind(value)) setLayout(value);
-          }}
-          aria-label={t("workspace.layoutSwitch")}
-        >
-          <ToggleGroupItem
-            value="outline"
-            data-testid="tree-layout-outline"
-            className="h-7 px-2 text-[11px]"
-          >
-            {t("workspace.layoutOutline")}
-          </ToggleGroupItem>
-          <ToggleGroupItem
-            value="columns"
-            data-testid="tree-layout-columns"
-            className="h-7 px-2 text-[11px]"
-          >
-            {t("workspace.layoutColumns")}
-          </ToggleGroupItem>
-          <ToggleGroupItem
-            value="graph"
-            data-testid="tree-layout-graph"
-            className="h-7 px-2 text-[11px]"
-          >
-            {t("workspace.layoutGraph")}
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </div>
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-2">
+      <ul className="space-y-px">
+        {rows.map((row) => (
+          <DecisionRow
+            key={row.decision.id}
+            {...row}
+            selected={row.decision.id === selectedId}
+            onSelect={onSelect}
+          />
+        ))}
+      </ul>
 
-      {layout === "columns" ? (
-        <ColumnsLayout
-          decisions={decisions}
-          selectedId={selectedId}
-          onSelect={onSelect}
-        />
-      ) : layout === "graph" ? (
-        <NodeGraphLayout
-          decisions={decisions}
-          selectedId={selectedId}
-          onSelect={onSelect}
-        />
-      ) : (
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-2">
+      {unplaced.length > 0 ? (
+        <div>
+          <p className="px-1.5 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            {t("workspace.unplacedGroup")}
+          </p>
           <ul className="space-y-px">
-            {rows.map((row) => (
+            {unplaced.map((decision) => (
               <DecisionRow
-                key={row.decision.id}
-                {...row}
-                selected={row.decision.id === selectedId}
+                key={decision.id}
+                decision={decision}
+                depth={0}
+                otherParents={[]}
+                selected={decision.id === selectedId}
                 onSelect={onSelect}
               />
             ))}
           </ul>
-
-          {unplaced.length > 0 ? (
-            <div>
-              <p className="px-1.5 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                {t("workspace.unplacedGroup")}
-              </p>
-              <ul className="space-y-px">
-                {unplaced.map((decision) => (
-                  <DecisionRow
-                    key={decision.id}
-                    decision={decision}
-                    depth={0}
-                    otherParents={[]}
-                    selected={decision.id === selectedId}
-                    onSelect={onSelect}
-                  />
-                ))}
-              </ul>
-            </div>
-          ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

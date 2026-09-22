@@ -279,6 +279,10 @@ chips can carry the answer. #1, #6, #9 are independent and can ship immediately.
 - **The interviewer's prose recommendation.** It carries the reasoning ("since
   each covers what the other misses") that the chips cannot. It should be
   demoted relative to the chips, never removed.
+- **The indented outline as the only tree layout.** The user tried a
+  columns-by-state layout and a dependency node graph against the real
+  72-decision tree and kept the outline. The aside is too narrow for either,
+  and neither earned a full-width view.
 
 ## Verification
 
