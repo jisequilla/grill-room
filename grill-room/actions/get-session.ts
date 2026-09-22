@@ -3,6 +3,7 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
+import { isModelLocked } from "../server/model-lock.js";
 
 export default defineAction({
   description: "Read one session by id, so resuming lands exactly where it left off.",
@@ -19,6 +20,6 @@ export default defineAction({
 
     if (!row) throw new Error(`Session not found: ${id}`);
 
-    return row;
+    return { ...row, modelLocked: isModelLocked(row) };
   },
 });

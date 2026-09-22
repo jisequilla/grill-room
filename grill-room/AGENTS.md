@@ -53,7 +53,7 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | --- | --- |
 | `create-session` | Start a grilling session from a loose idea, defaulting the interviewer model to the global default. |
 | `list-sessions` | Every session with its title, state, and last activity, most recently active first. |
-| `get-session` | One session by id, so resuming lands where it left off. |
+| `get-session` | One session by id, so resuming lands where it left off; carries a derived `modelLocked` flag. |
 | `delete-session` | A session and everything under it: decisions, history, rounds, spec, tickets, build records. |
 | `set-session-answering-mode` | Switch a session between whole-round and one-at-a-time answering. |
 | `get-default-model` | The global default interviewer model new sessions pre-fill with; `fable` when unset. |
