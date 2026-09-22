@@ -56,6 +56,7 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `get-session` | One session by id, so resuming lands where it left off; carries a derived `modelLocked` flag. |
 | `delete-session` | A session and everything under it: decisions, history, rounds, spec, tickets, build records. |
 | `set-session-answering-mode` | Switch a session between whole-round and one-at-a-time answering. |
+| `set-session-model` | Change a session's interviewer model before its first round. Refused with `model-locked` once the session's interviewer conversation exists or while a turn is working. |
 | `get-default-model` | The global default interviewer model new sessions pre-fill with; `fable` when unset. |
 | `set-default-model` | Set that default. |
 | `get-setting` / `set-setting` | Read and write one app-wide setting. |
