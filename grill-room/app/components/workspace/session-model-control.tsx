@@ -49,10 +49,9 @@ export function SessionModelControl({
       if (code === "model-locked") {
         const details = actionErrorDetails(error);
         const recordedModel = details?.recordedModel as SessionModel | undefined;
-        // A 28 ms-lived inline message is unreadable: a stale tab just
-        // learned the session locked underneath it, so this is a toast, and
-        // the header drops straight to the same static text a fresh load
-        // would show rather than holding an inline message no one can read.
+        // A stale tab just learned the session locked underneath it: say so
+        // in a toast, and drop straight to the static text a fresh load
+        // would show.
         toast.error(
           t("workspace.modelLockedError", {
             model: recordedModel
