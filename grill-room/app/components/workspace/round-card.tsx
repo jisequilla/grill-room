@@ -171,8 +171,8 @@ export function RoundCard({
             <Button
               type="button"
               size="sm"
-              variant="ghost"
-              className="-my-1 shrink-0"
+              variant="outline"
+              className="-my-1 shrink-0 border border-border bg-transparent hover:bg-accent"
               disabled={busy}
               onClick={() => openMove("own-answer")}
             >
@@ -246,34 +246,66 @@ export function RoundCard({
           </div>
         </div>
 
-        <div className="rounded-lg border border-dashed bg-muted/40 px-3.5 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        {draft ? (
+          // Once the decision is settled, the recommendation is context, not
+          // the ask: one muted line, and a button that admits it would be
+          // replacing an answer that already exists.
+          <div
+            className="flex items-center gap-3 rounded-lg bg-muted/30 px-3.5 py-2"
+            data-testid="recommendation-block"
+          >
+            <p className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
               {t("workspace.recommended")}
+            </p>
+            <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+              {card.recommendedAnswer ?? t("workspace.noRecommendation")}
             </p>
             {card.recommendedAnswer ? (
               <Button
                 type="button"
                 size="sm"
+                variant="outline"
+                className="shrink-0 border border-border bg-transparent hover:bg-accent"
                 disabled={busy}
                 onClick={() => save("accepted-recommendation")}
               >
-                <IconCheck className="size-4" />
-                {t("workspace.accept")}
+                {t("workspace.acceptInstead")}
               </Button>
             ) : null}
           </div>
-          {card.recommendedAnswer ? (
-            <Markdown
-              text={card.recommendedAnswer}
-              className="mt-1.5 text-sm text-foreground"
-            />
-          ) : (
-            <p className="mt-1.5 text-sm text-muted-foreground italic">
-              {t("workspace.noRecommendation")}
-            </p>
-          )}
-        </div>
+        ) : (
+          <div
+            className="rounded-lg border border-dashed bg-muted/40 px-3.5 py-3"
+            data-testid="recommendation-block"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                {t("workspace.recommended")}
+              </p>
+              {card.recommendedAnswer ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => save("accepted-recommendation")}
+                >
+                  <IconCheck className="size-4" />
+                  {t("workspace.accept")}
+                </Button>
+              ) : null}
+            </div>
+            {card.recommendedAnswer ? (
+              <Markdown
+                text={card.recommendedAnswer}
+                className="mt-1.5 text-sm text-foreground"
+              />
+            ) : (
+              <p className="mt-1.5 text-sm text-muted-foreground italic">
+                {t("workspace.noRecommendation")}
+              </p>
+            )}
+          </div>
+        )}
 
         {field && move ? (
           <div className="space-y-2 rounded-lg border bg-muted/30 p-3.5">

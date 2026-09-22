@@ -195,6 +195,7 @@ const messages = {
     chooseOne: "Choose one",
     steerHeading: "Or steer the interview",
     accept: "Accept",
+    acceptInstead: "Accept instead",
     accepted: "Recommendation accepted",
     writeOwn: "Write my own",
     ownAnswerLabel: "Your answer",
