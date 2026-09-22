@@ -107,7 +107,7 @@ export function DesignTree({
 
   if (decisions.length === 0) {
     return (
-      <p className="px-2 py-6 text-center text-sm text-muted-foreground">
+      <p className="flex-1 px-2 py-6 text-center text-sm text-muted-foreground">
         {t("workspace.treeEmpty")}
       </p>
     );

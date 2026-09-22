@@ -234,6 +234,10 @@ const messages = {
     answeringMode: "Answering mode",
 
     treeEmpty: "No decisions yet.",
+    treeSettled: "{{settled}} of {{total}} settled",
+    treeLooseEnds_one: "1 loose end",
+    treeLooseEnds_other: "{{count}} loose ends",
+    treeNoLooseEnds: "No loose ends",
     unplacedGroup: "Waiting for the interviewer to place",
     moreDependencies_one: "+{{count}} more",
     moreDependencies_other: "+{{count}} more",

@@ -18,6 +18,7 @@ import { DesignTree } from "@/components/workspace/design-tree";
 import { RoundHistory } from "@/components/workspace/round-history";
 import { RoundPanel } from "@/components/workspace/round-panel";
 import { SessionIdea } from "@/components/workspace/session-idea";
+import { TreeFooter } from "@/components/workspace/tree-footer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { APP_TITLE } from "@/lib/app-config";
@@ -106,6 +107,14 @@ export default function SessionWorkspaceRoute() {
 
   const { data: rounds } = useActionQuery(
     "list-rounds",
+    { sessionId: id },
+    { enabled, refetchInterval: working ? TURN_POLL_MS : false },
+  );
+
+  // The tree footer counts loose ends the way the loose ends list does, by
+  // asking the same action, so the two can never disagree about what is open.
+  const { data: looseEnds } = useActionQuery(
+    "list-loose-ends",
     { sessionId: id },
     { enabled, refetchInterval: working ? TURN_POLL_MS : false },
   );
@@ -227,6 +236,21 @@ export default function SessionWorkspaceRoute() {
                 selectedId={selectedId}
                 onSelect={selectDecision}
               />
+              {decisions.length > 0 ? (
+                <TreeFooter
+                  settled={
+                    decisions.filter(
+                      (decision) => decision.state === "settled",
+                    ).length
+                  }
+                  total={
+                    decisions.filter(
+                      (decision) => decision.withdrawnAt === null,
+                    ).length
+                  }
+                  looseEnds={looseEnds?.length ?? 0}
+                />
+              ) : null}
             </div>
           </aside>
         </div>
