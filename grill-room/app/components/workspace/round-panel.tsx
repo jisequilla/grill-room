@@ -1,4 +1,5 @@
 import { useT } from "@agent-native/core/client/i18n";
+import { useState } from "react";
 
 import {
   ConfirmedPanel,
@@ -58,6 +59,10 @@ export function RoundPanel({
   onOpenDecision: (decisionId: string) => void;
 }) {
   const t = useT();
+  // The card the user is working on. An answered card folds to its question
+  // and its answer, so a long round stays readable — but never the one just
+  // interacted with, which would pull the answer out from under them.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   if (isLoading || !round) {
     return (
@@ -137,6 +142,9 @@ export function RoundPanel({
             card={card}
             index={index}
             disabled={isSubmitting}
+            foldable={cards.length > 1}
+            expanded={expandedId === card.id}
+            onExpandedChange={(open) => setExpandedId(open ? card.id : null)}
           />
         ))}
       </div>
