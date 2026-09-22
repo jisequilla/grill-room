@@ -4,6 +4,7 @@ import {
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { useState } from "react";
+import { toast } from "sonner";
 
 import {
   Select,
@@ -48,15 +49,17 @@ export function SessionModelControl({
       if (code === "model-locked") {
         const details = actionErrorDetails(error);
         const recordedModel = details?.recordedModel as SessionModel | undefined;
-        setErrorMessage(
+        // A 28 ms-lived inline message is unreadable: a stale tab just
+        // learned the session locked underneath it, so this is a toast, and
+        // the header drops straight to the same static text a fresh load
+        // would show rather than holding an inline message no one can read.
+        toast.error(
           t("workspace.modelLockedError", {
             model: recordedModel
               ? t(MODEL_LABEL_KEY[recordedModel])
               : t(MODEL_LABEL_KEY[model]),
           }),
         );
-        // A stale tab just learned the session locked underneath it; drop the
-        // select for the same static text a fresh load would show.
         onChanged();
         return;
       }
