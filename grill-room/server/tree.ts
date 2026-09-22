@@ -652,8 +652,51 @@ export function validateProposal(
   for (const decision of proposed) {
     if (existingIdByKey.has(decision.key)) {
       reasons.push(
-        `Decision "${decision.key}" is already in the tree. Propose it under a new key, or leave it alone.`,
+        `Decision "${decision.key}" is already in the tree. Leave it alone, or answer the existing decision instead of proposing it again.`,
       );
+    }
+  }
+
+  // A key collision is only the case where the interviewer names the existing
+  // decision; it can just as easily re-ask the same question under a fresh
+  // key. Catch that by title, normalised, so the tree never grows the same
+  // question twice under different keys. A decision this round's push-back
+  // responses name may legitimately be replaced by a proposal with the same
+  // title, and a withdrawn decision's title is free to reuse, so both are
+  // excluded from the comparison set.
+  const respondedToKeys = new Set(
+    pushBackResponses.map((response) => response.decisionKey),
+  );
+  const liveExistingTitlesByNormalisedTitle = new Map<string, string>();
+  for (const decision of existing) {
+    if (decision.key == null) continue;
+    if (decision.withdrawnAt != null) continue;
+    if (respondedToKeys.has(decision.key)) continue;
+    const normalisedTitle = decision.title.trim().toLowerCase();
+    if (!liveExistingTitlesByNormalisedTitle.has(normalisedTitle)) {
+      liveExistingTitlesByNormalisedTitle.set(normalisedTitle, decision.key);
+    }
+  }
+
+  const proposedTitlesSeen = new Map<string, string>();
+  for (const decision of proposed) {
+    if (decision.title == null) continue;
+    const normalisedTitle = decision.title.trim().toLowerCase();
+
+    const existingKey = liveExistingTitlesByNormalisedTitle.get(normalisedTitle);
+    if (existingKey != null) {
+      reasons.push(
+        `Decision "${decision.key}" asks the same question as "${existingKey}", which is already in the tree. Leave it alone; a blocked question is asked again on its own once what it waits on is answered.`,
+      );
+    }
+
+    const seenAsKey = proposedTitlesSeen.get(normalisedTitle);
+    if (seenAsKey != null) {
+      reasons.push(
+        `Decision "${decision.key}" asks the same question as "${seenAsKey}", proposed in the same round.`,
+      );
+    } else {
+      proposedTitlesSeen.set(normalisedTitle, decision.key);
     }
   }
 

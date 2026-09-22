@@ -309,7 +309,12 @@ describe("request-next-round", () => {
       const interviewer = scriptInterviewer([
         round(
           proposed({ key: "shape", ask: false }),
-          proposed({ key: "storage", dependsOn: ["shape"], ask: true }),
+          proposed({
+            key: "storage",
+            title: "Where does the data live?",
+            dependsOn: ["shape"],
+            ask: true,
+          }),
         ),
         round(proposed({ key: "shape" })),
       ]);
@@ -346,7 +351,12 @@ describe("request-next-round", () => {
       const interviewer = scriptInterviewer([
         round(
           proposed({ key: "shape", dependsOn: ["storage"], ask: false }),
-          proposed({ key: "storage", dependsOn: ["shape"], ask: false }),
+          proposed({
+            key: "storage",
+            title: "Where does the data live?",
+            dependsOn: ["shape"],
+            ask: false,
+          }),
         ),
         round(proposed({ key: "shape" })),
       ]);
@@ -384,6 +394,181 @@ describe("request-next-round", () => {
           'Decision "shape" is already in the tree',
         ),
       });
+    });
+
+    it("rejects a new key that asks the same question as an existing live decision, naming the existing key", async () => {
+      const session = await aSession();
+      const now = new Date().toISOString();
+      await getDb().insert(schema.decisions).values({
+        id: "decision-shape",
+        sessionId: session.id,
+        key: "shape",
+        questionTitle: "What shape should this take?",
+        currentAnswer: "A workspace",
+        answerKind: "own-answer",
+        settledAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const interviewer = scriptInterviewer([
+        round(
+          proposed({
+            key: "shape-again",
+            // Same question, different case and surrounding whitespace: the
+            // comparison is normalised, not literal.
+            title: "  WHAT SHAPE SHOULD THIS TAKE?  ",
+          }),
+        ),
+        round(proposed({ key: "tone", title: "How blunt should it be?" })),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining(
+          'Decision "shape-again" asks the same question as "shape"',
+        ),
+      });
+      expect(interviewer.requests[1]?.rejectionReason).not.toContain(
+        "new key",
+      );
+    });
+
+    it("rejects a key collision and a title collision without ever recommending a new key", async () => {
+      const session = await aSession();
+      const now = new Date().toISOString();
+      await getDb().insert(schema.decisions).values({
+        id: "decision-shape",
+        sessionId: session.id,
+        key: "shape",
+        questionTitle: "What shape should this take?",
+        currentAnswer: "A workspace",
+        answerKind: "own-answer",
+        settledAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const interviewer = scriptInterviewer([
+        round(
+          proposed({ key: "shape" }),
+          proposed({ key: "shape-again", title: "What shape should this take?" }),
+        ),
+        round(proposed({ key: "tone", title: "How blunt should it be?" })),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      const rejectionReason = interviewer.requests[1]?.rejectionReason ?? "";
+      expect(rejectionReason).toContain('Decision "shape" is already in the tree');
+      expect(rejectionReason).toContain(
+        'Decision "shape-again" asks the same question as "shape"',
+      );
+      expect(rejectionReason).not.toContain("new key");
+    });
+
+    it("rejects two proposed decisions in the same round asking the same question", async () => {
+      const session = await aSession();
+      const interviewer = scriptInterviewer([
+        round(
+          proposed({ key: "shape", title: "What shape should this take?" }),
+          proposed({ key: "shape-too", title: "What shape should this take?" }),
+        ),
+        round(proposed({ key: "tone", title: "How blunt should it be?" })),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining(
+          'Decision "shape-too" asks the same question as "shape", proposed in the same round',
+        ),
+      });
+    });
+
+    it("accepts a push-back replacement that reuses the pushed-back decision's own title", async () => {
+      const session = await aSession();
+      const now = new Date().toISOString();
+      await getDb()
+        .insert(schema.decisions)
+        .values({
+          id: "decision-shape",
+          sessionId: session.id,
+          key: "shape",
+          questionTitle: "What shape?",
+          questionBody: "The first thing to settle.",
+          currentAnswer: "Too vague.",
+          answerKind: "pushed-back",
+          dependsOnJson: "[]",
+          createdAt: now,
+          updatedAt: now,
+        });
+      scriptInterviewer([
+        {
+          kind: "propose-round",
+          result: {
+            proposedDecisions: [
+              proposed({
+                key: "shape-2",
+                title: "What shape?",
+                body: "A narrower version of the same question.",
+              }),
+            ],
+            pushBackResponses: [
+              {
+                decisionKey: "shape",
+                response: "replace",
+                explanation: "Replacing it with a narrower version.",
+                replacementKey: "shape-2",
+              },
+            ],
+            userDecisionPlacements: [],
+            done: null,
+          },
+        },
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(result.round?.decisions.map((card) => card.key)).toEqual([
+        "shape-2",
+      ]);
+      const tree = await getTree.run({ sessionId: session.id });
+      expect(
+        tree.decisions.map((decision) => [decision.key, decision.state]),
+      ).toEqual([
+        ["shape", "withdrawn"],
+        ["shape-2", "frontier"],
+      ]);
+    });
+
+    it("accepts a proposal that reuses the title of an already-withdrawn decision", async () => {
+      const session = await aSession();
+      const now = new Date().toISOString();
+      await getDb()
+        .insert(schema.decisions)
+        .values({
+          id: "decision-shape",
+          sessionId: session.id,
+          key: "shape",
+          questionTitle: "What shape should this take?",
+          currentAnswer: "Dropped.",
+          answerKind: "pushed-back",
+          dependsOnJson: "[]",
+          withdrawnAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      scriptInterviewer([
+        round(
+          proposed({ key: "shape-2", title: "What shape should this take?" }),
+        ),
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(result.round?.decisions.map((card) => card.key)).toEqual([
+        "shape-2",
+      ]);
     });
 
     it("rejects a recommendedChoice that is not one of the decision's own choices", async () => {
