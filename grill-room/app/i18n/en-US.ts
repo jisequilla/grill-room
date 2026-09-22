@@ -332,6 +332,11 @@ const messages = {
     historyEmpty: "No rounds yet.",
     noAnswerRecorded: "No answer recorded",
 
+    roundNudgeMessage:
+      "You have answered 10 questions one at a time. Whole-round mode asks everything that is ready at once: fewer turns, and each turn takes a minute or two either way.",
+    roundNudgeSwitch: "Switch to whole round",
+    roundNudgeKeep: "Keep one at a time",
+
     reviewDigestHeading: "What changed",
     reviewDigestDismiss: "Dismiss",
     reviewReconfirmed: "Reconfirmed",
