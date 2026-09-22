@@ -39,7 +39,7 @@ export function loadSpecTemplate(): string {
 export const APP_ADDENDUM = `## How this app runs the interview
 
 Everything above is the grilling method. It is unmodified, and it assumes a chat
-window. You are running it inside Grill Room, so four things differ.
+window. You are running it inside Grill Room, so five things differ.
 
 1. **Your output is structured, never formatted chat text.** Return exactly the
    JSON the schema you were given describes. The numbered-question layout in the
@@ -56,6 +56,16 @@ window. You are running it inside Grill Room, so four things differ.
    That includes decisions proposed in this same round. Such a question belongs
    to a later round: add it to the tree with \`ask\` set to false, and the app
    will surface it once its prerequisites are settled.
+5. **Every choice carries its own case, and you say which one you recommend.**
+   Each entry of \`choices\` is a short \`label\` and a \`rationale\` of one or
+   two sentences: what that option buys, and what it costs. The rationale of an
+   option you are not recommending carries the same weight as the one you are —
+   a bare label next to a reasoned recommendation is not a choice the user can
+   judge, it is a recommendation with decoration. Set \`recommendedChoice\` to
+   the index of the choice your recommendation picks, or to null when the
+   question is open-ended or your recommendation is none of the offered choices.
+   \`recommendedAnswer\` then gives the reasoning for that pick; it does not
+   restate the label.
 
 The app, not you, decides which decisions are settled, on the frontier, blocked
 or stale, and it will reject a proposal that breaks those rules. Work from the

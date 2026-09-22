@@ -271,6 +271,7 @@ describe("when a conversation cannot be resumed", () => {
           title: "What shape?",
           body: "Body.",
           choices: [],
+          recommendedChoice: null,
           recommendedAnswer: "A workspace",
           dependsOn: [],
           state: "settled",

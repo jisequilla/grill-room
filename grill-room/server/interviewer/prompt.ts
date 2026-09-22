@@ -27,7 +27,16 @@ function renderDecision(decision: DecisionSnapshot): string {
   ];
   if (decision.body) lines.push(`  question: ${decision.body}`);
   if (decision.choices.length > 0) {
-    lines.push(`  choices: ${decision.choices.join(" | ")}`);
+    lines.push("  choices:");
+    for (const [index, choice] of decision.choices.entries()) {
+      const recommended =
+        index === decision.recommendedChoice ? " (you recommended this one)" : "";
+      lines.push(
+        `    ${index}. ${choice.label}${recommended}${
+          choice.rationale ? ` — ${choice.rationale}` : ""
+        }`,
+      );
+    }
   }
   if (decision.recommendedAnswer) {
     lines.push(`  your recommendation was: ${decision.recommendedAnswer}`);
@@ -121,8 +130,9 @@ function renderTask(request: InterviewerRequest): string {
         "  for those whose prerequisites are all settled and that belong in this",
         "  round; set `ask` false for decisions that belong in the tree now but",
         "  must wait for a prerequisite. Give each a stable `key` that is not",
-        "  already used, and a `recommendedAnswer` the user can accept in one",
-        "  action.",
+        "  already used, a `choices` entry per option with its own `rationale`,",
+        "  a `recommendedChoice` index naming the one you recommend (or null),",
+        "  and a `recommendedAnswer` the user can accept in one action.",
         "- `pushBackResponses`: one entry for every answer above whose kind is",
         "  `pushed-back`. Withdraw the decision, replace it with a different one",
         "  (naming the replacement's key, which must be in `proposedDecisions`),",
@@ -152,10 +162,12 @@ function renderTask(request: InterviewerRequest): string {
         "whether the new answer actually affects it:",
         "",
         "- `reconfirm` when the old answer still holds. Leave the question fields",
-        "  null and the choices empty; give the reason it still holds.",
+        "  null, the choices empty and `recommendedChoice` null; give the reason",
+        "  it still holds.",
         "- `re-ask` when it does not. Supply an updated `title`, `body`, any",
-        "  `choices`, and a `recommendedAnswer` that takes the new answer into",
-        "  account.",
+        "  `choices` — each with its own `rationale` — a `recommendedChoice`",
+        "  index naming the one you recommend (or null), and a",
+        "  `recommendedAnswer` that takes the new answer into account.",
         "",
         "Do not re-ask a decision merely because it is downstream. Reconfirming",
         "what still holds is the point of this step.",
