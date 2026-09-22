@@ -383,7 +383,13 @@ export default defineAction({
               key: decision.key,
               questionTitle: decision.title,
               questionBody: decision.body,
-              offeredChoicesJson: JSON.stringify(decision.choices),
+              offeredChoicesJson: JSON.stringify(
+                decision.choices.map((choice) => choice.label),
+              ),
+              choiceRationalesJson: JSON.stringify(
+                decision.choices.map((choice) => choice.rationale),
+              ),
+              recommendedChoice: decision.recommendedChoice,
               recommendedAnswer: decision.recommendedAnswer,
               dependsOnJson: JSON.stringify(
                 decision.dependsOn.flatMap((key) => {
@@ -437,7 +443,13 @@ export default defineAction({
           .update(schema.decisions)
           .set({
             recommendedAnswer: placement.recommendedAnswer,
-            offeredChoicesJson: JSON.stringify(placement.choices),
+            recommendedChoice: placement.recommendedChoice,
+            offeredChoicesJson: JSON.stringify(
+              placement.choices.map((choice) => choice.label),
+            ),
+            choiceRationalesJson: JSON.stringify(
+              placement.choices.map((choice) => choice.rationale),
+            ),
             dependsOnJson: JSON.stringify(
               placement.dependsOn.flatMap((key) => {
                 const id = resolveId(key);

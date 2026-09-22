@@ -254,4 +254,14 @@ export const appMigrations: MigrationEntry[] = [
     name: "specs-tickets-generated-at-column",
     sql: `ALTER TABLE gr_specs ADD COLUMN IF NOT EXISTS tickets_generated_at TEXT`,
   },
+  {
+    version: 30,
+    name: "decisions-choice-rationales-column",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS choice_rationales_json TEXT NOT NULL DEFAULT '[]'`,
+  },
+  {
+    version: 31,
+    name: "decisions-recommended-choice-column",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS recommended_choice INTEGER`,
+  },
 ];

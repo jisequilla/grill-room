@@ -21,6 +21,7 @@ import type {
 } from "./interviewer/index.js";
 import {
   deriveTreeStates,
+  parseChoices,
   parseStringArray,
   treeFacts,
   type DecisionRow,
@@ -238,7 +239,8 @@ export async function decisionSnapshots(
         key: portKey(row),
         title: row.questionTitle,
         body: row.questionBody,
-        choices: parseStringArray(row.offeredChoicesJson),
+        choices: parseChoices(row),
+        recommendedChoice: row.recommendedChoice,
         recommendedAnswer: row.recommendedAnswer ?? "",
         dependsOn: parseStringArray(row.dependsOnJson).flatMap((id) => {
           const key = keyById.get(id);

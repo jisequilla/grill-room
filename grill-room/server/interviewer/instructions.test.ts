@@ -52,11 +52,17 @@ describe("the interviewer's instructions", () => {
     );
   });
 
-  it("tells the interviewer the four things the skill cannot know", () => {
+  it("tells the interviewer the five things the skill cannot know", () => {
     expect(APP_ADDENDUM).toContain("structured");
     expect(APP_ADDENDUM).toContain("Fact-finding is unavailable");
     expect(APP_ADDENDUM).toContain("dependsOn");
     expect(APP_ADDENDUM).toContain("still open");
+    expect(APP_ADDENDUM).toContain("recommendedChoice");
+  });
+
+  it("asks for a rationale of equal weight on every choice", () => {
+    expect(APP_ADDENDUM).toContain("rationale");
+    expect(APP_ADDENDUM).toContain("same weight");
   });
 });
 
@@ -72,7 +78,11 @@ describe("the prompt for a turn", () => {
               key: "shape",
               title: "What shape?",
               body: "Body.",
-              choices: ["a", "b"],
+              choices: [
+                { label: "a", rationale: "Cheap, and it leaks." },
+                { label: "b", rationale: "Costlier, and it holds." },
+              ],
+              recommendedChoice: 1,
               recommendedAnswer: "b",
               dependsOn: [],
               state: "settled",
@@ -90,6 +100,39 @@ describe("the prompt for a turn", () => {
     expect(prompt).toContain("[shape] (settled, added by interviewer)");
     expect(prompt).toContain("answer (own-answer): b, but narrower");
     expect(prompt).toContain("propose the next round");
+  });
+
+  it("shows each choice with its rationale, and marks the recommended one", () => {
+    const prompt = buildPrompt(
+      aProposeRoundRequest({
+        context: {
+          ...aProposeRoundRequest().context,
+          decisions: [
+            {
+              key: "shape",
+              title: "What shape?",
+              body: "Body.",
+              choices: [
+                { label: "A page", rationale: "One scroll, no navigation." },
+                { label: "A workspace", rationale: "Three columns, more layout." },
+              ],
+              recommendedChoice: 1,
+              recommendedAnswer: "A workspace, for the tree beside the question.",
+              dependsOn: [],
+              state: "frontier",
+              answer: null,
+              previousAnswers: [],
+              introducedBy: "interviewer",
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(prompt).toContain("0. A page — One scroll, no navigation.");
+    expect(prompt).toContain(
+      "1. A workspace (you recommended this one) — Three columns, more layout.",
+    );
   });
 
   it("never starts with a dash, which the command line reads as an option", () => {

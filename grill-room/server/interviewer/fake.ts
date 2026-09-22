@@ -150,8 +150,21 @@ export function cannedInterviewTurns(): ScriptedTurn[] {
             key: "shape",
             title: "What shape should this take?",
             body: "The first thing to settle is the overall shape.",
-            choices: ["A single page", "A workspace"],
-            recommendedAnswer: "A workspace",
+            choices: [
+              {
+                label: "A single page",
+                rationale:
+                  "Everything in one scroll, nothing to navigate. Cheapest to build, but the tree and the round compete for the same space.",
+              },
+              {
+                label: "A workspace",
+                rationale:
+                  "Round, tree and history each get their own column. More layout to get right, and the whole shape of the session stays visible.",
+              },
+            ],
+            recommendedChoice: 1,
+            recommendedAnswer:
+              "The workspace, because seeing the tree beside the question is the thing a chat window cannot do.",
             dependsOn: [],
             ask: true,
           },
@@ -159,8 +172,21 @@ export function cannedInterviewTurns(): ScriptedTurn[] {
             key: "storage",
             title: "Where does the data live?",
             body: "Storage follows from the shape.",
-            choices: ["In memory", "On disk"],
-            recommendedAnswer: "On disk",
+            choices: [
+              {
+                label: "In memory",
+                rationale:
+                  "No schema, no migrations, instant reads. A reload loses the session, which is fatal for an interview that runs for an hour.",
+              },
+              {
+                label: "On disk",
+                rationale:
+                  "Survives a reload and a restart, and the session can be read back by other tools. Costs a schema and migrations from day one.",
+              },
+            ],
+            recommendedChoice: 1,
+            recommendedAnswer:
+              "On disk: an interview that cannot survive a reload is not one anybody will finish.",
             dependsOn: [],
             ask: true,
           },

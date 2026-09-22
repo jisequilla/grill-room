@@ -14,6 +14,8 @@ function decision(
     questionTitle: id,
     questionBody: "",
     choices: [],
+    recommendedChoice: null,
+    recommendedChoiceLabel: null,
     recommendedAnswer: null,
     dependsOn,
     introducedBy: "interviewer",

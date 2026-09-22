@@ -13,6 +13,22 @@ import { z } from "zod";
 
 const decisionKey = z.string().min(1);
 
+/**
+ * One option on offer, and the case for it. The rationale is what makes the
+ * alternatives judgeable: without it the user reads a sentence of reasoning for
+ * the recommendation and a bare label for everything else, and the only
+ * defensible move left is to accept.
+ */
+export const offeredChoice = z.strictObject({
+  /** The short label the chip reads. */
+  label: z.string().min(1),
+  /** One or two sentences: what this option buys, and what it costs. */
+  rationale: z.string(),
+});
+
+/** Index into a decision's `choices`, or null when the recommendation is none of them. */
+const recommendedChoice = z.number().int().nonnegative().nullable();
+
 /** A decision the interviewer proposes adding to the tree. */
 const proposedDecision = z.strictObject({
   /** Stable key, unique within the session. The app links decisions by it. */
@@ -20,13 +36,24 @@ const proposedDecision = z.strictObject({
   title: z.string().min(1),
   body: z.string(),
   /** Offered choices, or empty when the question is open. */
-  choices: z.array(z.string()),
+  choices: z.array(offeredChoice),
+  /**
+   * Which of `choices` the recommendation picks, as an index, or null when the
+   * question is open-ended or the recommendation is none of them. The app marks
+   * the chip from this, and records a click on it as accepting the
+   * recommendation rather than as the user's own answer.
+   */
+  recommendedChoice,
+  /** The recommendation's reasoning. It explains the pick; it does not restate it. */
   recommendedAnswer: z.string(),
   /** Keys of the decisions this one hangs off. */
   dependsOn: z.array(decisionKey),
   /** True to ask it in this round, false to add it to the tree as blocked. */
   ask: z.boolean(),
 });
+
+/** One offered choice, as every layer of the app passes it around. */
+export type OfferedChoice = z.infer<typeof offeredChoice>;
 
 export const proposeRoundResultSchema = z.strictObject({
   proposedDecisions: z.array(proposedDecision),
@@ -56,7 +83,8 @@ export const reviewStaleResultSchema = z.strictObject({
       /** The updated question, set only when the verdict is `re-ask`. */
       title: z.string().nullable(),
       body: z.string().nullable(),
-      choices: z.array(z.string()),
+      choices: z.array(offeredChoice),
+      recommendedChoice,
       recommendedAnswer: z.string().nullable(),
     }),
   ),

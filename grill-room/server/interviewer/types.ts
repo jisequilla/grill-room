@@ -1,5 +1,6 @@
 import type {
   BreakIntoTicketsResult,
+  OfferedChoice,
   ProposeRoundResult,
   RequestKind,
   ReviewStaleResult,
@@ -40,7 +41,10 @@ export interface DecisionSnapshot {
   key: string;
   title: string;
   body: string;
-  choices: string[];
+  /** The choices offered, each with the case for it. */
+  choices: OfferedChoice[];
+  /** Which of `choices` the recommendation picked, or null when none of them. */
+  recommendedChoice: number | null;
   recommendedAnswer: string;
   dependsOn: string[];
   state: DecisionState;

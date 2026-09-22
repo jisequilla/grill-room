@@ -29,6 +29,7 @@ function proposal(key: string, dependsOn: string[] = []): ScriptedTurn {
           title: `Question ${key}`,
           body: `The body of ${key}`,
           choices: [],
+          recommendedChoice: null,
           recommendedAnswer: `The usual answer to ${key}`,
           dependsOn,
           ask: true,
