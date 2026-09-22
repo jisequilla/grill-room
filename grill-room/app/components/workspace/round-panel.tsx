@@ -1,4 +1,5 @@
 import { useT } from "@agent-native/core/client/i18n";
+import { useState } from "react";
 
 import {
   ConfirmedPanel,
@@ -58,6 +59,10 @@ export function RoundPanel({
   onOpenDecision: (decisionId: string) => void;
 }) {
   const t = useT();
+  // The card the user is working on. An answered card folds to its question
+  // and its answer, so a long round stays readable — but never the one just
+  // interacted with, which would pull the answer out from under them.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   if (isLoading || !round) {
     return (
@@ -127,17 +132,26 @@ export function RoundPanel({
   const roundId = round.round.id;
 
   return (
-    <div className="space-y-3">
-      {cards.map((card, index) => (
-        <RoundCard
-          key={card.id}
-          card={card}
-          index={index}
-          disabled={isSubmitting}
-        />
-      ))}
+    <div>
+      {/* The stack clears the submit bar's own height, so the last card can be
+          scrolled out from under it rather than read through it. */}
+      <div className="space-y-3 pb-20">
+        {cards.map((card, index) => (
+          <RoundCard
+            key={card.id}
+            card={card}
+            index={index}
+            disabled={isSubmitting}
+            foldable={cards.length > 1}
+            expanded={expandedId === card.id}
+            onExpandedChange={(open) => setExpandedId(open ? card.id : null)}
+          />
+        ))}
+      </div>
 
-      <div className="sticky bottom-0 -mx-1 flex items-center justify-between gap-4 rounded-t-xl border-t bg-background/85 px-5 py-3 backdrop-blur">
+      {/* Opaque, not translucent: a translucent bar renders the chips beneath
+          it as legible ghosts, which reads as a rendering fault. */}
+      <div className="sticky bottom-0 -mx-1 flex items-center justify-between gap-4 rounded-t-xl border-t bg-background px-5 py-3">
         <div className="flex items-center gap-3">
           <div
             className="flex gap-1"

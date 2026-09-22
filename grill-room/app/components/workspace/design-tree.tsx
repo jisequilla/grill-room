@@ -107,14 +107,14 @@ export function DesignTree({
 
   if (decisions.length === 0) {
     return (
-      <p className="px-2 py-6 text-center text-sm text-muted-foreground">
+      <p className="flex-1 px-2 py-6 text-center text-sm text-muted-foreground">
         {t("workspace.treeEmpty")}
       </p>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-2">
       <ul className="space-y-px">
         {rows.map((row) => (
           <DecisionRow

@@ -112,6 +112,9 @@ const messages = {
     treeHeading: "Design tree",
     historyHeading: "Previous rounds",
 
+    ideaMore: "Show more",
+    ideaLess: "Show less",
+
     startTitle: "Nothing asked yet",
     startDescription:
       "The interviewer reads your idea and opens with the decisions it can ask about now.",
@@ -189,8 +192,10 @@ const messages = {
 
     recommended: "Recommended",
     noRecommendation: "No recommendation",
-    choices: "Offered choices",
+    chooseOne: "Choose one",
+    steerHeading: "Or steer the interview",
     accept: "Accept",
+    acceptInstead: "Accept instead",
     accepted: "Recommendation accepted",
     writeOwn: "Write my own",
     ownAnswerLabel: "Your answer",
@@ -229,6 +234,10 @@ const messages = {
     answeringMode: "Answering mode",
 
     treeEmpty: "No decisions yet.",
+    treeSettled: "{{settled}} of {{total}} settled",
+    treeLooseEnds_one: "1 loose end",
+    treeLooseEnds_other: "{{count}} loose ends",
+    treeNoLooseEnds: "No loose ends",
     unplacedGroup: "Waiting for the interviewer to place",
     moreDependencies_one: "+{{count}} more",
     moreDependencies_other: "+{{count}} more",
