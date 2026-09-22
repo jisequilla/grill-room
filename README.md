@@ -1,16 +1,19 @@
-# poc-grill-me
+# grill-room
 
-An experiment in splitting a software build by model: one top-tier model does
-all the judgment — grilling the idea, writing the spec, cutting tickets,
-reviewing results, deciding what is done — and cheaper models do all the
+A local app that runs Matt Pocock's grilling interview as a workspace instead
+of a chat: rounds of question cards, a design tree whose states the app
+derives, steering moves, reopening with a stale review of everything
+downstream, a done gate, then spec synthesis and ticket breakdown. It is built
+on the [agent-native](https://www.agent-native.com/) framework and drives
+Claude through the Claude Code CLI on a subscription — no API key anywhere.
+
+It is also the subject of the experiment that produced it. One top-tier model
+did all the judgment — grilling the idea, writing the spec, cutting tickets,
+reviewing results, deciding what was done — and cheaper models did all the
 implementation. Every delegation was recorded, so the split is measured rather
-than asserted.
+than asserted, and that record is the most reusable thing here.
 
-The subject under construction was **Grill Room**, a local app that runs Matt
-Pocock's grilling interview as a structured workspace instead of a chat. It was
-specified with the `grill-me` and `to-spec` skills in this repository, built on
-the [agent-native](https://www.agent-native.com/) framework, and drives Claude
-through the Claude Code CLI on a subscription — no API key anywhere.
+An experiment, not a maintained product.
 
 ## What came out of it
 
