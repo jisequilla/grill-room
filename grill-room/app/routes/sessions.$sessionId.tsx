@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { SessionStateBadge } from "@/components/sessions/session-state-badge";
 import { AddDecisionDialog } from "@/components/workspace/add-decision-dialog";
 import { AnsweringModeSwitch } from "@/components/workspace/answering-mode-switch";
+import { ApplyBatchDialog } from "@/components/workspace/batch/apply-batch-dialog";
 import { DecisionDetailSheet } from "@/components/workspace/decision-detail-sheet";
 import { DesignTree } from "@/components/workspace/design-tree";
 import { DocsFolderChip } from "@/components/workspace/docs-folder-chip";
@@ -179,6 +180,7 @@ export default function SessionWorkspaceRoute() {
           sessionId={id}
           answeringMode={session.answeringMode as SessionAnsweringMode}
         />
+        <ApplyBatchDialog sessionId={id} />
         <AddDecisionDialog sessionId={id} />
       </div>
     ) : null,

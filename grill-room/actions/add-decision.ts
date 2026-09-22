@@ -18,6 +18,63 @@ function generateKey(title: string): string {
   return `${slug || "user-decision"}-${randomUUID().slice(0, 8)}`;
 }
 
+/**
+ * Add one user-thought-of decision to a session's tree, awaiting placement.
+ *
+ * The action below is this and nothing else. It is exported because a batch of
+ * reopens can carry decisions to add once its items are applied
+ * (`server/reopen-batch.ts`), and those have to arrive by exactly the same
+ * route as one added from the workspace.
+ */
+export async function addDecisionCore(input: {
+  sessionId: string;
+  title: string;
+  body: string;
+}) {
+  const { sessionId, title, body } = input;
+  const db = getDb();
+
+  const [session] = await db
+    .select()
+    .from(schema.sessions)
+    .where(eq(schema.sessions.id, sessionId))
+    .limit(1);
+
+  if (!session) fail(`Session not found: ${sessionId}`, { statusCode: 404 });
+
+  const now = new Date().toISOString();
+
+  // A decision the user thinks of is the interview continuing: a session
+  // that had proposed or confirmed done returns to interviewing, its done
+  // summary is dropped, and — leaving `confirmed` — its spec is marked not
+  // current.
+  if (session.state !== "interviewing") {
+    await returnSessionToInterviewing(session, now);
+  }
+
+  const [row] = await db
+    .insert(schema.decisions)
+    .values({
+      id: randomUUID(),
+      sessionId,
+      key: generateKey(title),
+      questionTitle: title,
+      questionBody: body,
+      offeredChoicesJson: "[]",
+      choiceRationalesJson: "[]",
+      dependsOnJson: "[]",
+      introducedBy: "user",
+      awaitingPlacementSince: now,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .returning();
+
+  if (!row) fail("Failed to add the decision.", { statusCode: 500 });
+
+  return describeDecisions([row])[0];
+}
+
 export default defineAction({
   description:
     "Add a decision the user thought of themselves, something the interviewer never asked about. It waits, excluded from the frontier and every round, until the next propose-round places it in the tree with its dependencies.",
@@ -26,47 +83,6 @@ export default defineAction({
     title: z.string().min(1).describe("The question's title"),
     body: z.string().default("").describe("The question's body, if any"),
   }),
-  run: async ({ sessionId, title, body }) => {
-    const db = getDb();
-
-    const [session] = await db
-      .select()
-      .from(schema.sessions)
-      .where(eq(schema.sessions.id, sessionId))
-      .limit(1);
-
-    if (!session) fail(`Session not found: ${sessionId}`, { statusCode: 404 });
-
-    const now = new Date().toISOString();
-
-    // A decision the user thinks of is the interview continuing: a session
-    // that had proposed or confirmed done returns to interviewing, its done
-    // summary is dropped, and — leaving `confirmed` — its spec is marked not
-    // current.
-    if (session.state !== "interviewing") {
-      await returnSessionToInterviewing(session, now);
-    }
-
-    const [row] = await db
-      .insert(schema.decisions)
-      .values({
-        id: randomUUID(),
-        sessionId,
-        key: generateKey(title),
-        questionTitle: title,
-        questionBody: body,
-        offeredChoicesJson: "[]",
-        choiceRationalesJson: "[]",
-        dependsOnJson: "[]",
-        introducedBy: "user",
-        awaitingPlacementSince: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning();
-
-    if (!row) fail("Failed to add the decision.", { statusCode: 500 });
-
-    return describeDecisions([row])[0];
-  },
+  run: ({ sessionId, title, body }) =>
+    addDecisionCore({ sessionId, title, body }),
 });

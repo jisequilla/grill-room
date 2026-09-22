@@ -271,6 +271,46 @@ const messages = {
     adding: "Adding…",
     addFailed: "Could not add the decision.",
 
+    batchAction: "Apply a batch of changes",
+    batchDescription:
+      "Paste a two-column table (decision, new answer) or a JSON array. Each row is matched to a decision before anything is written.",
+    batchPlaceholder:
+      "| Decision | New answer |\n| --- | --- |\n| dashboard-access | Over the tailnet |",
+    batchPreview: "Preview",
+    batchApply_one: "Apply 1 change",
+    batchApply_other: "Apply {{count}} changes",
+    batchApplying: "Applying…",
+    batchClose: "Close",
+    batchFailed: "Could not apply the batch.",
+    batchErrorEmpty: "There is nothing to apply yet.",
+    batchErrorBadJson: "That is not a JSON array this can read.",
+    batchErrorNoRows:
+      "No rows found. Use a two-column table, or a JSON array of objects.",
+    batchRowAnswer: "New answer: {{answer}}",
+    batchRowUnresolved:
+      "No decision in this session matches. Fix or remove this row.",
+    batchRowAmbiguous: "Matches more than one decision: {{titles}}",
+    batchRowNotSettled:
+      "Not settled, so it cannot be reopened. It will be answered as a card if the review re-asks it, otherwise skipped.",
+
+    batchRunning: "Applying changes — {{completed}} of {{total}}",
+    batchCurrent: "Now: {{title}}",
+    batchStatusReopened: "reopened and answered",
+    batchStatusAnsweredAsCard: "answered as a card",
+    batchStatusAnsweredAsLooseEnd: "answered as a loose end",
+    batchStatusSkipped: "skipped",
+    batchStatusFailed: "failed",
+
+    batchSummaryDescription: "What the batch did, item by item.",
+    batchSummaryReopened: "Reopened",
+    batchSummaryAsCard: "Answered as a card",
+    batchSummaryAsLooseEnd: "Answered as a loose end",
+    batchSummarySkipped: "Skipped",
+    batchSummaryFailedAt: "Stopped at item {{position}}: {{title}}",
+    batchSummaryAdded_one: "1 decision added, awaiting placement.",
+    batchSummaryAdded_other:
+      "{{count}} decisions added, awaiting placement.",
+
     answeringMode: "Answering mode",
 
     treeEmpty: "No decisions yet.",

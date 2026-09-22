@@ -284,4 +284,9 @@ export const appMigrations: MigrationEntry[] = [
     name: "sessions-docs-folder-column",
     sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS docs_folder TEXT`,
   },
+  {
+    version: 36,
+    name: "sessions-batch-progress-column",
+    sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS batch_progress_json TEXT`,
+  },
 ];

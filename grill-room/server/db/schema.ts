@@ -69,6 +69,15 @@ export const sessions = table("gr_sessions", {
   exportTargetFolder: text("export_target_folder"),
   /** A read-only folder the interviewer may read while grilling, or null for the tool-less interview. */
   docsFolder: text("docs_folder"),
+  /**
+   * The batch of reopens running on this session right now, as JSON: how many
+   * items it holds, how many are done, which one it is on, and the outcome of
+   * each one finished. A batch is many interviewer turns long, so its progress
+   * is stored rather than held in the request: a reload mid-batch reads it, and
+   * a second batch is refused while it is set. Null whenever no batch is
+   * running. See {@link import("../reopen-batch.js").BatchProgress}.
+   */
+  batchProgressJson: text("batch_progress_json"),
   /** Where the current interviewer turn stands. See {@link SESSION_TURN_STATUSES}. */
   turnStatus: text("turn_status", { enum: SESSION_TURN_STATUSES })
     .notNull()

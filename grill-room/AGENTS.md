@@ -67,6 +67,7 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `submit-round` | Settle an open round's decisions (a steering move does not settle its decision) and ask for the next round. Refuses a round with unanswered cards. |
 | `reopen-decision` | Reopen a settled decision: its answer becomes history, it is asked again straight away, and everything under it goes stale until the interviewer reconfirms or re-asks it. Returns a done-proposed or confirmed session to interviewing and clears the done summary; leaving `confirmed` also marks the session's spec not current. |
 | `add-decision` | Add a decision the user thought of themselves; it awaits the interviewer's placement in the tree. Returns a done-proposed or confirmed session to interviewing and clears the done summary. |
+| `apply-reopen-batch` | Apply a list of reopens whose answers are already decided, in order, and report what happened to each. See "Applying a batch of reopens" below. |
 | `answer-decision` | Give a real answer to an unresolved loose end (unknown, deferred, prototype flagged, or an unanswered push back) outside a round, without calling the interviewer. Call `request-next-round` afterwards: that is where a reopened decision's dependents are reviewed. |
 | `list-loose-ends` | Every decision blocking confirmation of a session — unknown, deferred, prototype flagged or pushed back and not withdrawn, stale, unplaced, or never answered — each with a reason naming its category, and the supersession proposed on it when it has one. Empty once nothing blocks confirming. |
 | `find-superseded` | Ask the interviewer which open loose ends a decision that settled later has already answered, and store what it finds on each as a proposal. Runs automatically as the second half of a done proposal; this action repeats it on demand. Allowed while interviewing or with a done proposal pending, refused while a turn is working. |
@@ -88,13 +89,52 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `view-screen` | What the user is looking at. Call it first when the visible context matters. |
 | `provider-api-request` | Call Slack's Web API through the workspace connection. |
 
-`request-next-round`, `submit-round`, `find-superseded`, `synthesize-spec`, and
-`break-into-tickets`
+`request-next-round`, `submit-round`, `find-superseded`, `synthesize-spec`,
+`break-into-tickets`, and `apply-reopen-batch` (one or two turns per item)
 all wait on a Claude CLI turn, which takes about a minute and can take several.
 The client action hooks time out at 60 s by default, so UI code calling any of
 them must pass a `timeoutMs` of several minutes; the default cancels a turn
 that was about to succeed and leaves the session's `turn_status` reading
 `working`.
+
+### Applying a batch of reopens
+
+`apply-reopen-batch` takes a list of `{ decisionKey | decisionId, answer }`
+items and applies them **in order**, plus optional `newDecisions` added once
+every item has landed. It is what a comparison against an existing system
+produces: a set of changes already agreed, rather than one decision to rethink.
+
+The order matters because each item changes the tree the next one meets.
+Reopening a decision makes its dependents stale, and the stale review that
+follows re-asks the ones the new answer broke — so an item further down the
+list may be open again by the time the batch reaches it. Each item is therefore
+applied against the tree *as it then stands*:
+
+- **settled or stale** — reopened, answered as an own answer, round submitted
+  (`reopened`). Every other card of that round with no draft is **deferred**, so
+  the round can be submitted without the batch answering a question it was not
+  given; the interviewer asks those again.
+- **open and a card of the round** — answered there and submitted
+  (`answered-as-card`). This is the case `reopen-decision` refuses with
+  `decision-not-settled`.
+- **open and a loose end** — answered through `answer-decision`
+  (`answered-as-loose-end`). No interviewer turn, so ask for the next round
+  afterwards if it is the last item.
+- **anything else** (blocked, withdrawn, unplaced) — `not-reopenable`, nothing
+  written, and the batch carries on.
+
+It stops at the first failure, returns every outcome up to and including it with
+`failedAt` set, and leaves `newDecisions` unadded. It refuses while a turn is
+working (`turn-in-progress`) or another batch is running (`batch-in-progress`),
+and refuses the whole call if any item names a decision this session does not
+have (`decision-not-found`) — a list with a typo in it should not cost several
+interviewer turns before saying so.
+
+Because a batch is one or two real turns per item, its progress is stored on the
+session as `gr_sessions.batch_progress_json` (`{ total, completed, current,
+outcomes }`) and cleared when it ends. `get-session` carries it, which is how
+the workspace shows a batch it did not start and how a reload mid-batch lands
+somewhere truthful.
 
 ### Grill with docs
 
