@@ -12,7 +12,11 @@
  *
  * Tested through the actions that use it, never directly.
  */
-import type { decisions, DecisionAnswerKind } from "./db/schema.js";
+import type {
+  decisionHistory,
+  decisions,
+  DecisionAnswerKind,
+} from "./db/schema.js";
 
 /**
  * The six states of a decision. Computed, never stored. `withdrawn` and
@@ -461,6 +465,38 @@ export function describeDecisions(
     createdAt: row.createdAt,
     };
   });
+}
+
+/** A stored history row, exactly as the table holds it. */
+export type DecisionHistoryRow = typeof decisionHistory.$inferSelect;
+
+/**
+ * A decision's previous answer, as every read action reports it: the answer
+ * itself beside the question exactly as it read when this answer was
+ * recorded — a re-ask can reword the question afterward, so the current
+ * decision's title is not always what this entry was actually asked under.
+ */
+export interface PreviousAnswerView {
+  text: string | null;
+  kind: DecisionAnswerKind | null;
+  interviewerReason: string | null;
+  recordedAt: string;
+  questionTitle: string;
+  questionBody: string;
+}
+
+/** Turns a stored history row into the shape read actions attach to `previousAnswers`. */
+export function describeHistoryEntry(
+  row: DecisionHistoryRow,
+): PreviousAnswerView {
+  return {
+    text: row.answer,
+    kind: row.answerKind,
+    interviewerReason: row.interviewerReason,
+    recordedAt: row.recordedAt,
+    questionTitle: row.questionTitle,
+    questionBody: row.questionBody,
+  };
 }
 
 /**

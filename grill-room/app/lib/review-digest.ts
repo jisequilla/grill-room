@@ -97,6 +97,18 @@ export interface ReviewedDependent {
   /** The interviewer's reason. Never empty — that is what made this a verdict. */
   reason: string;
   recordedAt: string;
+  /**
+   * The question exactly as it read when this verdict was recorded — a
+   * re-ask can reword the question afterward, so this is not always what the
+   * decision reads now.
+   */
+  title: string;
+  /**
+   * The decision's current title, when a re-ask left it reading differently
+   * from `title` above. Null for a reconfirm, and for a re-ask whose question
+   * went unchanged: those have nothing to point out.
+   */
+  retitledTo: string | null;
 }
 
 /** One reopen and everything the review that followed it settled. */
@@ -167,6 +179,11 @@ export function reviewEvents(decisions: readonly TreeDecision[]): ReviewEvent[] 
         verdict,
         reason: entry.interviewerReason as string,
         recordedAt: entry.recordedAt,
+        title: entry.questionTitle,
+        retitledTo:
+          verdict === "re-ask" && entry.questionTitle !== decision.questionTitle
+            ? decision.questionTitle
+            : null,
       });
       reviewedByReopenId.set(chosen.id, list);
     });

@@ -3,7 +3,7 @@ import { eq, inArray } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { describeDecisions } from "../server/tree.js";
+import { describeDecisions, describeHistoryEntry } from "../server/tree.js";
 
 export default defineAction({
   description:
@@ -54,12 +54,7 @@ export default defineAction({
         ...decision,
         previousAnswers: history
           .filter((entry) => entry.decisionId === decision.id)
-          .map((entry) => ({
-            text: entry.answer,
-            kind: entry.answerKind,
-            interviewerReason: entry.interviewerReason,
-            recordedAt: entry.recordedAt,
-          })),
+          .map(describeHistoryEntry),
       })),
     };
   },

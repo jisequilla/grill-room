@@ -1,3 +1,4 @@
+import { eq } from "@agent-native/core/db/schema";
 import { describe, expect, it } from "vitest";
 
 import type { DecisionAnswerKind } from "../server/db/schema.js";
@@ -248,6 +249,51 @@ describe("get-tree", () => {
       shape: "withdrawn",
       storage: "frontier",
     });
+  });
+
+  it("carries the question as it read at the time on every previous answer", async () => {
+    const session = await aSession();
+    await arrangeDecision(session.id, {
+      id: "a",
+      key: "shape",
+      answerKind: "own-answer",
+      answer: "A workspace, reworded",
+      settledAt: "2026-01-02T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    await getDb()
+      .update(schema.decisions)
+      .set({ questionTitle: "What shape should this take, exactly?" })
+      .where(eq(schema.decisions.id, "a"));
+    await getDb()
+      .insert(schema.decisionHistory)
+      .values({
+        id: "h1",
+        decisionId: "a",
+        questionTitle: "What shape should this take?",
+        questionBody: "The original body.",
+        answer: "A workspace",
+        answerKind: "own-answer",
+        interviewerReason: "the question needed sharpening",
+        recordedAt: "2026-01-01T12:00:00.000Z",
+      });
+
+    const tree = await getTree.run({ sessionId: session.id });
+    const [decision] = tree.decisions;
+
+    expect(decision?.questionTitle).toBe(
+      "What shape should this take, exactly?",
+    );
+    expect(decision?.previousAnswers).toEqual([
+      {
+        text: "A workspace",
+        kind: "own-answer",
+        interviewerReason: "the question needed sharpening",
+        recordedAt: "2026-01-01T12:00:00.000Z",
+        questionTitle: "What shape should this take?",
+        questionBody: "The original body.",
+      },
+    ]);
   });
 
   it("reports a user-added decision awaiting placement as unplaced, excluded from the frontier", async () => {

@@ -15,8 +15,10 @@ function history(
   kind: DecisionAnswerKind,
   recordedAt: string,
   interviewerReason: string | null = null,
+  questionTitle = "Question",
+  questionBody = "",
 ): HistoryEntry {
-  return { text, kind, interviewerReason, recordedAt };
+  return { text, kind, interviewerReason, recordedAt, questionTitle, questionBody };
 }
 
 function decision(overrides: Partial<TreeDecision> = {}): TreeDecision {
@@ -149,14 +151,16 @@ describe("reviewEvents", () => {
     const reconfirmed = decision({
       id: "e1",
       dependsOn: ["d"],
-      previousAnswers: [history("e1-answer", "own-answer", "T2", "still fits")],
+      previousAnswers: [
+        history("e1-answer", "own-answer", "T2", "still fits", "e1"),
+      ],
       answer: { text: "e1-answer", kind: "own-answer" },
     });
     const reAsked = decision({
       id: "e2",
       dependsOn: ["d"],
       previousAnswers: [
-        history("e2-old-answer", "own-answer", "T2b", "doesn't fit anymore"),
+        history("e2-old-answer", "own-answer", "T2b", "doesn't fit anymore", "e2"),
       ],
       answer: null,
     });
@@ -177,12 +181,53 @@ describe("reviewEvents", () => {
         verdict: "reconfirm",
         reason: "still fits",
         recordedAt: "T2",
+        title: "e1",
+        retitledTo: null,
       },
       {
         decisionId: "e2",
         verdict: "re-ask",
         reason: "doesn't fit anymore",
         recordedAt: "T2b",
+        title: "e2",
+        retitledTo: null,
+      },
+    ]);
+  });
+
+  it("exposes the old title and points at the current one when a re-ask reworded the question", () => {
+    const d = decision({
+      id: "d",
+      reopenedAt: "T1",
+      previousAnswers: [history("old-d", "own-answer", "T1")],
+      answer: { text: "new-d", kind: "own-answer" },
+    });
+    const reAsked = decision({
+      id: "e",
+      questionTitle: "Where does this run, exactly?",
+      dependsOn: ["d"],
+      previousAnswers: [
+        history(
+          "old-answer",
+          "own-answer",
+          "T2",
+          "doesn't fit anymore",
+          "Where does this run?",
+        ),
+      ],
+      answer: null,
+    });
+
+    const events = reviewEvents([d, reAsked]);
+
+    expect(events[0]!.reviewed).toEqual([
+      {
+        decisionId: "e",
+        verdict: "re-ask",
+        reason: "doesn't fit anymore",
+        recordedAt: "T2",
+        title: "Where does this run?",
+        retitledTo: "Where does this run, exactly?",
       },
     ]);
   });
@@ -205,9 +250,9 @@ describe("reviewEvents", () => {
       dependsOn: ["d1", "d2"],
       previousAnswers: [
         // Reviewed once under d1's reopen (before d2 was ever reopened)...
-        history("e-orig", "own-answer", "T2", "fits d1's reopen"),
+        history("e-orig", "own-answer", "T2", "fits d1's reopen", "e"),
         // ...and again, later, once d2 was also reopened.
-        history("e-orig", "own-answer", "T4", "doesn't fit d2's reopen"),
+        history("e-orig", "own-answer", "T4", "doesn't fit d2's reopen", "e"),
       ],
       answer: null,
     });
@@ -221,6 +266,8 @@ describe("reviewEvents", () => {
         verdict: "re-ask",
         reason: "doesn't fit d2's reopen",
         recordedAt: "T4",
+        title: "e",
+        retitledTo: null,
       },
     ]);
     expect(events[1]!.reviewed).toEqual([
@@ -229,6 +276,8 @@ describe("reviewEvents", () => {
         verdict: "reconfirm",
         reason: "fits d1's reopen",
         recordedAt: "T2",
+        title: "e",
+        retitledTo: null,
       },
     ]);
   });

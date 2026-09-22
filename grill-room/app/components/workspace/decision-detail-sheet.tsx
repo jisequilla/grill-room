@@ -150,6 +150,13 @@ export function DecisionDetailSheet({
                     key={`${entry.recordedAt}-${index}`}
                     className="rounded-lg border-l-2 border-muted bg-muted/20 py-2 pr-3 pl-3"
                   >
+                    {entry.questionTitle !== decision.questionTitle ? (
+                      <p className="text-xs text-muted-foreground italic">
+                        {t("workspace.historyAskedAs", {
+                          title: entry.questionTitle,
+                        })}
+                      </p>
+                    ) : null}
                     <div className="flex flex-wrap items-center gap-1.5">
                       <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
                         {entry.kind

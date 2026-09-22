@@ -260,6 +260,7 @@ const messages = {
     history: "History",
     noHistory: "No previous answers.",
     interviewerReason: "Interviewer",
+    historyAskedAs: "Asked as: {{title}}",
     looseEnd: "Loose end",
 
     stateSettled: "Settled",
@@ -308,6 +309,7 @@ const messages = {
     reviewReAsked: "Re-asked",
     reviewReconfirmedCount_one: "{{count}} reconfirmed",
     reviewReconfirmedCount_other: "{{count}} reconfirmed",
+    reviewNowAskedAs: "Now asked as: {{title}}",
   },
   output: {
     notConfirmedTitle: "Not confirmed yet",
