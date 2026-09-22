@@ -193,6 +193,7 @@ const messages = {
     recommended: "Recommended",
     noRecommendation: "No recommendation",
     chooseOne: "Choose one",
+    steerHeading: "Or steer the interview",
     accept: "Accept",
     accepted: "Recommendation accepted",
     writeOwn: "Write my own",

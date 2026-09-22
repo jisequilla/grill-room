@@ -52,6 +52,17 @@ const MOVE_FIELD: Record<
   },
 };
 
+/** The four ways to decline to answer, in the order the card offers them. */
+const STEERING_MOVES = [
+  { kind: "unknown", labelKey: "workspace.unknown", typed: false },
+  { kind: "pushed-back", labelKey: "workspace.pushBack", typed: true },
+  { kind: "deferred", labelKey: "workspace.defer", typed: false },
+  { kind: "prototype-flagged", labelKey: "workspace.prototype", typed: true },
+] as const satisfies readonly (
+  | { kind: RoundAnswerKind; labelKey: string; typed: false }
+  | { kind: TypedMove; labelKey: string; typed: true }
+)[];
+
 export function RoundCard({
   card,
   index,
@@ -175,51 +186,65 @@ export function RoundCard({
         {/* Pick one, then why the interviewer suggests one of them. The chips
             are the answering mechanism; the prose is the reasoning behind one
             of them, and reading in the other order buries the mechanism. */}
-        {card.choices.length > 0 ? (
-          <div>
-            <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        <div>
+          {card.choices.length > 0 ? (
+            <p className="pb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
               {t("workspace.chooseOne")}
             </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {card.choices.map((choice, choiceIndex) => (
-                <Button
-                  key={choice}
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  data-testid="choice-chip"
-                  data-recommended={
-                    choiceIndex === recommendedIndex ? "true" : "false"
-                  }
-                  className={cn(
-                    "h-9 rounded-full border border-border bg-transparent px-3.5 text-[13px] font-medium",
-                    "hover:border-foreground/40 hover:bg-accent",
-                    choiceIndex === recommendedIndex &&
-                      "border-primary/50 ring-1 ring-primary/40",
-                  )}
-                  onClick={() =>
-                    // The chip the interviewer recommended is the
-                    // recommendation, however differently the two are worded:
-                    // recording it as an own answer would lose that it was the
-                    // interviewer's own suggestion, which is the one thing a
-                    // record of accepting versus diverging is made of.
-                    choiceIndex === recommendedIndex
-                      ? save("accepted-recommendation")
-                      : save("own-answer", choice)
-                  }
-                >
-                  {choice}
-                  {choiceIndex === recommendedIndex ? (
-                    <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-primary uppercase">
-                      {t("workspace.recommended")}
-                    </span>
-                  ) : null}
-                </Button>
-              ))}
-            </div>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {card.choices.map((choice, choiceIndex) => (
+              <Button
+                key={choice}
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                data-testid="choice-chip"
+                data-recommended={
+                  choiceIndex === recommendedIndex ? "true" : "false"
+                }
+                className={cn(
+                  "h-9 rounded-full border border-border bg-transparent px-3.5 text-[13px] font-medium",
+                  "hover:border-foreground/40 hover:bg-accent",
+                  choiceIndex === recommendedIndex &&
+                    "border-primary/50 ring-1 ring-primary/40",
+                )}
+                onClick={() =>
+                  // The chip the interviewer recommended is the
+                  // recommendation, however differently the two are worded:
+                  // recording it as an own answer would lose that it was the
+                  // interviewer's own suggestion, which is the one thing a
+                  // record of accepting versus diverging is made of.
+                  choiceIndex === recommendedIndex
+                    ? save("accepted-recommendation")
+                    : save("own-answer", choice)
+                }
+              >
+                {choice}
+                {choiceIndex === recommendedIndex ? (
+                  <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-primary uppercase">
+                    {t("workspace.recommended")}
+                  </span>
+                ) : null}
+              </Button>
+            ))}
+
+            {/* A fifth way to answer, not a way to decline: it belongs with
+                the choices rather than among the steering moves. */}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              className="h-9 rounded-full border border-border bg-transparent px-3.5 text-[13px] font-medium hover:border-foreground/40 hover:bg-accent"
+              onClick={() => openMove("own-answer")}
+            >
+              <IconPencil className="size-3.5" />
+              {t("workspace.writeOwn")}
+            </Button>
           </div>
-        ) : null}
+        </div>
 
         <div className="rounded-lg border border-dashed bg-muted/40 px-3.5 py-3">
           <div className="flex items-center justify-between gap-3">
@@ -283,62 +308,32 @@ export function RoundCard({
             </div>
           </div>
         ) : (
-          <div className="flex flex-wrap items-center gap-0.5 border-t pt-3">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs"
-              disabled={busy}
-              onClick={() => openMove("own-answer")}
-            >
-              <IconPencil className="size-3.5" />
-              {t("workspace.writeOwn")}
-            </Button>
-            <span className="mx-1.5 h-4 w-px bg-border" aria-hidden />
-            {/* The steering moves carry no icons: they are the escape hatches,
-                and the one icon in the row belongs to the answer that is not
-                one. */}
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs font-normal text-muted-foreground"
-              disabled={busy}
-              onClick={() => save("unknown")}
-            >
-              {t("workspace.unknown")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs font-normal text-muted-foreground"
-              disabled={busy}
-              onClick={() => openMove("pushed-back")}
-            >
-              {t("workspace.pushBack")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs font-normal text-muted-foreground"
-              disabled={busy}
-              onClick={() => save("deferred")}
-            >
-              {t("workspace.defer")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7 px-2 text-xs font-normal text-muted-foreground"
-              disabled={busy}
-              onClick={() => openMove("prototype-flagged")}
-            >
-              {t("workspace.prototype")}
-            </Button>
+          // Announced rather than left over: two of these commit instantly
+          // and change the decision's state, so they are named and sized like
+          // the real controls they are. They carry no icons — the one icon on
+          // the card belongs to the answer that is not a steering move.
+          <div className="border-t pt-3">
+            <p className="pb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              {t("workspace.steerHeading")}
+            </p>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {STEERING_MOVES.map((steer) => (
+                <Button
+                  key={steer.labelKey}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  data-testid="steering-move"
+                  className="h-8 border border-border bg-transparent px-2.5 text-[13px] font-medium text-foreground/75 hover:border-foreground/40 hover:bg-accent hover:text-foreground"
+                  disabled={busy}
+                  onClick={() =>
+                    steer.typed ? openMove(steer.kind) : save(steer.kind)
+                  }
+                >
+                  {t(steer.labelKey)}
+                </Button>
+              ))}
+            </div>
           </div>
         )}
       </div>
