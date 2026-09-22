@@ -139,7 +139,8 @@ export function createFakeInterviewer(
 
 /**
  * A minimal complete interview: one round of two questions, then a proposal
- * that we are done, then a spec and its tickets. It is what the fake serves
+ * that we are done, the supersession check that follows it, then a spec and
+ * its tickets. It is what the fake serves
  * when it is selected by environment variable rather than scripted by a test,
  * so the browser smoke test has an interview to walk through.
  */
@@ -210,6 +211,13 @@ export function cannedInterviewTurns(): ScriptedTurn[] {
             "Settled: the shape is a workspace, and its data lives on disk.",
         },
       },
+    },
+    {
+      // The done proposal's second half. The canned session's one loose end is
+      // not answered anywhere else in the tree, so nothing is superseded and
+      // the user resolves it by hand, exactly as before this turn existed.
+      kind: "find-superseded",
+      result: { supersessions: [] },
     },
     {
       kind: "synthesize-spec",

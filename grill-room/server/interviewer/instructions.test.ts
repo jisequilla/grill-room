@@ -12,6 +12,7 @@ import {
 } from "./instructions.js";
 import { buildPrompt } from "./prompt.js";
 import {
+  aFindSupersededRequest,
   aProposeRoundRequest,
   aSynthesizeSpecRequest,
 } from "./test-fixtures.js";
@@ -52,12 +53,17 @@ describe("the interviewer's instructions", () => {
     );
   });
 
-  it("tells the interviewer the five things the skill cannot know", () => {
+  it("tells the interviewer the six things the skill cannot know", () => {
     expect(APP_ADDENDUM).toContain("structured");
     expect(APP_ADDENDUM).toContain("Fact-finding is unavailable");
     expect(APP_ADDENDUM).toContain("dependsOn");
     expect(APP_ADDENDUM).toContain("still open");
     expect(APP_ADDENDUM).toContain("recommendedChoice");
+    expect(APP_ADDENDUM).toContain("is not a supersession");
+  });
+
+  it("forbids inventing an answer no settled decision carries", () => {
+    expect(APP_ADDENDUM).toContain("no settled decision carries");
   });
 
   it("asks for a rationale of equal weight on every choice", () => {
@@ -151,6 +157,15 @@ describe("the prompt for a turn", () => {
       "could not be resumed",
     );
     expect(buildPrompt(request)).not.toContain("could not be resumed");
+  });
+
+  it("names the loose ends to judge when looking for superseded ones", () => {
+    const prompt = buildPrompt(
+      aFindSupersededRequest({ looseEndKeys: ["storage", "hosting"] }),
+    );
+
+    expect(prompt).toContain("Loose ends to judge: storage, hosting");
+    expect(prompt).toContain("Be conservative");
   });
 
   it("carries the spec template verbatim when synthesizing a spec", () => {
