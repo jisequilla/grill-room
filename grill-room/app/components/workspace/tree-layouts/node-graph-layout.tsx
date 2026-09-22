@@ -224,15 +224,47 @@ export function NodeGraphLayout({
       availableHeight / layout.height,
     );
     const k = Number.isFinite(scale) && scale > 0 ? scale : 1;
+    // Centred on both axes, not pinned to the top: a wide, shallow tree (the
+    // common case — most decisions depend on nothing) leaves a lot of empty
+    // panel below a top-pinned graph, and that empty band is exactly where a
+    // first scroll-to-zoom would land with nothing under the cursor.
     setTransform({
       x: (container.clientWidth - layout.width * k) / 2,
-      y: PADDING,
+      y: (container.clientHeight - layout.height * k) / 2,
       k,
     });
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- refit whenever the graph's own shape changes
   useEffect(fitToPanel, [layout.width, layout.height]);
+
+  // Fit-to-panel alone leaves a wide, shallow tree (many decisions that share
+  // depth 0, which is the common case — most questions have no dependency)
+  // scaled down to illegible. Wheel-zoom, centred on the cursor, is the way
+  // out; it needs a real (non-passive) listener because React makes its
+  // synthetic wheel handler passive, which silently drops preventDefault and
+  // lets the wheel scroll the page instead of the graph.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    function handleWheel(event: WheelEvent) {
+      event.preventDefault();
+      const rect = container!.getBoundingClientRect();
+      const pointerX = event.clientX - rect.left;
+      const pointerY = event.clientY - rect.top;
+      const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+      setTransform((current) => {
+        const nextK = Math.min(3, Math.max(0.05, current.k * factor));
+        const worldX = (pointerX - current.x) / current.k;
+        const worldY = (pointerY - current.y) / current.k;
+        return { k: nextK, x: pointerX - worldX * nextK, y: pointerY - worldY * nextK };
+      });
+    }
+
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => container.removeEventListener("wheel", handleWheel);
+  }, []);
 
   function onPointerDown(event: React.PointerEvent<SVGSVGElement>) {
     draggingRef.current = true;
@@ -278,7 +310,7 @@ export function NodeGraphLayout({
                 count: NODE_CAP,
                 total: decisions.length,
               })
-            : null}
+            : t("workspace.layoutGraphZoomHint")}
         </p>
         <Button type="button" variant="outline" size="sm" onClick={fitToPanel}>
           {t("workspace.layoutGraphFitToPanel")}

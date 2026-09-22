@@ -1,9 +1,6 @@
 import { useT } from "@agent-native/core/client/i18n";
 
-import {
-  DecisionStateBadge,
-  LooseEndBadge,
-} from "@/components/workspace/decision-state-badge";
+import { LooseEndBadge } from "@/components/workspace/decision-state-badge";
 import { isLooseEnd, type TreeDecision } from "@/lib/decisions";
 import {
   groupByColumn,
@@ -46,6 +43,9 @@ function ColumnCard({
   const t = useT();
   const withdrawn = decision.state === "withdrawn";
   const unplaced = decision.state === "unplaced";
+  // The column already says the state; a per-card badge would only repeat
+  // it. The one exception is the Loose ends & stale column, which mixes two
+  // different reasons for being there — this marks which of the two.
   const loose = isLooseEnd(decision);
 
   return (
@@ -62,7 +62,7 @@ function ColumnCard({
         (withdrawn || unplaced) && "opacity-60",
       )}
     >
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-start justify-between gap-1.5">
         <span
           className={cn(
             "min-w-0 flex-1 text-[13px] leading-5",
@@ -71,10 +71,11 @@ function ColumnCard({
         >
           {decision.questionTitle}
         </span>
-        <span className="mt-px flex shrink-0 items-center gap-1">
-          {loose ? <LooseEndBadge /> : null}
-          <DecisionStateBadge state={decision.state} />
-        </span>
+        {loose ? (
+          <span className="mt-px shrink-0">
+            <LooseEndBadge />
+          </span>
+        ) : null}
       </div>
       <span className="truncate text-[11px] text-muted-foreground">
         {dependsOnLine(decision, byId, t)}
@@ -102,39 +103,42 @@ export function ColumnsLayout({
   const byId = new Map(decisions.map((decision) => [decision.id, decision]));
   const groups = groupByColumn(decisions);
 
+  // The tree panel is a narrow aside, not the main canvas, so four columns
+  // never fit side by side at its width — a viewport-width breakpoint (e.g.
+  // `xl:grid-cols-4`) would fire from the *page's* width and cram them in
+  // regardless. Each column gets a fixed width instead and the row scrolls
+  // horizontally; a column's own card list scrolls vertically on its own.
   return (
-    <div className="min-h-0 flex-1 overflow-auto p-2">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {LAYOUT_COLUMN_ORDER.map((column) => (
-          <div key={column} className="flex min-w-0 flex-col gap-1.5">
-            <div className="flex items-center justify-between px-0.5">
-              <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                {t(COLUMN_LABEL_KEY[column])}
-              </p>
-              <span className="text-[11px] tabular-nums text-muted-foreground">
-                {groups[column].length}
-              </span>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              {groups[column].length === 0 ? (
-                <p className="rounded-md border border-dashed px-2.5 py-3 text-center text-[11px] text-muted-foreground">
-                  {t("workspace.layoutColumnEmpty")}
-                </p>
-              ) : (
-                groups[column].map((decision) => (
-                  <ColumnCard
-                    key={decision.id}
-                    decision={decision}
-                    byId={byId}
-                    selected={decision.id === selectedId}
-                    onSelect={onSelect}
-                  />
-                ))
-              )}
-            </div>
+    <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-2">
+      {LAYOUT_COLUMN_ORDER.map((column) => (
+        <div key={column} className="flex min-h-0 w-48 shrink-0 flex-col gap-1.5">
+          <div className="flex items-center justify-between px-0.5">
+            <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              {t(COLUMN_LABEL_KEY[column])}
+            </p>
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {groups[column].length}
+            </span>
           </div>
-        ))}
-      </div>
+          <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-0.5 pb-1">
+            {groups[column].length === 0 ? (
+              <p className="rounded-md border border-dashed px-2.5 py-3 text-center text-[11px] text-muted-foreground">
+                {t("workspace.layoutColumnEmpty")}
+              </p>
+            ) : (
+              groups[column].map((decision) => (
+                <ColumnCard
+                  key={decision.id}
+                  decision={decision}
+                  byId={byId}
+                  selected={decision.id === selectedId}
+                  onSelect={onSelect}
+                />
+              ))
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

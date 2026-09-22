@@ -259,6 +259,7 @@ const messages = {
     layoutColumnEmpty: "Nothing here",
     layoutDependsOn: "Depends on: {{list}}",
     layoutGraphFitToPanel: "Fit to panel",
+    layoutGraphZoomHint: "Scroll to zoom, drag to pan",
     layoutGraphShowingFirst: "Showing first {{count}} of {{total}} decisions",
     moreDependencies_one: "+{{count}} more",
     moreDependencies_other: "+{{count}} more",
