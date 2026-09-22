@@ -44,6 +44,9 @@ export default defineConfig({
       "**/.git/**",
       "**/dist/**",
       "**/.react-router/**",
+      // The Playwright browser smoke test: a different runner (`pnpm test:e2e`),
+      // against a real running server, not vitest's action-boundary suite.
+      "**/e2e/**",
     ],
   },
 });

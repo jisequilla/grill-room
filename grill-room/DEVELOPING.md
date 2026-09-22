@@ -15,6 +15,47 @@ This guide is for development-mode agents editing this app's source code. For ap
 - **Dev:** `pnpm dev` (Vite dev server with both React Router + Nitro plugins)
 - **Build:** `pnpm build` (React Router build — client + SSR + Nitro server)
 - **Start:** `node .output/server/index.mjs` (production)
+- **Unit/action tests:** `pnpm test` (vitest, the action boundary — see "Testing Decisions" in `.scratch/grill-room/spec.md`)
+- **Browser smoke test:** `pnpm test:e2e` (Playwright — see below)
+- **Both:** `pnpm test:all`
+
+## Testing
+
+Everything except one thing is tested at the action boundary with vitest —
+`pnpm test`, which never opens a browser and never calls the real Claude CLI.
+
+The one exception is `e2e/smoke.spec.ts`, a single Playwright test that walks
+a full grilling session through the real UI: create a session, answer a round
+(accepting a recommendation and using one steering move), submit it, resolve
+the loose end that leaves, confirm, write the spec, and break it into
+tickets. Run it with `pnpm test:e2e`.
+
+It starts its own dev server (`playwright.config.ts`'s `webServer`) rather
+than reusing anything already running, with two things forced regardless of
+your shell's environment:
+
+- `GRILL_ROOM_INTERVIEWER=fake` — the scripted interviewer
+  (`server/interviewer/fake.ts`) serves a fixed, canned interview
+  (`cannedInterviewTurns()`) instead of calling the real `claude` CLI. The
+  config asserts this before it will even start the server.
+- `DATABASE_URL=pglite:<a fresh temp directory>` — a brand-new, empty
+  database for the run, never `grill-room/data/pglite`.
+
+**The fake interviewer's turn queue lives once per server process, not once
+per session** — it is a plain in-memory queue, consumed in order by whichever
+session asks next. That is why this suite is one test file, one test, one
+Playwright worker, no retries: a second test, a retry, or a second session in
+the same run would ask the interviewer for a turn that was already handed to
+someone else and get a "next queued turn is X but the request was Y" error.
+If you need another end-to-end scenario, either script its own turns onto a
+second `webServer` (a second config, a different port) or extend the existing
+test's one session rather than starting a second one.
+
+The suite runs headless Chromium at a pinned `@playwright/test` version
+whose bundled Chromium build matches what was already cached on this
+machine (`~/Library/Caches/ms-playwright`), so it never triggers a browser
+download. Screenshots on failure and the HTML report are written to
+`e2e/artifacts/` and `playwright-report/`, both gitignored.
 
 ## Directory Structure
 

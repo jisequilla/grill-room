@@ -13,6 +13,8 @@
     "action": "agent-native action",
     "script": "agent-native script",
     "test": "vitest --run --passWithNoTests",
+    "test:e2e": "playwright test",
+    "test:all": "pnpm test && pnpm test:e2e",
     "agent-native:doctor": "agent-native doctor",
     "doctor": "agent-native doctor"
   },
@@ -45,6 +47,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-aspect-ratio": "^1.1.8",
