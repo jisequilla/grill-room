@@ -1,4 +1,15 @@
 #!/usr/bin/env sh
+# This repository is public. local/ holds working notes that stay on this
+# machine, so refuse any commit that stages a path under it — including one
+# staged with `git add -f`.
+_local_staged=$(git diff --cached --name-only --diff-filter=ACMR | grep '^local/')
+if [ -n "$_local_staged" ]; then
+  echo >&2 "pre-commit: refusing to commit local-only paths:"
+  echo "$_local_staged" | sed 's/^/  /' >&2
+  echo >&2 "Unstage with: git restore --staged local/"
+  exit 1
+fi
+
 # --- BEGIN BEADS INTEGRATION v1.3.0 ---
 # This section is managed by beads. Do not remove these markers.
 if command -v bd >/dev/null 2>&1; then

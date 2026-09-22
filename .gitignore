@@ -8,3 +8,6 @@
 
 # Per-ticket git worktrees for parallel subagents
 .worktrees/
+
+# Working notes that stay on this machine
+local/
