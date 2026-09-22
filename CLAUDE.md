@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PoC of Matt Pocock's `grill-me` skill: turn a loose idea into a set of settled decisions through a rounds-of-frontier interview, then carry it into implementation. The experiment is the model split, not the product being built.
 
+## Asking the User
+
+When a decision or clarification is needed from the user, ask it with the AskUserQuestion tool: concrete options, the recommended one first. Never leave it as a trailing question at the end of a prose reply.
+
 ## The Skill
 
 Installed project-locally, unmodified from `github.com/mattpocock/skills` (`skills/productivity/`):
