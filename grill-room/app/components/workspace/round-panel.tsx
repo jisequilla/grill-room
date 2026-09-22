@@ -5,6 +5,7 @@ import {
   ConfirmedPanel,
   DoneProposedPanel,
 } from "@/components/workspace/done-panel";
+import { BatchProgressPanel } from "@/components/workspace/batch/batch-progress-panel";
 import { ReviewDigestPanel } from "@/components/workspace/review-digest";
 import { RoundCard } from "@/components/workspace/round-card";
 import { RoundNudge } from "@/components/workspace/round-nudge";
@@ -89,6 +90,11 @@ export function RoundPanel({
   // dependent that will not resurface as a card at all (a reconfirm) or one
   // that resurfaces only once the interviewer's next turn opens a round for
   // it.
+  // A batch of reopens holds the session for many turns at a time; this says
+  // which of the user's own changes the turn below belongs to. Above the
+  // digest, because the digest is what the batch is producing.
+  const batch = <BatchProgressPanel sessionId={round.sessionId} />;
+
   const digest = (
     <ReviewDigestPanel
       sessionId={round.sessionId}
@@ -106,6 +112,7 @@ export function RoundPanel({
   if (round.turnStatus === "working") {
     return (
       <div>
+        {batch}
         {digest}
         <TurnWorkingPanel startedAt={round.turnStartedAt} />
       </div>
@@ -115,6 +122,7 @@ export function RoundPanel({
   if (round.turnStatus === "failed") {
     return (
       <div>
+        {batch}
         {digest}
         <TurnFailedPanel
           error={round.turnError}
@@ -130,6 +138,7 @@ export function RoundPanel({
   if (round.state === "done-proposed") {
     return (
       <div>
+        {batch}
         {digest}
         <DoneProposedPanel
           sessionId={round.sessionId}
@@ -145,6 +154,7 @@ export function RoundPanel({
   if (round.state === "confirmed") {
     return (
       <div>
+        {batch}
         {digest}
         <ConfirmedPanel
           sessionId={round.sessionId}
@@ -157,6 +167,7 @@ export function RoundPanel({
   if (!round.round) {
     return (
       <div>
+        {batch}
         {digest}
         {hasDecisions ? (
           <NextRoundPanel onRequest={onRequestNextRound} isPending={isRequesting} />
@@ -174,6 +185,7 @@ export function RoundPanel({
 
   return (
     <div>
+      {batch}
       {digest}
       <RoundNudge sessionId={round.sessionId} />
       {/* The stack clears the submit bar's own height, so the last card can be
