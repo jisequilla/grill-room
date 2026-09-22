@@ -98,6 +98,18 @@ export default defineAction({
       })
       .where(eq(schema.decisions.id, decisionId));
 
+    // A supersession is the claim that this decision, as settled, already
+    // answers a loose end. It no longer is settled, so the claim goes with it.
+    await db
+      .update(schema.decisions)
+      .set({
+        supersededById: null,
+        supersessionAnswer: null,
+        supersessionReason: null,
+        updatedAt: now,
+      })
+      .where(eq(schema.decisions.supersededById, decisionId));
+
     if (session.state !== "interviewing") {
       await returnSessionToInterviewing(session, now);
     }
