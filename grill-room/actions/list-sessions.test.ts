@@ -1,9 +1,9 @@
+import { eq } from "@agent-native/core/db/schema";
 import { describe, expect, it } from "vitest";
 
-import { useTestDatabase } from "../test/db.js";
+import { getDb, schema, useTestDatabase } from "../test/db.js";
 import createSession from "./create-session.js";
 import listSessions from "./list-sessions.js";
-import setSessionAnsweringMode from "./set-session-answering-mode.js";
 
 describe("list-sessions", () => {
   useTestDatabase();
@@ -33,14 +33,41 @@ describe("list-sessions", () => {
     const first = await createSession.run({ title: "First", idea: "Idea one" });
     const second = await createSession.run({ title: "Second", idea: "Idea two" });
 
-    // Touching the first session bumps its updatedAt past the second's.
-    await setSessionAnsweringMode.run({
-      id: first.id,
-      answeringMode: "one-at-a-time",
-    });
+    // Explicit, distinct timestamps set directly through the database: two
+    // real action calls can land in the same millisecond, which would make
+    // this assertion flaky if it relied on wall-clock gaps between them.
+    await getDb()
+      .update(schema.sessions)
+      .set({ updatedAt: "2024-01-01T00:00:01.000Z" })
+      .where(eq(schema.sessions.id, second.id));
+    await getDb()
+      .update(schema.sessions)
+      .set({ updatedAt: "2024-01-01T00:00:02.000Z" })
+      .where(eq(schema.sessions.id, first.id));
 
     const sessions = await listSessions.run({});
 
     expect(sessions.map((session) => session.id)).toEqual([first.id, second.id]);
+  });
+
+  it("breaks a tie in activity by id, so the order is stable rather than arbitrary", async () => {
+    const first = await createSession.run({ title: "First", idea: "Idea one" });
+    const second = await createSession.run({ title: "Second", idea: "Idea two" });
+
+    const tiedAt = "2024-01-01T00:00:00.000Z";
+    await getDb()
+      .update(schema.sessions)
+      .set({ updatedAt: tiedAt })
+      .where(eq(schema.sessions.id, first.id));
+    await getDb()
+      .update(schema.sessions)
+      .set({ updatedAt: tiedAt })
+      .where(eq(schema.sessions.id, second.id));
+
+    const expected = [first.id, second.id].sort();
+
+    const sessions = await listSessions.run({});
+
+    expect(sessions.map((session) => session.id)).toEqual(expected);
   });
 });

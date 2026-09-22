@@ -11,6 +11,7 @@ import type {
   SubmittedAnswer,
   UserAddedDecision,
 } from "../server/interviewer/index.js";
+import { increasingTimestamps } from "../server/ordering.js";
 import { returnSessionToInterviewing } from "../server/session-state.js";
 import { runDueStaleReviews } from "../server/stale-review.js";
 import {
@@ -103,7 +104,12 @@ export default defineAction({
         .select()
         .from(schema.decisions)
         .where(eq(schema.decisions.sessionId, sessionId))
-        .orderBy(schema.decisions.createdAt);
+        // `createdAt` has millisecond precision; id as a final tie-break
+        // keeps round-building order deterministic when two decisions land
+        // in the same millisecond (a proposal's own decisions never tie —
+        // see `store` below — but a decision from a different action, such
+        // as `add-decision`, still can).
+        .orderBy(schema.decisions.createdAt, schema.decisions.id);
 
     /**
      * Every decision that belongs in the next round: whatever the last
@@ -289,7 +295,15 @@ export default defineAction({
             eq(schema.rounds.submissionState, "submitted"),
           ),
         )
-        .orderBy(desc(schema.rounds.submittedAt))
+        // `submittedAt` has millisecond precision. Only one round is ever
+        // open at a time, so a round is always created after the previous
+        // one submits — `createdAt` desc is a meaningful secondary key on a
+        // tie, and id is the final, arbitrary-but-deterministic fallback.
+        .orderBy(
+          desc(schema.rounds.submittedAt),
+          desc(schema.rounds.createdAt),
+          schema.rounds.id,
+        )
         .limit(1);
 
       if (!last) return [];
@@ -331,8 +345,14 @@ export default defineAction({
      * pending-candidate check just below finds nothing, and no round opens.
      */
     async function store(result: ProposeRoundResult): Promise<void> {
-      const stamp = Date.now();
-      const now = new Date(stamp).toISOString();
+      const now = new Date().toISOString();
+      // Distinct, increasing timestamps: the tree and the one-at-a-time queue
+      // are read back in `createdAt` order, and a tie would make it
+      // arbitrary.
+      const decisionCreatedAts = increasingTimestamps(
+        now,
+        result.proposedDecisions.length,
+      );
       const currentRows = await loadDecisions();
       const keyById = new Map(
         currentRows.flatMap((row) =>
@@ -356,10 +376,7 @@ export default defineAction({
       if (result.proposedDecisions.length > 0) {
         await db.insert(schema.decisions).values(
           result.proposedDecisions.map((decision, index) => {
-            // Distinct, increasing timestamps: the tree and the one-at-a-time
-            // queue are read back in this order, and a tie would make it
-            // arbitrary.
-            const createdAt = new Date(stamp + index).toISOString();
+            const createdAt = decisionCreatedAts[index] as string;
             return {
               id: ids.get(decision.key) as string,
               sessionId,

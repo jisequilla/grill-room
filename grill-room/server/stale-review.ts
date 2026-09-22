@@ -154,7 +154,10 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
       .select()
       .from(schema.decisions)
       .where(eq(schema.decisions.sessionId, sessionId))
-      .orderBy(schema.decisions.createdAt);
+      // `createdAt` has millisecond precision; id as a final tie-break keeps
+      // review-group order deterministic when two decisions land in the same
+      // millisecond.
+      .orderBy(schema.decisions.createdAt, schema.decisions.id);
 
   let rows = await loadDecisions();
   let due = dueStaleReviews(treeFacts(rows));
