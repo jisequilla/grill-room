@@ -114,7 +114,7 @@ export function DesignTree({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-2">
       <ul className="space-y-px">
         {rows.map((row) => (
           <DecisionRow

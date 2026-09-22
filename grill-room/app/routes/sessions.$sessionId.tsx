@@ -163,7 +163,7 @@ export default function SessionWorkspaceRoute() {
 
   if (sessionLoading) {
     return (
-      <div className="mx-auto w-full max-w-7xl space-y-4 p-6">
+      <div className="mx-auto w-full max-w-[1600px] space-y-4 p-6">
         <Skeleton className="h-6 w-48" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -174,7 +174,7 @@ export default function SessionWorkspaceRoute() {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="mx-auto w-full max-w-7xl p-6">
+      <div className="mx-auto w-full max-w-[1600px] p-6">
         {/* The shell header already carries the session's title, so this block
             is the idea rather than a second heading: the meta chips sit on
             their own row and the idea gets the width to be read whole. */}
@@ -188,7 +188,7 @@ export default function SessionWorkspaceRoute() {
           <SessionIdea idea={session.idea} />
         </header>
 
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_21rem]">
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]">
           <div className="min-w-0 space-y-8">
             <section>
               <h3 className="pb-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
@@ -214,11 +214,14 @@ export default function SessionWorkspaceRoute() {
             </section>
           </div>
 
-          <aside className="min-w-0 lg:sticky lg:top-6 lg:self-start">
+          {/* The column is sized to reach the bottom of the viewport from
+              where it starts unscrolled, which is the state this page is
+              read in: the centre column is what scrolls. */}
+          <aside className="flex min-w-0 flex-col lg:sticky lg:top-6 lg:h-[calc(100dvh-15rem)] lg:self-start">
             <h3 className="pb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
               {t("workspace.treeHeading")}
             </h3>
-            <div className="rounded-xl border bg-card/50 p-2 lg:max-h-[calc(100dvh-10rem)] lg:overflow-y-auto">
+            <div className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card/50">
               <DesignTree
                 decisions={decisions}
                 selectedId={selectedId}
