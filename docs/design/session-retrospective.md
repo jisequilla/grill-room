@@ -44,6 +44,7 @@ The first interview a user ran in Grill Room end to end, on a real idea ("Agent 
 | gr-31 | Grill-with-docs mode: a read-only folder the interviewer may read | The interview designed something that already existed |
 | gr-32 | Bulk reopen from a comparison document | What the orchestrator scripted today, as a feature |
 | gr-33 | Round-size nudge after many one-at-a-time rounds | Ninety-six rounds |
+| gr-36 | Remove the two prototype tree layouts | The user tried columns and a node graph on the real tree and kept the outline |
 
 ## For the PoC
 
