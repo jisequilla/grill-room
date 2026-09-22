@@ -5,6 +5,7 @@ import { and, desc, eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
+import { laterTimestamp } from "../server/ordering.js";
 import { returnSessionToInterviewing } from "../server/session-state.js";
 import { deriveTreeStates, treeFacts } from "../server/tree.js";
 import { failIfTurnInProgress } from "../server/turn.js";
@@ -16,12 +17,7 @@ import getCurrentRound from "./get-current-round.js";
  * run inside one millisecond when something other than a person drives it.
  */
 function reopenStamp(rows: readonly { settledAt: string | null }[]): string {
-  const settled = rows
-    .map((row) => (row.settledAt ? Date.parse(row.settledAt) : 0))
-    .filter((ms) => Number.isFinite(ms));
-  const latest = settled.length > 0 ? Math.max(...settled) : 0;
-
-  return new Date(Math.max(Date.now(), latest + 1)).toISOString();
+  return laterTimestamp(...rows.map((row) => row.settledAt));
 }
 
 export default defineAction({
@@ -62,7 +58,9 @@ export default defineAction({
       .select()
       .from(schema.decisions)
       .where(eq(schema.decisions.sessionId, sessionId))
-      .orderBy(schema.decisions.createdAt);
+      // `createdAt` has millisecond precision; id as a final tie-break keeps
+      // this deterministic when two decisions land in the same millisecond.
+      .orderBy(schema.decisions.createdAt, schema.decisions.id);
 
     const state = deriveTreeStates(treeFacts(rows)).get(decisionId);
 
@@ -113,7 +111,9 @@ export default defineAction({
           eq(schema.rounds.submissionState, "open"),
         ),
       )
-      .orderBy(desc(schema.rounds.createdAt))
+      // Only one round is ever "open" at a time, so this tie-break is
+      // defensive rather than load-bearing: total order still costs nothing.
+      .orderBy(desc(schema.rounds.createdAt), schema.rounds.id)
       .limit(1);
 
     // The user reopened it to answer it differently, so it is asked straight

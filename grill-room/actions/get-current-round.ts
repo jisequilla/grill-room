@@ -46,7 +46,9 @@ export default defineAction({
           eq(schema.rounds.submissionState, "open"),
         ),
       )
-      .orderBy(desc(schema.rounds.createdAt))
+      // Only one round is ever "open" at a time, so this tie-break is
+      // defensive rather than load-bearing: total order still costs nothing.
+      .orderBy(desc(schema.rounds.createdAt), schema.rounds.id)
       .limit(1);
 
     if (!round) return { ...turn, round: null };

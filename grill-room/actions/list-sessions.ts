@@ -13,6 +13,10 @@ export default defineAction({
     return getDb()
       .select()
       .from(schema.sessions)
-      .orderBy(desc(schema.sessions.updatedAt));
+      // `updatedAt` has millisecond precision, so two sessions touched inside
+      // the same millisecond tie. No other column carries a meaningful
+      // secondary "more active" signal, so ties break by id — arbitrary, but
+      // deterministic, so the list stops reordering itself on a reload.
+      .orderBy(desc(schema.sessions.updatedAt), schema.sessions.id);
   },
 });

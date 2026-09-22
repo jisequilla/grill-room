@@ -27,7 +27,9 @@ export default defineAction({
       .select()
       .from(schema.decisions)
       .where(eq(schema.decisions.sessionId, sessionId))
-      .orderBy(schema.decisions.createdAt);
+      // `createdAt` has millisecond precision; id as a final tie-break keeps
+      // this deterministic when two decisions land in the same millisecond.
+      .orderBy(schema.decisions.createdAt, schema.decisions.id);
 
     const reasons = classifyLooseEnds(treeFacts(rows));
     const views = describeDecisions(rows);

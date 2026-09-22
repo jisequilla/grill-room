@@ -217,7 +217,7 @@ export async function decisionSnapshots(
             rows.map((row) => row.id),
           ),
         )
-        .orderBy(schema.decisionHistory.recordedAt)
+        .orderBy(schema.decisionHistory.recordedAt, schema.decisionHistory.id)
     : [];
 
   return rows

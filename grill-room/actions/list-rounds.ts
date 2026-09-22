@@ -27,7 +27,9 @@ export default defineAction({
       .select()
       .from(schema.rounds)
       .where(eq(schema.rounds.sessionId, sessionId))
-      .orderBy(schema.rounds.createdAt);
+      // `createdAt` has millisecond precision; id as a final tie-break keeps
+      // this deterministic when two rounds land in the same millisecond.
+      .orderBy(schema.rounds.createdAt, schema.rounds.id);
 
     if (rounds.length === 0) return { sessionId, rounds: [] };
 

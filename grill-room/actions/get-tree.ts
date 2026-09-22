@@ -27,7 +27,9 @@ export default defineAction({
       .select()
       .from(schema.decisions)
       .where(eq(schema.decisions.sessionId, sessionId))
-      .orderBy(schema.decisions.createdAt);
+      // `createdAt` has millisecond precision; id as a final tie-break keeps
+      // this deterministic when two decisions land in the same millisecond.
+      .orderBy(schema.decisions.createdAt, schema.decisions.id);
 
     // What the decision used to say, and what the interviewer said about
     // superseding it. Kept whenever the decision was reopened, re-asked,
@@ -43,7 +45,7 @@ export default defineAction({
               rows.map((row) => row.id),
             ),
           )
-          .orderBy(schema.decisionHistory.recordedAt)
+          .orderBy(schema.decisionHistory.recordedAt, schema.decisionHistory.id)
       : [];
 
     return {
