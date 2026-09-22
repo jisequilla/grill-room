@@ -7,6 +7,7 @@ import {
 } from "@/components/workspace/done-panel";
 import { ReviewDigestPanel } from "@/components/workspace/review-digest";
 import { RoundCard } from "@/components/workspace/round-card";
+import { RoundNudge } from "@/components/workspace/round-nudge";
 import {
   NextRoundPanel,
   StartInterviewPanel,
@@ -174,6 +175,7 @@ export function RoundPanel({
   return (
     <div>
       {digest}
+      <RoundNudge sessionId={round.sessionId} />
       {/* The stack clears the submit bar's own height, so the last card can be
           scrolled out from under it rather than read through it. */}
       <div className="space-y-3 pb-20">
