@@ -25,6 +25,8 @@ function Summary({
   title: string;
   summary: string | null;
 }) {
+  const t = useT();
+
   return (
     <section className="rounded-xl border bg-card px-5 py-4">
       <div className="flex items-center gap-2 pb-2.5 text-muted-foreground">
@@ -33,10 +35,18 @@ function Summary({
           {title}
         </h3>
       </div>
-      <Markdown
-        text={summary}
-        className="text-sm leading-relaxed text-foreground"
-      />
+      {summary?.trim() ? (
+        <Markdown
+          text={summary}
+          className="text-sm leading-relaxed text-foreground"
+        />
+      ) : (
+        // The server sets a summary with the state and clears it on the way
+        // out, so this is the seam between the two rather than a normal read.
+        <p className="text-sm text-muted-foreground italic">
+          {t("workspace.noDoneSummary")}
+        </p>
+      )}
     </section>
   );
 }

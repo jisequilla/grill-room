@@ -146,6 +146,7 @@ const messages = {
     confirmedHeading: "Confirmed",
     doneProposedTitle: "The interviewer proposes you are done",
     confirmedTitle: "Shared understanding confirmed",
+    noDoneSummary: "The interviewer left no summary with its proposal.",
     confirmedBanner:
       "Reopening any decision returns this session to interviewing.",
     confirmedMeaning:
