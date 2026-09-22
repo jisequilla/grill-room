@@ -8,6 +8,7 @@ import {
 } from "@/components/workspace/decision-state-badge";
 import { Markdown } from "@/components/workspace/markdown";
 import { ReopenDecisionAlert } from "@/components/workspace/reopen-decision-alert";
+import { VerdictTag } from "@/components/workspace/review-digest";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -22,6 +23,7 @@ import {
   isLooseEnd,
   type TreeDecision,
 } from "@/lib/decisions";
+import { classifyHistoryEntry } from "@/lib/review-digest";
 
 function Section({
   title,
@@ -148,11 +150,17 @@ export function DecisionDetailSheet({
                     key={`${entry.recordedAt}-${index}`}
                     className="rounded-lg border-l-2 border-muted bg-muted/20 py-2 pr-3 pl-3"
                   >
-                    <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                      {entry.kind
-                        ? t(ANSWER_KIND_LABEL_KEY[entry.kind])
-                        : t("workspace.noAnswerRecorded")}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                        {entry.kind
+                          ? t(ANSWER_KIND_LABEL_KEY[entry.kind])
+                          : t("workspace.noAnswerRecorded")}
+                      </p>
+                      {(() => {
+                        const verdict = classifyHistoryEntry(decision, index);
+                        return verdict ? <VerdictTag verdict={verdict} /> : null;
+                      })()}
+                    </div>
                     {entry.text ? (
                       <p className="mt-0.5 text-sm break-words whitespace-pre-wrap">
                         {entry.text}

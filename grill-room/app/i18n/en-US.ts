@@ -301,6 +301,13 @@ const messages = {
     roundCardCount_other: "{{count}} questions",
     historyEmpty: "No rounds yet.",
     noAnswerRecorded: "No answer recorded",
+
+    reviewDigestHeading: "What changed",
+    reviewDigestDismiss: "Dismiss",
+    reviewReconfirmed: "Reconfirmed",
+    reviewReAsked: "Re-asked",
+    reviewReconfirmedCount_one: "{{count}} reconfirmed",
+    reviewReconfirmedCount_other: "{{count}} reconfirmed",
   },
   output: {
     notConfirmedTitle: "Not confirmed yet",

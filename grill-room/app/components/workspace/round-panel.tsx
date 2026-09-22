@@ -5,6 +5,7 @@ import {
   ConfirmedPanel,
   DoneProposedPanel,
 } from "@/components/workspace/done-panel";
+import { ReviewDigestPanel } from "@/components/workspace/review-digest";
 import { RoundCard } from "@/components/workspace/round-card";
 import {
   NextRoundPanel,
@@ -15,6 +16,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import type { TreeDecision } from "@/lib/decisions";
+import { roundCardAnchorId } from "@/lib/review-digest";
 
 type RoundResult = AgentNativeActionRegistry["get-current-round"]["result"];
 type Card = NonNullable<RoundResult["round"]>["decisions"][number];
@@ -41,6 +44,8 @@ export function RoundPanel({
   round,
   isLoading,
   hasDecisions,
+  decisions,
+  lastSubmittedAt,
   onRequestNextRound,
   isRequesting,
   onSubmit,
@@ -51,6 +56,10 @@ export function RoundPanel({
   isLoading: boolean;
   /** Whether the session's tree holds anything yet, which decides the empty copy. */
   hasDecisions: boolean;
+  /** The whole tree, history included — what the "what changed" digest reads. */
+  decisions: readonly TreeDecision[];
+  /** The most recently submitted round's timestamp, or null when none yet. */
+  lastSubmittedAt: string | null;
   onRequestNextRound: () => void;
   isRequesting: boolean;
   onSubmit: (roundId: string) => void;
@@ -73,19 +82,45 @@ export function RoundPanel({
     );
   }
 
+  // What a recent reopen put in doubt, above whatever the round itself is
+  // showing: a turn working or failed, the interview's ending, or the cards.
+  // Present throughout rather than only alongside cards, since it can name a
+  // dependent that will not resurface as a card at all (a reconfirm) or one
+  // that resurfaces only once the interviewer's next turn opens a round for
+  // it.
+  const digest = (
+    <ReviewDigestPanel
+      sessionId={round.sessionId}
+      decisions={decisions}
+      lastSubmittedAt={lastSubmittedAt}
+      openRoundDecisionIds={
+        new Set((round.round?.decisions ?? []).map((card) => card.id))
+      }
+      onOpenDecision={onOpenDecision}
+    />
+  );
+
   // The stored status, not the pending promise: a turn outlives the request
   // that started it, so a reload mid-turn must land here too.
   if (round.turnStatus === "working") {
-    return <TurnWorkingPanel startedAt={round.turnStartedAt} />;
+    return (
+      <div>
+        {digest}
+        <TurnWorkingPanel startedAt={round.turnStartedAt} />
+      </div>
+    );
   }
 
   if (round.turnStatus === "failed") {
     return (
-      <TurnFailedPanel
-        error={round.turnError}
-        onRetry={onRequestNextRound}
-        isPending={isRequesting}
-      />
+      <div>
+        {digest}
+        <TurnFailedPanel
+          error={round.turnError}
+          onRetry={onRequestNextRound}
+          isPending={isRequesting}
+        />
+      </div>
     );
   }
 
@@ -93,36 +128,41 @@ export function RoundPanel({
   // interviewer has proposed done, the centre panel is the ending, not cards.
   if (round.state === "done-proposed") {
     return (
-      <DoneProposedPanel
-        sessionId={round.sessionId}
-        doneSummary={round.doneSummary}
-        onOpenDecision={onOpenDecision}
-        onContinueInterview={onRequestNextRound}
-        isContinuing={isRequesting}
-      />
+      <div>
+        {digest}
+        <DoneProposedPanel
+          sessionId={round.sessionId}
+          doneSummary={round.doneSummary}
+          onOpenDecision={onOpenDecision}
+          onContinueInterview={onRequestNextRound}
+          isContinuing={isRequesting}
+        />
+      </div>
     );
   }
 
   if (round.state === "confirmed") {
     return (
-      <ConfirmedPanel
-        sessionId={round.sessionId}
-        doneSummary={round.doneSummary}
-      />
+      <div>
+        {digest}
+        <ConfirmedPanel
+          sessionId={round.sessionId}
+          doneSummary={round.doneSummary}
+        />
+      </div>
     );
   }
 
   if (!round.round) {
-    return hasDecisions ? (
-      <NextRoundPanel
-        onRequest={onRequestNextRound}
-        isPending={isRequesting}
-      />
-    ) : (
-      <StartInterviewPanel
-        onStart={onRequestNextRound}
-        isPending={isRequesting}
-      />
+    return (
+      <div>
+        {digest}
+        {hasDecisions ? (
+          <NextRoundPanel onRequest={onRequestNextRound} isPending={isRequesting} />
+        ) : (
+          <StartInterviewPanel onStart={onRequestNextRound} isPending={isRequesting} />
+        )}
+      </div>
     );
   }
 
@@ -133,19 +173,21 @@ export function RoundPanel({
 
   return (
     <div>
+      {digest}
       {/* The stack clears the submit bar's own height, so the last card can be
           scrolled out from under it rather than read through it. */}
       <div className="space-y-3 pb-20">
         {cards.map((card, index) => (
-          <RoundCard
-            key={card.id}
-            card={card}
-            index={index}
-            disabled={isSubmitting}
-            foldable={cards.length > 1}
-            expanded={expandedId === card.id}
-            onExpandedChange={(open) => setExpandedId(open ? card.id : null)}
-          />
+          <div key={card.id} id={roundCardAnchorId(card.id)}>
+            <RoundCard
+              card={card}
+              index={index}
+              disabled={isSubmitting}
+              foldable={cards.length > 1}
+              expanded={expandedId === card.id}
+              onExpandedChange={(open) => setExpandedId(open ? card.id : null)}
+            />
+          </div>
         ))}
       </div>
 

@@ -149,6 +149,19 @@ export default function SessionWorkspaceRoute() {
   const selected =
     decisions.find((decision) => decision.id === selectedId) ?? null;
 
+  // What the "what changed" digest treats as already seen: everything up to
+  // (and including) the last round the user actually submitted.
+  const lastSubmittedAt =
+    rounds?.rounds
+      .filter((round) => round.submissionState === "submitted" && round.submittedAt)
+      .reduce<string | null>(
+        (latest, round) =>
+          !latest || (round.submittedAt as string) > latest
+            ? (round.submittedAt as string)
+            : latest,
+        null,
+      ) ?? null;
+
   function selectDecision(decision: TreeDecision) {
     openDecision(decision.id);
   }
@@ -207,6 +220,8 @@ export default function SessionWorkspaceRoute() {
                 round={round}
                 isLoading={roundLoading}
                 hasDecisions={decisions.length > 0}
+                decisions={decisions}
+                lastSubmittedAt={lastSubmittedAt}
                 onRequestNextRound={() => nextRound.mutate({ sessionId: id })}
                 isRequesting={nextRound.isPending}
                 onSubmit={(roundId) => submitRound.mutate({ id: roundId })}
@@ -219,7 +234,7 @@ export default function SessionWorkspaceRoute() {
               <h3 className="pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
                 {t("workspace.historyHeading")}
               </h3>
-              <RoundHistory rounds={rounds?.rounds ?? []} />
+              <RoundHistory rounds={rounds?.rounds ?? []} decisions={decisions} />
             </section>
           </div>
 
