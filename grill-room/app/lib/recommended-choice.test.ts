@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { recommendedChoiceIndex } from "@/lib/recommended-choice";
+import {
+  recommendedChoiceIndex,
+  resolveRecommendedChoice,
+} from "@/lib/recommended-choice";
 
 describe("recommendedChoiceIndex", () => {
   it("matches a lettered choice the recommendation repeats verbatim", () => {
@@ -112,6 +115,74 @@ describe("recommendedChoiceIndex", () => {
         "A) Common photo formats only",
         "B) Above plus RAW formats",
       ]),
+    ).toBeNull();
+  });
+});
+
+describe("resolveRecommendedChoice", () => {
+  const reasoned = [
+    { label: "pgx + sqlc", rationale: "Generated, typed, and one more build step." },
+    { label: "Raw pgx", rationale: "No codegen, and every query is hand-checked." },
+  ];
+
+  it("takes the interviewer's index, even when the prose matches nothing", () => {
+    expect(
+      resolveRecommendedChoice({
+        choices: reasoned,
+        recommendedChoice: 0,
+        recommendedAnswer:
+          "pgx with sqlc on top, so the query layer is checked at build time rather than in review.",
+      }),
+    ).toBe(0);
+  });
+
+  it("does not guess past a null index on a decision whose choices are reasoned", () => {
+    // The interviewer was asked for the index and told to answer null when its
+    // recommendation is none of the choices. Falling back here would put the
+    // marker back on a chip the interviewer declined to pick.
+    expect(
+      resolveRecommendedChoice({
+        choices: reasoned,
+        recommendedChoice: null,
+        recommendedAnswer: "Raw pgx for now, and revisit once the schema settles.",
+      }),
+    ).toBeNull();
+  });
+
+  it("falls back to the prose match for a row stored before rationales existed", () => {
+    expect(
+      resolveRecommendedChoice({
+        choices: [
+          { label: "In memory", rationale: "" },
+          { label: "On disk", rationale: "" },
+        ],
+        recommendedChoice: null,
+        recommendedAnswer: "On disk, in the app's own database",
+      }),
+    ).toBe(1);
+  });
+
+  it("marks nothing when an old row's prose matches none of its choices", () => {
+    expect(
+      resolveRecommendedChoice({
+        choices: [
+          { label: "Hooks only", rationale: "" },
+          { label: "OTel exporter only", rationale: "" },
+        ],
+        recommendedChoice: null,
+        recommendedAnswer:
+          "Hooks for tool-call events plus the OTel exporter for token metrics",
+      }),
+    ).toBeNull();
+  });
+
+  it("marks nothing when the stored index points past the choices", () => {
+    expect(
+      resolveRecommendedChoice({
+        choices: reasoned,
+        recommendedChoice: 7,
+        recommendedAnswer: "pgx + sqlc",
+      }),
     ).toBeNull();
   });
 });

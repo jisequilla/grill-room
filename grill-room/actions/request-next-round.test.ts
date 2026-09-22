@@ -2,6 +2,10 @@ import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  recommendedChoiceIndex,
+  resolveRecommendedChoice,
+} from "@/lib/recommended-choice";
+import {
   InterviewerError,
   resetInterviewer,
   scriptInterviewer,
@@ -192,6 +196,113 @@ describe("request-next-round", () => {
     expect(tree.decisions[1]?.dependsOn).toEqual([tree.decisions[0]?.id]);
   });
 
+  describe("choices and their rationales", () => {
+    it("stores each choice's rationale beside its label, and the recommended index, and reads all three back", async () => {
+      const session = await aSession();
+      scriptInterviewer([
+        {
+          kind: "propose-round",
+          result: {
+            proposedDecisions: [
+              {
+                key: "shape",
+                title: "What shape should this take?",
+                body: "The first thing to settle.",
+                choices: [
+                  { label: "A page", rationale: "One scroll, and the tree hides." },
+                  { label: "A workspace", rationale: "Three columns, more layout." },
+                ],
+                recommendedChoice: 1,
+                recommendedAnswer:
+                  "The workspace, because the tree beside the question is the point.",
+                dependsOn: [],
+                ask: true,
+              },
+            ],
+            pushBackResponses: [],
+            userDecisionPlacements: [],
+            done: null,
+          },
+        },
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(result.round?.decisions[0]).toMatchObject({
+        choices: [
+          { label: "A page", rationale: "One scroll, and the tree hides." },
+          { label: "A workspace", rationale: "Three columns, more layout." },
+        ],
+        recommendedChoice: 1,
+        recommendedChoiceLabel: "A workspace",
+      });
+
+      const [stored] = await getDb()
+        .select()
+        .from(schema.decisions)
+        .where(eq(schema.decisions.sessionId, session.id));
+
+      expect(stored).toMatchObject({
+        offeredChoicesJson: JSON.stringify(["A page", "A workspace"]),
+        choiceRationalesJson: JSON.stringify([
+          "One scroll, and the tree hides.",
+          "Three columns, more layout.",
+        ]),
+        recommendedChoice: 1,
+      });
+    });
+
+    it("marks the recommended chip from the index when the prose names no label at all", async () => {
+      // The whole reason the index exists: across a real 72-decision session
+      // the prose matcher hit on one round in five, and every miss recorded a
+      // click on the recommended chip as the user's own answer.
+      const session = await aSession();
+      scriptInterviewer([
+        round(
+          proposed({
+            choices: ["Hooks only", "OTel exporter only", "Hooks + OTel"],
+            recommendedChoice: 2,
+            recommendedAnswer:
+              "Both, since each covers what the other misses on cost attribution.",
+          }),
+        ),
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+      const card = result.round!.decisions[0]!;
+
+      expect(recommendedChoiceIndex(card.recommendedAnswer, card.choices.map((c) => c.label))).toBeNull();
+      expect(resolveRecommendedChoice(card)).toBe(2);
+      expect(card.recommendedChoiceLabel).toBe("Hooks + OTel");
+    });
+
+    it("reads a row stored before rationales existed as choices with none, and no recommended index", async () => {
+      const session = await aSession();
+      const now = new Date().toISOString();
+      await getDb().insert(schema.decisions).values({
+        id: "decision-legacy",
+        sessionId: session.id,
+        key: "legacy",
+        questionTitle: "Where does the data live?",
+        offeredChoicesJson: JSON.stringify(["In memory", "On disk"]),
+        recommendedAnswer: "On disk, in the app's own database",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const [view] = (await getTree.run({ sessionId: session.id })).decisions;
+
+      expect(view).toMatchObject({
+        choices: [
+          { label: "In memory", rationale: "" },
+          { label: "On disk", rationale: "" },
+        ],
+        recommendedChoice: null,
+        recommendedChoiceLabel: null,
+      });
+    });
+  });
+
   describe("proposal validation", () => {
     it("rejects a question that is not on the frontier and re-asks with the reason", async () => {
       const session = await aSession();
@@ -273,6 +384,47 @@ describe("request-next-round", () => {
           'Decision "shape" is already in the tree',
         ),
       });
+    });
+
+    it("rejects a recommendedChoice that is not one of the decision's own choices", async () => {
+      const session = await aSession();
+      const interviewer = scriptInterviewer([
+        round(
+          proposed({ choices: ["A page", "A workspace"], recommendedChoice: 2 }),
+        ),
+        round(
+          proposed({ choices: ["A page", "A workspace"], recommendedChoice: 1 }),
+        ),
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining(
+          '`recommendedChoice` to 2, which is not one of its 2 choices',
+        ),
+      });
+      expect(result.round?.decisions[0]).toMatchObject({
+        recommendedChoice: 1,
+        recommendedChoiceLabel: "A workspace",
+      });
+    });
+
+    it("rejects a recommendedChoice on a decision that offers no choices", async () => {
+      const session = await aSession();
+      const bad = round(proposed({ choices: [], recommendedChoice: 0 }));
+      const interviewer = scriptInterviewer([bad, bad, bad]);
+
+      await expect(
+        requestNextRound.run({ sessionId: session.id }),
+      ).rejects.toThrow(/offers no choices/);
+      expect(interviewer.requests).toHaveLength(3);
+      expect(
+        await getDb()
+          .select()
+          .from(schema.decisions)
+          .where(eq(schema.decisions.sessionId, session.id)),
+      ).toEqual([]);
     });
 
     it("gives up after two retries, stores nothing, and records the failed turn", async () => {
@@ -491,6 +643,8 @@ describe("request-next-round", () => {
                 key: added.key as string,
                 dependsOn: [],
                 ask: true,
+                choices: ["Not yet", "From the start"],
+                recommendedChoice: 0,
                 recommendedAnswer: "Not for the first version.",
               }),
             ],
@@ -516,8 +670,17 @@ describe("request-next-round", () => {
       });
 
       const tree = await getTree.run({ sessionId: session.id });
+      // A placement carries the choices, their rationales and the recommended
+      // index the same way a proposal does: the user wrote the question, the
+      // interviewer supplies everything needed to answer it.
       expect(tree.decisions).toMatchObject([
-        { key: added.key, state: "frontier" },
+        {
+          key: added.key,
+          state: "frontier",
+          choices: withRationales(["Not yet", "From the start"]),
+          recommendedChoice: 0,
+          recommendedChoiceLabel: "Not yet",
+        },
       ]);
       expect(result.round?.decisions.map((card) => card.key)).toEqual([
         added.key,

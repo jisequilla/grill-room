@@ -984,6 +984,50 @@ describe("stale review", () => {
     ]);
   });
 
+  it("sends back a re-ask whose recommendedChoice is not one of its own choices", async () => {
+    const { sessionId, interviewer } = await aSettledChain(
+      nothingMore,
+      review(
+        { key: "storage", verdict: "reconfirm" },
+        {
+          key: "sync",
+          verdict: "re-ask",
+          title: "How does a page stay current?",
+          choices: ["Poll", "Push"],
+          recommendedChoice: 4,
+        },
+      ),
+      review(
+        { key: "storage", verdict: "reconfirm" },
+        {
+          key: "sync",
+          verdict: "re-ask",
+          title: "How does a page stay current?",
+          choices: ["Poll", "Push"],
+          recommendedChoice: 1,
+          recommendedAnswer: "Push, so a stale page cannot linger.",
+        },
+      ),
+      nothingMore,
+    );
+
+    const reopened = (await treeBy(sessionId)).shape!;
+    await reopenDecision.run({ decisionId: reopened.id });
+    await answerOpenRound(sessionId, "A page, after all");
+
+    expect(interviewer.requests[5]).toMatchObject({
+      rejectionReason: expect.stringContaining(
+        '`recommendedChoice` to 4, which is not one of its 2 choices',
+      ),
+    });
+    expect((await treeBy(sessionId)).sync).toMatchObject({
+      questionTitle: "How does a page stay current?",
+      choices: withRationales(["Poll", "Push"]),
+      recommendedChoice: 1,
+      recommendedChoiceLabel: "Push",
+    });
+  });
+
   it("gives up after two retries, changes nothing, and records the failed turn", async () => {
     const overComplete = review(
       { key: "storage", verdict: "reconfirm" },
