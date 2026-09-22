@@ -17,6 +17,7 @@ import {
   type RoundAnswerKind,
   type RoundCard as RoundCardData,
 } from "@/lib/decisions";
+import { recommendedChoiceIndex } from "@/lib/recommended-choice";
 import { cn } from "@/lib/utils";
 
 /** Draft answers that count as given but leave the decision unsettled. */
@@ -76,6 +77,10 @@ export function RoundCard({
 
   const draft = card.draft;
   const busy = disabled || isPending;
+  const recommendedIndex = recommendedChoiceIndex(
+    card.recommendedAnswer,
+    card.choices,
+  );
   const leavesOpen =
     draft !== null && LOOSE_END_DRAFT_KINDS.includes(draft.answerKind);
 
@@ -167,6 +172,53 @@ export function RoundCard({
       ) : null}
 
       <div className="space-y-4 px-5 pb-4">
+        {/* Pick one, then why the interviewer suggests one of them. The chips
+            are the answering mechanism; the prose is the reasoning behind one
+            of them, and reading in the other order buries the mechanism. */}
+        {card.choices.length > 0 ? (
+          <div>
+            <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              {t("workspace.chooseOne")}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {card.choices.map((choice, choiceIndex) => (
+                <Button
+                  key={choice}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  data-testid="choice-chip"
+                  data-recommended={
+                    choiceIndex === recommendedIndex ? "true" : "false"
+                  }
+                  className={cn(
+                    "h-9 rounded-full border border-border bg-transparent px-3.5 text-[13px] font-medium",
+                    "hover:border-foreground/40 hover:bg-accent",
+                    choiceIndex === recommendedIndex &&
+                      "border-primary/50 ring-1 ring-primary/40",
+                  )}
+                  onClick={() =>
+                    // A choice that is the recommendation is the recommendation:
+                    // recording it as an own answer would lose that it was the
+                    // interviewer's own suggestion.
+                    choice === card.recommendedAnswer
+                      ? save("accepted-recommendation")
+                      : save("own-answer", choice)
+                  }
+                >
+                  {choice}
+                  {choiceIndex === recommendedIndex ? (
+                    <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-primary uppercase">
+                      {t("workspace.recommended")}
+                    </span>
+                  ) : null}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="rounded-lg border border-dashed bg-muted/40 px-3.5 py-3">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
@@ -195,36 +247,6 @@ export function RoundCard({
             </p>
           )}
         </div>
-
-        {card.choices.length > 0 ? (
-          <div>
-            <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-              {t("workspace.choices")}
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {card.choices.map((choice) => (
-                <Button
-                  key={choice}
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  className="h-7 rounded-full text-xs font-normal"
-                  onClick={() =>
-                    // A choice that is the recommendation is the recommendation:
-                    // recording it as an own answer would lose that it was the
-                    // interviewer's own suggestion.
-                    choice === card.recommendedAnswer
-                      ? save("accepted-recommendation")
-                      : save("own-answer", choice)
-                  }
-                >
-                  {choice}
-                </Button>
-              ))}
-            </div>
-          </div>
-        ) : null}
 
         {field && move ? (
           <div className="space-y-2 rounded-lg border bg-muted/30 p-3.5">

@@ -192,7 +192,7 @@ const messages = {
 
     recommended: "Recommended",
     noRecommendation: "No recommendation",
-    choices: "Offered choices",
+    chooseOne: "Choose one",
     accept: "Accept",
     accepted: "Recommendation accepted",
     writeOwn: "Write my own",
