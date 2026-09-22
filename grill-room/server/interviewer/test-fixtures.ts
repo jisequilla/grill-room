@@ -41,6 +41,7 @@ export function aContext(
     model: "sonnet",
     answeringMode: "whole-round",
     conversationId: null,
+    docsFolder: null,
     decisions: [],
     ...overrides,
   };

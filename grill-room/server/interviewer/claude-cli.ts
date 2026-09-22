@@ -99,10 +99,59 @@ function childEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return env;
 }
 
+/**
+ * The only tools a docs-folder turn may use. All three read; none writes, runs
+ * a command, or reaches the network. The list is passed twice: to `--tools`,
+ * which is the set of built-in tools that exist at all for this turn, and to
+ * `--allowed-tools`, which is the permission allowlist that keeps them from
+ * prompting. A tool named in neither cannot be called; a tool named in the
+ * first but not the second would prompt, and `--permission-prompts none`
+ * denies anything that prompts.
+ */
+export const DOCS_MODE_TOOLS = ["Read", "Grep", "Glob"] as const;
+
+/**
+ * What a docs-folder turn adds to the invocation. The folder is also the
+ * child's working directory; these flags are what stops the turn reaching
+ * anything else.
+ *
+ * - `--restricted` is the one that enforces the boundary: it confines the file
+ *   tools to the working directories (`--add-dir` included), removes the
+ *   command-running tools and WebFetch, and ignores the user, project and
+ *   local settings files. Without it the file tools are not directory-scoped
+ *   at all — the CLI has no flag that scopes a tool to a directory on its own.
+ * - `--strict-mcp-config` stops the folder's own `.mcp.json` from adding
+ *   servers, which `--restricted` alone does not cover.
+ * - `--disable-slash-commands` stops the folder's `.claude/skills` from being
+ *   loaded: skills resolve from the working directory (see
+ *   `docs/spikes/claude-code-harness.md`, Q4).
+ *
+ * What none of these stops: a `CLAUDE.md` or `AGENTS.md` in the docs folder is
+ * still auto-discovered and prepended as context. Only `--bare` skips that, and
+ * `--bare` refuses the OAuth login this app's subscription auth depends on, so
+ * the folder's memory files are accepted as read.
+ */
+function docsModeArgs(docsFolder: string): string[] {
+  return [
+    "--tools",
+    DOCS_MODE_TOOLS.join(","),
+    "--add-dir",
+    docsFolder,
+    "--restricted",
+    "--strict-mcp-config",
+    "--disable-slash-commands",
+    // Nobody is at the terminal: anything that would prompt is denied rather
+    // than granted or left hanging.
+    "--permission-prompts",
+    "none",
+  ];
+}
+
 export function buildCliArgs(
   request: InterviewerRequest,
   { prompt, resume }: { prompt: string; resume: string | null },
 ): string[] {
+  const { docsFolder } = request.context;
   const args = [
     "-p",
     prompt,
@@ -110,13 +159,15 @@ export function buildCliArgs(
     request.context.model,
     "--output-format",
     "json",
-    // The empty-string form: it disables every tool. The interviewer must not
-    // be able to run commands, read files, or touch the machine.
+    // Without a docs folder: the empty-string form, which disables every tool.
+    // The interviewer must not be able to run commands, read files, or touch
+    // the machine. With one, exactly the three read tools, and nothing else.
     "--allowed-tools",
-    "",
+    docsFolder ? DOCS_MODE_TOOLS.join(",") : "",
     "--json-schema",
     JSON.stringify(jsonSchemaFor(request.kind)),
   ];
+  if (docsFolder) args.push(...docsModeArgs(docsFolder));
   if (resume) args.push("--resume", resume);
   return args;
 }
@@ -190,7 +241,9 @@ export function createClaudeCliInterviewer(
     const outcome = await runCli({
       command,
       args: buildCliArgs(request, { prompt, resume }),
-      cwd,
+      // A docs folder is the child's working directory, which is what makes it
+      // the directory `--restricted` confines the file tools to.
+      cwd: request.context.docsFolder ?? cwd,
       env: childEnvironment(sourceEnv),
     });
 

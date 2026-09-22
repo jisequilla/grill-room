@@ -70,6 +70,9 @@ function renderContext(context: InterviewContext): string {
         ? "one question at a time — propose at most one decision with `ask` true"
         : "whole round — ask the entire frontier at once"
     }`,
+    ...(context.docsFolder
+      ? [`Docs folder (your working directory, read only): ${context.docsFolder}`]
+      : []),
     "",
     "The idea being grilled, in the user's words:",
     "",
@@ -279,7 +282,7 @@ export function buildPrompt(
   return [
     OPENING_LINE,
     "",
-    interviewerInstructions(),
+    interviewerInstructions({ docsFolder: request.context.docsFolder }),
     "",
     "---",
     "",

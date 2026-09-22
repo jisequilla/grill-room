@@ -279,4 +279,9 @@ export const appMigrations: MigrationEntry[] = [
     name: "decisions-supersession-reason-column",
     sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS supersession_reason TEXT`,
   },
+  {
+    version: 35,
+    name: "sessions-docs-folder-column",
+    sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS docs_folder TEXT`,
+  },
 ];

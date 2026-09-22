@@ -23,6 +23,8 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { actionErrorCode } from "@/lib/decisions";
+import { DOCS_FOLDER_ERROR_KEY } from "@/lib/docs-folder";
 import {
   ANSWERING_MODE_LABEL_KEY,
   MODEL_LABEL_KEY,
@@ -55,6 +57,8 @@ export function CreateSessionDialog({
   const [model, setModel] = useState<SessionModel>(defaultModel ?? "fable");
   const [answeringMode, setAnsweringMode] =
     useState<SessionAnsweringMode>("whole-round");
+  const [docsFolder, setDocsFolder] = useState("");
+  const [docsFolderError, setDocsFolderError] = useState<string | null>(null);
 
   // Reset the form to a clean slate, pre-filled with the current global
   // default model, every time the dialog opens.
@@ -63,6 +67,8 @@ export function CreateSessionDialog({
     setTitle("");
     setIdea("");
     setAnsweringMode("whole-round");
+    setDocsFolder("");
+    setDocsFolderError(null);
     setModel(defaultModel ?? "fable");
   }, [open, defaultModel]);
 
@@ -72,6 +78,13 @@ export function CreateSessionDialog({
       onCreated(session.id);
     },
     onError: (error: unknown) => {
+      // A refused docs folder belongs beside the field that caused it; the
+      // dialog stays open so the path can be corrected rather than retyped.
+      const key = DOCS_FOLDER_ERROR_KEY[actionErrorCode(error) ?? ""];
+      if (key) {
+        setDocsFolderError(t(key));
+        return;
+      }
       toast.error(actionErrorMessage(error) ?? t("sessions.createFailed"));
     },
   });
@@ -81,7 +94,15 @@ export function CreateSessionDialog({
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!canSubmit || isPending) return;
-    mutate({ title: title.trim(), idea: idea.trim(), model, answeringMode });
+    setDocsFolderError(null);
+    const folder = docsFolder.trim();
+    mutate({
+      title: title.trim(),
+      idea: idea.trim(),
+      model,
+      answeringMode,
+      ...(folder.length > 0 ? { docsFolder: folder } : {}),
+    });
   }
 
   return (
@@ -154,6 +175,33 @@ export function CreateSessionDialog({
                 ))}
               </ToggleGroup>
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="session-docs-folder">
+              {t("sessions.docsFolderLabel")}
+            </Label>
+            <Input
+              id="session-docs-folder"
+              value={docsFolder}
+              onChange={(event) => {
+                setDocsFolder(event.target.value);
+                setDocsFolderError(null);
+              }}
+              placeholder={t("sessions.docsFolderPlaceholder")}
+              aria-invalid={docsFolderError !== null}
+              aria-describedby="session-docs-folder-hint"
+              spellCheck={false}
+            />
+            <p
+              id="session-docs-folder-hint"
+              className={
+                docsFolderError
+                  ? "text-xs text-destructive"
+                  : "text-xs text-muted-foreground"
+              }
+            >
+              {docsFolderError ?? t("sessions.docsFolderHint")}
+            </p>
           </div>
           <DialogFooter>
             <Button

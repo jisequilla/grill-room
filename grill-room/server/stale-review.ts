@@ -230,6 +230,7 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
             title: session!.title,
             model: session!.model,
             answeringMode: session!.answeringMode,
+            docsFolder: session!.docsFolder,
             conversationId,
             decisions: await decisionSnapshots(await loadDecisions()),
           },

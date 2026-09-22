@@ -67,6 +67,8 @@ export const sessions = table("gr_sessions", {
   doneSummary: text("done_summary"),
   conversationId: text("conversation_id"),
   exportTargetFolder: text("export_target_folder"),
+  /** A read-only folder the interviewer may read while grilling, or null for the tool-less interview. */
+  docsFolder: text("docs_folder"),
   /** Where the current interviewer turn stands. See {@link SESSION_TURN_STATUSES}. */
   turnStatus: text("turn_status", { enum: SESSION_TURN_STATUSES })
     .notNull()

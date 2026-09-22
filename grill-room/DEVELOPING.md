@@ -57,6 +57,39 @@ machine (`~/Library/Caches/ms-playwright`), so it never triggers a browser
 download. Screenshots on failure and the HTML report are written to
 `e2e/artifacts/` and `playwright-report/`, both gitignored.
 
+## The docs folder, and what the CLI actually enforces
+
+A session's optional docs folder is the only path the app ever lets the
+interviewer read. `server/interviewer/claude-cli.ts` builds the narrowed
+invocation and `server/interviewer/claude-cli.test.ts` is its contract: the
+argument list without a folder is asserted whole, so the tool-less turn cannot
+drift, and every flag of the narrowed turn is asserted individually.
+
+What the CLI enforces:
+
+- **The tool set.** `--tools Read,Grep,Glob` is the whole set of built-in tools
+  that exist for the turn. Nothing that writes, runs a command, or reaches the
+  network is in it, and `--restricted` removes those categories again anyway.
+- **The directory.** There is no flag that scopes a single tool to a path.
+  Confinement comes from `--restricted`, which limits the file tools to the
+  working directories — the child's `cwd` (the folder) plus `--add-dir`, which
+  names the same folder. Without `--restricted`, `--add-dir` only *widens*.
+- **Permission escalation.** `--permission-prompts none` denies anything that
+  would prompt rather than waiting on a terminal nobody is watching. No
+  `--permission-mode` is passed, so nothing is pre-granted.
+- **The folder's own configuration.** `--restricted` ignores the user, project
+  and local settings files; `--strict-mcp-config` ignores a `.mcp.json` in the
+  folder; `--disable-slash-commands` stops its `.claude/skills` from loading
+  (skills resolve from the working directory — see
+  `../docs/spikes/claude-code-harness.md`, Q4).
+
+What it does **not** enforce: a `CLAUDE.md` or `AGENTS.md` in the docs folder is
+still auto-discovered and prepended to the turn's context. The only flag that
+skips memory discovery is `--bare`, and `--bare` reads Anthropic credentials
+strictly from `ANTHROPIC_API_KEY` or an `apiKeyHelper` — never OAuth or the
+keychain — so it cannot be used with the subscription login this app runs on.
+Treat a docs folder's memory files as text the interviewer will read.
+
 ## Directory Structure
 
 ```
