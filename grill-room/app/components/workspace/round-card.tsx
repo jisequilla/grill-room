@@ -52,6 +52,10 @@ const MOVE_FIELD: Record<
   },
 };
 
+function isTypedMove(kind: string): kind is TypedMove {
+  return kind in MOVE_FIELD;
+}
+
 /** The four ways to decline to answer, in the order the card offers them. */
 const STEERING_MOVES = [
   { kind: "unknown", labelKey: "workspace.unknown", typed: false },
@@ -103,6 +107,21 @@ export function RoundCard({
   function openMove(next: TypedMove) {
     setMove(next);
     setText(draft?.answerKind === next ? (draft.answer ?? "") : "");
+  }
+
+  /**
+   * `Change` returns to the mode the draft was made in. A typed move reopens
+   * its own field with what was typed; an accepted recommendation, an
+   * `I don't know` or a deferral were made from the rows below, so it returns
+   * to those rather than to a blank textarea that would mean "replace this
+   * with something typed".
+   */
+  function change() {
+    if (draft !== null && isTypedMove(draft.answerKind)) {
+      openMove(draft.answerKind);
+      return;
+    }
+    setMove(null);
   }
 
   const field = move ? MOVE_FIELD[move] : null;
@@ -174,7 +193,7 @@ export function RoundCard({
               variant="outline"
               className="-my-1 shrink-0 border border-border bg-transparent hover:bg-accent"
               disabled={busy}
-              onClick={() => openMove("own-answer")}
+              onClick={change}
             >
               {t("workspace.change")}
             </Button>
