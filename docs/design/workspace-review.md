@@ -279,3 +279,115 @@ chips can carry the answer. #1, #6, #9 are independent and can ship immediately.
 - **The interviewer's prose recommendation.** It carries the reasoning ("since
   each covers what the other misses") that the chips cannot. It should be
   demoted relative to the chips, never removed.
+
+## Verification
+
+Checked against the running app at 1852×1073 and 1280×800, light and dark. The
+session advanced through several rounds during the pass, which gave five
+different live cards — including, usefully, both an unanswered and an answered
+one.
+
+**1. Idea as a first-class header block — PASS.** The idea is its own row at
+15px, `foreground/0.9`, `max-w-3xl` (768px), `line-clamp-2` with a working
+`Show more` (scrollHeight 73 vs clientHeight 49, so it is genuinely clamped, not
+cut). It now reads through *"…monitor agents behaviour, tool calls, token usage,
+model usage and cost usage, interactive. The system stores session of all
+project details, and has …"* — against 448px of 1839px before. No `truncate`.
+Identical in dark.
+
+**2. Recommendation demotes once answered — PASS.** On the answered *Homebrew
+tap* card the block is one 52px row, `bg-muted/30`, no dashed border, the
+recommendation truncated to a single muted line, and the button is `outline`
+reading **Accept instead**. `Change` is `outline` with an explicit border. No
+solid-fill control remains inside an answered card, so the green *Accepted the
+recommendation* block is the most prominent element — the inversion is gone.
+Unanswered cards still show the dashed block and the solid `Accept`, as
+specified.
+
+**3. Choices as the primary selector — PASS WITH NOTE.** Order, size and weight
+all pass: chips render above the recommendation (chips y=453, block y=505), 36px
+tall, 13px, `font-medium`, outline with explicit borders; at 1280×800 the entire
+choice row plus `Write my own` sits above the fold. **The marker is the note.**
+It renders correctly when it fires — `Homebrew tap` carried a visible
+`RECOMMENDED` pill and `border-primary/50` against plain chips — but across five
+live rounds it fired on **one**. `recommendedChoiceIndex` is a prefix/label
+matcher and the interviewer paraphrases: *"Version field per event, collector
+accepts…"* does not prefix-match the chip *"Version field, collector accepts
+current and previous"*, and *"pgx with sqlc…"* does not match *"pgx + sqlc…"*.
+Separately, `ring-1 ring-primary/40` computes to a fully transparent box-shadow;
+the visible differentiation comes from the border and the pill, which is
+sufficient, but the ring class is dead and should be dropped or fixed.
+
+**4. `accepted-recommendation` recorded correctly — PASS.** Observed live, not
+inferred: the marked `Homebrew tap` chip was clicked and the answer block reads
+**Accepted the recommendation**, not *Own answer*. The fidelity bug is fixed on
+the path that matters. It inherits item 3's note — on a round where the matcher
+misses, every chip still records `own-answer`, so the original bug survives
+there untouched.
+
+**5. Steering moves promoted and regrouped — PASS.** `Write my own` has moved out
+and sits with the choices as an outline chip. The four moves sit under an
+`OR STEER THE INTERVIEW` label at 32px, 13px, `font-medium`, `text-foreground/75`,
+explicit 1px borders, 6px apart (measured 419→425, 512→518, 574→580). The `|`
+divider is gone. Dark-mode borders (`rgb(61,61,61)`) read clearly.
+
+**6. Page width and tree column height — PASS WITH NOTE.** `max-w-[1600px]`
+renders 1576px — the whole main area with the 276px shell sidebar open, so the
+container is no longer the constraint, which is what the item was for. The
+deviation is correct and I would not chase the literal number. Grid is 1048px +
+a 448px aside (28rem, up from 21rem), and tree titles that wrapped to two lines
+now fit one (rows at 33px). Tree bottom 1050 in a 1073 viewport — a 23px gap.
+**Note:** the height is `lg:h-[calc(100dvh-15rem)]`, tuned to the unscrolled
+header offset; once scrolled the panel pins at top=113 and leaves 152px empty
+below it. Deriving the height from the sticky offset rather than a fixed 15rem
+would hold the fit at every scroll position.
+
+**7. Tree footer — PASS.** A pinned footer inside the tree card reads
+`39 of 53 settled` with `14 loose ends` in orange. The outline scrolls
+internally (scrollHeight 2703 against a 770px client) with the footer fixed, so
+the panel is full-height and full — not a stretched empty box. Visible at both
+viewports without scrolling the tree.
+
+**8. Answered cards collapse — NOT VERIFIABLE LIVE; code-verified.**
+`foldable={cards.length > 1}` at `round-panel.tsx:145`, and the folded branch
+drops the question body, choices, recommendation and steering row, clamping the
+answer to two lines. Every live round during this pass was a single card (the
+session is in one-at-a-time mode), so no fold ever rendered, and forcing one
+needs a state change I was told not to make. The ≤160px height criterion is
+unmeasured — worth confirming on a whole-round session before calling it done.
+
+**9. Sticky footer opacity and scroll padding — PASS.** The bar computes
+`rgb(255, 255, 255)` with `backdrop-filter: none` (was `/85` plus blur), and the
+card stack carries `pb-20` (80px measured). At 1280×800 mid-scroll nothing is
+legible through the bar. **Note:** on a short single-card round the 80px
+clearance reads as an empty band between the card and the bar; it is doing its
+job, but `pb-20` could be conditional on the stack overflowing.
+
+**10. `Change` opens the draft's own mode — NOT VERIFIABLE LIVE; code-verified.**
+`change()` at `round-card.tsx:160-167` reopens a typed move's own field
+pre-filled with what was typed, and for `accepted-recommendation`, `unknown` and
+`deferred` clears `move` and expands, returning to the chip and recommendation
+rows rather than a blank textarea. Exercising it on the live answered card would
+have changed a draft.
+
+### What the rebuild made worse, or left open
+
+- **The matcher is the one substantive gap.** Items 3 and 4 are implemented
+  correctly and fail only on their input. A string-prefix matcher is being asked
+  to solve a paraphrase problem. The durable fix is at the port: have the
+  interviewer return the index of the choice it recommends, rather than
+  recovering it from prose afterwards.
+- **No selected state on the chosen chip.** On the answered card the accepted
+  `Homebrew tap` chip looks identical to the two it was chosen over; only the
+  green block records the choice. An `aria-pressed` / filled state on the chosen
+  chip would close the loop and costs almost nothing.
+- **Two fixed measurements that only hold in one state:** the tree's `15rem`
+  calc (item 6) and the unconditional `pb-20` (item 9).
+- **Dead `ring-1 ring-primary/40`** on the recommended chip.
+
+Nothing on the original "what I would not change" list was damaged. The
+green/orange settled-versus-still-open split survives and now renders *Accepted
+the recommendation* correctly; the dot strip is intact; the tree's visual
+language is unchanged apart from width; the idea is a paragraph rather than a
+competing `<h1>`; and the new `Choose one` and `Or steer the interview` labels
+reuse the existing 11px micro-label system rather than inventing a second one.
