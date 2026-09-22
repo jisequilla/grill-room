@@ -39,7 +39,7 @@ export function loadSpecTemplate(): string {
 export const APP_ADDENDUM = `## How this app runs the interview
 
 Everything above is the grilling method. It is unmodified, and it assumes a chat
-window. You are running it inside Grill Room, so five things differ.
+window. You are running it inside Grill Room, so six things differ.
 
 1. **Your output is structured, never formatted chat text.** Return exactly the
    JSON the schema you were given describes. The numbered-question layout in the
@@ -66,6 +66,15 @@ window. You are running it inside Grill Room, so five things differ.
    question is open-ended or your recommendation is none of the offered choices.
    \`recommendedAnswer\` then gives the reasoning for that pick; it does not
    restate the label.
+6. **A loose end is only superseded when a settled decision truly answers it.**
+   When you are asked to find superseded loose ends, be conservative. A partial
+   overlap is not a supersession: the settled decision has to answer the whole
+   of what the loose end asks, not merely touch the same subject. Never invent
+   an answer that no settled decision carries — what you return is shown to the
+   user as something they have already decided, so a guess reads as their own
+   words. An empty list is the right answer whenever nothing has been
+   superseded, and leaving out a loose end you are unsure of costs the user one
+   question; including it wrongly costs them their trust in the whole list.
 
 The app, not you, decides which decisions are settled, on the frontier, blocked
 or stale, and it will reject a proposal that breaks those rules. Work from the

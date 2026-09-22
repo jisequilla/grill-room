@@ -173,6 +173,30 @@ function renderTask(request: InterviewerRequest): string {
         "what still holds is the point of this step.",
       ].join("\n");
 
+    case "find-superseded":
+      return [
+        "## Your task: find the loose ends a later decision already answered",
+        "",
+        "Every decision below marked with a loose-end answer was left open by the",
+        "user at the time. The interview has moved on since, and some of them may",
+        "already be answered by a decision that settled later, under a different",
+        "question.",
+        "",
+        `Loose ends to judge: ${request.looseEndKeys.join(", ")}`,
+        "",
+        "Return one entry in `supersessions` for each loose end above that a",
+        "settled decision in the tree fully answers, naming that decision in",
+        "`answeredByKey`, the answer to record on the loose end in `answer`, in",
+        "the loose end's own terms, and in `reason` which decision answers it and",
+        "why. Leave out every loose end you are not sure about; an empty list is",
+        "the right answer when nothing has been superseded.",
+        "",
+        "Be conservative. A partial overlap is not a supersession: the settled",
+        "decision must answer the whole of the question the loose end asks, not",
+        "merely touch on it. Never invent an answer no settled decision carries —",
+        "the user will see it as something they already decided.",
+      ].join("\n");
+
     case "synthesize-spec": {
       const outOfScope =
         request.outOfScope.length > 0

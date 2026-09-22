@@ -3,6 +3,7 @@ import { resultSchemas } from "./schemas.js";
 import type { RequestKind, ResultFor } from "./schemas.js";
 import type {
   BreakIntoTicketsRequest,
+  FindSupersededRequest,
   Interviewer,
   InterviewerRequest,
   InterviewerTurn,
@@ -125,6 +126,8 @@ export function createFakeInterviewer(
       turn(request) as Promise<InterviewerTurn<ResultFor<"propose-round">>>,
     reviewStale: (request: ReviewStaleRequest) =>
       turn(request) as Promise<InterviewerTurn<ResultFor<"review-stale">>>,
+    findSuperseded: (request: FindSupersededRequest) =>
+      turn(request) as Promise<InterviewerTurn<ResultFor<"find-superseded">>>,
     synthesizeSpec: (request: SynthesizeSpecRequest) =>
       turn(request) as Promise<InterviewerTurn<ResultFor<"synthesize-spec">>>,
     breakIntoTickets: (request: BreakIntoTicketsRequest) =>
