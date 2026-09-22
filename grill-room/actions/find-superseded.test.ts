@@ -265,6 +265,34 @@ describe("find-superseded", () => {
       });
     });
 
+    it("rejects a superseding decision that was dispositioned, and retries with the reason", async () => {
+      const session = await aSession();
+      await aTreeWithOneLooseEnd(session.id);
+      await insertDecision(session.id, {
+        id: "d-hosting",
+        key: "hosting",
+        questionTitle: "Where does this run?",
+        answerKind: "dispositioned",
+        dispositionTarget: "out-of-scope",
+        settledAt: new Date().toISOString(),
+      });
+      const interviewer = scriptInterviewer([
+        DONE_PROPOSAL,
+        supersessions({ looseEndKey: "storage", answeredByKey: "hosting" }),
+        supersessions({ looseEndKey: "storage", answeredByKey: "shape" }),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests[2]).toMatchObject({
+        rejectionReason: expect.stringContaining(
+          "it was set aside (dispositioned), not answered",
+        ),
+      });
+      const [looseEnd] = await listLooseEnds.run({ sessionId: session.id });
+      expect(looseEnd?.supersession).toMatchObject({ byKey: "shape" });
+    });
+
     it("rejects a decision superseded twice, and gives up after two retries storing nothing", async () => {
       const session = await aSession();
       await aTreeWithOneLooseEnd(session.id);
