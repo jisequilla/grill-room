@@ -1,5 +1,6 @@
 import type {
   BreakIntoTicketsResult,
+  FindSupersededResult,
   OfferedChoice,
   ProposeRoundResult,
   RequestKind,
@@ -109,6 +110,17 @@ export interface ReviewStaleRequest extends RequestBase {
   staleDecisionKeys: string[];
 }
 
+export interface FindSupersededRequest extends RequestBase {
+  kind: "find-superseded";
+  /**
+   * The loose ends to judge, by key: the ones the user could still answer
+   * themselves — unknown, deferred, prototype flagged, or pushed back with no
+   * response. A stale or unplaced decision is never one of them; those are the
+   * interviewer's to resolve by another route.
+   */
+  looseEndKeys: string[];
+}
+
 export interface SynthesizeSpecRequest extends RequestBase {
   kind: "synthesize-spec";
   /** Loose ends the user moved out of scope, for the spec's Out of Scope section. */
@@ -125,10 +137,11 @@ export interface BreakIntoTicketsRequest extends RequestBase {
 export type InterviewerRequest =
   | ProposeRoundRequest
   | ReviewStaleRequest
+  | FindSupersededRequest
   | SynthesizeSpecRequest
   | BreakIntoTicketsRequest;
 
-/** A request narrowed to one kind, for generic code over the four kinds. */
+/** A request narrowed to one kind, for generic code over the five kinds. */
 export type RequestFor<Kind extends RequestKind> = Extract<
   InterviewerRequest,
   { kind: Kind }
@@ -155,6 +168,9 @@ export interface Interviewer {
   reviewStale(
     request: ReviewStaleRequest,
   ): Promise<InterviewerTurn<ReviewStaleResult>>;
+  findSuperseded(
+    request: FindSupersededRequest,
+  ): Promise<InterviewerTurn<FindSupersededResult>>;
   synthesizeSpec(
     request: SynthesizeSpecRequest,
   ): Promise<InterviewerTurn<SynthesizeSpecResult>>;

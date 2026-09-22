@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * The output schemas of the four request kinds. Each one is both the contract
+ * The output schemas of the five request kinds. Each one is both the contract
  * the model is constrained by (converted to JSON Schema for the command line)
  * and the validator every result is checked against before it leaves the port.
  *
@@ -90,6 +90,28 @@ export const reviewStaleResultSchema = z.strictObject({
   ),
 });
 
+/**
+ * Loose ends a later settled decision turns out to have answered.
+ *
+ * At most one entry per loose end, and only for loose ends genuinely answered:
+ * the result is a set of proposals the user accepts or rejects one by one, so
+ * an over-eager entry costs the user the same work it was meant to save.
+ */
+export const findSupersededResultSchema = z.strictObject({
+  supersessions: z.array(
+    z.strictObject({
+      /** The loose end, by key. One of the keys the request listed. */
+      looseEndKey: decisionKey,
+      /** The settled decision that answers it. Must already be settled. */
+      answeredByKey: decisionKey,
+      /** The answer to record on the loose end, in the loose end's own terms. */
+      answer: z.string().min(1),
+      /** Which settled decision answers it, and why that answer covers it. */
+      reason: z.string(),
+    }),
+  ),
+});
+
 export const synthesizeSpecResultSchema = z.strictObject({
   /** The whole spec as markdown, following the to-spec template. */
   markdown: z.string().min(1),
@@ -111,6 +133,7 @@ export const breakIntoTicketsResultSchema = z.strictObject({
 export const resultSchemas = {
   "propose-round": proposeRoundResultSchema,
   "review-stale": reviewStaleResultSchema,
+  "find-superseded": findSupersededResultSchema,
   "synthesize-spec": synthesizeSpecResultSchema,
   "break-into-tickets": breakIntoTicketsResultSchema,
 } as const;
@@ -123,6 +146,7 @@ export type ResultFor<Kind extends RequestKind> = z.infer<
 
 export type ProposeRoundResult = ResultFor<"propose-round">;
 export type ReviewStaleResult = ResultFor<"review-stale">;
+export type FindSupersededResult = ResultFor<"find-superseded">;
 export type SynthesizeSpecResult = ResultFor<"synthesize-spec">;
 export type BreakIntoTicketsResult = ResultFor<"break-into-tickets">;
 

@@ -21,6 +21,7 @@ function decision(
     introducedBy: "interviewer",
     state,
     answer: null,
+    supersession: null,
     dispositionTarget: null,
     settledAt: null,
     reopenedAt: null,

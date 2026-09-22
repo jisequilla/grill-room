@@ -1,5 +1,10 @@
+import {
+  actionErrorMessage,
+  useActionMutation,
+} from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
-import { IconRefresh } from "@tabler/icons-react";
+import { IconLink, IconRefresh } from "@tabler/icons-react";
+import { toast } from "sonner";
 
 import { AnswerNow } from "@/components/workspace/answer-now";
 import { SetAsideDialog } from "@/components/workspace/set-aside-dialog";
@@ -11,6 +16,81 @@ import {
   LOOSE_END_REASON_LABEL_KEY,
   type LooseEnd,
 } from "@/lib/decisions";
+
+/**
+ * A settled decision the interviewer believes already answers this loose end.
+ * A proposal and nothing more: until it is accepted the decision is as open as
+ * every other row here, so it reads as an offer inside the row rather than as
+ * an answer replacing it.
+ */
+function Supersession({
+  decisionId,
+  supersession,
+}: {
+  decisionId: string;
+  supersession: NonNullable<LooseEnd["supersession"]>;
+}) {
+  const t = useT();
+
+  const accept = useActionMutation("accept-supersession", {
+    onError: (error: unknown) => {
+      toast.error(
+        actionErrorMessage(error) ?? t("workspace.acceptSupersessionFailed"),
+      );
+    },
+  });
+
+  const dismiss = useActionMutation("dismiss-supersession", {
+    onError: (error: unknown) => {
+      toast.error(
+        actionErrorMessage(error) ?? t("workspace.dismissSupersessionFailed"),
+      );
+    },
+  });
+
+  const busy = accept.isPending || dismiss.isPending;
+
+  return (
+    <div
+      className="w-full space-y-2 rounded-lg border bg-muted/30 p-3"
+      data-testid="supersession"
+    >
+      <p className="flex items-start gap-1.5 text-xs font-medium">
+        <IconLink className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+        <span>
+          {t("workspace.supersededBy", {
+            title: supersession.byTitle ?? t("workspace.supersededByUnknown"),
+          })}
+        </span>
+      </p>
+      <p className="text-sm leading-snug">{supersession.answer}</p>
+      {supersession.reason ? (
+        <p className="text-xs text-muted-foreground">{supersession.reason}</p>
+      ) : null}
+      <div className="flex justify-end gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => dismiss.mutate({ decisionId })}
+        >
+          {t("workspace.dismissSupersession")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          disabled={busy}
+          onClick={() => accept.mutate({ decisionId })}
+          data-testid="accept-supersession"
+        >
+          {accept.isPending && <Spinner className="size-4" />}
+          {t("workspace.acceptSupersession")}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 function Row({
   looseEnd,
@@ -100,6 +180,12 @@ export function LooseEndList({
               looseEnd={looseEnd}
               onOpenDecision={onOpenDecision}
             >
+              {looseEnd.supersession ? (
+                <Supersession
+                  decisionId={looseEnd.id}
+                  supersession={looseEnd.supersession}
+                />
+              ) : null}
               <AnswerNow decisionId={looseEnd.id} />
               <SetAsideDialog
                 decisionId={looseEnd.id}

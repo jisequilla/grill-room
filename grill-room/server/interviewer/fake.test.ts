@@ -9,6 +9,7 @@ import {
   scriptInterviewer,
 } from "./index.js";
 import {
+  aFindSupersededRequest,
   aProposeRoundRequest,
   aProposeRoundResult,
   aSynthesizeSpecRequest,
@@ -151,9 +152,13 @@ describe("the scripted fake interviewer", () => {
 
     await interviewer.proposeRound(aProposeRoundRequest());
     const done = await interviewer.proposeRound(aProposeRoundRequest());
+    const superseded = await interviewer.findSuperseded(
+      aFindSupersededRequest(),
+    );
     const spec = await interviewer.synthesizeSpec(aSynthesizeSpecRequest());
 
     expect(done.result.done?.summary).toContain("Settled");
+    expect(superseded.result.supersessions).toEqual([]);
     expect(spec.result.markdown).toContain("## Problem Statement");
   });
 });

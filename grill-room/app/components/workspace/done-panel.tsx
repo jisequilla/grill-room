@@ -4,7 +4,12 @@ import {
   useActionQuery,
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
-import { IconArrowRight, IconCircleCheck, IconFlag } from "@tabler/icons-react";
+import {
+  IconArrowRight,
+  IconCircleCheck,
+  IconFlag,
+  IconSparkles,
+} from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -51,6 +56,9 @@ function Summary({
   );
 }
 
+/** A turn takes about a minute and can take several; the default 60 s cancels it. */
+const TURN_TIMEOUT_MS = 10 * 60 * 1000;
+
 /**
  * The end of the interview, pending the user's agreement: what the interviewer
  * says was settled, everything still open, and the one button that closes the
@@ -89,6 +97,21 @@ export function DoneProposedPanel({
     },
   });
 
+  // The same check the done proposal ran, on demand: answering one loose end
+  // can be what makes another one obviously already answered, and the scan is
+  // worth repeating rather than being a one-shot the user cannot reach.
+  const findSuperseded = useActionMutation("find-superseded", {
+    timeoutMs: TURN_TIMEOUT_MS,
+    onError: (error: unknown) => {
+      toast.error(
+        actionErrorMessage(error) ?? t("workspace.checkSupersededFailed"),
+      );
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["action"] });
+    },
+  });
+
   const remaining = looseEnds?.length ?? 0;
   const blocked = isLoading || remaining > 0;
 
@@ -101,9 +124,32 @@ export function DoneProposedPanel({
       />
 
       <section className="space-y-2.5">
-        <h3 className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-          {t("workspace.looseEndsHeading")}
-        </h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            {t("workspace.looseEndsHeading")}
+          </h3>
+          {remaining > 0 ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={findSuperseded.isPending}
+              onClick={() => findSuperseded.mutate({ sessionId })}
+              data-testid="check-superseded"
+            >
+              {findSuperseded.isPending ? (
+                <Spinner className="size-4" />
+              ) : (
+                <IconSparkles className="size-4" />
+              )}
+              {t(
+                findSuperseded.isPending
+                  ? "workspace.checkingSuperseded"
+                  : "workspace.checkSuperseded",
+              )}
+            </Button>
+          ) : null}
+        </div>
         <LooseEndList
           looseEnds={looseEnds ?? []}
           isLoading={isLoading}

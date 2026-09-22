@@ -80,6 +80,11 @@ export default defineAction({
         answerKind: "dispositioned",
         dispositionTarget: target,
         settledAt: now,
+        // Set aside is an answer to the same question a supersession proposed
+        // one for, and the user's answer wins.
+        supersededById: null,
+        supersessionAnswer: null,
+        supersessionReason: null,
         updatedAt: now,
       })
       .where(eq(schema.decisions.id, decisionId))

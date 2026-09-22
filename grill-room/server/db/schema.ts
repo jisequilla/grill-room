@@ -145,6 +145,17 @@ export const decisions = table(
      * opened on it yet. One-at-a-time mode drains these one round at a time.
      */
     pendingAsk: boolean("pending_ask").notNull().default(false),
+    /**
+     * The settled decision the interviewer believes already answers this loose
+     * end. A *proposal*, not an answer: the decision stays exactly as open as it
+     * was until the user accepts, and accepting, answering, dispositioning, or
+     * reopening the superseding decision clears all three columns.
+     */
+    supersededById: text("superseded_by_id"),
+    /** The answer the supersession proposes recording, in this decision's own terms. */
+    supersessionAnswer: text("supersession_answer"),
+    /** Which settled decision answers it and why, kept as the history entry's reason. */
+    supersessionReason: text("supersession_reason"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

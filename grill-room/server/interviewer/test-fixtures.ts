@@ -1,6 +1,7 @@
-import type { ProposeRoundResult } from "./schemas.js";
+import type { FindSupersededResult, ProposeRoundResult } from "./schemas.js";
 import type {
   DecisionSnapshot,
+  FindSupersededRequest,
   InterviewContext,
   ProposeRoundRequest,
   SynthesizeSpecRequest,
@@ -58,6 +59,18 @@ export function aProposeRoundRequest(
   };
 }
 
+export function aFindSupersededRequest(
+  overrides: Partial<FindSupersededRequest> = {},
+): FindSupersededRequest {
+  return {
+    kind: "find-superseded",
+    context: aContext(),
+    looseEndKeys: ["storage"],
+    rejectionReason: null,
+    ...overrides,
+  };
+}
+
 export function aSynthesizeSpecRequest(
   overrides: Partial<SynthesizeSpecRequest> = {},
 ): SynthesizeSpecRequest {
@@ -93,6 +106,22 @@ export function aProposeRoundResult(
     pushBackResponses: [],
     userDecisionPlacements: [],
     done: null,
+    ...overrides,
+  };
+}
+
+export function aFindSupersededResult(
+  overrides: Partial<FindSupersededResult> = {},
+): FindSupersededResult {
+  return {
+    supersessions: [
+      {
+        looseEndKey: "storage",
+        answeredByKey: "shape",
+        answer: "On disk",
+        reason: "The workspace decision already commits to a database on disk.",
+      },
+    ],
     ...overrides,
   };
 }

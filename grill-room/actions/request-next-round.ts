@@ -15,6 +15,10 @@ import { increasingTimestamps } from "../server/ordering.js";
 import { returnSessionToInterviewing } from "../server/session-state.js";
 import { runDueStaleReviews } from "../server/stale-review.js";
 import {
+  findSupersessionsForDone,
+  type SupersessionFailure,
+} from "../server/supersession.js";
+import {
   deferredFrontierIds,
   neverAnsweredFrontierIds,
   toTreeDecision,
@@ -144,7 +148,23 @@ export default defineAction({
     let pending = isOneAtATime ? nextRoundCandidates(rows) : [];
 
     if (!isOneAtATime || pending.length === 0) {
-      await runProposalTurn();
+      const supersessionFailure = await runProposalTurn();
+      // `runTurn` has finished writing the turn's own status by now, so an
+      // error from the done proposal's second turn survives being stored here.
+      // The status stays `idle` deliberately: the done proposal did succeed,
+      // and a `failed` status would replace the ending the user just reached
+      // with a retry panel. The error is what the done panel offers a fresh
+      // check from.
+      if (supersessionFailure) {
+        await db
+          .update(schema.sessions)
+          .set({
+            turnErrorCode: supersessionFailure.code,
+            turnErrorMessage: supersessionFailure.message,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(schema.sessions.id, sessionId));
+      }
       rows = await loadDecisions();
       pending = nextRoundCandidates(rows);
     }
@@ -231,17 +251,26 @@ export default defineAction({
      * One interviewer turn, retried with the app's reasons while the proposal
      * keeps breaking the tree's rules. Nothing is written until a proposal is
      * accepted whole, so a rejected one leaves the tree exactly as it was.
+     *
+     * Resolves with the failure of a done proposal's supersession scan, when
+     * there was one: the scan runs inside this turn, but its error can only be
+     * stored after `runTurn` has written the turn's own result.
      */
-    function runProposalTurn(): Promise<void> {
-      return runTurn({
+    async function runProposalTurn(): Promise<SupersessionFailure | null> {
+      let failure: SupersessionFailure | null = null;
+
+      await runTurn({
         sessionId,
         failedMessage: "The interviewer turn failed.",
         take: async () => {
           const accepted = await propose();
-          await store(accepted.result);
-          return accepted.conversationId;
+          const stored = await store(accepted.result, accepted.conversationId);
+          failure = stored.failure;
+          return stored.conversationId;
         },
       });
+
+      return failure;
     }
 
     async function propose() {
@@ -339,12 +368,17 @@ export default defineAction({
     }
 
     /**
-     * Store an accepted proposal. When it carries `done`, `reasonsToRefuse`
-     * has already checked that nothing would be asked once it lands, so the
-     * session moves straight to `done-proposed` with the summary: the
-     * pending-candidate check just below finds nothing, and no round opens.
+     * Store an accepted proposal, and resolve with the conversation to resume
+     * next and whatever the done proposal's second turn failed with. When the
+     * proposal carries `done`, `reasonsToRefuse` has already checked that
+     * nothing would be asked once it lands, so the session moves straight to
+     * `done-proposed` with the summary: the pending-candidate check just below
+     * finds nothing, and no round opens.
      */
-    async function store(result: ProposeRoundResult): Promise<void> {
+    async function store(
+      result: ProposeRoundResult,
+      conversationId: string,
+    ): Promise<{ conversationId: string; failure: SupersessionFailure | null }> {
       const now = new Date().toISOString();
       // Distinct, increasing timestamps: the tree and the one-at-a-time queue
       // are read back in `createdAt` order, and a tie would make it
@@ -463,16 +497,32 @@ export default defineAction({
           .where(eq(schema.decisions.id, row.id));
       }
 
-      if (result.done) {
-        await db
-          .update(schema.sessions)
-          .set({
-            state: "done-proposed",
-            doneSummary: result.done.summary,
-            updatedAt: now,
-          })
-          .where(eq(schema.sessions.id, sessionId));
-      }
+      if (!result.done) return { conversationId, failure: null };
+
+      // The second half of a done proposal: before the user is asked to
+      // resolve every loose end by hand, the interviewer says which of them a
+      // later decision already answered. It runs inside this same turn — one
+      // working status, one conversation — and cannot take the done proposal
+      // down with it if it fails, which is why the failure comes back as a
+      // value rather than an exception.
+      const scan = await findSupersessionsForDone({
+        session: session!,
+        conversationId,
+      });
+
+      await db
+        .update(schema.sessions)
+        .set({
+          state: "done-proposed",
+          doneSummary: result.done.summary,
+          updatedAt: now,
+        })
+        .where(eq(schema.sessions.id, sessionId));
+
+      return {
+        conversationId: scan.conversationId ?? conversationId,
+        failure: scan.failure,
+      };
     }
   },
 });

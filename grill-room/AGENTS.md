@@ -68,7 +68,10 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `reopen-decision` | Reopen a settled decision: its answer becomes history, it is asked again straight away, and everything under it goes stale until the interviewer reconfirms or re-asks it. Returns a done-proposed or confirmed session to interviewing and clears the done summary; leaving `confirmed` also marks the session's spec not current. |
 | `add-decision` | Add a decision the user thought of themselves; it awaits the interviewer's placement in the tree. Returns a done-proposed or confirmed session to interviewing and clears the done summary. |
 | `answer-decision` | Give a real answer to an unresolved loose end (unknown, deferred, prototype flagged, or an unanswered push back) outside a round, without calling the interviewer. Call `request-next-round` afterwards: that is where a reopened decision's dependents are reviewed. |
-| `list-loose-ends` | Every decision blocking confirmation of a session — unknown, deferred, prototype flagged or pushed back and not withdrawn, stale, unplaced, or never answered — each with a reason naming its category. Empty once nothing blocks confirming. |
+| `list-loose-ends` | Every decision blocking confirmation of a session — unknown, deferred, prototype flagged or pushed back and not withdrawn, stale, unplaced, or never answered — each with a reason naming its category, and the supersession proposed on it when it has one. Empty once nothing blocks confirming. |
+| `find-superseded` | Ask the interviewer which open loose ends a decision that settled later has already answered, and store what it finds on each as a proposal. Runs automatically as the second half of a done proposal; this action repeats it on demand. Allowed while interviewing or with a done proposal pending, refused while a turn is working. |
+| `accept-supersession` | Accept the supersession proposed on a loose end: the answer found in the superseding decision becomes its own answer and it settles, the steering move it held moving to history with the interviewer's reason. |
+| `dismiss-supersession` | Reject that proposal and leave the loose end exactly as open as it was. Answering the loose end, setting it aside, or reopening the superseding decision clears it too. |
 | `disposition-decision` | Resolve a loose end by moving it out of scope or into the notes as a named open question, instead of a real answer. Settles the decision (as dispositioned) without calling the interviewer; refuses a decision that is not a loose end, or one that is stale or unplaced. |
 | `confirm-session` | Confirm a session whose done proposal is pending. Refuses outside `done-proposed`, refuses with the list of loose ends while any remain, and refuses while a turn is working. |
 | `synthesize-spec` | Synthesize the session's spec from its settled decisions, following the upstream to-spec template verbatim. Allowed only for a confirmed session with no turn working. Dispositioned decisions feed Out of Scope and Further Notes. Regenerating replaces the markdown and returns the spec row. |
@@ -84,7 +87,8 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `view-screen` | What the user is looking at. Call it first when the visible context matters. |
 | `provider-api-request` | Call Slack's Web API through the workspace connection. |
 
-`request-next-round`, `submit-round`, `synthesize-spec`, and `break-into-tickets`
+`request-next-round`, `submit-round`, `find-superseded`, `synthesize-spec`, and
+`break-into-tickets`
 all wait on a Claude CLI turn, which takes about a minute and can take several.
 The client action hooks time out at 60 s by default, so UI code calling any of
 them must pass a `timeoutMs` of several minutes; the default cancels a turn

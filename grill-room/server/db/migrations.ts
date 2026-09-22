@@ -264,4 +264,19 @@ export const appMigrations: MigrationEntry[] = [
     name: "decisions-recommended-choice-column",
     sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS recommended_choice INTEGER`,
   },
+  {
+    version: 32,
+    name: "decisions-superseded-by-id-column",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS superseded_by_id TEXT REFERENCES gr_decisions(id) ON DELETE SET NULL`,
+  },
+  {
+    version: 33,
+    name: "decisions-supersession-answer-column",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS supersession_answer TEXT`,
+  },
+  {
+    version: 34,
+    name: "decisions-supersession-reason-column",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS supersession_reason TEXT`,
+  },
 ];

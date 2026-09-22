@@ -312,6 +312,23 @@ export interface DecisionChoice {
   rationale: string;
 }
 
+/**
+ * A settled decision the interviewer believes already answers a loose end,
+ * resolved for reading: the superseding decision's id, key and title beside the
+ * answer and reason proposed for the loose end itself.
+ *
+ * `byKey` and `byTitle` are null when the superseding decision is not among the
+ * rows being described — a read of one decision on its own, rather than a whole
+ * session — which is why neither is what the UI keys off.
+ */
+export interface DecisionSupersession {
+  byId: string;
+  byKey: string | null;
+  byTitle: string | null;
+  answer: string;
+  reason: string;
+}
+
 /** A decision as every read action reports it: the row with its state resolved. */
 export interface DecisionView {
   id: string;
@@ -329,6 +346,11 @@ export interface DecisionView {
   introducedBy: DecisionRow["introducedBy"];
   state: DerivedDecisionState;
   answer: { text: string | null; kind: DecisionAnswerKind } | null;
+  /**
+   * A pending supersession proposal, or null. A loose end carrying one is still
+   * a loose end: nothing about its answer changes until the user accepts.
+   */
+  supersession: DecisionSupersession | null;
   dispositionTarget: DecisionRow["dispositionTarget"];
   settledAt: string | null;
   reopenedAt: string | null;
@@ -397,9 +419,13 @@ export function describeDecisions(
   rows: readonly DecisionRow[],
 ): DecisionView[] {
   const states = deriveTreeStates(treeFacts(rows));
+  const byId = new Map(rows.map((row) => [row.id, row]));
 
   return rows.map((row) => {
     const choices = parseChoices(row);
+    const supersededBy = row.supersededById
+      ? byId.get(row.supersededById)
+      : undefined;
     return {
     id: row.id,
     key: row.key,
@@ -417,6 +443,15 @@ export function describeDecisions(
     state: states.get(row.id) ?? "blocked",
     answer: row.answerKind
       ? { text: row.currentAnswer, kind: row.answerKind }
+      : null,
+    supersession: row.supersededById
+      ? {
+          byId: row.supersededById,
+          byKey: supersededBy?.key ?? null,
+          byTitle: supersededBy?.questionTitle ?? null,
+          answer: row.supersessionAnswer ?? "",
+          reason: row.supersessionReason ?? "",
+        }
       : null,
     dispositionTarget: row.dispositionTarget,
     settledAt: row.settledAt,
