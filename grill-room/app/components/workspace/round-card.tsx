@@ -17,7 +17,7 @@ import {
   type RoundAnswerKind,
   type RoundCard as RoundCardData,
 } from "@/lib/decisions";
-import { recommendedChoiceIndex } from "@/lib/recommended-choice";
+import { resolveRecommendedChoice } from "@/lib/recommended-choice";
 import { cn } from "@/lib/utils";
 
 /** Draft answers that count as given but leave the decision unsettled. */
@@ -131,10 +131,21 @@ export function RoundCard({
   const busy = disabled || isPending;
   const canFold = foldable && draft !== null;
   const folded = canFold && !expanded;
-  const recommendedIndex = recommendedChoiceIndex(
-    card.recommendedAnswer,
-    card.choices,
-  );
+  const recommendedIndex = resolveRecommendedChoice(card);
+  // Which chip the draft stands for, so the card shows what was picked rather
+  // than only that something was. An accepted recommendation is the marked
+  // chip; an own answer is a chip only when its text is one of the labels,
+  // which is what clicking a chip writes.
+  const selectedIndex =
+    draft === null
+      ? null
+      : draft.answerKind === "accepted-recommendation"
+        ? recommendedIndex
+        : draft.answerKind === "own-answer"
+          ? (card.choices.findIndex(
+              (choice) => choice.label === draft.answer,
+            ) ?? -1)
+          : -1;
   const leavesOpen =
     draft !== null && LOOSE_END_DRAFT_KINDS.includes(draft.answerKind);
 
@@ -268,46 +279,75 @@ export function RoundCard({
                 {t("workspace.chooseOne")}
               </p>
             ) : null}
-            <div className="flex flex-wrap items-center gap-2">
-              {card.choices.map((choice, choiceIndex) => (
-                <Button
-                  key={choice}
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  data-testid="choice-chip"
-                  data-recommended={
-                    choiceIndex === recommendedIndex ? "true" : "false"
-                  }
-                  className={cn(
-                    "h-9 rounded-full border border-border bg-transparent px-3.5 text-[13px] font-medium",
-                    "hover:border-foreground/40 hover:bg-accent",
-                    choiceIndex === recommendedIndex &&
-                      "border-primary/50 ring-1 ring-primary/40",
-                  )}
-                  onClick={() =>
-                    // The chip the interviewer recommended is the
-                    // recommendation, however differently the two are worded:
-                    // recording it as an own answer would lose that it was the
-                    // interviewer's own suggestion, which is the one thing a
-                    // record of accepting versus diverging is made of.
-                    choiceIndex === recommendedIndex
-                      ? save("accepted-recommendation")
-                      : save("own-answer", choice)
-                  }
-                >
-                  {choice}
-                  {choiceIndex === recommendedIndex ? (
-                    <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-primary uppercase">
-                      {t("workspace.recommended")}
+            {/* One row per choice, its own case under its label. A row rather
+              than a chip because the rationale is the point: a label alone is
+              not a choice the user can judge against a reasoned
+              recommendation. Two tight lines each keeps five of them to about
+              a third of the card. */}
+            <div className="grid gap-2">
+              {card.choices.map((choice, choiceIndex) => {
+                const recommended = choiceIndex === recommendedIndex;
+                const selected = choiceIndex === selectedIndex;
+                return (
+                  <button
+                    key={choice.label}
+                    type="button"
+                    aria-pressed={selected}
+                    disabled={busy}
+                    data-testid="choice-chip"
+                    data-recommended={recommended ? "true" : "false"}
+                    data-selected={selected ? "true" : "false"}
+                    className={cn(
+                      "min-h-9 w-full rounded-lg border border-border bg-transparent px-3.5 py-2.5 text-left transition-colors",
+                      "hover:border-foreground/40 hover:bg-accent",
+                      "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                      "disabled:pointer-events-none disabled:opacity-60",
+                      recommended && "border-primary/50",
+                      selected && "border-foreground bg-accent",
+                    )}
+                    onClick={() =>
+                      // The chip the interviewer recommended is the
+                      // recommendation, however differently the two are
+                      // worded: recording it as an own answer would lose that
+                      // it was the interviewer's own suggestion, which is the
+                      // one thing a record of accepting versus diverging is
+                      // made of.
+                      recommended
+                        ? save("accepted-recommendation")
+                        : save("own-answer", choice.label)
+                    }
+                  >
+                    <span className="flex items-center gap-2">
+                      {selected ? (
+                        <IconCheck className="size-3.5 shrink-0" />
+                      ) : null}
+                      <span className="min-w-0 text-[13px] font-medium">
+                        {choice.label}
+                      </span>
+                      {recommended ? (
+                        <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-primary uppercase">
+                          {t("workspace.recommended")}
+                        </span>
+                      ) : null}
                     </span>
-                  ) : null}
-                </Button>
-              ))}
+                    {choice.rationale ? (
+                      <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                        {choice.rationale}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
 
-              {/* A fifth way to answer, not a way to decline: it belongs with
-                the choices rather than among the steering moves. */}
+            {/* A fifth way to answer, not a way to decline: it belongs with
+              the choices rather than among the steering moves. */}
+            <div
+              className={cn(
+                "flex flex-wrap items-center gap-2",
+                card.choices.length > 0 && "pt-2",
+              )}
+            >
               <Button
                 type="button"
                 size="sm"

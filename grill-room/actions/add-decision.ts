@@ -56,6 +56,7 @@ export default defineAction({
         questionTitle: title,
         questionBody: body,
         offeredChoicesJson: "[]",
+        choiceRationalesJson: "[]",
         dependsOnJson: "[]",
         introducedBy: "user",
         awaitingPlacementSince: now,

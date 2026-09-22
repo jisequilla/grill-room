@@ -301,13 +301,28 @@ export function classifyLooseEnds(
 /** A stored decision, exactly as the table holds it. */
 export type DecisionRow = typeof decisions.$inferSelect;
 
+/**
+ * One offered choice, as the app stores and reports it: the label the chip
+ * reads and the case for it. Structurally the interviewer port's
+ * `OfferedChoice`, restated here because the port's types stop at the port —
+ * `DecisionView` restates every other field for the same reason.
+ */
+export interface DecisionChoice {
+  label: string;
+  rationale: string;
+}
+
 /** A decision as every read action reports it: the row with its state resolved. */
 export interface DecisionView {
   id: string;
   key: string | null;
   questionTitle: string;
   questionBody: string;
-  choices: string[];
+  choices: DecisionChoice[];
+  /** Index into `choices` of the one the recommendation picks, or null. */
+  recommendedChoice: number | null;
+  /** The label at `recommendedChoice`, resolved for callers that only want it. */
+  recommendedChoiceLabel: string | null;
   recommendedAnswer: string | null;
   /** Ids, not keys: the interviewer's keys never leave the interviewer port. */
   dependsOn: string[];
@@ -331,6 +346,32 @@ export function parseStringArray(json: string): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * The offered choices of a row: the labels zipped with the rationales stored
+ * beside them. A row written before choices carried a rationale holds `[]` in
+ * the rationale column, so every choice of it reads with an empty rationale
+ * rather than disappearing.
+ */
+export function parseChoices(row: {
+  offeredChoicesJson: string;
+  choiceRationalesJson: string;
+}): DecisionChoice[] {
+  const rationales = parseStringArray(row.choiceRationalesJson);
+  return parseStringArray(row.offeredChoicesJson).map((label, index) => ({
+    label,
+    rationale: rationales[index] ?? "",
+  }));
+}
+
+/** The label the recommendation picks, when the index points at a choice. */
+export function recommendedChoiceLabel(
+  choices: readonly DecisionChoice[],
+  recommendedChoice: number | null,
+): string | null {
+  if (recommendedChoice == null) return null;
+  return choices[recommendedChoice]?.label ?? null;
 }
 
 /** A stored row, reduced to the facts derivation and selection work from. */
@@ -357,12 +398,19 @@ export function describeDecisions(
 ): DecisionView[] {
   const states = deriveTreeStates(treeFacts(rows));
 
-  return rows.map((row) => ({
+  return rows.map((row) => {
+    const choices = parseChoices(row);
+    return {
     id: row.id,
     key: row.key,
     questionTitle: row.questionTitle,
     questionBody: row.questionBody,
-    choices: parseStringArray(row.offeredChoicesJson),
+    choices,
+    recommendedChoice: row.recommendedChoice,
+    recommendedChoiceLabel: recommendedChoiceLabel(
+      choices,
+      row.recommendedChoice,
+    ),
     recommendedAnswer: row.recommendedAnswer,
     dependsOn: parseStringArray(row.dependsOnJson),
     introducedBy: row.introducedBy,
@@ -376,7 +424,8 @@ export function describeDecisions(
     withdrawnAt: row.withdrawnAt,
     awaitingPlacementSince: row.awaitingPlacementSince,
     createdAt: row.createdAt,
-  }));
+    };
+  });
 }
 
 /**
@@ -401,6 +450,29 @@ export interface ProposedDecision {
   body?: string;
   dependsOn: readonly string[];
   ask: boolean;
+  /** Read only to check `recommendedChoice` against it. */
+  choices?: readonly unknown[];
+  /** Index into `choices`, which must actually be one of them. */
+  recommendedChoice?: number | null;
+}
+
+/**
+ * Why a proposed decision's `recommendedChoice` cannot be stored, or null when
+ * it can. An index past the end of the choices would mark a chip that does not
+ * exist, and an accepted recommendation would then be recorded against nothing.
+ */
+export function recommendedChoiceRejection(
+  decision: ProposedDecision,
+): string | null {
+  const index = decision.recommendedChoice;
+  if (index == null) return null;
+
+  const count = decision.choices?.length ?? 0;
+  if (Number.isInteger(index) && index >= 0 && index < count) return null;
+
+  return count === 0
+    ? `Decision "${decision.key}" sets \`recommendedChoice\` to ${index} but offers no choices. Offer the choices, or set \`recommendedChoice\` to null.`
+    : `Decision "${decision.key}" sets \`recommendedChoice\` to ${index}, which is not one of its ${count} choices. Use an index from 0 to ${count - 1}, or null when the recommendation is none of them.`;
 }
 
 /**
@@ -461,7 +533,8 @@ function keysOnCycles(
  * asked.
  *
  * Refused: a key that already exists or is proposed twice, a dependency link
- * pointing at nothing, links that form a cycle, a question marked to be asked
+ * pointing at nothing, a `recommendedChoice` that is not one of the decision's
+ * own choices, links that form a cycle, a question marked to be asked
  * that is not on the frontier once the proposal's own new decisions are part
  * of the tree, a pending push back with no response, a response that re-asks
  * the pushed-back decision unchanged, a user-added decision the proposal
@@ -537,6 +610,11 @@ export function validateProposal(
         );
       }
     }
+  }
+
+  for (const decision of [...proposed, ...userDecisionPlacements]) {
+    const rejection = recommendedChoiceRejection(decision);
+    if (rejection) reasons.push(rejection);
   }
 
   // A pending push back or an awaiting placement is a loose end the proposal

@@ -24,27 +24,44 @@ import submitRound from "./submit-round.js";
  * action wrote therefore travel with it.
  */
 
+/**
+ * A choice's rationale, derived from its label so a test that only cares about
+ * the labels still produces the shape the port requires.
+ */
+function rationaleFor(label: string): string {
+  return `Why ${label}`;
+}
+
+/** Labels as the port takes them: each with its own case. */
+export function withRationales(labels: readonly string[]) {
+  return labels.map((label) => ({ label, rationale: rationaleFor(label) }));
+}
+
 /** One proposed decision, with everything but the point of the test defaulted. */
 function proposed(
   overrides: Partial<{
     key: string;
     title: string;
     body: string;
+    /** Labels; each gets a derived rationale. */
     choices: string[];
+    recommendedChoice: number | null;
     recommendedAnswer: string;
     dependsOn: string[];
     ask: boolean;
   }> = {},
 ) {
+  const { choices, ...rest } = overrides;
   return {
     key: "shape",
     title: "What shape should this take?",
     body: "The first thing to settle.",
-    choices: [],
+    choices: withRationales(choices ?? []),
+    recommendedChoice: null,
     recommendedAnswer: "A workspace",
     dependsOn: [],
     ask: true,
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -98,7 +115,7 @@ describe("request-next-round", () => {
     ]);
     expect(result.round?.decisions[0]).toMatchObject({
       questionTitle: "What shape should this take?",
-      choices: ["A page", "A workspace"],
+      choices: withRationales(["A page", "A workspace"]),
       recommendedAnswer: "A workspace",
       state: "frontier",
       draft: null,

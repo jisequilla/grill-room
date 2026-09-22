@@ -26,6 +26,7 @@ import { getInterviewer } from "./interviewer/index.js";
 import type { ReviewStaleResult } from "./interviewer/index.js";
 import {
   deriveTreeStates,
+  recommendedChoiceRejection,
   transitiveDependencies,
   treeFacts,
   type TreeDecision,
@@ -132,6 +133,17 @@ export function reviewRejectionReasons(
         `Decision "${key}" was ruled on but is not one of the stale decisions in this review. Rule only on the ones listed.`,
       );
     }
+  }
+
+  for (const review of result.reviews) {
+    const rejection = recommendedChoiceRejection({
+      key: review.decisionKey,
+      dependsOn: [],
+      ask: false,
+      choices: review.choices,
+      recommendedChoice: review.recommendedChoice,
+    });
+    if (rejection) reasons.push(rejection);
   }
 
   return reasons;
@@ -281,7 +293,13 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
         .set({
           questionTitle: review.title ?? row.questionTitle,
           questionBody: review.body ?? row.questionBody,
-          offeredChoicesJson: JSON.stringify(review.choices),
+          offeredChoicesJson: JSON.stringify(
+            review.choices.map((choice) => choice.label),
+          ),
+          choiceRationalesJson: JSON.stringify(
+            review.choices.map((choice) => choice.rationale),
+          ),
+          recommendedChoice: review.recommendedChoice,
           recommendedAnswer: review.recommendedAnswer ?? row.recommendedAnswer,
           currentAnswer: null,
           answerKind: null,

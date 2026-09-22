@@ -27,12 +27,19 @@ import submitRound from "./submit-round.js";
  * build outruns vitest's hook timeout and unrelated files start failing.
  */
 
+/** Labels as the port takes them: each with its own case, derived from the label. */
+function withRationales(labels: readonly string[]) {
+  return labels.map((label) => ({ label, rationale: `Why ${label}` }));
+}
+
 function proposal(
   ...proposedDecisions: {
     key: string;
     title: string;
     recommendedAnswer?: string;
+    /** Labels; each gets a derived rationale. */
     choices?: string[];
+    recommendedChoice?: number | null;
     dependsOn?: string[];
     ask?: boolean;
   }[]
@@ -44,7 +51,8 @@ function proposal(
         key: decision.key,
         title: decision.title,
         body: "",
-        choices: decision.choices ?? [],
+        choices: withRationales(decision.choices ?? []),
+        recommendedChoice: decision.recommendedChoice ?? null,
         recommendedAnswer:
           decision.recommendedAnswer ?? `The usual answer to ${decision.key}`,
         dependsOn: decision.dependsOn ?? [],
@@ -488,7 +496,9 @@ describe("stale review", () => {
       reason?: string;
       title?: string;
       body?: string;
+      /** Labels; each gets a derived rationale. */
       choices?: string[];
+      recommendedChoice?: number | null;
       recommendedAnswer?: string;
     }[]
   ): ScriptedTurn {
@@ -501,7 +511,8 @@ describe("stale review", () => {
           reason: verdict.reason ?? `What ${verdict.key} rests on moved.`,
           title: verdict.title ?? null,
           body: verdict.body ?? null,
-          choices: verdict.choices ?? [],
+          choices: withRationales(verdict.choices ?? []),
+          recommendedChoice: verdict.recommendedChoice ?? null,
           recommendedAnswer: verdict.recommendedAnswer ?? null,
         })),
       },
@@ -616,6 +627,7 @@ describe("stale review", () => {
           title: "How does a page stay current?",
           body: "The old answer assumed a workspace.",
           choices: ["Poll", "Push"],
+          recommendedChoice: 1,
           recommendedAnswer: "Push",
         },
       ),
@@ -637,7 +649,9 @@ describe("stale review", () => {
       settledAt: null,
       questionTitle: "How does a page stay current?",
       questionBody: "The old answer assumed a workspace.",
-      choices: ["Poll", "Push"],
+      choices: withRationales(["Poll", "Push"]),
+      recommendedChoice: 1,
+      recommendedChoiceLabel: "Push",
       recommendedAnswer: "Push",
     });
     expect(
@@ -806,6 +820,7 @@ describe("stale review", () => {
               title: added.questionTitle,
               body: added.questionBody,
               choices: [],
+              recommendedChoice: null,
               recommendedAnswer: "Not for the first version.",
               dependsOn: [],
               ask: true,

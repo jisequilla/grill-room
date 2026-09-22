@@ -98,9 +98,21 @@ export const decisions = table(
     key: text("key"),
     questionTitle: text("question_title").notNull(),
     questionBody: text("question_body").notNull().default(""),
-    /** JSON array of strings: the choices the interviewer offered, if any. */
+    /** JSON array of strings: the labels of the choices the interviewer offered, if any. */
     offeredChoicesJson: text("offered_choices_json").notNull().default("[]"),
+    /**
+     * JSON array of strings, parallel to `offeredChoicesJson`: the case for each
+     * choice. Rows written before choices carried a rationale hold `[]`, which
+     * is why the two arrays are read as a zip rather than required to match.
+     */
+    choiceRationalesJson: text("choice_rationales_json").notNull().default("[]"),
     recommendedAnswer: text("recommended_answer"),
+    /**
+     * Index into the choices of the one the recommendation picks. Null when the
+     * question is open-ended, when the recommendation is none of the choices,
+     * or when the row predates the interviewer being asked for it.
+     */
+    recommendedChoice: integer("recommended_choice"),
     currentAnswer: text("current_answer"),
     answerKind: text("answer_kind", { enum: DECISION_ANSWER_KINDS }),
     dispositionTarget: text("disposition_target", {
