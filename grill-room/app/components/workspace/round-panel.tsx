@@ -1,5 +1,9 @@
 import { useT } from "@agent-native/core/client/i18n";
 
+import {
+  ConfirmedPanel,
+  DoneProposedPanel,
+} from "@/components/workspace/done-panel";
 import { RoundCard } from "@/components/workspace/round-card";
 import {
   NextRoundPanel,
@@ -40,6 +44,7 @@ export function RoundPanel({
   isRequesting,
   onSubmit,
   isSubmitting,
+  onOpenDecision,
 }: {
   round: RoundResult | undefined;
   isLoading: boolean;
@@ -49,6 +54,8 @@ export function RoundPanel({
   isRequesting: boolean;
   onSubmit: (roundId: string) => void;
   isSubmitting: boolean;
+  /** Opens the decision sheet, which is how a loose end is read in full. */
+  onOpenDecision: (decisionId: string) => void;
 }) {
   const t = useT();
 
@@ -73,6 +80,29 @@ export function RoundPanel({
         error={round.turnError}
         onRetry={onRequestNextRound}
         isPending={isRequesting}
+      />
+    );
+  }
+
+  // The session's own state outranks whatever round is lying around: once the
+  // interviewer has proposed done, the centre panel is the ending, not cards.
+  if (round.state === "done-proposed") {
+    return (
+      <DoneProposedPanel
+        sessionId={round.sessionId}
+        doneSummary={round.doneSummary}
+        onOpenDecision={onOpenDecision}
+        onContinueInterview={onRequestNextRound}
+        isContinuing={isRequesting}
+      />
+    );
+  }
+
+  if (round.state === "confirmed") {
+    return (
+      <ConfirmedPanel
+        sessionId={round.sessionId}
+        doneSummary={round.doneSummary}
       />
     );
   }

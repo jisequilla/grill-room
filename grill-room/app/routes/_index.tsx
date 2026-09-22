@@ -34,7 +34,7 @@ export default function SessionListRoute() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-3xl p-6">
+    <div className="w-full max-w-3xl p-6">
       {isLoading ? (
         <SessionListSkeleton />
       ) : sessions && sessions.length > 0 ? (

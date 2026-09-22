@@ -17,8 +17,11 @@ interface SessionListItem {
 export function SessionList({ sessions }: { sessions: SessionListItem[] }) {
   const formatters = useFormatters();
 
+  // A row's own padding lets its hover reach past the text; the negative
+  // margin puts the text back on the page's left edge, where the header's
+  // title sits.
   return (
-    <ul className="divide-y divide-border">
+    <ul className="-mx-2 divide-y divide-border">
       {sessions.map((session) => (
         <li key={session.id} className="flex items-center gap-2">
           <Link

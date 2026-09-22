@@ -20,7 +20,11 @@ import { RoundPanel } from "@/components/workspace/round-panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { APP_TITLE } from "@/lib/app-config";
-import { actionErrorCode, type TreeDecision } from "@/lib/decisions";
+import {
+  actionErrorCode,
+  type SessionState,
+  type TreeDecision,
+} from "@/lib/decisions";
 import { MODEL_LABEL_KEY } from "@/lib/session-labels";
 
 import type { SessionAnsweringMode, SessionModel } from "@shared/session-constants";
@@ -38,6 +42,13 @@ const TURN_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** How often the workspace re-reads the session while the interviewer works. */
 const TURN_POLL_MS = 3000;
+
+/** What the centre column is showing, which is the session's state, not "this round". */
+const PANEL_HEADING_KEY: Record<SessionState, string> = {
+  interviewing: "workspace.roundHeading",
+  "done-proposed": "workspace.doneHeading",
+  confirmed: "workspace.confirmedHeading",
+};
 
 /**
  * Failures the session's stored turn status already reports on screen. Toasting
@@ -129,7 +140,11 @@ export default function SessionWorkspaceRoute() {
     decisions.find((decision) => decision.id === selectedId) ?? null;
 
   function selectDecision(decision: TreeDecision) {
-    setSelectedId(decision.id);
+    openDecision(decision.id);
+  }
+
+  function openDecision(decisionId: string) {
+    setSelectedId(decisionId);
     setDetailOpen(true);
   }
 
@@ -171,24 +186,11 @@ export default function SessionWorkspaceRoute() {
           </span>
         </header>
 
-        {session.state !== "interviewing" ? (
-          <p
-            className="mb-5 rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground"
-            data-testid="session-state-banner"
-          >
-            {t(
-              session.state === "confirmed"
-                ? "workspace.confirmedBanner"
-                : "workspace.doneProposedBanner",
-            )}
-          </p>
-        ) : null}
-
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_21rem]">
-          <main className="min-w-0 space-y-8">
+          <div className="min-w-0 space-y-8">
             <section>
               <h3 className="pb-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                {t("workspace.roundHeading")}
+                {t(PANEL_HEADING_KEY[session.state as SessionState])}
               </h3>
               <RoundPanel
                 round={round}
@@ -198,6 +200,7 @@ export default function SessionWorkspaceRoute() {
                 isRequesting={nextRound.isPending}
                 onSubmit={(roundId) => submitRound.mutate({ id: roundId })}
                 isSubmitting={submitRound.isPending}
+                onOpenDecision={openDecision}
               />
             </section>
 
@@ -207,7 +210,7 @@ export default function SessionWorkspaceRoute() {
               </h3>
               <RoundHistory rounds={rounds?.rounds ?? []} />
             </section>
-          </main>
+          </div>
 
           <aside className="min-w-0 lg:sticky lg:top-6 lg:self-start">
             <h3 className="pb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">

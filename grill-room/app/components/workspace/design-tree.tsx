@@ -61,7 +61,7 @@ function DecisionRow({
           {otherParents.length > 0 ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="ml-1.5 cursor-default rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">
+                <span className="ml-1.5 inline-block cursor-default rounded bg-muted px-1 font-mono text-[10px] whitespace-nowrap text-muted-foreground">
                   {t("workspace.moreDependencies", {
                     count: otherParents.length,
                   })}

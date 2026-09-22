@@ -8,6 +8,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { DecisionStateBadge } from "@/components/workspace/decision-state-badge";
+import { Markdown } from "@/components/workspace/markdown";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -108,11 +109,10 @@ export function RoundCard({
           <h3 className="text-[15px] leading-snug font-medium text-balance">
             {card.questionTitle}
           </h3>
-          {card.questionBody ? (
-            <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-              {card.questionBody}
-            </p>
-          ) : null}
+          <Markdown
+            text={card.questionBody}
+            className="mt-1.5 text-sm leading-relaxed text-muted-foreground"
+          />
         </div>
         <DecisionStateBadge state={card.state} className="mt-0.5" />
       </header>
@@ -184,16 +184,16 @@ export function RoundCard({
               </Button>
             ) : null}
           </div>
-          <p
-            className={cn(
-              "mt-1.5 text-sm",
-              card.recommendedAnswer
-                ? "text-foreground"
-                : "text-muted-foreground italic",
-            )}
-          >
-            {card.recommendedAnswer ?? t("workspace.noRecommendation")}
-          </p>
+          {card.recommendedAnswer ? (
+            <Markdown
+              text={card.recommendedAnswer}
+              className="mt-1.5 text-sm text-foreground"
+            />
+          ) : (
+            <p className="mt-1.5 text-sm text-muted-foreground italic">
+              {t("workspace.noRecommendation")}
+            </p>
+          )}
         </div>
 
         {card.choices.length > 0 ? (
