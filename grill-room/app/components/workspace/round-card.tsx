@@ -199,10 +199,12 @@ export function RoundCard({
                       "border-primary/50 ring-1 ring-primary/40",
                   )}
                   onClick={() =>
-                    // A choice that is the recommendation is the recommendation:
+                    // The chip the interviewer recommended is the
+                    // recommendation, however differently the two are worded:
                     // recording it as an own answer would lose that it was the
-                    // interviewer's own suggestion.
-                    choice === card.recommendedAnswer
+                    // interviewer's own suggestion, which is the one thing a
+                    // record of accepting versus diverging is made of.
+                    choiceIndex === recommendedIndex
                       ? save("accepted-recommendation")
                       : save("own-answer", choice)
                   }
