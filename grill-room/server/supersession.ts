@@ -82,11 +82,19 @@ export function supersessionRejectionReasons(input: {
   askedKeys: readonly string[];
   /** The keys of every decision currently derived settled. */
   settledKeys: readonly string[];
+  /**
+   * The keys of every settled decision whose answer kind is `dispositioned`:
+   * set aside as out of scope or as a named open question, not answered. Such
+   * a decision is settled — nothing downstream of it is blocked — but it
+   * answers nothing, so it cannot supersede a loose end.
+   */
+  dispositionedKeys: readonly string[];
   result: FindSupersededResult;
 }): string[] {
   const reasons: string[] = [];
   const asked = new Set(input.askedKeys);
   const settled = new Set(input.settledKeys);
+  const dispositioned = new Set(input.dispositionedKeys);
   const seen = new Set<string>();
 
   for (const entry of input.result.supersessions) {
@@ -103,7 +111,11 @@ export function supersessionRejectionReasons(input: {
       );
     }
 
-    if (!settled.has(entry.answeredByKey)) {
+    if (dispositioned.has(entry.answeredByKey)) {
+      reasons.push(
+        `"${entry.answeredByKey}" cannot supersede "${entry.looseEndKey}": it was set aside (dispositioned), not answered. A loose end is only superseded by a decision that settled with a real answer.`,
+      );
+    } else if (!settled.has(entry.answeredByKey)) {
       reasons.push(
         `"${entry.answeredByKey}" cannot supersede "${entry.looseEndKey}": it is not a settled decision of this tree. A loose end is only superseded by a decision that is settled now.`,
       );
@@ -142,8 +154,10 @@ async function scan(
 
   const askedKeys = looseEnds.map(portKey);
   const states = deriveTreeStates(treeFacts(rows));
-  const settledKeys = rows
-    .filter((row) => states.get(row.id) === "settled")
+  const settledRows = rows.filter((row) => states.get(row.id) === "settled");
+  const settledKeys = settledRows.map(portKey);
+  const dispositionedKeys = settledRows
+    .filter((row) => row.answerKind === "dispositioned")
     .map(portKey);
 
   const interviewer = getInterviewer();
@@ -165,7 +179,12 @@ async function scan(
         rejectionReason: attempt.rejectionReason,
       }),
     reasonsToRefuse: (result) =>
-      supersessionRejectionReasons({ askedKeys, settledKeys, result }),
+      supersessionRejectionReasons({
+        askedKeys,
+        settledKeys,
+        dispositionedKeys,
+        result,
+      }),
     exhausted: (lastReason) =>
       new TurnRejected(
         "invalid-supersession",

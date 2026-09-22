@@ -151,6 +151,8 @@ describe("reopen-decision", () => {
         // The user reopened it; the interviewer had nothing to say about that.
         interviewerReason: null,
         recordedAt: expect.stringMatching(/^\d{4}-/),
+        questionTitle: "Question shape",
+        questionBody: "The body of shape",
       },
     ]);
   });

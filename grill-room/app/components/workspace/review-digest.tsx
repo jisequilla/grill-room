@@ -182,11 +182,16 @@ function ReviewEventCard({
                 <VerdictTag verdict="re-ask" />
                 <DecisionLink
                   decisionId={entry.decisionId}
-                  title={byId.get(entry.decisionId)?.questionTitle ?? entry.decisionId}
+                  title={entry.title}
                   inOpenRound={openRoundDecisionIds.has(entry.decisionId)}
                   onOpenDecision={onOpenDecision}
                 />
               </div>
+              {entry.retitledTo ? (
+                <p className="text-xs text-muted-foreground italic">
+                  {t("workspace.reviewNowAskedAs", { title: entry.retitledTo })}
+                </p>
+              ) : null}
               <p className="text-xs text-muted-foreground">{entry.reason}</p>
             </li>
           ))}
@@ -213,7 +218,7 @@ function ReviewEventCard({
               <div key={entry.decisionId} className="space-y-0.5">
                 <DecisionLink
                   decisionId={entry.decisionId}
-                  title={byId.get(entry.decisionId)?.questionTitle ?? entry.decisionId}
+                  title={entry.title}
                   inOpenRound={openRoundDecisionIds.has(entry.decisionId)}
                   onOpenDecision={onOpenDecision}
                 />
