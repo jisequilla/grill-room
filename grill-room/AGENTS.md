@@ -75,6 +75,8 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `get-spec` | A session's spec, or null when none has been synthesized yet, plus a `ticketsCurrent` flag: whether any generated tickets still match it. |
 | `break-into-tickets` | Break the session's current spec into implementation tickets, replacing any it already has. Allowed only for a confirmed session with a current spec and no turn working. Refuses to replace tickets carrying a build record unless `force` is set. Returns the same shape as `list-tickets`. |
 | `list-tickets` | A session's tickets in number order, each with `blockedBy` resolved to ticket numbers, plus the same `ticketsCurrent` flag as `get-spec`. |
+| `set-export-target` | Set the absolute folder a session exports into; `~` is expanded and the path normalised. Does not need to exist yet. |
+| `export-session` | Write the session's current spec, and its tickets when current, into the export target folder in the local-markdown tracker layout. Refuses a missing or unwritable target and refuses to overwrite existing files unless `overwrite` is set. |
 | `navigate` | Move the UI to a view or path, through application state. |
 | `view-screen` | What the user is looking at. Call it first when the visible context matters. |
 | `provider-api-request` | Call Slack's Web API through the workspace connection. |
