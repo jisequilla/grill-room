@@ -112,6 +112,9 @@ const messages = {
     treeHeading: "Design tree",
     historyHeading: "Previous rounds",
 
+    ideaMore: "Show more",
+    ideaLess: "Show less",
+
     startTitle: "Nothing asked yet",
     startDescription:
       "The interviewer reads your idea and opens with the decisions it can ask about now.",

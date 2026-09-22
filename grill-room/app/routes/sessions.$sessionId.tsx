@@ -17,6 +17,7 @@ import { DecisionDetailSheet } from "@/components/workspace/decision-detail-shee
 import { DesignTree } from "@/components/workspace/design-tree";
 import { RoundHistory } from "@/components/workspace/round-history";
 import { RoundPanel } from "@/components/workspace/round-panel";
+import { SessionIdea } from "@/components/workspace/session-idea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { APP_TITLE } from "@/lib/app-config";
@@ -174,16 +175,17 @@ export default function SessionWorkspaceRoute() {
   return (
     <TooltipProvider delayDuration={200}>
       <div className="mx-auto w-full max-w-7xl p-6">
-        {/* The shell header already carries the session's title. */}
-        <header className="flex flex-wrap items-center gap-2 pb-5">
-          <SessionStateBadge state={session.state} />
-          <span className="text-sm text-muted-foreground">
-            {t(MODEL_LABEL_KEY[session.model as SessionModel])}
-          </span>
-          <span className="text-sm text-muted-foreground">·</span>
-          <span className="max-w-md truncate text-sm text-muted-foreground">
-            {session.idea}
-          </span>
+        {/* The shell header already carries the session's title, so this block
+            is the idea rather than a second heading: the meta chips sit on
+            their own row and the idea gets the width to be read whole. */}
+        <header className="flex flex-col gap-2 pb-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <SessionStateBadge state={session.state} />
+            <span className="text-sm text-muted-foreground">
+              {t(MODEL_LABEL_KEY[session.model as SessionModel])}
+            </span>
+          </div>
+          <SessionIdea idea={session.idea} />
         </header>
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_21rem]">
