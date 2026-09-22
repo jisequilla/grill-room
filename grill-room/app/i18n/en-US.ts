@@ -142,10 +142,49 @@ const messages = {
     errorMalformed: "The interviewer returned something unusable.",
     errorGeneric: "The interviewer could not complete the turn.",
 
-    doneProposedBanner:
-      "The interviewer proposes that you are done. Review and confirm on the output screen.",
+    doneHeading: "Finishing",
+    confirmedHeading: "Confirmed",
+    doneProposedTitle: "The interviewer proposes you are done",
+    confirmedTitle: "Shared understanding confirmed",
     confirmedBanner:
-      "This session is confirmed. Reopening any decision returns it to interviewing.",
+      "Reopening any decision returns this session to interviewing.",
+    confirmedMeaning:
+      "You agreed these decisions say what you meant. The spec is written from them.",
+    openOutput: "Open the output",
+
+    looseEndsHeading: "Loose ends",
+    looseEndsChecking: "Checking what is still open…",
+    looseEndsClear:
+      "Nothing is open: every decision has a real answer or was set aside.",
+    looseEndsInterviewerNote:
+      "These are the interviewer's to resolve, not yours. Another round reconfirms, re-asks, or places them.",
+    continueInterview: "Continue the interview",
+
+    reasonUnknown: "You said you don't know",
+    reasonDeferred: "Deferred",
+    reasonPrototypeFlagged: "Waiting for a prototype",
+    reasonPushedBack: "You pushed back and the interviewer has not responded",
+    reasonStale: "Out of date after a reopened answer",
+    reasonUnplaced: "Waiting for the interviewer to place it",
+    reasonNeverAnswered: "Never answered",
+
+    setAside: "Set aside",
+    settingAside: "Setting aside…",
+    setAsideTitle: "Set this decision aside",
+    setAsideWhere: "Where does it go?",
+    targetOutOfScope: "Out of scope",
+    targetOutOfScopeHint: "The spec says it does not cover this.",
+    targetOpenQuestion: "Open question",
+    targetOpenQuestionHint: "The spec carries it in its notes, still open.",
+    setAsideNoteLabel: "Note (optional)",
+    setAsideNotePlaceholder: "Why it is set aside, in one line",
+    setAsideFailed: "Could not set that decision aside.",
+
+    confirmSession: "Confirm shared understanding",
+    confirmBlocked_one: "1 loose end has to be resolved first.",
+    confirmBlocked_other: "{{count}} loose ends have to be resolved first.",
+    confirmReady: "Everything is answered or set aside.",
+    confirmFailed: "Could not confirm the session.",
 
     recommended: "Recommended",
     noRecommendation: "No recommendation",

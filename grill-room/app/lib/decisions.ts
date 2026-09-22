@@ -6,9 +6,18 @@
 
 type TreeResult = AgentNativeActionRegistry["get-tree"]["result"];
 type RoundResult = AgentNativeActionRegistry["get-current-round"]["result"];
+type LooseEndResult = AgentNativeActionRegistry["list-loose-ends"]["result"];
 
 /** One decision of the design tree, with its history. */
 export type TreeDecision = TreeResult["decisions"][number];
+
+/** One decision blocking confirmation, with the category it falls under. */
+export type LooseEnd = LooseEndResult[number];
+
+export type LooseEndReason = LooseEnd["reason"];
+
+/** The session's own lifecycle, as the round action reports it. */
+export type SessionState = RoundResult["state"];
 
 /** One card of the open round: a decision plus whatever draft answer it holds. */
 export type RoundCard = NonNullable<RoundResult["round"]>["decisions"][number];
@@ -67,6 +76,32 @@ export const ANSWER_KIND_LABEL_KEY: Record<DecisionAnswerKind, string> = {
   "prototype-flagged": "workspace.kindPrototypeFlagged",
   dispositioned: "workspace.kindDispositioned",
 };
+
+export const LOOSE_END_REASON_LABEL_KEY: Record<LooseEndReason, string> = {
+  unknown: "workspace.reasonUnknown",
+  deferred: "workspace.reasonDeferred",
+  "prototype-flagged": "workspace.reasonPrototypeFlagged",
+  "pushed-back": "workspace.reasonPushedBack",
+  stale: "workspace.reasonStale",
+  unplaced: "workspace.reasonUnplaced",
+  "never-answered": "workspace.reasonNeverAnswered",
+};
+
+/**
+ * Loose ends the user can close here and now, by answering or setting aside.
+ * The rest — stale, unplaced, never answered — are the interviewer's to
+ * resolve on its next turn, so the list offers them nothing but the interview.
+ */
+const RESOLVABLE_REASONS: readonly LooseEndReason[] = [
+  "unknown",
+  "deferred",
+  "prototype-flagged",
+  "pushed-back",
+];
+
+export function isResolvableByUser(reason: LooseEndReason): boolean {
+  return RESOLVABLE_REASONS.includes(reason);
+}
 
 /**
  * The `errorCode` an action attached to a failure, when it attached one. The
