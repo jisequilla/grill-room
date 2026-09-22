@@ -16,7 +16,7 @@ The subject was Grill Room, a local app that runs Matt Pocock's grilling intervi
 | First-attempt passes | 28 of 31 first-attempt tickets; the three exceptions are a session restart that killed two agents before they committed, and one ticket revised from pass to fail after a defect surfaced post-merge |
 | Delegation prompts with a gap the agent had to work around | 24 of 33; 9 reported none |
 | Merges | 28 ticket merges onto `main`, every one behind a trial merge and the full suite (unit, type check, browser smoke) run on the merged tree before committing, after the first two merges taught that lesson |
-| Final state | 38 actions, 452 tests across 39 files, 1 end-to-end browser test, ~17,000 lines of TypeScript, 135 commits |
+| Final state | 38 actions, 437 tests across 38 files, 1 end-to-end browser test, ~17,000 lines of TypeScript, 136 commits |
 | First real session | 72 decisions, 96 rounds, 7 reopens with real stale reviews, a spec of 35 user stories and 18 tickets exported in the local-markdown tracker layout |
 
 ## What the numbers say
@@ -36,6 +36,12 @@ The subject was Grill Room, a local app that runs Matt Pocock's grilling intervi
 - **Parallel work on shared files costs a third ticket.** Two tickets built on the same module in parallel merged without conflict only because one duplicated code; the duplicate diverged within a ticket, and a cleanup ticket had to unify it. Parallel work on disjoint files (backend beside UI, export beside build records) paid off every time.
 - **Give UI agents a browser.** Once agents could screenshot their own screens, they found and fixed visual defects before reporting: a viewport grid inside a narrow aside, a steering row that wrapped, loose-end answers coloured like settled ones.
 - **The first real user session found what no ticket could.** The user could not judge the alternatives because the recommendation carried a median 146 characters of reasoning and each other choice 29; the UI guessed which chip was the recommendation and guessed wrong four times in five; three loose ends had already been answered by later decisions and still blocked confirmation; and the design being grilled already existed on disk, unnoticed, because the method does no fact-finding. Each became a ticket, and the tickets were built the same way as the rest.
+
+## The final pass
+
+After the last ticket merged, one session was driven end to end through the browser with the real model (Fable), in docs mode, on a small idea with a two-file docs folder: 11 rounds, 57 decisions, a done proposal, the supersession check, confirmation, spec synthesis (166 lines, 35 stories), 8 tickets with dependencies, and an export in the local-markdown tracker layout. Zero page errors. Turns ran 30 s to 2.5 min, except one of 7.5 min: the app had refused the proposal twice and was on its third attempt, and nothing outside the process showed that. Refused attempts should be visible in the turn status.
+
+The pass also found a defect no ticket had covered. One "I don't know" blocked a subtree of four questions. Instead of waiting for the loose end, the interviewer proposed each blocked question again under a new key with an unblocked dependency, settled the clones, and proposed done with ten never-answered exact-title duplicates in the tree. The done gate blocked confirmation on them, correctly, but the supersession check does not cover never-answered loose ends, and proposal validation refuses duplicate keys, not duplicate titles. Filed as gr-1tj. It is the same shape as every other post-merge defect: a contract split across two tickets (proposal validation and the interviewer's instructions), each half correct alone.
 
 ## On the method itself
 
