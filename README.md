@@ -53,14 +53,20 @@ Requires the Claude Code CLI, authenticated on a subscription. Interview turns
 are real model calls that take a minute or two each.
 
 ```bash
-cd grill-room
-pnpm install
-pnpm dev
+just setup
+just dev        # http://localhost:8080
 ```
 
-`pnpm test` runs the suite at the action boundary without opening a browser or
-calling the CLI; `pnpm test:e2e` walks a session through the real UI against a
-fake interviewer. See `grill-room/DEVELOPING.md` for the rest.
+The `justfile` at the repo root owns the dev workflow. Only one process can
+open the local database, so `just dev` refuses to start a second server and
+points at the running one instead; `just status`, `just open`, `just stop` and
+`just restart` find that server wherever it listens. `just dev-fake` runs the
+UI against a fake interviewer, without calling the CLI.
+
+`just test` runs the suite at the action boundary without opening a browser or
+calling the CLI; `just e2e` walks a session through the real UI against a fake
+interviewer; `just check` runs both plus the typecheck. `just --list` shows
+every recipe, and `grill-room/DEVELOPING.md` covers the rest.
 
 ## Attribution
 
