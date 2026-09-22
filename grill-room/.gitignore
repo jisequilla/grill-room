@@ -50,3 +50,8 @@ data/*.lock
 
 # Holds a plaintext ACCESS_TOKEN once `agent-native mcp install` has run
 .mcp.json
+
+# Playwright
+e2e/artifacts/
+test-results/
+playwright-report/
