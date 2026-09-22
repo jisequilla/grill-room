@@ -51,7 +51,6 @@ Grill-me worked as a container for the interview, and the design tree did the on
 
 - `docs/delegation-log.md`: one row per delegated task with model, outcome and the prompt gap.
 - `docs/design/session-retrospective.md`: the first real session in numbers and what it changed.
-- `docs/design/monitor-comparison.md`: the grilled design against the existing system it turned out to duplicate.
 - `docs/design/workspace-review.md`: the design review and its verification.
 - `docs/spikes/claude-code-harness.md`: why the app calls `claude -p` instead of the framework's harness.
-- The beads store (`bd list --status=closed`): every ticket's close comment carries the verification evidence.
+- The beads store, which stays local: each ticket's close comment carries that ticket's verification evidence, and the delegation log is its summary.

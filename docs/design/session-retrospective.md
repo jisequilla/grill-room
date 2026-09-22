@@ -23,7 +23,7 @@ The first interview a user ran in Grill Room end to end, on a real idea ("Agent 
 
 **Every detail was reachable from outside.** The main session read the idea, all answers and the open round through the app's actions, exported the decisions as data for a comparison, and drove the reopens through the same actions the UI uses.
 
-**The comparison against the existing system was worth more than the interview.** Of 49 settled decisions, 19 had no counterpart in the existing product, six of them real defects in a shipped system, and the four hardest-won lessons of that system (subagent lineage, cache-token TTL pricing, the five-hour subscription window, payload limits) never appeared in 96 rounds.
+**The comparison against the existing system was worth more than the interview.** The idea being grilled turned out to be a system that already existed on disk, built for the same purpose. Of 49 settled decisions, 19 had no counterpart in it and several of those were gaps worth closing — while the four hardest-won lessons already paid for in the existing implementation (subagent lineage, cache-token TTL pricing, the five-hour subscription window, payload limits) never surfaced once in 96 rounds of interview.
 
 ## What did not
 
