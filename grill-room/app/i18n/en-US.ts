@@ -119,6 +119,10 @@ const messages = {
     ideaMore: "Show more",
     ideaLess: "Show less",
 
+    modelSelectLabel: "Interviewer model",
+    modelLockedError: "This session's interviewer model is fixed on {{model}}.",
+    modelChangeFailed: "Could not change the session's interviewer model.",
+
     docsFolderNone: "No docs folder",
     docsFolderSet: "Reading {{folder}}",
     docsFolderTooltip:

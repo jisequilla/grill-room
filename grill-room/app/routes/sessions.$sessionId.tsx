@@ -20,6 +20,7 @@ import { DocsFolderChip } from "@/components/workspace/docs-folder-chip";
 import { RoundHistory } from "@/components/workspace/round-history";
 import { RoundPanel } from "@/components/workspace/round-panel";
 import { SessionIdea } from "@/components/workspace/session-idea";
+import { SessionModelControl } from "@/components/workspace/session-model-control";
 import { TreeFooter } from "@/components/workspace/tree-footer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -29,7 +30,6 @@ import {
   type SessionState,
   type TreeDecision,
 } from "@/lib/decisions";
-import { MODEL_LABEL_KEY } from "@/lib/session-labels";
 
 import type { SessionAnsweringMode, SessionModel } from "@shared/session-constants";
 
@@ -206,9 +206,12 @@ export default function SessionWorkspaceRoute() {
         <header className="flex flex-col gap-2 pb-5">
           <div className="flex flex-wrap items-center gap-2">
             <SessionStateBadge state={session.state} />
-            <span className="text-sm text-muted-foreground">
-              {t(MODEL_LABEL_KEY[session.model as SessionModel])}
-            </span>
+            <SessionModelControl
+              sessionId={id}
+              model={session.model as SessionModel}
+              modelLocked={session.modelLocked}
+              onChanged={refresh}
+            />
             <DocsFolderChip
               sessionId={id}
               docsFolder={session.docsFolder}
