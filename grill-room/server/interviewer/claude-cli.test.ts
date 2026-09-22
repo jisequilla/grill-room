@@ -5,10 +5,11 @@ import { describe, expect, it } from "vitest";
 import {
   CLEARED_ENVIRONMENT_MARKERS,
   createClaudeCliInterviewer,
+  DOCS_MODE_TOOLS,
   type CliInvocation,
   type CliOutcome,
 } from "./claude-cli.js";
-import { loadGrillingSkill } from "./instructions.js";
+import { DOCS_FOLDER_ADDENDUM, loadGrillingSkill } from "./instructions.js";
 import { jsonSchemaFor } from "./schemas.js";
 import {
   aProposeRoundRequest,
@@ -140,6 +141,150 @@ describe("what the adapter sends to the command line", () => {
     );
 
     expect(runner.invocations[0].cwd).toBe(tmpdir());
+  });
+
+  it("sends exactly this argument list when there is no docs folder", async () => {
+    const runner = recordingRunner([ok(anEnvelope())]);
+    const request = aProposeRoundRequest();
+
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).proposeRound(
+      request,
+    );
+
+    const { args } = runner.invocations[0];
+    expect(args).toEqual([
+      "-p",
+      valueOf(args, "-p"),
+      "--model",
+      "sonnet",
+      "--output-format",
+      "json",
+      "--allowed-tools",
+      "",
+      "--json-schema",
+      JSON.stringify(jsonSchemaFor("propose-round")),
+    ]);
+  });
+});
+
+/**
+ * The docs-folder turn is the one place the app points the model at the user's
+ * own filesystem. These assertions are the security contract: what it may use,
+ * where it may use it, and what it can never reach.
+ */
+describe("what the adapter sends when the session has a docs folder", () => {
+  const DOCS_FOLDER = "/Users/someone/projects/observability";
+
+  function aDocsRequest() {
+    const base = aProposeRoundRequest();
+    return aProposeRoundRequest({
+      context: { ...base.context, docsFolder: DOCS_FOLDER },
+    });
+  }
+
+  async function invocationWithDocsFolder() {
+    const runner = recordingRunner([ok(anEnvelope())]);
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).proposeRound(
+      aDocsRequest(),
+    );
+    return runner.invocations[0];
+  }
+
+  it("runs the turn from the docs folder itself", async () => {
+    expect((await invocationWithDocsFolder()).cwd).toBe(DOCS_FOLDER);
+  });
+
+  it("allows exactly the three read tools, and makes them the whole tool set", async () => {
+    const { args } = await invocationWithDocsFolder();
+
+    expect(DOCS_MODE_TOOLS).toEqual(["Read", "Grep", "Glob"]);
+    expect(valueOf(args, "--tools")).toBe("Read,Grep,Glob");
+    expect(valueOf(args, "--allowed-tools")).toBe("Read,Grep,Glob");
+  });
+
+  it("names no tool that writes, runs a command, or reaches the network", async () => {
+    const { args } = await invocationWithDocsFolder();
+
+    const named = [valueOf(args, "--tools"), valueOf(args, "--allowed-tools")]
+      .join(",")
+      .split(",");
+    for (const forbidden of [
+      "Bash",
+      "Write",
+      "Edit",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "Task",
+    ]) {
+      expect(named).not.toContain(forbidden);
+    }
+  });
+
+  it("scopes the file tools to that one directory, and to nothing else", async () => {
+    const { args } = await invocationWithDocsFolder();
+
+    // `--add-dir` alone widens; `--restricted` is what confines the file tools
+    // to the working directories, this one included.
+    expect(valueOf(args, "--add-dir")).toBe(DOCS_FOLDER);
+    expect(args).toContain("--restricted");
+    expect(args.filter((arg) => arg === "--add-dir")).toHaveLength(1);
+  });
+
+  it("honours nothing the folder itself configures", async () => {
+    const { args } = await invocationWithDocsFolder();
+
+    expect(args).toContain("--strict-mcp-config");
+    expect(args).toContain("--disable-slash-commands");
+  });
+
+  it("denies anything that would prompt rather than waiting or granting it", async () => {
+    const { args } = await invocationWithDocsFolder();
+
+    expect(valueOf(args, "--permission-prompts")).toBe("none");
+    expect(args).not.toContain("--permission-mode");
+    expect(args).not.toContain("--dangerously-skip-permissions");
+    expect(args).not.toContain("--allow-dangerously-skip-permissions");
+  });
+
+  it("tells the interviewer how to use the folder", async () => {
+    const { args } = await invocationWithDocsFolder();
+    const prompt = valueOf(args, "-p") as string;
+
+    expect(prompt).toContain(DOCS_FOLDER_ADDENDUM);
+    expect(prompt).toContain(DOCS_FOLDER);
+  });
+
+  it("still clears the nested-session markers from the child's environment", async () => {
+    const runner = recordingRunner([ok(anEnvelope())]);
+
+    await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+      env: { PATH: "/usr/bin", CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli" },
+    }).proposeRound(aDocsRequest());
+
+    const { env } = runner.invocations[0];
+    for (const marker of CLEARED_ENVIRONMENT_MARKERS) {
+      expect(env).not.toHaveProperty(marker);
+    }
+  });
+
+  it("still resumes the conversation the session is carrying", async () => {
+    const runner = recordingRunner([ok(anEnvelope())]);
+    const base = aProposeRoundRequest();
+
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).proposeRound(
+      aProposeRoundRequest({
+        context: {
+          ...base.context,
+          docsFolder: DOCS_FOLDER,
+          conversationId: "session-7",
+        },
+      }),
+    );
+
+    expect(valueOf(runner.invocations[0].args, "--resume")).toBe("session-7");
   });
 });
 

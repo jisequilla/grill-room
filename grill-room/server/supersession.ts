@@ -172,6 +172,7 @@ async function scan(
           title: session.title,
           model: session.model,
           answeringMode: session.answeringMode,
+          docsFolder: session.docsFolder,
           conversationId: attempt.conversationId,
           decisions: await decisionSnapshots(rows),
         },

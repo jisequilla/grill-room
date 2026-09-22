@@ -88,6 +88,10 @@ const messages = {
     answeringModeLabel: "Answering mode",
     answeringModeWholeRound: "Whole round",
     answeringModeOneAtATime: "One at a time",
+    docsFolderLabel: "Docs folder (optional)",
+    docsFolderPlaceholder: "/Users/you/projects/the-system",
+    docsFolderHint:
+      "The interviewer may read this folder — and only this folder — while grilling, so it can align its questions with what already exists. It never writes.",
     modelFable: "Fable",
     modelOpus: "Opus",
     modelSonnet: "Sonnet",
@@ -114,6 +118,31 @@ const messages = {
 
     ideaMore: "Show more",
     ideaLess: "Show less",
+
+    docsFolderNone: "No docs folder",
+    docsFolderSet: "Reading {{folder}}",
+    docsFolderTooltip:
+      "The interviewer reads this folder, and only this folder, while grilling. It never writes to it.",
+    docsFolderAdd: "Add a docs folder",
+    docsFolderChange: "Change",
+    docsFolderClear: "Clear",
+    docsFolderDialogTitle: "Docs folder",
+    docsFolderDialogDescription:
+      "An absolute path to a folder the interviewer may read while grilling this session. It reads nothing outside it and never writes. Leave it unset for the tool-less interview.",
+    docsFolderLabel: "Folder",
+    docsFolderPlaceholder: "/Users/you/projects/the-system",
+    docsFolderSave: "Save",
+    docsFolderSaving: "Saving…",
+    docsFolderSaveFailed: "Could not save the docs folder.",
+    docsFolderNotAbsolute: "The docs folder must be an absolute path.",
+    docsFolderNotFound: "That folder does not exist.",
+    docsFolderNotDirectory: "That path is not a directory.",
+    docsFolderIsRoot:
+      "The filesystem root is too wide: the interviewer would be able to read the whole machine.",
+    docsFolderIsHome:
+      "Your home directory is too wide: point at the project the interview is about.",
+    docsFolderContainsApp:
+      "That folder contains Grill Room itself, which would expose the app's own configuration.",
 
     startTitle: "Nothing asked yet",
     startDescription:

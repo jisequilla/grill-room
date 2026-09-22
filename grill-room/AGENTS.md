@@ -79,6 +79,7 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `break-into-tickets` | Break the session's current spec into implementation tickets, replacing any it already has. Allowed only for a confirmed session with a current spec and no turn working. Refuses to replace tickets carrying a build record unless `force` is set. Returns the same shape as `list-tickets`. |
 | `list-tickets` | A session's tickets in number order, each with `blockedBy` resolved to ticket numbers, plus the same `ticketsCurrent` flag as `get-spec`. |
 | `set-export-target` | Set the absolute folder a session exports into; `~` is expanded and the path normalised. Does not need to exist yet. |
+| `set-docs-folder` | Set the read-only folder the interviewer may read while grilling this session, or clear it with `null`. See "Grill with docs" below. |
 | `export-session` | Write the session's current spec, and its tickets when current, into the export target folder in the local-markdown tracker layout. Refuses a missing or unwritable target and refuses to overwrite existing files unless `overwrite` is set. |
 | `set-build-record` | Create or edit a ticket's build record — model, whether the first attempt passed, whether it was escalated, what the prompt was missing, and free notes — identifying the ticket by `ticketId` or by `sessionId` + `ticketNumber`. Optionally updates the ticket's `status` in the same call. See "Logging a build from an agent" below. |
 | `get-build-record` | One ticket's build record, or null when none has been logged yet. |
@@ -94,6 +95,40 @@ The client action hooks time out at 60 s by default, so UI code calling any of
 them must pass a `timeoutMs` of several minutes; the default cancels a turn
 that was about to succeed and leaves the session's `turn_status` reading
 `working`.
+
+### Grill with docs
+
+A session may carry a **docs folder**: one absolute, existing directory the
+interviewer may read while grilling, so it can align its questions with a system
+that already exists instead of designing it again. Set it at creation
+(`create-session --docsFolder`) or later (`set-docs-folder`); `null` clears it.
+Without one, nothing about the interview changes.
+
+The folder is the one place the app points the model at the user's own
+filesystem, so the rules are narrow and enforced in three places at once:
+
+- **The action refuses a folder that is too wide.** It must be absolute (a
+  leading `~` is expanded), exist, be a directory, and be none of: the
+  filesystem root, the home directory itself, or any folder containing this app
+  — a docs folder that is a parent of Grill Room would let the interviewer read
+  the app's own `.env`. Each refusal has its own error code
+  (`folder-not-absolute`, `folder-not-found`, `folder-not-directory`,
+  `folder-is-root`, `folder-is-home`, `folder-contains-app`).
+- **The adapter narrows the turn.** The folder becomes the child's working
+  directory and the invocation adds `--tools Read,Grep,Glob`, the same three in
+  `--allowed-tools`, `--add-dir <folder>`, `--restricted`,
+  `--strict-mcp-config`, `--disable-slash-commands` and
+  `--permission-prompts none`. `--restricted` is what actually confines the file
+  tools to the working directory: the CLI has no flag that scopes a single tool
+  to a path. What is *not* prevented: a `CLAUDE.md` or `AGENTS.md` inside the
+  docs folder is still auto-discovered and prepended as context. Only `--bare`
+  skips that, and `--bare` refuses OAuth, which is how this app authenticates.
+- **The instructions keep the decision the user's.** When the folder already
+  answers a question the interviewer still asks it, with the finding as the
+  recommendation and the file path cited in the question body. A folder can be
+  out of date, and a decision the user did not make is not a decision.
+
+No version of this writes to the folder.
 
 ### Logging a build from an agent
 

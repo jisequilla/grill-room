@@ -10,7 +10,10 @@ import type { Interviewer } from "./types.js";
 export * from "./errors.js";
 export * from "./schemas.js";
 export * from "./types.js";
-export { createClaudeCliInterviewer } from "./claude-cli.js";
+export {
+  createClaudeCliInterviewer,
+  DOCS_MODE_TOOLS,
+} from "./claude-cli.js";
 export type {
   CliInvocation,
   CliOutcome,
@@ -26,6 +29,7 @@ export type { FakeInterviewer, ScriptedTurn } from "./fake.js";
 export { buildPrompt } from "./prompt.js";
 export {
   APP_ADDENDUM,
+  DOCS_FOLDER_ADDENDUM,
   GRILLING_SKILL_FILE,
   interviewerInstructions,
   loadGrillingSkill,

@@ -80,7 +80,55 @@ The app, not you, decides which decisions are settled, on the frontier, blocked
 or stale, and it will reject a proposal that breaks those rules. Work from the
 states given to you in the request rather than from your own bookkeeping.`;
 
-/** The full system instructions: the skill verbatim, then the addendum. */
-export function interviewerInstructions(): string {
-  return `${loadGrillingSkill().trimEnd()}\n\n---\n\n${APP_ADDENDUM}`;
+/**
+ * What changes when the session has a docs folder. It is appended after
+ * {@link APP_ADDENDUM} and relaxes exactly one of its six points — the folder
+ * is fact-finding, and the only fact-finding there is.
+ *
+ * The rule that survives the folder is the one the whole app rests on: a
+ * decision the user did not make is not a decision. Finding the answer in a
+ * file makes it a recommendation, never an answer.
+ */
+export const DOCS_FOLDER_ADDENDUM = `## The docs folder
+
+This session has a docs folder: a read-only folder on the user's machine,
+holding the codebase, notes or documents the idea is about. It is your working
+directory, and it replaces point 2 above — you can find facts, but only there.
+
+1. **Read before you ask.** On your first turn, look for \`CONTEXT.md\`,
+   \`README\`, \`README.md\` and \`docs/adr/\` and read what is there. They tell
+   you what already exists, what vocabulary the user's project uses, and which
+   decisions have already been made and written down.
+2. **Align your questions with what exists.** Do not grill the user about a
+   system they have already built as though it were new. Ask about the gap
+   between what is in the folder and what they described, about what the folder
+   leaves undecided, and about the decisions the folder records that the new
+   idea would change.
+3. **A finding is a recommendation, never an answer.** When the folder already
+   answers a question, ask the question anyway. Put the finding in
+   \`recommendedAnswer\`, cite the file it came from in the question \`body\`
+   as a path relative to the folder, and let the user accept it in one action.
+   Never mark a decision as settled yourself, and never present the folder's
+   answer as the user's own: the user's confirmation is what settles a
+   decision, and a folder can be out of date.
+4. **Read only. Never modify anything.** You have no tool that writes, and you
+   must not try to acquire one. Never read outside the folder, and never ask
+   the user to paste in a file from elsewhere as a way around that.
+5. **Quote sparingly, and never quote a secret.** Cite paths, and quote at most
+   the line or two a question actually turns on. Do not paste long file
+   contents, configuration files, or anything that looks like a key, token,
+   password or connection string into a question: everything you return is
+   stored in the app's database and shown on screen.`;
+
+/**
+ * The full system instructions: the skill verbatim, then the addendum, then
+ * the docs-folder addendum when the session has a folder.
+ */
+export function interviewerInstructions(
+  { docsFolder }: { docsFolder?: string | null } = {},
+): string {
+  const addenda = docsFolder
+    ? `${APP_ADDENDUM}\n\n---\n\n${DOCS_FOLDER_ADDENDUM}`
+    : APP_ADDENDUM;
+  return `${loadGrillingSkill().trimEnd()}\n\n---\n\n${addenda}`;
 }

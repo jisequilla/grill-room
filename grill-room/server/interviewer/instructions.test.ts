@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   APP_ADDENDUM,
+  DOCS_FOLDER_ADDENDUM,
   GRILLING_SKILL_FILE,
   interviewerInstructions,
   loadGrillingSkill,
@@ -69,6 +70,42 @@ describe("the interviewer's instructions", () => {
   it("asks for a rationale of equal weight on every choice", () => {
     expect(APP_ADDENDUM).toContain("rationale");
     expect(APP_ADDENDUM).toContain("same weight");
+  });
+
+  it("says nothing about a docs folder when the session has none", () => {
+    expect(interviewerInstructions()).not.toContain(DOCS_FOLDER_ADDENDUM);
+    expect(interviewerInstructions({ docsFolder: null })).not.toContain(
+      DOCS_FOLDER_ADDENDUM,
+    );
+  });
+
+  it("appends the docs-folder addendum after the app addendum when there is one", () => {
+    const instructions = interviewerInstructions({ docsFolder: "/docs" });
+
+    expect(instructions).toContain(loadGrillingSkill().trimEnd());
+    expect(instructions.indexOf(DOCS_FOLDER_ADDENDUM)).toBeGreaterThan(
+      instructions.indexOf(APP_ADDENDUM),
+    );
+  });
+});
+
+describe("the docs-folder addendum", () => {
+  it("asks the interviewer to read what the folder already records", () => {
+    expect(DOCS_FOLDER_ADDENDUM).toContain("CONTEXT.md");
+    expect(DOCS_FOLDER_ADDENDUM).toContain("README");
+    expect(DOCS_FOLDER_ADDENDUM).toContain("docs/adr/");
+  });
+
+  it("keeps a finding a recommendation, so the decision stays the user's", () => {
+    expect(DOCS_FOLDER_ADDENDUM).toContain("ask the question anyway");
+    expect(DOCS_FOLDER_ADDENDUM).toContain("recommendedAnswer");
+    expect(DOCS_FOLDER_ADDENDUM).toContain("cite the file");
+  });
+
+  it("forbids writing, reading elsewhere, and pasting secrets into a question", () => {
+    expect(DOCS_FOLDER_ADDENDUM).toContain("Never modify anything");
+    expect(DOCS_FOLDER_ADDENDUM).toContain("Never read outside the folder");
+    expect(DOCS_FOLDER_ADDENDUM).toContain("never quote a secret");
   });
 });
 
@@ -179,6 +216,19 @@ describe("the prompt for a turn", () => {
     expect(prompt).toContain(loadSpecTemplate().trimEnd());
     expect(prompt).toContain("Multiple users");
     expect(prompt).toContain("Which export layout wins");
+  });
+
+  it("names the docs folder in the session block, and omits it without one", () => {
+    const base = aProposeRoundRequest();
+
+    expect(
+      buildPrompt(
+        aProposeRoundRequest({
+          context: { ...base.context, docsFolder: "/Users/someone/project" },
+        }),
+      ),
+    ).toContain("Docs folder (your working directory, read only): /Users/someone/project");
+    expect(buildPrompt(base)).not.toContain("Docs folder");
   });
 
   it("passes the app's rejection reason back to the interviewer", () => {

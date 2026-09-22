@@ -292,6 +292,7 @@ export default defineAction({
               title: session!.title,
               model: session!.model,
               answeringMode: session!.answeringMode,
+              docsFolder: session!.docsFolder,
               conversationId,
               decisions: await decisionSnapshots(current),
             },

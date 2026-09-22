@@ -67,6 +67,12 @@ export interface InterviewContext {
   answeringMode: "whole-round" | "one-at-a-time";
   /** The conversation to resume, or null to start a new one. */
   conversationId: string | null;
+  /**
+   * An absolute folder the interviewer may read while grilling, or null for the
+   * tool-less interview. Set, it is the only path the turn can reach, and it can
+   * only be read: see {@link import("./claude-cli.js").DOCS_MODE_TOOLS}.
+   */
+  docsFolder: string | null;
   /** Every decision in the tree, in the order the app wants them read. */
   decisions: DecisionSnapshot[];
 }

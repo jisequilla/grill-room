@@ -15,6 +15,7 @@ import { AddDecisionDialog } from "@/components/workspace/add-decision-dialog";
 import { AnsweringModeSwitch } from "@/components/workspace/answering-mode-switch";
 import { DecisionDetailSheet } from "@/components/workspace/decision-detail-sheet";
 import { DesignTree } from "@/components/workspace/design-tree";
+import { DocsFolderChip } from "@/components/workspace/docs-folder-chip";
 import { RoundHistory } from "@/components/workspace/round-history";
 import { RoundPanel } from "@/components/workspace/round-panel";
 import { SessionIdea } from "@/components/workspace/session-idea";
@@ -206,6 +207,11 @@ export default function SessionWorkspaceRoute() {
             <span className="text-sm text-muted-foreground">
               {t(MODEL_LABEL_KEY[session.model as SessionModel])}
             </span>
+            <DocsFolderChip
+              sessionId={id}
+              docsFolder={session.docsFolder}
+              onChanged={refresh}
+            />
           </div>
           <SessionIdea idea={session.idea} />
         </header>
