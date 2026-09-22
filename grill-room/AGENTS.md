@@ -75,6 +75,9 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `get-spec` | A session's spec, or null when none has been synthesized yet, plus a `ticketsCurrent` flag: whether any generated tickets still match it. |
 | `break-into-tickets` | Break the session's current spec into implementation tickets, replacing any it already has. Allowed only for a confirmed session with a current spec and no turn working. Refuses to replace tickets carrying a build record unless `force` is set. Returns the same shape as `list-tickets`. |
 | `list-tickets` | A session's tickets in number order, each with `blockedBy` resolved to ticket numbers, plus the same `ticketsCurrent` flag as `get-spec`. |
+| `set-build-record` | Create or edit a ticket's build record — model, whether the first attempt passed, whether it was escalated, what the prompt was missing, and free notes — identifying the ticket by `ticketId` or by `sessionId` + `ticketNumber`. Optionally updates the ticket's `status` in the same call. See "Logging a build from an agent" below. |
+| `get-build-record` | One ticket's build record, or null when none has been logged yet. |
+| `get-build-summary` | A session's build records summarized: ticket and recorded counts, first-attempt pass rate, escalations, a per-model breakdown, and every ticket with its build record or null — one call for the whole build records table. |
 | `navigate` | Move the UI to a view or path, through application state. |
 | `view-screen` | What the user is looking at. Call it first when the visible context matters. |
 | `provider-api-request` | Call Slack's Web API through the workspace connection. |
@@ -85,6 +88,50 @@ The client action hooks time out at 60 s by default, so UI code calling any of
 them must pass a `timeoutMs` of several minutes; the default cancels a turn
 that was about to succeed and leaves the session's `turn_status` reading
 `working`.
+
+### Logging a build from an agent
+
+`set-build-record` is reachable over HTTP and the framework's action command
+line, so an orchestrating agent can log a build's outcome without a browser.
+Identify the ticket either with `ticketId`, or with `sessionId` +
+`ticketNumber` (what an orchestrating agent knows from the exported ticket
+file's number, not its id). `model` is required free text; booleans are
+`true`/`false`; free text with spaces is just a normal argument, quoted for
+the shell.
+
+HTTP:
+
+```bash
+curl -s -X POST http://localhost:5210/_agent-native/actions/set-build-record \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ticketId": "<ticket-id>",
+    "model": "sonnet",
+    "firstAttemptPassed": true,
+    "escalated": false,
+    "notes": "Passed first try, straightforward spec.",
+    "ticketStatus": "done"
+  }'
+```
+
+Command line (booleans as `--flag value`, the `sessionId` + `ticketNumber`
+form, free text quoted):
+
+```bash
+pnpm action set-build-record \
+  --sessionId <session-id> --ticketNumber 2 \
+  --model opus --firstAttemptPassed false --escalated true \
+  --promptMissing "no mention of the retry policy" \
+  --notes "escalated from sonnet after two failed attempts" \
+  --ticketStatus in-progress
+```
+
+`pnpm action` forwards to an already-running `pnpm dev` server over HTTP
+when one is detected (a `.agent-native/dev-server.json` discovery file
+naming a live process whose database matches); only when no such server is
+running does it open the embedded database itself. This is why the command
+line is safe to run alongside `pnpm dev`: it never opens PGlite's file lock
+while the dev server already holds it.
 
 ## Application State
 
