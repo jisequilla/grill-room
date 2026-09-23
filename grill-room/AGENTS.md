@@ -89,7 +89,8 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `set-session-project` | Set the registered project a session exports into, or clear it with `null`. Export requires one. |
 | `set-docs-folder` | Set the read-only folder the interviewer may read while grilling this session, or clear it with `null`. See "Grill with docs" below. |
 | `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written as an absolute path (the manifest included), the files from the previous manifest that will be removed, and the project's tracker diagnostic. Built by the same plan `export-session` writes. |
-| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md` plus `issues/NN-slug.md` per ticket (tickets only when current), creating missing folders. Also writes a manifest (`.grill-room-export.json`) of what it wrote; re-export overwrites the planned files and removes only files the previous manifest lists that the new plan no longer contains, never anything else. Writes exactly what `preview-export` lists. Refuses with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, or `export-outside-root` when any path resolves (through symlinks) outside the real project root. See "Exporting a session" below. |
+| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md` plus `issues/NN-slug.md` per ticket (tickets only when current), creating missing folders. Also writes a manifest (`.grill-room-export.json`) of what it wrote; re-export overwrites the planned files and removes exactly the files the previous manifest lists that the new plan no longer writes, never anything else. Writes exactly what `preview-export` lists. Refuses with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, or `export-outside-root` when any path resolves (through symlinks) outside the real project root. Also returns a post-export visibility report — see "Exporting a session" below. |
+| `get-export-visibility` | Classify every file a session's export wrote (or would write) as `tracked`, `ignored`, or `untracked` in the project's repository, given the same `sessionId` and `slug` as `preview-export`/`export-session`. Read-only and side-effect-free, so the UI can re-check without exporting again. See "Exporting a session" below. |
 | `set-build-record` | Create or edit a ticket's build record — model, whether the first attempt passed, whether it was escalated, what the prompt was missing, and free notes — identifying the ticket by `ticketId` or by `sessionId` + `ticketNumber`. Optionally updates the ticket's `status` in the same call. See "Logging a build from an agent" below. |
 | `get-build-record` | One ticket's build record, or null when none has been logged yet. |
 | `get-build-summary` | A session's build records summarized: ticket and recorded counts, first-attempt pass rate, escalations, a per-model breakdown, and every ticket with its build record or null — one call for the whole build records table. |
@@ -250,6 +251,15 @@ Before anything is written, every path is resolved with `fs.realpath` (the
 deepest existing ancestor of each) and refused with `export-outside-root`
 unless it lands inside the real project root. That covers an export folder,
 or an `issues/` folder, that is a symlink out of the repository.
+
+`export-session` also returns a post-export visibility report (`server/visibility.ts`),
+built the same way `get-export-visibility` builds it on demand: every written
+file classified `tracked`, `ignored`, or `untracked` with two batched
+read-only git calls, a plain warning plus the exact command to run when
+agents will not see a file, and a separate warning when the project's
+`visibility` flag disagrees with what was observed. Grill Room never stages
+or commits in the target repo — the remedy commands are for the operator to
+run by hand.
 
 ### Logging a build from an agent
 

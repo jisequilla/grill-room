@@ -564,6 +564,17 @@ const messages = {
     exportedFilesHeading: "Files written",
     exportRemovedFilesHeading: "Files removed",
     exportTicketsSkipped: "Tickets were not exported",
+
+    visibilityHeading: "File visibility",
+    visibilityTracked: "Tracked",
+    visibilityIgnored: "Ignored",
+    visibilityUntracked: "Untracked",
+    visibilityWarningHeading: "Agents may not see these files",
+    visibilityUntrackedRemedyHeading: "Run this to make it visible to agents",
+    visibilityIgnoredRemedyHeading: "Cannot be committed as-is",
+    visibilityMismatchHeading: "Visibility flag does not match the repository",
+    visibilityRecheck: "Recheck visibility",
+    visibilityRechecking: "Checking…",
   },
 };
 

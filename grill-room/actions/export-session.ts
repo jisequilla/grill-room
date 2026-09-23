@@ -2,10 +2,11 @@ import { defineAction } from "@agent-native/core/action";
 import { z } from "zod";
 
 import { planExportBundle, writeExportBundle } from "../server/export-bundle.js";
+import { buildVisibilityReport } from "../server/visibility.js";
 
 export default defineAction({
   description:
-    "Export a session's current spec, and its tickets when current, into one bundle directory in its project: <root>/<exportFolder>/<folderName>/spec.md plus issues/NN-slug.md per ticket, where folderName is the project's slug pattern applied to the given slug. Creates missing folders; re-export overwrites the bundle's spec and issue files and removes issue files the session no longer has. Writes exactly what preview-export lists, and refuses any path that resolves outside the real project root.",
+    "Export a session's current spec, and its tickets when current, into one bundle directory in its project: <root>/<exportFolder>/<folderName>/spec.md plus issues/NN-slug.md per ticket, where folderName is the project's slug pattern applied to the given slug. Creates missing folders; re-export overwrites the bundle's spec and issue files and removes exactly the files the previous export's manifest lists that the new export no longer writes. Writes exactly what preview-export lists, and refuses any path that resolves outside the real project root. Also returns a post-export visibility report classifying every written file as tracked, ignored, or untracked, with a remedy when agents will not see it and a warning when the project's visibility flag disagrees with what was observed; see get-export-visibility to re-check without exporting again.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
     slug: z
@@ -16,6 +17,12 @@ export default defineAction({
   run: async ({ sessionId, slug }) => {
     const plan = await planExportBundle({ sessionId, slug });
     const { written, removed } = await writeExportBundle(plan);
+    const visibility = await buildVisibilityReport({
+      root: plan.project.rootPath,
+      bundleDir: plan.bundleDir,
+      absolutePaths: written,
+      visibility: plan.project.visibility,
+    });
     return {
       slug: plan.slug,
       folderName: plan.folderName,
@@ -24,6 +31,7 @@ export default defineAction({
       removed,
       ticketsExported: plan.ticketsExported,
       ticketsSkippedReason: plan.ticketsSkippedReason,
+      visibility,
     };
   },
 });

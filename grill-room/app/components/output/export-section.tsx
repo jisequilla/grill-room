@@ -1,10 +1,11 @@
 import {
   actionErrorMessage,
+  callAction,
   useActionMutation,
   useActionQuery,
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
-import { IconFolderOpen } from "@tabler/icons-react";
+import { IconFolderOpen, IconRefresh } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -14,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { actionErrorCode } from "@/lib/decisions";
+import { ExportVisibilityReport } from "./export-visibility-report";
 
 /** Every code `preview-export` and `export-session` refuse with, mapped to its message. */
 const EXPORT_ERROR_KEY: Record<string, string> = {
@@ -32,6 +34,7 @@ const SLUG_DEBOUNCE_MS = 250;
 
 type ExportResult = AgentNativeActionRegistry["export-session"]["result"];
 type PreviewResult = AgentNativeActionRegistry["preview-export"]["result"];
+type VisibilityResult = AgentNativeActionRegistry["get-export-visibility"]["result"];
 
 function useDebounced<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -69,6 +72,9 @@ export function ExportSection({
   const [slugDraft, setSlugDraft] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<ExportResult | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  /** A fresher visibility report from "Recheck visibility"; cleared whenever a new export lands. */
+  const [visibilityOverride, setVisibilityOverride] = useState<VisibilityResult | null>(null);
+  const [recheckingVisibility, setRecheckingVisibility] = useState(false);
 
   const debouncedSlug = useDebounced(slugDraft, SLUG_DEBOUNCE_MS);
   const slugBlank = slugDraft !== null && slugDraft.trim().length === 0;
@@ -90,14 +96,32 @@ export function ExportSection({
   const exportSession = useActionMutation("export-session", {
     onSuccess: (result: ExportResult) => {
       setLastResult(result);
+      setVisibilityOverride(null);
       setExportError(null);
     },
     onError: (error: unknown) => {
       setLastResult(null);
+      setVisibilityOverride(null);
       const key = EXPORT_ERROR_KEY[actionErrorCode(error) ?? ""];
       setExportError(key ? t(key) : (actionErrorMessage(error) ?? t("output.exportFailed")));
     },
   });
+
+  /** Re-checks the same files export-session just wrote, without exporting again. */
+  async function recheckVisibility() {
+    if (!lastResult) return;
+    setRecheckingVisibility(true);
+    try {
+      const result = await callAction<VisibilityResult>(
+        "get-export-visibility",
+        { sessionId, slug: lastResult.slug },
+        { method: "GET" },
+      );
+      setVisibilityOverride(result);
+    } finally {
+      setRecheckingVisibility(false);
+    }
+  }
 
   if (projectId === null) {
     return (
@@ -230,6 +254,29 @@ export function ExportSection({
                   <PathList paths={lastResult.removed} testId="export-removed-files" />
                 </>
               ) : null}
+
+              <div className="space-y-2 border-t pt-2">
+                <ExportVisibilityReport report={visibilityOverride ?? lastResult.visibility} />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={recheckingVisibility}
+                  onClick={() => void recheckVisibility()}
+                  data-testid="export-visibility-recheck"
+                >
+                  {recheckingVisibility ? (
+                    <Spinner className="size-4" />
+                  ) : (
+                    <IconRefresh className="size-4" />
+                  )}
+                  {t(
+                    recheckingVisibility
+                      ? "output.visibilityRechecking"
+                      : "output.visibilityRecheck",
+                  )}
+                </Button>
+              </div>
             </AlertDescription>
           </Alert>
         ) : null}
