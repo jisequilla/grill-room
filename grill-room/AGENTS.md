@@ -89,9 +89,12 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `refresh-project-tracker` | Re-read a project's declared tracker and update only what it governs: the stored commands and diagnostic always, and the export folder and slug pattern only when the tracker is valid. Nothing else about the project changes, and nothing else re-reads the tracker file — every ordinary edit carries these fields over untouched. |
 | `set-session-project` | Set the registered project a session exports into, or clear it with `null`. Export requires one. |
 | `set-docs-folder` | Set the read-only folder the interviewer may read while grilling this session, or clear it with `null`. See "Grill with docs" below. |
-| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written as an absolute path (the manifest included), the files from the previous manifest that will be removed, and the project's tracker diagnostic. Built by the same plan `export-session` writes. |
-| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md` plus `issues/NN-slug.md` per ticket (tickets only when current), creating missing folders. Also writes a manifest (`.grill-room-export.json`) of what it wrote; re-export overwrites the planned files and removes exactly the files the previous manifest lists that the new plan no longer writes, never anything else. Writes exactly what `preview-export` lists. Refuses with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, or `export-outside-root` when any path resolves (through symlinks) outside the real project root. Also returns a post-export visibility report — see "Exporting a session" below. |
+| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written as an absolute path (HANDOFF.md and the briefs when a handoff exists, and the manifest), `handoffIncluded`, the files from the previous manifest that will be removed, and the project's tracker diagnostic. Built by the same plan `export-session` writes. |
+| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md` plus `issues/NN-slug.md` per ticket (tickets only when current), and `HANDOFF.md` plus `briefs/NN-slug.md` when a handoff exists (recording that export on the handoff), creating missing folders. Also writes a manifest (`.grill-room-export.json`) of what it wrote; re-export overwrites the planned files and removes exactly the files the previous manifest lists that the new plan no longer writes, never anything else. Writes exactly what `preview-export` lists. Refuses with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, or `export-outside-root` when any path resolves (through symlinks) outside the real project root. Also returns a post-export visibility report — see "Exporting a session" below. |
 | `get-export-visibility` | Classify every file a session's export wrote (or would write) as `tracked`, `ignored`, or `untracked` in the project's repository, given the same `sessionId` and `slug` as `preview-export`/`export-session`. Read-only and side-effect-free, so the UI can re-check without exporting again. See "Exporting a session" below. |
+| `generate-handoff` | Generate or regenerate a session's handoff from deterministic templates (no model call): `HANDOFF.md` plus one brief per ticket. Refuses with `no-project`, `project-not-found`, `spec-missing`, `no-tickets` or `ticket-cycle`, and with `handoff-edited` when the stored handoff carries UI edits unless `overwriteEdits` is true. See "Handoff" below. |
+| `get-handoff` | A session's handoff (HANDOFF.md, briefs by ticket number, timestamps) or null, with `stale` (its inputs changed since generation), `exportStale` (edited or regenerated after the last export that included it), `canGenerate`, and `cannotGenerateReason`. |
+| `update-handoff` | Edit a generated handoff: replace HANDOFF.md's `markdown` and/or `briefs` by `ticketNumber`. Marks it edited, so regenerating needs `overwriteEdits`. Refuses with `handoff-missing` or `brief-not-found`. |
 | `set-build-record` | Create or edit a ticket's build record — model, whether the first attempt passed, whether it was escalated, what the prompt was missing, and free notes — identifying the ticket by `ticketId` or by `sessionId` + `ticketNumber`. Optionally updates the ticket's `status` in the same call. See "Logging a build from an agent" below. |
 | `get-build-record` | One ticket's build record, or null when none has been logged yet. |
 | `get-build-summary` | A session's build records summarized: ticket and recorded counts, first-attempt pass rate, escalations, a per-model breakdown, and every ticket with its build record or null — one call for the whole build records table. |
@@ -224,8 +227,10 @@ disagree.
 The bundle is one directory per session:
 
 ```
+<root>/<exportFolder>/<folderName>/HANDOFF.md         # when a handoff was generated
 <root>/<exportFolder>/<folderName>/spec.md
 <root>/<exportFolder>/<folderName>/issues/NN-slug.md   # "Blocked by: NN, NN" line
+<root>/<exportFolder>/<folderName>/briefs/NN-slug.md   # when a handoff was generated
 <root>/<exportFolder>/<folderName>/.grill-room-export.json
 ```
 
@@ -261,6 +266,50 @@ agents will not see a file, and a separate warning when the project's
 `visibility` flag disagrees with what was observed. Grill Room never stages
 or commits in the target repo — the remedy commands are for the operator to
 run by hand.
+
+### Handoff
+
+`generate-handoff` renders a session's handoff with plain TypeScript templates
+(`server/handoff.ts`) over the session, spec, tickets, their waves (from
+`blockedBy`, via `computeWaves`) and the project. No model is called; the same
+inputs render the same text. It is stored in `gr_handoffs`, one row per
+session, and is readable and editable in the output page's Handoff block.
+
+- `HANDOFF.md` is the entry point for a fresh orchestrating session: the
+  session title and idea, the spec path, the waves (each ticket with its
+  ticket file and brief), the verify command, the PR-based worktree
+  lifecycle (embedded whole, so the target repo needs no rules file), and
+  what to record per ticket. Beads projects get bead commands (the declared
+  tracker's stored commands when present); markdown projects get a
+  `Status:` line per ticket instead. Build-record commands, with the session
+  id and ticket numbers filled in, appear only when the project logs build
+  records.
+- `briefs/NN-slug.md` (the same `NN-slug` as the ticket file) holds the
+  ticket text, its blockers, the verify command, the file-boundary,
+  git/worktree and PR rules, the report format, and "report, then stop",
+  plus two labelled empty slots for the orchestrator: **File boundaries**
+  and **Codebase facts**. Nothing is pre-filled from the target repo.
+- Bundle paths are stored as `{{BUNDLE}}` and filled in at export from the
+  project's visibility flag, without re-checking git: `tracked` gives paths
+  relative to the repo root plus a commit-and-push-before-delegating step;
+  `ignored` gives absolute paths into the main checkout and tells worktree
+  agents to read the bundle by absolute path.
+
+The handoff is **stale** when a fingerprint over everything it renders
+differs from the one it was generated from: the session's title and idea,
+the spec's `updatedAt` and `ticketsGeneratedAt`, each ticket's id, number,
+slug, title, body and `blockedBy`, and the project's root, export folder,
+verify command, tracker kind, tracker commands, build-record toggle and
+visibility. That is what catches a `set-ticket-blocked-by` edit, which does
+not touch `ticketsGeneratedAt`. An edit is not a change of inputs: an edited
+handoff stays current, but regenerating over it needs `overwriteEdits`.
+
+When a handoff exists, `preview-export`/`export-session` plan `HANDOFF.md`
+and the briefs like any other bundle file (listed, contained, recorded in the
+manifest, so a dropped ticket's brief is removed on re-export), and export
+records the handoff's fingerprint, revision and time. The handoff is
+**export stale** once it is edited or regenerated after that. Export does not
+yet require a handoff.
 
 ### Logging a build from an agent
 

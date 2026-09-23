@@ -5,7 +5,7 @@ import { planExportBundle } from "../server/export-bundle.js";
 
 export default defineAction({
   description:
-    "Preview a session's export without writing anything: the proposed slug (first four words of the title), the slug used, the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written (absolute paths, the export manifest included), the files the previous manifest lists that will be removed, and the project's tracker diagnostic. Built by the same plan export-session writes, so the two cannot disagree.",
+    "Preview a session's export without writing anything: the proposed slug (first four words of the title), the slug used, the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written (absolute paths: HANDOFF.md and briefs/NN-slug.md when a handoff has been generated, and the export manifest), the files the previous manifest lists that will be removed, and the project's tracker diagnostic. Built by the same plan export-session writes, so the two cannot disagree.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
     slug: z
@@ -32,6 +32,7 @@ export default defineAction({
       trackerDiagnostic: plan.trackerDiagnostic,
       ticketsExported: plan.ticketsExported,
       ticketsSkippedReason: plan.ticketsSkippedReason,
+      handoffIncluded: plan.handoff !== null,
     };
   },
 });

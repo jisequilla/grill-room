@@ -370,3 +370,36 @@ export const buildRecords = table("gr_build_records", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+/**
+ * A session's handoff: HANDOFF.md and one delegation brief per ticket, rendered
+ * by `server/handoff.ts` from the session, spec, tickets and project. One row
+ * per session.
+ *
+ * `fingerprint` hashes every input the templates rendered from; the handoff is
+ * stale when the same hash over today's inputs differs. `revision` counts every
+ * generation and edit, and `exportedRevision` is the revision the last export
+ * wrote, so "edited or regenerated since the last export" compares two
+ * integers rather than two timestamps that may share a millisecond.
+ */
+export const handoffs = table("gr_handoffs", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id")
+    .notNull()
+    .unique()
+    .references(() => sessions.id, { onDelete: "cascade" }),
+  /** HANDOFF.md, with `{{BUNDLE}}` standing for the bundle path export fills in. */
+  markdown: text("markdown").notNull(),
+  /** JSON array of `{ ticketNumber, relativePath, markdown }`, one per ticket, in number order. */
+  briefsJson: text("briefs_json").notNull().default("[]"),
+  fingerprint: text("fingerprint").notNull(),
+  revision: integer("revision").notNull().default(1),
+  generatedAt: text("generated_at").notNull(),
+  /** Set by an edit in the UI, cleared by regeneration. */
+  editedAt: text("edited_at"),
+  exportedFingerprint: text("exported_fingerprint"),
+  exportedRevision: integer("exported_revision"),
+  exportedAt: text("exported_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});

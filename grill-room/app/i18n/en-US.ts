@@ -538,6 +538,36 @@ const messages = {
     buildRecordCommandCopy: "Copy",
     buildRecordCommandCopied: "Copied",
 
+    handoffHeading: "Handoff",
+    handoffEmptyTitle: "No handoff yet",
+    handoffEmptyDescription:
+      "Generate HANDOFF.md and one delegation brief per ticket from the spec, tickets and project.",
+    handoffNeedsProject: "Choose the project this session exports into first.",
+    handoffNeedsSpec: "Write a spec first.",
+    handoffNeedsTickets: "Break the spec into tickets first.",
+    handoffTicketCycle: "The tickets' blockers form a cycle. Fix them first.",
+    generateHandoff: "Generate the handoff",
+    generatingHandoff: "Generating…",
+    handoffGenerateFailed: "Could not generate the handoff.",
+    regenerateHandoff: "Regenerate",
+    regenerateHandoffTitle: "Overwrite your edits?",
+    regenerateHandoffDescription:
+      "The handoff was edited since it was generated. Regenerating replaces HANDOFF.md and every brief, and your edits are lost.",
+    regenerateHandoffConfirm: "Regenerate anyway",
+    handoffCurrent: "Current",
+    handoffStale: "Stale",
+    handoffStaleHint:
+      "The spec, tickets or project changed since this handoff was generated. Regenerate it so its waves and paths match.",
+    handoffEdited: "Edited",
+    handoffExportStale: "Export stale",
+    handoffDocumentLabel: "Document",
+    handoffEdit: "Edit",
+    handoffSave: "Save",
+    handoffSaving: "Saving…",
+    handoffSaveFailed: "Could not save the handoff.",
+    handoffBundleHint:
+      "{{token}} is replaced at export with the bundle's path: relative to the repository root when the project's export folder is tracked, absolute when it is ignored.",
+
     exportHeading: "Export",
     exportNeedsProject:
       "Choose the project this session exports into above. Export writes into that repository.",
