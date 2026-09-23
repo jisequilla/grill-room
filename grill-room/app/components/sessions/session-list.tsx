@@ -2,6 +2,10 @@ import { useFormatters } from "@agent-native/core/client/i18n";
 import { Link } from "react-router";
 
 import { DeleteSessionAlert } from "@/components/sessions/delete-session-alert";
+import {
+  ReadinessBadge,
+  type ReadinessVerdict,
+} from "@/components/sessions/readiness-badge";
 import { SessionStateBadge } from "@/components/sessions/session-state-badge";
 import { formatRelativeTimestamp } from "@/lib/relative-time";
 
@@ -12,6 +16,8 @@ interface SessionListItem {
   title: string;
   state: SessionState;
   updatedAt: string;
+  /** The current idea's readiness verdict; null when it has not been judged. */
+  readinessVerdict: ReadinessVerdict | null;
 }
 
 export function SessionList({ sessions }: { sessions: SessionListItem[] }) {
@@ -31,6 +37,12 @@ export function SessionList({ sessions }: { sessions: SessionListItem[] }) {
             <span className="min-w-0 flex-1 truncate font-medium text-foreground">
               {session.title}
             </span>
+            {session.readinessVerdict ? (
+              <ReadinessBadge
+                verdict={session.readinessVerdict}
+                testId="session-readiness-badge"
+              />
+            ) : null}
             <SessionStateBadge state={session.state} />
             <span className="w-28 shrink-0 text-right text-xs text-muted-foreground">
               {formatRelativeTimestamp(formatters, session.updatedAt)}

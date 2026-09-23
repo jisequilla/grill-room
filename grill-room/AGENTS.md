@@ -179,6 +179,13 @@ as absent everywhere (`get-current-round`'s `readiness`, `list-sessions`'
 no rounds and no turn working, and clears the judgment; re-judging is the
 user's call. Nothing blocks the first round on a `not-ready` verdict.
 
+In the UI, the session page shows a readiness panel above the start panel
+while the session has no rounds (`readiness-panel`, with `readiness-assess`
+or `readiness-reassess` and the `readiness-verdict` badge); a working turn
+disables its action and the one working panel below carries the elapsed time.
+The idea block offers `idea-edit` while `canEditIdea` is true, and the session
+list shows `session-readiness-badge` next to the state badge for a judged idea.
+
 ### Grill with docs
 
 A session may carry a **docs folder**: one absolute, existing directory the

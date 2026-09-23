@@ -17,6 +17,7 @@ import { ApplyBatchDialog } from "@/components/workspace/batch/apply-batch-dialo
 import { DecisionDetailSheet } from "@/components/workspace/decision-detail-sheet";
 import { DesignTree } from "@/components/workspace/design-tree";
 import { DocsFolderChip } from "@/components/workspace/docs-folder-chip";
+import { ReadinessPanel } from "@/components/workspace/readiness-panel";
 import { RoundHistory } from "@/components/workspace/round-history";
 import { RoundPanel } from "@/components/workspace/round-panel";
 import { SessionIdea } from "@/components/workspace/session-idea";
@@ -57,19 +58,28 @@ const PANEL_HEADING_KEY: Record<SessionState, string> = {
 /**
  * Failures the session's stored turn status already reports on screen. Toasting
  * them as well would say the same thing twice, in a place the user cannot act
- * on. `turn-in-progress` is not a failure at all: the turn is simply already
- * running, and the next poll shows it.
+ * on. `turn-in-progress` and `turn-working` are not failures at all: a turn is
+ * simply already running, and the next poll shows it.
  */
 const SILENT_ERROR_CODES = new Set([
   "turn-in-progress",
+  "turn-working",
   "cli-missing",
   "not-logged-in",
   "rate-limited",
   "malformed-output",
   "invalid-proposal",
   "invalid-review",
+  "invalid-readiness",
   "failed",
 ]);
+
+/**
+ * Refusals of a readiness judgment that only mean the page is out of date: a
+ * round opened, or the session left interviewing, since it was last read. The
+ * refresh that follows every failure hides the panel; nothing needs saying.
+ */
+const STALE_READINESS_CODES = new Set(["has-rounds", "wrong-session-state"]);
 
 export default function SessionWorkspaceRoute() {
   const t = useT();
@@ -147,7 +157,34 @@ export default function SessionWorkspaceRoute() {
     onSettled: refresh,
   });
 
+  const assessReadiness = useActionMutation("assess-readiness", {
+    timeoutMs: TURN_TIMEOUT_MS,
+    onError: (error: unknown) => {
+      refresh();
+      const code = actionErrorCode(error) ?? "";
+      if (SILENT_ERROR_CODES.has(code) || STALE_READINESS_CODES.has(code)) return;
+      toast.error(actionErrorMessage(error) ?? t("workspace.readinessAssessFailed"));
+    },
+    onSettled: refresh,
+  });
+
+  // Refusals (an empty idea, a round that opened meanwhile) are shown inside
+  // the editor, so this only keeps every view of the session current.
+  const updateIdea = useActionMutation("update-session-idea", {
+    onSettled: refresh,
+  });
+
   const decisions: TreeDecision[] = tree?.decisions ?? [];
+
+  // Readiness is judged before the first round only: the same moment the
+  // centre column offers to start the interview.
+  const showReadiness =
+    round !== undefined &&
+    round.state === "interviewing" &&
+    round.round === null &&
+    decisions.length === 0 &&
+    rounds !== undefined &&
+    rounds.rounds.length === 0;
   const selected =
     decisions.find((decision) => decision.id === selectedId) ?? null;
 
@@ -218,7 +255,11 @@ export default function SessionWorkspaceRoute() {
               onChanged={refresh}
             />
           </div>
-          <SessionIdea idea={session.idea} />
+          <SessionIdea
+            idea={session.idea}
+            canEdit={round?.canEditIdea ?? false}
+            onSave={(idea) => updateIdea.mutateAsync({ sessionId: id, idea })}
+          />
         </header>
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]">
@@ -227,6 +268,14 @@ export default function SessionWorkspaceRoute() {
               <h3 className="pb-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
                 {t(PANEL_HEADING_KEY[session.state as SessionState])}
               </h3>
+              {showReadiness ? (
+                <ReadinessPanel
+                  readiness={round.readiness}
+                  working={working}
+                  isAssessing={assessReadiness.isPending}
+                  onAssess={() => assessReadiness.mutate({ sessionId: id })}
+                />
+              ) : null}
               <RoundPanel
                 round={round}
                 isLoading={roundLoading}

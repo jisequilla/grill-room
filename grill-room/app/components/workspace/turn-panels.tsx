@@ -112,6 +112,7 @@ export const HEADLINE_KEY_BY_CODE: Record<string, string> = {
   "cli-missing": "workspace.errorCliMissing",
   "not-logged-in": "workspace.errorNotLoggedIn",
   "malformed-output": "workspace.errorMalformed",
+  "invalid-readiness": "workspace.errorInvalidReadiness",
 };
 
 export const HINT_KEY_BY_CODE: Record<string, string> = {
