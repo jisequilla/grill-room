@@ -65,8 +65,10 @@ UI against a fake interviewer, without calling the CLI.
 
 `just test` runs the suite at the action boundary without opening a browser or
 calling the CLI; `just e2e` walks a session through the real UI against a fake
-interviewer; `just check` runs both plus the typecheck. `just --list` shows
-every recipe, and `grill-room/DEVELOPING.md` covers the rest.
+interviewer; `just check` runs both plus the typecheck. `just register-project`
+registers a repository for session exports from the command line, root
+defaulting to the current git top-level. `just --list` shows every recipe, and
+`grill-room/DEVELOPING.md` covers the rest.
 
 ## Attribution
 
