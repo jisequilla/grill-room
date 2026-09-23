@@ -3,8 +3,11 @@
  * tickets. Nothing here reads a table or calls the interviewer: `break-into-
  * tickets` loads rows, hands the interviewer's proposal here to validate, and
  * writes back what is accepted; `get-spec` and `list-tickets` hand it stored
- * rows to describe. Tested through those actions, never directly — the same
- * convention `tree.ts` follows.
+ * rows to describe. `validateTicketSet` and `describeTickets` are tested
+ * through those actions, never directly — the same convention `tree.ts`
+ * follows. `computeWaves` is tested directly (`tickets.test.ts`): its
+ * ordering and cycle-naming rules are exact enough to state as unit cases
+ * without an action's setup around them.
  */
 import type { TicketStatus } from "./db/schema.js";
 import { parseStringArray } from "./tree.js";
@@ -26,8 +29,13 @@ export interface TicketSetValidation {
 
 const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-/** Every number that sits on a cycle of the `blockedBy` graph, in a stable order. */
-function numbersOnCycles(
+/**
+ * Every number that sits on a cycle of the `blockedBy` graph, in a stable
+ * order. Shared by `validateTicketSet`, `computeWaves` and any action that
+ * needs to refuse an edit that would introduce a cycle — there is exactly one
+ * cycle detector in this module.
+ */
+export function numbersOnCycles(
   byNumber: ReadonlyMap<number, { blockedBy: readonly number[] }>,
 ): number[] {
   const onCycle = new Set<number>();
@@ -146,6 +154,77 @@ export function validateTicketSet(
   }
 
   return { ok: reasons.length === 0, reasons };
+}
+
+/** A ticket as `computeWaves` needs it: a number and its blockers, already resolved to numbers. */
+export interface TicketForWaves {
+  number: number;
+  blockedBy: readonly number[];
+}
+
+export interface WavesResult {
+  ok: true;
+  /** Wave 1 first. Each wave is sorted by ticket number. */
+  waves: number[][];
+}
+
+export interface WavesCycleError {
+  ok: false;
+  /** Every ticket number on the cycle, sorted ascending — never a partial wave list. */
+  cycle: number[];
+}
+
+/**
+ * Groups a session's tickets into waves by `blockedBy`: wave 1 holds every
+ * ticket with no blockers (or whose blockers fall outside this set), wave N
+ * holds every ticket whose blockers are all in wave N-1 or earlier, and each
+ * ticket lands in the earliest wave that rule allows it. Within a wave,
+ * tickets are ordered by number. The same input always produces the same
+ * output — no randomness, no dependence on map/object iteration order beyond
+ * what the sort fixes.
+ *
+ * A cycle (which `validateTicketSet` should already have refused, so this is
+ * a defensive check, not the primary one) returns every ticket number on it
+ * instead of a partial or best-effort wave list.
+ */
+export function computeWaves(
+  tickets: readonly TicketForWaves[],
+): WavesResult | WavesCycleError {
+  const byNumber = new Map(tickets.map((ticket) => [ticket.number, ticket]));
+
+  const cyclic = numbersOnCycles(byNumber);
+  if (cyclic.length > 0) {
+    return { ok: false, cycle: cyclic.sort((a, b) => a - b) };
+  }
+
+  const waveByNumber = new Map<number, number>();
+  function waveOf(number: number): number {
+    const cached = waveByNumber.get(number);
+    if (cached !== undefined) return cached;
+
+    const blockers = (byNumber.get(number)?.blockedBy ?? []).filter((blocker) =>
+      byNumber.has(blocker),
+    );
+    const wave = blockers.length === 0 ? 1 : 1 + Math.max(...blockers.map(waveOf));
+    waveByNumber.set(number, wave);
+    return wave;
+  }
+
+  let maxWave = 0;
+  for (const number of byNumber.keys()) {
+    maxWave = Math.max(maxWave, waveOf(number));
+  }
+
+  const waves: number[][] = [];
+  for (let wave = 1; wave <= maxWave; wave += 1) {
+    waves.push(
+      [...byNumber.keys()]
+        .filter((number) => waveByNumber.get(number) === wave)
+        .sort((a, b) => a - b),
+    );
+  }
+
+  return { ok: true, waves };
 }
 
 /** A stored ticket row, exactly as `get-spec`, `list-tickets` and `break-into-tickets` need it. */
