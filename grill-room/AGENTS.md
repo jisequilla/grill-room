@@ -80,11 +80,12 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `get-spec` | A session's spec, or null when none has been synthesized yet, plus a `ticketsCurrent` flag: whether any generated tickets still match it. |
 | `break-into-tickets` | Break the session's current spec into implementation tickets, replacing any it already has. Allowed only for a confirmed session with a current spec and no turn working. Refuses to replace tickets carrying a build record unless `force` is set. Returns the same shape as `list-tickets`. |
 | `list-tickets` | A session's tickets in number order, each with `blockedBy` resolved to ticket numbers, plus the same `ticketsCurrent` flag as `get-spec`. |
-| `register-project` | Register a repository sessions export into. The root (any folder inside the repo) is resolved to its git top-level with read-only `git rev-parse`; root, verify command and export folder are required, the rest default (slug pattern `{slug}`, tracker `markdown`, build-record logging off). The visibility flag is seeded from `git check-ignore` on the export folder unless given. Refusals carry a code: `root-required`, `verify-command-required`, `export-folder-required`, `folder-not-absolute`, `folder-not-found`, `folder-not-directory`, `not-a-git-repo`, `git-unavailable`, `export-folder-outside-root`, `export-folder-is-root`, `invalid-slug-pattern`, `project-exists`. |
-| `update-project` | Edit a registered project. Omitted fields keep their value and the result is validated exactly as registration validates it; the visibility flag changes only when given. |
+| `register-project` | Register a repository sessions export into. The root (any folder inside the repo) is resolved to its git top-level with read-only `git rev-parse`; root and verify command are required, the rest default (slug pattern `{slug}`, tracker `markdown`, build-record logging off). A blank export folder or slug pattern falls back to the repo's declared tracker block (`docs/agents/issue-tracker.md` front matter — see "Declared tracker" below) when it has a valid one, otherwise export folder is required and slug pattern falls back to `{slug}`. The tracker's commands and diagnostic are stored on the project either way. The visibility flag is seeded from `git check-ignore` on the export folder unless given. Refusals carry a code: `root-required`, `verify-command-required`, `export-folder-required`, `folder-not-absolute`, `folder-not-found`, `folder-not-directory`, `not-a-git-repo`, `git-unavailable`, `export-folder-outside-root`, `export-folder-is-root`, `invalid-slug-pattern`, `project-exists`. |
+| `update-project` | Edit a registered project. Omitted fields keep their value and the result is validated exactly as registration validates it; the visibility flag changes only when given. Never re-reads the declared tracker — its stored commands and diagnostic pass through unchanged. |
 | `list-projects` | Every registered project, by name. |
 | `get-project` | One registered project by id. |
-| `suggest-project-defaults` | What registering a folder would detect, without registering it: the git root, a default name, a verify command suggested from the repo's justfile, package.json scripts or Makefile (in that order; `verify`, then `check`, then `test` within each), and the visibility `git check-ignore` seeds for a given export folder. |
+| `suggest-project-defaults` | What registering a folder would detect, without registering it: the git root, a default name, a verify command suggested from the repo's justfile, package.json scripts or Makefile (in that order; `verify`, then `check`, then `test` within each), an export folder and slug pattern suggested from a declared tracker block when the repo has a valid one, and the visibility `git check-ignore` seeds for a given export folder. |
+| `refresh-project-tracker` | Re-read a project's declared tracker and update only what it governs: the stored commands and diagnostic always, and the export folder and slug pattern only when the tracker is valid. Nothing else about the project changes, and nothing else re-reads the tracker file — every ordinary edit carries these fields over untouched. |
 | `set-session-project` | Set the registered project a session exports into, or clear it with `null`. |
 | `set-export-target` | Set the absolute folder a session exports into; `~` is expanded and the path normalised. Does not need to exist yet. |
 | `set-docs-folder` | Set the read-only folder the interviewer may read while grilling this session, or clear it with `null`. See "Grill with docs" below. |
@@ -176,6 +177,39 @@ filesystem, so the rules are narrow and enforced in three places at once:
   out of date, and a decision the user did not make is not a decision.
 
 No version of this writes to the folder.
+
+### Declared tracker
+
+A project's repository may declare a tracker as a front-matter block at the
+very top of `docs/agents/issue-tracker.md`, relative to the project root:
+
+```
+---
+tickets_dir: .scratch/tickets
+ticket_format: "{seq}-{slug}"
+commands:
+  claim: bd update {id} --claim
+  close: bd close {id}
+---
+```
+
+Three fixed keys, all required for the block to count as valid: `tickets_dir`
+(a folder relative to the root — not absolute, not resolving outside it),
+`ticket_format` (a slug pattern using the placeholders `register-project`
+accepts, e.g. `{seq}`, `{date}`, `{slug}`), and `commands` (a map of command
+name to shell command). A missing file, or a file without this block (prose
+only), reads as no tracker. A block missing a key, or with an invalid
+`tickets_dir`/`ticket_format`, reads as invalid, with a diagnostic naming the
+offending key. See `server/tracker.ts` for the exact parser.
+
+The tracker is read only at registration and by `refresh-project-tracker`:
+`register-project` stores its commands and diagnostic and, for any export
+folder or slug pattern the caller left blank, pre-fills them from a valid
+tracker (the fixed layout otherwise). `update-project` never re-reads it — the
+stored commands and diagnostic pass through every ordinary edit unchanged, so
+editing the tracker file has no effect until `refresh-project-tracker` is
+called. Only that action then updates the export folder and slug pattern, and
+only when the newly-read tracker is valid.
 
 ### Logging a build from an agent
 

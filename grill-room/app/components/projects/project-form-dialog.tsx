@@ -67,12 +67,17 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
   const [buildRecordLogging, setBuildRecordLogging] = useState(false);
   const [visibility, setVisibility] = useState<ProjectVisibility>("tracked");
   const [visibilitySeeded, setVisibilitySeeded] = useState(false);
+  const [exportFolderSuggested, setExportFolderSuggested] = useState(false);
+  const [slugPatternSuggested, setSlugPatternSuggested] = useState(false);
+  const [trackerDiagnostic, setTrackerDiagnostic] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
 
   // Whether the operator has set these by hand; a detection never overwrites that.
   const verifyTouched = useRef(false);
   const visibilityTouched = useRef(false);
+  const exportFolderTouched = useRef(false);
+  const slugPatternTouched = useRef(false);
   const detection = useRef(0);
 
   useEffect(() => {
@@ -84,14 +89,19 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
     setVerifyCommand(project?.verifyCommand ?? "");
     setVerifySuggested(false);
     setExportFolder(project?.exportFolder ?? "");
+    setExportFolderSuggested(false);
     setSlugPattern(project?.slugPattern ?? DEFAULT_PROJECT_SLUG_PATTERN);
+    setSlugPatternSuggested(false);
     setTrackerKind((project?.trackerKind as ProjectTrackerKind) ?? "markdown");
     setBuildRecordLogging(project?.buildRecordLogging ?? false);
     setVisibility((project?.visibility as ProjectVisibility) ?? "tracked");
     setVisibilitySeeded(false);
+    setTrackerDiagnostic(project?.trackerDiagnostic ?? null);
     setErrors({});
     verifyTouched.current = project !== null;
     visibilityTouched.current = project !== null;
+    exportFolderTouched.current = project !== null;
+    slugPatternTouched.current = project !== null;
   }, [open, project]);
 
   /** Ask the registry what it would detect, and pre-fill whatever the operator has not set. */
@@ -119,6 +129,14 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
       if (!visibilityTouched.current && found.visibility) {
         setVisibility(found.visibility);
         setVisibilitySeeded(true);
+      }
+      if (!exportFolderTouched.current && found.trackerExportFolder) {
+        setExportFolder(found.trackerExportFolder);
+        setExportFolderSuggested(true);
+      }
+      if (!slugPatternTouched.current && found.trackerSlugPattern) {
+        setSlugPattern(found.trackerSlugPattern);
+        setSlugPatternSuggested(true);
       }
     } catch (error) {
       if (run !== detection.current) return;
@@ -150,6 +168,18 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
     onError: onSaveError,
   });
   const saving = register.isPending || update.isPending;
+
+  const refreshTracker = useActionMutation("refresh-project-tracker", {
+    onSuccess: (updated) => {
+      setExportFolder(updated.exportFolder);
+      setSlugPattern(updated.slugPattern);
+      setTrackerDiagnostic(updated.trackerDiagnostic ?? null);
+      toast.success(t("projects.trackerRefreshed"));
+    },
+    onError: (error) => {
+      toast.error(actionErrorMessage(error) ?? t("projects.trackerRefreshFailed"));
+    },
+  });
 
   const canSubmit =
     root.trim().length > 0 &&
@@ -262,6 +292,8 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                 id="project-export"
                 value={exportFolder}
                 onChange={(event) => {
+                  exportFolderTouched.current = true;
+                  setExportFolderSuggested(false);
                   setExportFolder(event.target.value);
                   setErrors((current) => ({ ...current, exportFolder: undefined }));
                 }}
@@ -272,7 +304,13 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                 className="font-mono"
                 spellCheck={false}
               />
-              {hint("exportFolder", t("projects.exportFolderHint"), "project-export-hint")}
+              {hint(
+                "exportFolder",
+                exportFolderSuggested
+                  ? t("projects.exportFolderSuggested")
+                  : t("projects.exportFolderHint"),
+                "project-export-hint",
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="project-slug">{t("projects.slugPatternLabel")}</Label>
@@ -280,6 +318,8 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                 id="project-slug"
                 value={slugPattern}
                 onChange={(event) => {
+                  slugPatternTouched.current = true;
+                  setSlugPatternSuggested(false);
                   setSlugPattern(event.target.value);
                   setErrors((current) => ({ ...current, slugPattern: undefined }));
                 }}
@@ -289,7 +329,11 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                 className="font-mono"
                 spellCheck={false}
               />
-              {hint("slugPattern", t("projects.slugPatternHint"), "project-slug-hint")}
+              {hint(
+                "slugPattern",
+                slugPatternSuggested ? t("projects.slugPatternSuggested") : t("projects.slugPatternHint"),
+                "project-slug-hint",
+              )}
             </div>
           </div>
 
@@ -340,6 +384,31 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
               ) : null}
             </div>
           </div>
+
+          {project ? (
+            <div className="flex items-start justify-between gap-4 rounded-lg border px-3.5 py-3">
+              <div className="space-y-0.5">
+                <Label>{t("projects.trackerRefreshLabel")}</Label>
+                <p
+                  className={
+                    trackerDiagnostic ? "text-xs text-destructive" : "text-xs text-muted-foreground"
+                  }
+                >
+                  {trackerDiagnostic ?? t("projects.trackerRefreshHint")}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => refreshTracker.mutate({ id: project.id })}
+                disabled={refreshTracker.isPending}
+              >
+                {refreshTracker.isPending && <Spinner className="size-4" />}
+                {t("projects.trackerRefresh")}
+              </Button>
+            </div>
+          ) : null}
 
           <div className="flex items-start justify-between gap-4 rounded-lg border px-3.5 py-3">
             <div className="space-y-0.5">

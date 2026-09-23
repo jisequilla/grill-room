@@ -311,4 +311,14 @@ export const appMigrations: MigrationEntry[] = [
     name: "sessions-project-id-column",
     sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS project_id TEXT REFERENCES gr_projects(id) ON DELETE SET NULL`,
   },
+  {
+    version: 39,
+    name: "projects-tracker-commands-column",
+    sql: `ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS tracker_commands_json TEXT`,
+  },
+  {
+    version: 40,
+    name: "projects-tracker-diagnostic-column",
+    sql: `ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS tracker_diagnostic TEXT`,
+  },
 ];

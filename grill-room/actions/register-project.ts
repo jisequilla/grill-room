@@ -10,7 +10,7 @@ import {
 
 export default defineAction({
   description:
-    "Register a project sessions export into. The root is resolved to its git top-level and a folder outside any git repository is refused. Root, verify command and export folder are required; the visibility flag is seeded from git check-ignore on the export folder unless given.",
+    "Register a project sessions export into. The root is resolved to its git top-level and a folder outside any git repository is refused. Root and verify command are required; a blank export folder or slug pattern falls back to the repository's declared tracker block when it has a valid one, otherwise to the fixed layout. The visibility flag is seeded from git check-ignore on the export folder unless given.",
   schema: z.object({
     root: z
       .string()
@@ -22,8 +22,10 @@ export default defineAction({
       .describe("The command that verifies a change in this repository, e.g. 'pnpm test'"),
     exportFolder: z
       .string()
-      .min(1)
-      .describe("Where exports land, relative to the repository root, e.g. '.scratch'"),
+      .optional()
+      .describe(
+        "Where exports land, relative to the repository root, e.g. '.scratch'. Omit it to fall back to the repository's declared tracker block when it has a valid one; required otherwise.",
+      ),
     name: z
       .string()
       .optional()
