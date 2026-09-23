@@ -554,4 +554,84 @@ describe("preview-export and export-session", () => {
     expect(result.files[100]).toBe(path.join(bundleDir, "issues", "100-ticket-100.md"));
     for (const file of result.files) expect(file.startsWith(root + path.sep)).toBe(true);
   });
+
+  describe("post-export visibility report", () => {
+    it("reports freshly written files as untracked when the repo has never seen them", async () => {
+      const { root, session } = await aReadySession();
+
+      const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+      const bundleDir = path.join(root, ".scratch", "grill-room");
+      expect(result.visibility.files).toEqual(
+        result.files.map((file) => ({
+          path: file,
+          relativePath: path.relative(root, file).split(path.sep).join("/"),
+          visibility: "untracked",
+        })),
+      );
+      expect(result.visibility.hasUntracked).toBe(true);
+      expect(result.visibility.hasIgnored).toBe(false);
+      expect(result.visibility.warning).toMatch(/will not see/);
+      expect(result.visibility.untrackedRemedy).toContain(
+        `git -C ${root} add .scratch/grill-room`,
+      );
+      // The seeded flag ("tracked", since .scratch/ isn't gitignored here) matches: nothing is ignored.
+      expect(result.visibility.mismatchWarning).toBeNull();
+    });
+
+    it("reports files under a gitignored export folder as ignored, with the check-ignore remedy", async () => {
+      const { root, session } = await aReadySession({ files: { ".gitignore": ".scratch/\n" } });
+
+      const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+      expect(result.visibility.hasIgnored).toBe(true);
+      expect(result.visibility.files.every((file) => file.visibility === "ignored")).toBe(true);
+      expect(result.visibility.ignoredRemedy).toMatch(/cannot be committed/i);
+      expect(result.visibility.ignoredRemedy).toContain(
+        `git -C ${root} check-ignore -v .scratch/grill-room/spec.md`,
+      );
+      // The flag was seeded from check-ignore at registration, so it already says "ignored".
+      expect(result.visibility.mismatchWarning).toBeNull();
+    });
+
+    it("warns when the project's visibility flag disagrees with the repository's real state", async () => {
+      const root = repos.create({ files: { ".gitignore": ".scratch/\n" } });
+      const project = await registerProject.run({
+        root,
+        verifyCommand: "pnpm test",
+        exportFolder: ".scratch",
+        visibility: "tracked",
+      });
+      const session = await aSession("Grill Room", project.id);
+      await insertSpec(session.id);
+
+      const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+      expect(result.visibility.hasIgnored).toBe(true);
+      expect(result.visibility.mismatchWarning).toContain("tracked");
+      expect(result.visibility.mismatchWarning).toMatch(/ignored/);
+    });
+
+    it("reports no mismatch and no ignored/untracked files once the bundle is already tracked", async () => {
+      const { root, session } = await aReadySession({
+        files: {
+          ".scratch/grill-room/spec.md": "old committed content",
+          ".scratch/grill-room/issues/01-build-the-workspace.md": "old",
+          ".scratch/grill-room/issues/02-store-on-disk.md": "old",
+          [`.scratch/grill-room/${EXPORT_MANIFEST_FILE}`]: JSON.stringify({
+            version: 1,
+            files: ["spec.md", "issues/01-build-the-workspace.md", "issues/02-store-on-disk.md"],
+          }),
+        },
+      });
+
+      const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+      expect(result.visibility.hasUntracked).toBe(false);
+      expect(result.visibility.hasIgnored).toBe(false);
+      expect(result.visibility.warning).toBeNull();
+      expect(result.visibility.mismatchWarning).toBeNull();
+      expect(root.length).toBeGreaterThan(0);
+    });
+  });
 });

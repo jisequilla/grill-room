@@ -58,6 +58,7 @@ import path from "node:path";
 import { fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 
+import type { ProjectVisibility } from "../shared/session-constants.js";
 import { getDb, schema } from "./db/index.js";
 import {
   applySlugPattern,
@@ -93,6 +94,7 @@ export interface ExportBundlePlan {
     rootPath: string;
     exportFolder: string;
     slugPattern: string;
+    visibility: ProjectVisibility;
   };
   /** The slug proposed from the session title. */
   proposedSlug: string;
@@ -386,6 +388,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       rootPath: project.rootPath,
       exportFolder: project.exportFolder,
       slugPattern: project.slugPattern,
+      visibility: project.visibility,
     },
     proposedSlug,
     slug,
