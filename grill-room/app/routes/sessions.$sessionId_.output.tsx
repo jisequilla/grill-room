@@ -6,6 +6,7 @@ import { useParams } from "react-router";
 
 import { BuildRecordsSection } from "@/components/output/build-records-section";
 import { ExportSection } from "@/components/output/export-section";
+import { SessionProjectSection } from "@/components/output/session-project-section";
 import { NotConfirmedNotice } from "@/components/output/not-confirmed-notice";
 import { SpecSection } from "@/components/output/spec-section";
 import { TicketsSection } from "@/components/output/tickets-section";
@@ -104,6 +105,8 @@ export default function SessionOutputRoute() {
       <BuildRecordsSection sessionId={id} />
 
       <Separator />
+
+      <SessionProjectSection sessionId={id} projectId={session.projectId} />
 
       <ExportSection
         sessionId={id}

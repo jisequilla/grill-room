@@ -3,6 +3,7 @@ import { useT } from "@agent-native/core/client/i18n";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
+import { ProjectSelect } from "@/components/projects/project-select";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -59,6 +60,7 @@ export function CreateSessionDialog({
     useState<SessionAnsweringMode>("whole-round");
   const [docsFolder, setDocsFolder] = useState("");
   const [docsFolderError, setDocsFolderError] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
 
   // Reset the form to a clean slate, pre-filled with the current global
   // default model, every time the dialog opens.
@@ -69,6 +71,7 @@ export function CreateSessionDialog({
     setAnsweringMode("whole-round");
     setDocsFolder("");
     setDocsFolderError(null);
+    setProjectId(null);
     setModel(defaultModel ?? "fable");
   }, [open, defaultModel]);
 
@@ -102,6 +105,7 @@ export function CreateSessionDialog({
       model,
       answeringMode,
       ...(folder.length > 0 ? { docsFolder: folder } : {}),
+      ...(projectId !== null ? { projectId } : {}),
     });
   }
 
@@ -201,6 +205,20 @@ export function CreateSessionDialog({
               }
             >
               {docsFolderError ?? t("sessions.docsFolderHint")}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="session-project">
+              {t("projects.selectOptionalLabel")}
+            </Label>
+            <ProjectSelect
+              id="session-project"
+              value={projectId}
+              onChange={setProjectId}
+              aria-describedby="session-project-hint"
+            />
+            <p id="session-project-hint" className="text-xs text-muted-foreground">
+              {t("projects.selectHint")}
             </p>
           </div>
           <DialogFooter>

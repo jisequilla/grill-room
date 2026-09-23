@@ -289,4 +289,26 @@ export const appMigrations: MigrationEntry[] = [
     name: "sessions-batch-progress-column",
     sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS batch_progress_json TEXT`,
   },
+  {
+    version: 37,
+    name: "projects-table",
+    sql: `CREATE TABLE IF NOT EXISTS gr_projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      root_path TEXT NOT NULL UNIQUE,
+      verify_command TEXT NOT NULL,
+      export_folder TEXT NOT NULL,
+      slug_pattern TEXT NOT NULL DEFAULT '{slug}',
+      tracker_kind TEXT NOT NULL DEFAULT 'markdown',
+      build_record_logging BOOLEAN NOT NULL DEFAULT FALSE,
+      visibility TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+  },
+  {
+    version: 38,
+    name: "sessions-project-id-column",
+    sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS project_id TEXT REFERENCES gr_projects(id) ON DELETE SET NULL`,
+  },
 ];
