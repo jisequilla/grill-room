@@ -321,4 +321,23 @@ export const appMigrations: MigrationEntry[] = [
     name: "projects-tracker-diagnostic-column",
     sql: `ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS tracker_diagnostic TEXT`,
   },
+  {
+    version: 41,
+    name: "handoffs-table",
+    sql: `CREATE TABLE IF NOT EXISTS gr_handoffs (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL UNIQUE REFERENCES gr_sessions(id) ON DELETE CASCADE,
+      markdown TEXT NOT NULL,
+      briefs_json TEXT NOT NULL DEFAULT '[]',
+      fingerprint TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1,
+      generated_at TEXT NOT NULL,
+      edited_at TEXT,
+      exported_fingerprint TEXT,
+      exported_revision INTEGER,
+      exported_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
+  },
 ];

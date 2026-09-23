@@ -3,8 +3,10 @@
  * folder, holding `spec.md` at the top, one `issues/NN-slug.md` per ticket,
  * and a manifest of what the export wrote.
  *
+ *     <project root>/<export folder>/<folder name>/HANDOFF.md        (when a handoff exists)
  *     <project root>/<export folder>/<folder name>/spec.md
  *     <project root>/<export folder>/<folder name>/issues/NN-slug.md
+ *     <project root>/<export folder>/<folder name>/briefs/NN-slug.md (when a handoff exists)
  *     <project root>/<export folder>/<folder name>/.grill-room-export.json
  *
  * {@link planExportBundle} is the single source of truth for what an export
@@ -26,6 +28,16 @@
  *   is reused, so re-exporting lands where it did last time. Otherwise one more
  *   than the highest numeric prefix among the export folder's existing
  *   folders, zero-padded to two digits (`01` when there is none).
+ *
+ * ## Handoff
+ *
+ * When the session has a generated handoff (`server/handoff.ts`), its
+ * `HANDOFF.md` and briefs are planned files like the spec and tickets: listed
+ * in the preview, checked for containment, and recorded in the manifest, so a
+ * brief whose ticket is dropped is removed by the next export. Their
+ * `{{BUNDLE}}` placeholders are filled with the bundle path — repo-relative
+ * for a `tracked` project, absolute for an `ignored` one. The handoff is
+ * written as stored, stale or not; this module applies no gate.
  *
  * ## Containment
  *
@@ -72,6 +84,14 @@ import {
   renderExportManifest,
   sanitizeSlug,
 } from "./export.js";
+import {
+  bundlePathFor,
+  fillBundlePath,
+  getHandoffRow,
+  HANDOFF_FILE,
+  type HandoffRow,
+  parseBriefs,
+} from "./handoff.js";
 import { getProject } from "./projects.js";
 import { describeTickets, ticketsAreCurrent } from "./tickets.js";
 
@@ -113,6 +133,8 @@ export interface ExportBundlePlan {
   trackerDiagnostic: string | null;
   ticketsExported: boolean;
   ticketsSkippedReason: string | null;
+  /** The handoff row whose HANDOFF.md and briefs this plan writes, or null when the session has none. */
+  handoff: HandoffRow | null;
 }
 
 export interface PlanExportBundleInput {
@@ -351,11 +373,31 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     tickets: exportTickets,
   });
 
+  const handoff = (await getHandoffRow(session.id)) ?? null;
+  const handoffFiles: { relativePath: string; content: string }[] = [];
+  if (handoff) {
+    const bundlePath = bundlePathFor(project.visibility, project.rootPath, bundleDir);
+    handoffFiles.push({
+      relativePath: HANDOFF_FILE,
+      content: fillBundlePath(handoff.markdown, bundlePath),
+    });
+    for (const brief of parseBriefs(handoff.briefsJson)) {
+      handoffFiles.push({
+        relativePath: brief.relativePath,
+        content: fillBundlePath(brief.markdown, bundlePath),
+      });
+    }
+  }
+
+  const contentFiles = handoff
+    ? [handoffFiles[0]!, ...plan.files, ...handoffFiles.slice(1)]
+    : plan.files;
+
   const plannedFiles = [
-    ...plan.files,
+    ...contentFiles,
     {
       relativePath: EXPORT_MANIFEST_FILE,
-      content: renderExportManifest(plan.files.map((file) => file.relativePath)),
+      content: renderExportManifest(contentFiles.map((file) => file.relativePath)),
     },
   ];
 
@@ -400,6 +442,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     trackerDiagnostic: project.trackerDiagnostic,
     ticketsExported: exportTickets.length > 0,
     ticketsSkippedReason,
+    handoff,
   };
 }
 

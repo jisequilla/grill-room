@@ -6,6 +6,7 @@ import { useParams } from "react-router";
 
 import { BuildRecordsSection } from "@/components/output/build-records-section";
 import { ExportSection } from "@/components/output/export-section";
+import { HandoffSection } from "@/components/output/handoff-section";
 import { SessionProjectSection } from "@/components/output/session-project-section";
 import { NotConfirmedNotice } from "@/components/output/not-confirmed-notice";
 import { SpecSection } from "@/components/output/spec-section";
@@ -99,6 +100,10 @@ export default function SessionOutputRoute() {
       <Separator />
 
       <TicketsSection sessionId={id} working={working} onSettled={refresh} />
+
+      <Separator />
+
+      <HandoffSection sessionId={id} />
 
       <Separator />
 
