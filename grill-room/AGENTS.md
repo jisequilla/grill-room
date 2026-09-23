@@ -52,8 +52,10 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | Action | Purpose |
 | --- | --- |
 | `create-session` | Start a grilling session from a loose idea, defaulting the interviewer model to the global default. Optionally names the registered project it exports into (`projectId`); refused with `project-not-found` for an unknown one. |
-| `list-sessions` | Every session with its title, state, and last activity, most recently active first. |
+| `list-sessions` | Every session with its title, state, last activity, and `readinessVerdict` (`ready`, `not-ready`, or null when the current idea has not been judged), most recently active first. |
 | `get-session` | One session by id, so resuming lands where it left off; carries a derived `modelLocked` flag. |
+| `update-session-idea` | Replace a session's idea before its first round: trimmed, refused empty (`idea-required`). Clears the stored readiness judgment. Refused with `has-rounds` once any round exists and `turn-working` while a turn is working. Returns the session. |
+| `assess-readiness` | Ask the interviewer whether a session's idea is ready to be grilled, store the judgment, and return it. Refused with `has-rounds`, `turn-working`, or `wrong-session-state` outside interviewing. Never blocks starting the interview. See "Idea readiness" below. |
 | `delete-session` | A session and everything under it: decisions, history, rounds, spec, tickets, build records. |
 | `set-session-answering-mode` | Switch a session between whole-round and one-at-a-time answering. |
 | `set-session-model` | Change a session's interviewer model before its first round. Refused with `model-locked` once the session's interviewer conversation exists or while a turn is working. |
@@ -61,7 +63,7 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `set-default-model` | Set that default. |
 | `get-setting` / `set-setting` | Read and write one app-wide setting. |
 | `get-tree` | A session's whole design tree: every decision, what it depends on, its answer, its previous answers with the interviewer's reason for superseding each, and its derived state. |
-| `get-current-round` | The round a session is answering, with each card's question, recommendation, derived state, and saved draft — plus the session's state, its done-proposal summary when it has one, and whether the interviewer is working, idle, or failed. |
+| `get-current-round` | The round a session is answering, with each card's question, recommendation, derived state, and saved draft — plus the session's state, its done-proposal summary when it has one, whether the interviewer is working, idle, or failed, the idea's `readiness` (null when none, or when it judged an earlier idea), and `canEditIdea` (no round yet, no turn working). |
 | `list-rounds` | Every round of a session in order, with the questions asked and the answers given. |
 | `request-next-round` | Review whatever a reopened answer put in doubt, then ask the interviewer for the next round, validate the proposal against the tree — including a done proposal, accepted only once nothing would still be asked — and open the round. A session that had proposed or confirmed done returns to interviewing the moment a round actually opens. |
 | `save-draft-answer` | Save one card's draft answer — accepted recommendation, own answer, or a steering move (unknown, pushed back, deferred, prototype flagged) — so a half-answered round survives a reload. |
@@ -103,7 +105,8 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `provider-api-request` | Call Slack's Web API through the workspace connection. |
 
 `request-next-round`, `submit-round`, `find-superseded`, `synthesize-spec`,
-`break-into-tickets`, and `apply-reopen-batch` (one or two turns per item)
+`break-into-tickets`, `assess-readiness`, and `apply-reopen-batch` (one or two
+turns per item)
 all wait on a Claude CLI turn, which takes about a minute and can take several.
 The client action hooks time out at 60 s by default, so UI code calling any of
 them must pass a `timeoutMs` of several minutes; the default cancels a turn
@@ -148,6 +151,33 @@ session as `gr_sessions.batch_progress_json` (`{ total, completed, current,
 outcomes }`) and cleared when it ends. `get-session` carries it, which is how
 the workspace shows a batch it did not start and how a reload mid-batch lands
 somewhere truthful.
+
+### Idea readiness
+
+An idea that names nothing to build ("decide how to evaluate eight repos")
+produces a first round about methodology. Before the first round, the session
+can be judged for grill-readiness with `assess-readiness`, which runs one more
+interviewer request kind, `assess-readiness`, through the same turn lock,
+retries, structured output, docs-folder mode and fake interviewer as the rest.
+
+The result is `{ evidence, objective, objectiveIsProcess, expectedOutcome,
+unknowns, verdict, missing }`: evidence quoted in the idea's own words, the
+single buildable objective or null, whether that objective is a process
+(evaluate, decide how, compare, define a method), the expected outcome or null,
+the unknowns it raises, `ready` or `not-ready`, and what the idea still needs.
+`ready` requires at least one evidence item, a non-null objective that is not
+process, and at most five unknowns; a `ready` verdict breaking that rule is sent
+back with the reasons and, once retries are spent, fails the turn with
+`invalid-readiness`. The judge runs in a conversation of its own: the session's
+`conversationId` is left as it was, so the model stays changeable and the first
+round starts fresh.
+
+It is stored as `gr_sessions.readiness_json` (`{ ideaJudged, result,
+judgedAt }`). A judgment whose `ideaJudged` differs from the current idea reads
+as absent everywhere (`get-current-round`'s `readiness`, `list-sessions`'
+`readinessVerdict`). `update-session-idea` edits the idea while the session has
+no rounds and no turn working, and clears the judgment; re-judging is the
+user's call. Nothing blocks the first round on a `not-ready` verdict.
 
 ### Grill with docs
 

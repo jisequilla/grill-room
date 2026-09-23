@@ -6,6 +6,7 @@ import { buildPrompt } from "./prompt.js";
 import { jsonSchemaFor, resultSchemas } from "./schemas.js";
 import type { ResultFor } from "./schemas.js";
 import type {
+  AssessReadinessRequest,
   BreakIntoTicketsRequest,
   FindSupersededRequest,
   Interviewer,
@@ -332,6 +333,8 @@ export function createClaudeCliInterviewer(
       turn(request) as Promise<
         InterviewerTurn<ResultFor<"break-into-tickets">>
       >,
+    assessReadiness: (request: AssessReadinessRequest) =>
+      turn(request) as Promise<InterviewerTurn<ResultFor<"assess-readiness">>>,
   };
 }
 

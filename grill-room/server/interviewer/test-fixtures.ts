@@ -1,5 +1,10 @@
-import type { FindSupersededResult, ProposeRoundResult } from "./schemas.js";
 import type {
+  AssessReadinessResult,
+  FindSupersededResult,
+  ProposeRoundResult,
+} from "./schemas.js";
+import type {
+  AssessReadinessRequest,
   DecisionSnapshot,
   FindSupersededRequest,
   InterviewContext,
@@ -123,6 +128,32 @@ export function aFindSupersededResult(
         reason: "The workspace decision already commits to a database on disk.",
       },
     ],
+    ...overrides,
+  };
+}
+
+export function anAssessReadinessRequest(
+  overrides: Partial<Omit<AssessReadinessRequest, "kind">> = {},
+): AssessReadinessRequest {
+  return {
+    kind: "assess-readiness",
+    context: aContext({ decisions: [] }),
+    rejectionReason: null,
+    ...overrides,
+  };
+}
+
+export function anAssessReadinessResult(
+  overrides: Partial<AssessReadinessResult> = {},
+): AssessReadinessResult {
+  return {
+    evidence: ["A local app that grills me about an idea"],
+    objective: "A local app that interviews the user until an idea is decided.",
+    objectiveIsProcess: false,
+    expectedOutcome: "A settled set of decisions for the idea.",
+    unknowns: ["Where the sessions are stored"],
+    verdict: "ready",
+    missing: [],
     ...overrides,
   };
 }

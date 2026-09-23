@@ -3,11 +3,16 @@ import { and, desc, eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
+import {
+  canEditIdea,
+  currentReadiness,
+  sessionHasRounds,
+} from "../server/readiness.js";
 import { describeDecisions } from "../server/tree.js";
 
 export default defineAction({
   description:
-    "Read the round a session is currently answering, with each card's question, recommended answer, derived state, and saved draft. Also reports the session's state, its done-proposal summary when it has one, and whether the interviewer is working, idle, or failed.",
+    "Read the round a session is currently answering, with each card's question, recommended answer, derived state, and saved draft. Also reports the session's state, its done-proposal summary when it has one, whether the interviewer is working, idle, or failed, the idea's readiness judgment (null when none, or when it judged an earlier idea), and whether the idea can still be edited (no round yet, no turn working).",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
   }),
@@ -35,6 +40,8 @@ export default defineAction({
             message: session.turnErrorMessage ?? "",
           }
         : null,
+      readiness: currentReadiness(session),
+      canEditIdea: canEditIdea(session, await sessionHasRounds(sessionId)),
     };
 
     const [round] = await db

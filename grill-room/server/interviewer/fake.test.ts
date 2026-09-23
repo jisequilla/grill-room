@@ -9,6 +9,8 @@ import {
   scriptInterviewer,
 } from "./index.js";
 import {
+  anAssessReadinessRequest,
+  anAssessReadinessResult,
   aFindSupersededRequest,
   aProposeRoundRequest,
   aProposeRoundResult,
@@ -136,6 +138,17 @@ describe("the scripted fake interviewer", () => {
     await expect(
       interviewer.synthesizeSpec(aSynthesizeSpecRequest()),
     ).rejects.toThrow(/"propose-round" but the request was "synthesize-spec"/);
+  });
+
+  it("serves a scripted readiness judgment", async () => {
+    const interviewer = createFakeInterviewer([
+      { kind: "assess-readiness", result: anAssessReadinessResult() },
+    ]);
+
+    const turn = await interviewer.assessReadiness(anAssessReadinessRequest());
+
+    expect(turn.result).toEqual(anAssessReadinessResult());
+    expect(interviewer.requests[0]?.kind).toBe("assess-readiness");
   });
 
   it("accepts turns appended after it was created", async () => {

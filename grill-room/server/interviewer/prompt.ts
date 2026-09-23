@@ -1,5 +1,7 @@
 import { interviewerInstructions, loadSpecTemplate } from "./instructions.js";
+import { MAX_READY_UNKNOWNS } from "./schemas.js";
 import type {
+  AssessReadinessRequest,
   DecisionSnapshot,
   InterviewContext,
   InterviewerRequest,
@@ -96,7 +98,9 @@ function renderRetry(rejectionReason: string | null): string {
   ].join("\n");
 }
 
-function renderTask(request: InterviewerRequest): string {
+function renderTask(
+  request: Exclude<InterviewerRequest, AssessReadinessRequest>,
+): string {
   switch (request.kind) {
     case "propose-round": {
       const answers =
@@ -259,6 +263,73 @@ function renderTask(request: InterviewerRequest): string {
 }
 
 /**
+ * The readiness judge's opening line. Like {@link OPENING_LINE}, it keeps the
+ * prompt from starting with anything the argument parser could read as an
+ * option.
+ */
+const READINESS_OPENING_LINE =
+  "You are judging, inside the Grill Room app, whether an idea is ready for a grilling interview. You are not interviewing: you read the idea once and report on it.";
+
+/**
+ * The readiness judge is not an interview turn, so it carries none of the
+ * grilling method: only the idea, the rule the app checks the verdict against,
+ * and, when the session has one, the docs folder it may read for context.
+ */
+function buildReadinessPrompt(request: AssessReadinessRequest): string {
+  const { context } = request;
+  return [
+    READINESS_OPENING_LINE,
+    "",
+    "## The idea, in the user's words",
+    "",
+    `Title: ${context.title ?? "(untitled)"}`,
+    "",
+    context.idea,
+    "",
+    ...(context.docsFolder
+      ? [
+          "## The docs folder",
+          "",
+          `The session has a read-only docs folder, which is your working directory: ${context.docsFolder}`,
+          "You may read it to understand what the idea refers to. Never modify",
+          "anything, and never read outside it. Evidence still comes only from",
+          "the idea's own words: the folder can explain an item, it cannot add one.",
+          "",
+        ]
+      : []),
+    "## Your task: judge whether the idea is ready to grill",
+    "",
+    "A grilling interview settles the design decisions of one buildable thing.",
+    "It fails when the idea names nothing to build: asked to grill a process,",
+    "the interviewer can only ask about methodology. Return:",
+    "",
+    "- `evidence`: the concrete facts the idea states — constraints, users,",
+    "  existing systems, observed problems — each quoted in the idea's own",
+    "  words. Never paraphrase into something the idea does not say, and never",
+    "  invent a fact. An idea that states none has an empty list.",
+    "- `objective`: the single buildable thing the idea is after, in one",
+    "  sentence, or null when it names none.",
+    "- `objectiveIsProcess`: true when that objective is a process rather than",
+    "  a thing — to evaluate, decide how, compare, research, or define a",
+    "  method. False when there is no objective.",
+    "- `expectedOutcome`: what exists once the objective is done, or null when",
+    "  the idea does not say.",
+    "- `unknowns`: the open questions the idea raises that an interview would",
+    "  have to settle before building could start.",
+    "- `verdict`: `ready` only when all three hold — at least one evidence",
+    "  item, a non-null objective that is not process, and at most",
+    `  ${MAX_READY_UNKNOWNS} unknowns. Otherwise \`not-ready\`.`,
+    "- `missing`: what the idea needs before it is worth grilling, each item",
+    "  naming one gap the user could fill by editing the idea. Empty when the",
+    "  verdict is `ready` and nothing is missing. Name gaps only; do not",
+    "  rewrite the idea.",
+    renderRetry(request.rejectionReason),
+  ]
+    .join("\n")
+    .trimEnd();
+}
+
+/**
  * Builds the prompt for one turn.
  *
  * @param primed marks a conversation restarted after a failed resume, so the
@@ -268,6 +339,8 @@ export function buildPrompt(
   request: InterviewerRequest,
   { primed = false }: { primed?: boolean } = {},
 ): string {
+  if (request.kind === "assess-readiness") return buildReadinessPrompt(request);
+
   const preamble = primed
     ? [
         "## Note",

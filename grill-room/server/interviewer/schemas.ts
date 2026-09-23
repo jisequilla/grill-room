@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * The output schemas of the five request kinds. Each one is both the contract
+ * The output schemas of the six request kinds. Each one is both the contract
  * the model is constrained by (converted to JSON Schema for the command line)
  * and the validator every result is checked against before it leaves the port.
  *
@@ -130,12 +130,39 @@ export const breakIntoTicketsResultSchema = z.strictObject({
   ),
 });
 
+/**
+ * Whether an idea is ready to be grilled, judged before the first round.
+ *
+ * The verdict rule is stated to the model and checked by the app: ready needs
+ * at least one evidence item, an objective that is not process, and at most
+ * {@link MAX_READY_UNKNOWNS} unknowns. The app derives nothing else from it.
+ */
+export const assessReadinessResultSchema = z.strictObject({
+  /** Concrete facts the idea states, each quoted in the idea's own words. */
+  evidence: z.array(z.string().min(1)),
+  /** The single buildable thing the idea is after, or null when it names none. */
+  objective: z.string().min(1).nullable(),
+  /** True when the objective is a process: evaluate, decide how, compare, define a method. */
+  objectiveIsProcess: z.boolean(),
+  /** What exists once the objective is done, or null when the idea does not say. */
+  expectedOutcome: z.string().min(1).nullable(),
+  /** The open questions the idea raises that the interview would have to settle. */
+  unknowns: z.array(z.string().min(1)),
+  verdict: z.enum(["ready", "not-ready"]),
+  /** What the idea needs before it is worth grilling. Empty when nothing is missing. */
+  missing: z.array(z.string().min(1)),
+});
+
+/** A ready verdict tolerates at most this many unknowns. */
+export const MAX_READY_UNKNOWNS = 5;
+
 export const resultSchemas = {
   "propose-round": proposeRoundResultSchema,
   "review-stale": reviewStaleResultSchema,
   "find-superseded": findSupersededResultSchema,
   "synthesize-spec": synthesizeSpecResultSchema,
   "break-into-tickets": breakIntoTicketsResultSchema,
+  "assess-readiness": assessReadinessResultSchema,
 } as const;
 
 export type RequestKind = keyof typeof resultSchemas;
@@ -149,6 +176,7 @@ export type ReviewStaleResult = ResultFor<"review-stale">;
 export type FindSupersededResult = ResultFor<"find-superseded">;
 export type SynthesizeSpecResult = ResultFor<"synthesize-spec">;
 export type BreakIntoTicketsResult = ResultFor<"break-into-tickets">;
+export type AssessReadinessResult = ResultFor<"assess-readiness">;
 
 /** The JSON Schema handed to the command line's `--json-schema` flag. */
 export function jsonSchemaFor(kind: RequestKind): Record<string, unknown> {

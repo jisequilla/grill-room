@@ -340,4 +340,9 @@ export const appMigrations: MigrationEntry[] = [
       updated_at TEXT NOT NULL
     )`,
   },
+  {
+    version: 42,
+    name: "sessions-readiness-column",
+    sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS readiness_json TEXT`,
+  },
 ];
