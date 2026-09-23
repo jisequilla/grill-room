@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { SESSION_ANSWERING_MODES, SESSION_MODELS } from "../server/db/schema.js";
+import { getProject } from "../server/projects.js";
 import getDefaultModel from "./get-default-model.js";
 import { resolveDocsFolder } from "./set-docs-folder.js";
 
@@ -35,8 +36,15 @@ export default defineAction({
       .describe(
         "Absolute path to an existing folder the interviewer may read while grilling; omit for the tool-less interview",
       ),
+    projectId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Id of the registered project this session exports into; omit to choose one later",
+      ),
   }),
-  run: async ({ title, idea, model, answeringMode, docsFolder }) => {
+  run: async ({ title, idea, model, answeringMode, docsFolder, projectId }) => {
     const resolvedModel = model ?? (await getDefaultModel.run({})).model;
 
     let resolvedDocsFolder: string | null = null;
@@ -51,6 +59,13 @@ export default defineAction({
       resolvedDocsFolder = outcome.folder;
     }
 
+    if (projectId !== undefined && !(await getProject(projectId))) {
+      fail(`Project not found: ${projectId}`, {
+        errorCode: "project-not-found",
+        statusCode: 404,
+      });
+    }
+
     const now = new Date().toISOString();
     const id = randomUUID();
 
@@ -63,6 +78,7 @@ export default defineAction({
         model: resolvedModel,
         answeringMode,
         docsFolder: resolvedDocsFolder,
+        projectId: projectId ?? null,
         state: "interviewing",
         createdAt: now,
         updatedAt: now,

@@ -67,3 +67,18 @@ export type RoundSubmissionState = (typeof ROUND_SUBMISSION_STATES)[number];
 /** Lifecycle of an exported ticket. */
 export const TICKET_STATUSES = ["ready", "in-progress", "done"] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
+
+/** How a registered project tracks its tickets. Default is `markdown`. */
+export const PROJECT_TRACKER_KINDS = ["beads", "markdown"] as const;
+export type ProjectTrackerKind = (typeof PROJECT_TRACKER_KINDS)[number];
+
+/**
+ * Whether a project's export folder is version-controlled in its repo. Seeded
+ * from `git check-ignore` at registration and editable afterwards; the handoff
+ * renders its tracked or ignored instructions from this flag.
+ */
+export const PROJECT_VISIBILITIES = ["tracked", "ignored"] as const;
+export type ProjectVisibility = (typeof PROJECT_VISIBILITIES)[number];
+
+/** The slug pattern a project gets when none is given: the plain session slug. */
+export const DEFAULT_PROJECT_SLUG_PATTERN = "{slug}";

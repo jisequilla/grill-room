@@ -8,9 +8,12 @@ import {
 } from "@agent-native/core/db/schema";
 
 import {
+  DEFAULT_PROJECT_SLUG_PATTERN,
   DECISION_ANSWER_KINDS,
   DECISION_DISPOSITION_TARGETS,
   DECISION_INTRODUCED_BY,
+  PROJECT_TRACKER_KINDS,
+  PROJECT_VISIBILITIES,
   ROUND_SUBMISSION_STATES,
   SESSION_ANSWERING_MODES,
   SESSION_MODELS,
@@ -31,6 +34,11 @@ export {
   type DecisionDispositionTarget,
   DECISION_INTRODUCED_BY,
   type DecisionIntroducedBy,
+  DEFAULT_PROJECT_SLUG_PATTERN,
+  PROJECT_TRACKER_KINDS,
+  type ProjectTrackerKind,
+  PROJECT_VISIBILITIES,
+  type ProjectVisibility,
   ROUND_SUBMISSION_STATES,
   type RoundSubmissionState,
   SESSION_ANSWERING_MODES,
@@ -51,6 +59,31 @@ export const globalSettings = table("gr_global_settings", {
   value: text("value").notNull(),
 });
 
+/**
+ * A repository sessions export into, registered once. Created and edited only
+ * through `server/projects.ts`, which resolves `rootPath` to the git top-level
+ * and validates every field; nothing else writes this table.
+ */
+export const projects = table("gr_projects", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  /** The absolute git top-level of the repository, as `git rev-parse --show-toplevel` reports it. */
+  rootPath: text("root_path").notNull().unique(),
+  verifyCommand: text("verify_command").notNull(),
+  /** Where exports land, relative to `rootPath`. */
+  exportFolder: text("export_folder").notNull(),
+  slugPattern: text("slug_pattern")
+    .notNull()
+    .default(DEFAULT_PROJECT_SLUG_PATTERN),
+  trackerKind: text("tracker_kind", { enum: PROJECT_TRACKER_KINDS })
+    .notNull()
+    .default("markdown"),
+  buildRecordLogging: boolean("build_record_logging").notNull().default(false),
+  visibility: text("visibility", { enum: PROJECT_VISIBILITIES }).notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 /** One grilling interview. The root of a session's decision tree, rounds, spec, and tickets. */
 export const sessions = table("gr_sessions", {
   id: text("id").primaryKey(),
@@ -67,6 +100,10 @@ export const sessions = table("gr_sessions", {
   doneSummary: text("done_summary"),
   conversationId: text("conversation_id"),
   exportTargetFolder: text("export_target_folder"),
+  /** The registered project this session exports into, or null when none is chosen yet. */
+  projectId: text("project_id").references(() => projects.id, {
+    onDelete: "set null",
+  }),
   /** A read-only folder the interviewer may read while grilling, or null for the tool-less interview. */
   docsFolder: text("docs_folder"),
   /**
