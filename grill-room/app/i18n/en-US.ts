@@ -175,6 +175,8 @@ const messages = {
     stateInterviewing: "Interviewing",
     stateDoneProposed: "Awaiting confirmation",
     stateConfirmed: "Confirmed",
+    readinessReady: "Ready",
+    readinessNotReady: "Not ready",
   },
   workspace: {
     roundHeading: "This round",
@@ -183,6 +185,32 @@ const messages = {
 
     ideaMore: "Show more",
     ideaLess: "Show less",
+    ideaEdit: "Edit idea",
+    ideaLabel: "Idea",
+    ideaSave: "Save",
+    ideaSaving: "Saving…",
+    ideaCancel: "Cancel",
+    ideaRequired: "The idea cannot be empty.",
+    ideaSaveFailed: "Could not save the idea.",
+
+    readinessTitle: "Is this idea ready to grill?",
+    readinessDescription:
+      "The interviewer reads the idea and says what it can build from it and what is missing. It only warns: you can start the interview either way.",
+    readinessAssess: "Assess readiness",
+    readinessReassess: "Re-assess",
+    readinessAssessing: "Assessing…",
+    readinessAssessFailed: "Could not assess the idea.",
+    readinessObjective: "Objective",
+    readinessNoObjective: "No buildable objective found",
+    readinessProcessWarning:
+      "This objective is a process (evaluate, decide how, compare), not something to build. The first round will likely ask about method.",
+    readinessEvidence: "Evidence",
+    readinessNoEvidence: "Nothing in the idea states what to build.",
+    readinessExpectedOutcome: "Expected outcome",
+    readinessNotStated: "Not stated",
+    readinessUnknowns: "Unknowns ({{count}})",
+    readinessNoUnknowns: "None raised.",
+    readinessMissing: "Missing",
 
     modelSelectLabel: "Interviewer model",
     modelLockedError: "This session's interviewer model is fixed on {{model}}.",
@@ -241,6 +269,8 @@ const messages = {
     errorNotLoggedInHint:
       "Run `claude` once in a terminal and sign in, then try again.",
     errorMalformed: "The interviewer returned something unusable.",
+    errorInvalidReadiness:
+      "The interviewer's readiness verdict kept contradicting its own findings.",
     errorGeneric: "The interviewer could not complete the turn.",
 
     doneHeading: "Finishing",
