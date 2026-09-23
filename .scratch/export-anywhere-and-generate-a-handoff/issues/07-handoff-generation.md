@@ -1,0 +1,8 @@
+# 07 HANDOFF.md and per-ticket briefs: templates, UI block, editing, staleness
+
+Status: ready-for-agent
+Blocked by: 04, 06
+
+Add a handoff block on the same page as spec and ticket generation. Generate a session HANDOFF.md containing the spec path, ticket waves from ticket 6, the project's verify command, the sync-to-local-main rule, what to record per ticket, and links to one brief per ticket. Briefs fix the invariant parts (git and worktree rules, sync step, verify command, report format, stop-after-reporting) and leave labelled slots for file boundaries and codebase facts. Render the tracked variant (repo-relative paths, commit-before-delegating step) or ignored variant (absolute paths into the main checkout, mandatory sync rule) from the project's visibility flag without re-checking git. Include bead commands only when tracker kind is beads; for markdown, include a status line per ticket in HANDOFF.md. Include build-record logging instructions only when the toggle is on. Cite tracker commands from ticket 2 when present. The handoff is readable and editable in the UI; regeneration overwrites after a confirm; any ticket change marks it stale with a badge; a UI edit after export marks the export stale. Handoff and briefs are written into the export bundle by ticket 4's export.
+
+Judged by: snapshot tests for tracked and ignored variants, beads and markdown kinds, toggle on and off; briefs contain invariant parts and labelled slots; staleness transitions on ticket change and on edit-after-export; overwrite only after confirm.
