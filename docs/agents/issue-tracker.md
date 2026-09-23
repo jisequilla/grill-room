@@ -1,3 +1,11 @@
+---
+tickets_dir: .scratch
+ticket_format: "{slug}"
+commands:
+  ready: bd ready
+  claim: bd update {id} --claim
+  close: bd close {id}
+---
 # Issue tracker: Local Markdown
 
 Issues and specs for this repo live as markdown files in `.scratch/`.
