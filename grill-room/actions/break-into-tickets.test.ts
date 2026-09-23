@@ -383,6 +383,7 @@ describe("list-tickets", () => {
     expect(await listTickets.run({ sessionId })).toEqual({
       tickets: [],
       ticketsCurrent: false,
+      waves: [],
     });
   });
 
@@ -403,5 +404,34 @@ describe("list-tickets", () => {
     expect(tickets[1]?.blockedBy).toEqual([1]);
     expect(tickets.every((ticket) => ticket.status === "ready")).toBe(true);
     expect(ticketsCurrent).toBe(true);
+  });
+
+  it("exposes the wave order derived from blockedBy", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    scriptInterviewer([
+      ticketsTurn([
+        { number: 1, slug: "one" },
+        { number: 2, slug: "two", blockedBy: [1] },
+        { number: 3, slug: "three", blockedBy: [1] },
+        { number: 4, slug: "four", blockedBy: [2, 3] },
+      ]),
+    ]);
+
+    await breakIntoTickets.run({ sessionId });
+    const { waves } = await listTickets.run({ sessionId });
+
+    expect(waves).toEqual([[1], [2, 3], [4]]);
+  });
+
+  it("returns identical waves across repeated calls", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    scriptInterviewer([twoGoodTickets]);
+    await breakIntoTickets.run({ sessionId });
+
+    const first = await listTickets.run({ sessionId });
+    const second = await listTickets.run({ sessionId });
+
+    expect(first.waves).toEqual(second.waves);
+    expect(first.waves).toEqual([[1], [2]]);
   });
 });
