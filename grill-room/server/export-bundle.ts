@@ -1,0 +1,387 @@
+/**
+ * The export bundle: one directory per session inside its project's export
+ * folder, holding `spec.md` at the top and one `issues/NN-slug.md` per ticket.
+ *
+ *     <project root>/<export folder>/<folder name>/spec.md
+ *     <project root>/<export folder>/<folder name>/issues/NN-slug.md
+ *
+ * {@link planExportBundle} is the single source of truth for what an export
+ * does. `preview-export` returns its plan without writing; `export-session`
+ * builds the very same plan and hands it to {@link writeExportBundle}. The
+ * preview and the write therefore cannot disagree about a path.
+ *
+ * ## Folder name
+ *
+ * The folder name is the project's slug pattern with its placeholders filled:
+ *
+ * - `{slug}` — the slug the operator confirmed, sanitized by `sanitizeSlug`
+ *   (lowercase ASCII letters, digits and single hyphens, at most 60
+ *   characters). The proposal is `proposeSlug`: the first four words of the
+ *   session title. A slug that sanitizes to nothing is refused.
+ * - `{date}` — today's local date as `YYYY-MM-DD`.
+ * - `{seq}` — if a folder in the export folder already matches the pattern
+ *   with the same slug and date (any digits standing for `{seq}`), that folder
+ *   is reused, so re-exporting lands where it did last time. Otherwise one more
+ *   than the highest numeric prefix among the export folder's existing
+ *   folders, zero-padded to two digits (`01` when there is none).
+ *
+ * ## Containment
+ *
+ * The project's export folder was checked lexically at registration; that
+ * check cannot see symlinks. Here every path the export would write or remove
+ * is resolved through the filesystem — `fs.realpath` on the project root and
+ * on the deepest existing ancestor of each path — and the plan is refused with
+ * `export-outside-root` unless every one lands strictly inside the real project
+ * root. A dangling symlink on the way is refused too, since writing through it
+ * would create its target wherever it points.
+ *
+ * ## Re-export
+ *
+ * Writing overwrites `spec.md` and the planned issue files, and removes any
+ * `*.md` file in an owned subfolder (`OWNED_BUNDLE_SUBFOLDERS`) that the plan
+ * no longer contains. Nothing else in the bundle is touched.
+ */
+import fs from "node:fs/promises";
+import path from "node:path";
+
+import { fail } from "@agent-native/core/action";
+import { eq } from "@agent-native/core/db/schema";
+
+import { getDb, schema } from "./db/index.js";
+import {
+  applySlugPattern,
+  findSequencedFolder,
+  formatLocalDate,
+  nextSequence,
+  OWNED_BUNDLE_SUBFOLDERS,
+  planExport,
+  proposeSlug,
+  sanitizeSlug,
+} from "./export.js";
+import { getProject } from "./projects.js";
+import { describeTickets, ticketsAreCurrent } from "./tickets.js";
+
+const NO_TICKETS_REASON = "This session has no tickets to export.";
+const STALE_TICKETS_REASON =
+  "The session's tickets are out of date with its spec and were not exported.";
+
+export interface BundleFile {
+  /** Relative to the bundle directory, forward slashes: `spec.md`, `issues/01-slug.md`. */
+  relativePath: string;
+  absolutePath: string;
+  content: string;
+}
+
+export interface ExportBundlePlan {
+  sessionId: string;
+  project: {
+    id: string;
+    name: string;
+    rootPath: string;
+    exportFolder: string;
+    slugPattern: string;
+  };
+  /** The slug proposed from the session title. */
+  proposedSlug: string;
+  /** The slug actually used: the given one sanitized, or the proposal. */
+  slug: string;
+  folderName: string;
+  /** Absolute path of the bundle directory. */
+  bundleDir: string;
+  /** Whether the bundle directory already exists, i.e. this export replaces an earlier one. */
+  bundleExists: boolean;
+  /** Every file the export writes, spec first, then issues in number order. */
+  files: BundleFile[];
+  /** Absolute paths of stale owned files the export removes. */
+  removals: string[];
+  /** The project's declared-tracker diagnostic, shown as a preview line when present. */
+  trackerDiagnostic: string | null;
+  ticketsExported: boolean;
+  ticketsSkippedReason: string | null;
+}
+
+export interface PlanExportBundleInput {
+  sessionId: string;
+  /** The operator's slug; the proposal is used when omitted. */
+  slug?: string;
+  /** Clock for `{date}`; defaults to now. */
+  now?: Date;
+}
+
+function errorCode(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException | undefined)?.code;
+}
+
+function isStrictlyInside(candidate: string, root: string): boolean {
+  return candidate.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
+}
+
+function refuseOutsideRoot(target: string): never {
+  fail(`Refusing to export: ${target} resolves outside the project root.`, {
+    errorCode: "export-outside-root",
+    statusCode: 400,
+    details: { path: target },
+  });
+}
+
+/**
+ * Where `target` really lands: `fs.realpath` of its deepest existing ancestor,
+ * with the not-yet-existing remainder appended. A dangling symlink anywhere on
+ * the way is refused, because writing through it would create its target.
+ */
+async function realLocation(target: string): Promise<string> {
+  const remainder: string[] = [];
+  let current = target;
+
+  for (;;) {
+    try {
+      const real = await fs.realpath(current);
+      return path.join(real, ...remainder.reverse());
+    } catch (error) {
+      const code = errorCode(error);
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+
+      let present = true;
+      try {
+        await fs.lstat(current);
+      } catch {
+        present = false;
+      }
+      if (present) refuseOutsideRoot(target);
+
+      const parent = path.dirname(current);
+      if (parent === current) refuseOutsideRoot(target);
+      remainder.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+async function assertContained(targets: readonly string[], realRoot: string): Promise<void> {
+  for (const target of targets) {
+    if (!isStrictlyInside(await realLocation(target), realRoot)) refuseOutsideRoot(target);
+  }
+}
+
+async function directoryNames(folder: string): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(folder, { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch (error) {
+    if (errorCode(error) === "ENOENT" || errorCode(error) === "ENOTDIR") return [];
+    throw error;
+  }
+}
+
+async function exists(target: string): Promise<boolean> {
+  try {
+    await fs.lstat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** `*.md` files (or links) in the bundle's owned subfolders that the plan does not write. */
+async function staleOwnedFiles(bundleDir: string, planned: ReadonlySet<string>): Promise<string[]> {
+  const stale: string[] = [];
+  for (const subfolder of OWNED_BUNDLE_SUBFOLDERS) {
+    const folder = path.join(bundleDir, subfolder);
+    let entries;
+    try {
+      entries = await fs.readdir(folder, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.name.endsWith(".md")) continue;
+      if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+      const absolute = path.join(folder, entry.name);
+      if (!planned.has(absolute)) stale.push(absolute);
+    }
+  }
+  return stale.sort();
+}
+
+function checkFolderName(folderName: string): void {
+  if (
+    folderName.length === 0 ||
+    folderName === "." ||
+    folderName === ".." ||
+    /[\\/\0]/.test(folderName)
+  ) {
+    fail(`The project's slug pattern produced an unusable folder name: "${folderName}"`, {
+      errorCode: "invalid-folder-name",
+      statusCode: 400,
+    });
+  }
+}
+
+/**
+ * Everything an export of this session would do, with no side effects: the
+ * resolved folder name and bundle directory, every file with its content, the
+ * stale owned files it would remove, and the project's tracker diagnostic.
+ * Refuses (throws an action failure with an `errorCode`) when the session has
+ * no project, no current spec, an empty slug, or any path that resolves
+ * outside the real project root.
+ */
+export async function planExportBundle(input: PlanExportBundleInput): Promise<ExportBundlePlan> {
+  const db = getDb();
+
+  const [session] = await db
+    .select()
+    .from(schema.sessions)
+    .where(eq(schema.sessions.id, input.sessionId))
+    .limit(1);
+  if (!session) fail(`Session not found: ${input.sessionId}`, { statusCode: 404 });
+
+  if (!session.projectId) {
+    fail("Choose the project this session exports into before exporting.", {
+      errorCode: "no-project",
+      statusCode: 409,
+    });
+  }
+
+  const project = await getProject(session.projectId);
+  if (!project) {
+    fail(`Project not found: ${session.projectId}`, {
+      errorCode: "project-not-found",
+      statusCode: 404,
+    });
+  }
+
+  const [spec] = await db
+    .select()
+    .from(schema.specs)
+    .where(eq(schema.specs.sessionId, session.id))
+    .limit(1);
+  if (!spec) {
+    fail("This session has no spec yet. Synthesize one before exporting.", {
+      errorCode: "spec-missing",
+      statusCode: 409,
+    });
+  }
+  if (!spec.current) {
+    fail("The spec is out of date with the design tree. Regenerate it before exporting.", {
+      errorCode: "spec-not-current",
+      statusCode: 409,
+    });
+  }
+
+  const proposedSlug = proposeSlug(session.title, session.id);
+  const slug = input.slug === undefined ? proposedSlug : sanitizeSlug(input.slug);
+  if (slug.length === 0) {
+    fail("The slug needs at least one letter or digit.", {
+      errorCode: "invalid-slug",
+      statusCode: 400,
+    });
+  }
+
+  let realRoot: string;
+  try {
+    realRoot = await fs.realpath(project.rootPath);
+  } catch {
+    fail(`The project root no longer exists: ${project.rootPath}`, {
+      errorCode: "project-root-missing",
+      statusCode: 409,
+    });
+  }
+
+  const exportDir = path.resolve(project.rootPath, project.exportFolder);
+  const existingNames = await directoryNames(exportDir);
+  const date = formatLocalDate(input.now ?? new Date());
+  const folderName =
+    findSequencedFolder(project.slugPattern, { slug, date }, existingNames) ??
+    applySlugPattern(project.slugPattern, { slug, date, seq: nextSequence(existingNames) });
+  checkFolderName(folderName);
+
+  const bundleDir = path.join(exportDir, folderName);
+
+  const ticketRows = await db
+    .select()
+    .from(schema.tickets)
+    .where(eq(schema.tickets.sessionId, session.id))
+    .orderBy(schema.tickets.number);
+
+  let ticketsSkippedReason: string | null = null;
+  let exportTickets: ReturnType<typeof describeTickets> = [];
+  if (ticketRows.length === 0) {
+    ticketsSkippedReason = NO_TICKETS_REASON;
+  } else if (!ticketsAreCurrent(spec)) {
+    ticketsSkippedReason = STALE_TICKETS_REASON;
+  } else {
+    exportTickets = describeTickets(ticketRows);
+  }
+
+  const plan = planExport({
+    sessionTitle: session.title,
+    specMarkdown: spec.markdown,
+    tickets: exportTickets,
+  });
+
+  const files: BundleFile[] = plan.files.map((file) => {
+    const absolutePath = path.resolve(bundleDir, file.relativePath);
+    if (!isStrictlyInside(absolutePath, bundleDir)) {
+      fail(
+        `Refusing to export: a planned file would land outside the bundle directory: ${file.relativePath}`,
+        { errorCode: "path-escape", statusCode: 500 },
+      );
+    }
+    return { relativePath: file.relativePath, absolutePath, content: file.content };
+  });
+
+  const removals = await staleOwnedFiles(
+    bundleDir,
+    new Set(files.map((file) => file.absolutePath)),
+  );
+
+  await assertContained(
+    [bundleDir, ...files.map((file) => file.absolutePath), ...removals],
+    realRoot,
+  );
+
+  return {
+    sessionId: session.id,
+    project: {
+      id: project.id,
+      name: project.name,
+      rootPath: project.rootPath,
+      exportFolder: project.exportFolder,
+      slugPattern: project.slugPattern,
+    },
+    proposedSlug,
+    slug,
+    folderName,
+    bundleDir,
+    bundleExists: await exists(bundleDir),
+    files,
+    removals,
+    trackerDiagnostic: project.trackerDiagnostic,
+    ticketsExported: exportTickets.length > 0,
+    ticketsSkippedReason,
+  };
+}
+
+/**
+ * Carry out a plan from {@link planExportBundle}: create missing folders,
+ * write every planned file, then remove the stale owned files. Returns the
+ * absolute paths written and removed, in plan order.
+ */
+export async function writeExportBundle(
+  plan: ExportBundlePlan,
+): Promise<{ written: string[]; removed: string[] }> {
+  const written: string[] = [];
+  for (const file of plan.files) {
+    await fs.mkdir(path.dirname(file.absolutePath), { recursive: true });
+    await fs.writeFile(file.absolutePath, file.content, "utf8");
+    written.push(file.absolutePath);
+  }
+
+  const removed: string[] = [];
+  for (const stale of plan.removals) {
+    await fs.rm(stale, { force: true });
+    removed.push(stale);
+  }
+
+  return { written, removed };
+}

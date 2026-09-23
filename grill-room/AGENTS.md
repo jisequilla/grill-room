@@ -86,10 +86,10 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `get-project` | One registered project by id. |
 | `suggest-project-defaults` | What registering a folder would detect, without registering it: the git root, a default name, a verify command suggested from the repo's justfile, package.json scripts or Makefile (in that order; `verify`, then `check`, then `test` within each), an export folder and slug pattern suggested from a declared tracker block when the repo has a valid one, and the visibility `git check-ignore` seeds for a given export folder. |
 | `refresh-project-tracker` | Re-read a project's declared tracker and update only what it governs: the stored commands and diagnostic always, and the export folder and slug pattern only when the tracker is valid. Nothing else about the project changes, and nothing else re-reads the tracker file — every ordinary edit carries these fields over untouched. |
-| `set-session-project` | Set the registered project a session exports into, or clear it with `null`. |
-| `set-export-target` | Set the absolute folder a session exports into; `~` is expanded and the path normalised. Does not need to exist yet. |
+| `set-session-project` | Set the registered project a session exports into, or clear it with `null`. Export requires one. |
 | `set-docs-folder` | Set the read-only folder the interviewer may read while grilling this session, or clear it with `null`. See "Grill with docs" below. |
-| `export-session` | Write the session's current spec, and its tickets when current, into the export target folder in the local-markdown tracker layout. Refuses a missing or unwritable target and refuses to overwrite existing files unless `overwrite` is set. |
+| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written as an absolute path, stale issue files that will be removed, and the project's tracker diagnostic. Built by the same plan `export-session` writes. |
+| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md` plus `issues/NN-slug.md` per ticket (tickets only when current), creating missing folders. Re-export overwrites the bundle's spec and planned issue files and removes `issues/*.md` files the plan no longer has; nothing else is touched. Writes exactly what `preview-export` lists. Refuses with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, or `export-outside-root` when any path resolves (through symlinks) outside the real project root. See "Exporting a session" below. |
 | `set-build-record` | Create or edit a ticket's build record — model, whether the first attempt passed, whether it was escalated, what the prompt was missing, and free notes — identifying the ticket by `ticketId` or by `sessionId` + `ticketNumber`. Optionally updates the ticket's `status` in the same call. See "Logging a build from an agent" below. |
 | `get-build-record` | One ticket's build record, or null when none has been logged yet. |
 | `get-build-summary` | A session's build records summarized: ticket and recorded counts, first-attempt pass rate, escalations, a per-model breakdown, and every ticket with its build record or null — one call for the whole build records table. |
@@ -210,6 +210,37 @@ stored commands and diagnostic pass through every ordinary edit unchanged, so
 editing the tracker file has no effect until `refresh-project-tracker` is
 called. Only that action then updates the export folder and slug pattern, and
 only when the newly-read tracker is valid.
+
+### Exporting a session
+
+Export always goes into the session's registered project; a session without
+one cannot be previewed or exported (`no-project`). Call `preview-export`
+first, show its paths, then call `export-session` with the slug the preview
+used. Both build the plan in `server/export-bundle.ts`, so they cannot
+disagree.
+
+The bundle is one directory per session:
+
+```
+<root>/<exportFolder>/<folderName>/spec.md
+<root>/<exportFolder>/<folderName>/issues/NN-slug.md   # "Blocked by: NN, NN" line
+```
+
+`folderName` is the project's slug pattern with its placeholders filled:
+
+- `{slug}`: the slug, sanitized to lowercase ASCII letters, digits and single
+  hyphens (at most 60 characters). The proposal is the session title's first
+  four words. A slug that sanitizes to nothing is refused (`invalid-slug`).
+- `{date}`: today's local date, `YYYY-MM-DD`.
+- `{seq}`: if a folder already matches the pattern with the same slug and date,
+  it is reused, so re-exporting lands in the same folder. Otherwise it is one
+  more than the highest numeric prefix among existing folders in the export
+  folder, padded to two digits (`01` when there are none).
+
+Before anything is written, every path is resolved with `fs.realpath` (the
+deepest existing ancestor of each) and refused with `export-outside-root`
+unless it lands inside the real project root. That covers an export folder,
+or an `issues/` folder, that is a symlink out of the repository.
 
 ### Logging a build from an agent
 

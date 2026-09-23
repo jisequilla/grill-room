@@ -108,10 +108,7 @@ export default function SessionOutputRoute() {
 
       <SessionProjectSection sessionId={id} projectId={session.projectId} />
 
-      <ExportSection
-        sessionId={id}
-        exportTargetFolder={session.exportTargetFolder}
-      />
+      <ExportSection sessionId={id} projectId={session.projectId} />
     </div>
   );
 }
