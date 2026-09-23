@@ -11,6 +11,43 @@ default:
 setup:
     pnpm install
 
+# Register a project for session exports: flags for every registry field (see grill-room/actions/register-project.ts), root defaults to the current git top-level
+[positional-arguments]
+register-project *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    invocation_dir="{{invocation_directory()}}"
+    declare -a call_args=("$@")
+    root_index=-1
+    for i in "${!call_args[@]}"; do
+      if [ "${call_args[$i]}" = "--root" ]; then
+        root_index=$i
+      fi
+    done
+    if [ "$root_index" -ge 0 ]; then
+      value_index=$((root_index + 1))
+      if [ "$value_index" -ge "${#call_args[@]}" ]; then
+        echo "register-project: --root requires a value" >&2
+        exit 1
+      fi
+      raw_root="${call_args[$value_index]}"
+      case "$raw_root" in
+        /*|~*) resolved_root="$raw_root" ;;
+        *) resolved_root="$invocation_dir/$raw_root" ;;
+      esac
+      call_args[$value_index]="$resolved_root"
+    else
+      # Not a git repo: fall through with the invocation directory itself, so
+      # the action's own git-root resolution produces the same refusal the UI shows.
+      default_root="$(git -C "$invocation_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+      if [ -n "$default_root" ]; then
+        call_args=(--root "$default_root" "${call_args[@]}")
+      else
+        call_args=(--root "$invocation_dir" "${call_args[@]}")
+      fi
+    fi
+    pnpm action register-project "${call_args[@]}"
+
 # Start the dev server against the real Claude CLI (refuses if one already owns the database)
 dev: _guard
     pnpm exec agent-native dev --port {{port}} --strictPort
