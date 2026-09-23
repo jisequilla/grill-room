@@ -6,6 +6,7 @@ import { useParams } from "react-router";
 
 import { BuildRecordsSection } from "@/components/output/build-records-section";
 import { ExportSection } from "@/components/output/export-section";
+import { GenerateAllAction } from "@/components/output/generate-all-action";
 import { HandoffSection } from "@/components/output/handoff-section";
 import { SessionProjectSection } from "@/components/output/session-project-section";
 import { NotConfirmedNotice } from "@/components/output/not-confirmed-notice";
@@ -112,6 +113,8 @@ export default function SessionOutputRoute() {
       <Separator />
 
       <SessionProjectSection sessionId={id} projectId={session.projectId} />
+
+      <GenerateAllAction sessionId={id} working={working} onSettled={refresh} />
 
       <ExportSection sessionId={id} projectId={session.projectId} />
     </div>

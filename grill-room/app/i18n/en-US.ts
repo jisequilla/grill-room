@@ -568,6 +568,14 @@ const messages = {
     handoffBundleHint:
       "{{token}} is replaced at export with the bundle's path: relative to the repository root when the project's export folder is tracked, absolute when it is ignored.",
 
+    generateAll: "Generate everything",
+    generatingAll: "Generating…",
+    generateAllHint:
+      "Breaks the spec into tickets if there are none or they are out of date, generates the handoff, then jumps to the export preview. Writes nothing to disk.",
+    generateAllFailed: "Could not generate everything.",
+    generateAllBuildRecordsBlocked:
+      "Some tickets already have build records. Regenerate tickets in the Tickets section above to confirm replacing them, then try again.",
+
     exportHeading: "Export",
     exportNeedsProject:
       "Choose the project this session exports into above. Export writes into that repository.",
@@ -594,6 +602,8 @@ const messages = {
       "The project's slug pattern produces an unusable folder name. Fix it in the project settings.",
     exportOutsideRoot:
       "The export folder resolves outside the repository, through a symlink. Nothing was written.",
+    exportNeedsHandoff: "Generate a handoff before exporting.",
+    exportHandoffStale: "The handoff is stale. Regenerate it before exporting.",
     exportSuccessHeading: "Exported",
     exportedFilesHeading: "Files written",
     exportRemovedFilesHeading: "Files removed",

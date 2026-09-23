@@ -8,6 +8,7 @@ import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 import createSession from "./create-session.js";
 import exportSession from "./export-session.js";
+import generateHandoff from "./generate-handoff.js";
 import getExportVisibility from "./get-export-visibility.js";
 import registerProject from "./register-project.js";
 
@@ -50,6 +51,24 @@ async function insertSpec(sessionId: string) {
       sessionId,
       markdown: SPEC_MARKDOWN,
       current: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+}
+
+async function insertTicket(sessionId: string) {
+  const now = new Date().toISOString();
+  await getDb()
+    .insert(schema.tickets)
+    .values({
+      id: randomUUID(),
+      sessionId,
+      number: 1,
+      slug: "the-ticket",
+      title: "The ticket",
+      body: "Do the work.",
+      status: "ready",
+      blockedByJson: "[]",
       createdAt: now,
       updatedAt: now,
     });
@@ -108,7 +127,9 @@ describe("get-export-visibility", () => {
   it("re-checks the same files export-session wrote, agreeing with its own report", async () => {
     const { project } = await aProject();
     const session = await aSession("Grill Room", project.id);
+    await insertTicket(session.id);
     await insertSpec(session.id);
+    await generateHandoff.run({ sessionId: session.id });
 
     const exported = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
     const recheck = await getExportVisibility.run({ sessionId: session.id, slug: "grill-room" });

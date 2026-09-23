@@ -686,3 +686,30 @@ export function describeHandoff(row: HandoffRow, currentFingerprint: string | nu
     exportStale: row.exportedRevision !== null && row.exportedRevision !== row.revision,
   };
 }
+
+/** Why `export-session` refuses to write, from the current handoff's gate. */
+export type ExportGateReason = "handoff-missing" | "handoff-stale";
+
+export interface ExportGate {
+  blocked: boolean;
+  reason: ExportGateReason | null;
+}
+
+/**
+ * Whether a session's handoff is current enough to export: missing entirely,
+ * stale against today's inputs (the same fingerprint comparison
+ * {@link describeHandoff}'s `stale` makes, so a `set-ticket-blocked-by` edit
+ * that never touches `ticketsGeneratedAt` counts here too), or clear. An
+ * edited-but-current handoff is not blocked: an edit is not a change of
+ * inputs, only a regeneration or an input change is.
+ */
+export async function getExportGate(sessionId: string): Promise<ExportGate> {
+  const row = await getHandoffRow(sessionId);
+  if (!row) return { blocked: true, reason: "handoff-missing" };
+
+  const loaded = await loadHandoffSource(sessionId);
+  const currentFingerprint = "source" in loaded ? handoffFingerprint(loaded.source) : null;
+  if (currentFingerprint !== row.fingerprint) return { blocked: true, reason: "handoff-stale" };
+
+  return { blocked: false, reason: null };
+}

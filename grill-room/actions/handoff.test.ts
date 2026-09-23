@@ -267,14 +267,18 @@ describe("handoff export", () => {
   useTestDatabase();
   afterEach(resetInterviewer);
 
-  it("exports without a handoff exactly as before", async () => {
+  it("refuses to export without a handoff, writing nothing", async () => {
     const { session, bundleDir } = await aReadySession();
     const preview = await previewExport.run({ sessionId: session.id });
     expect(preview.handoffIncluded).toBe(false);
     expect(preview.files).not.toContain(path.join(bundleDir, "HANDOFF.md"));
+    expect(preview.exportBlocked).toBe(true);
+    expect(preview.exportBlockedReason).toBe("handoff-missing");
 
-    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
-    expect(result.handoffExported).toBe(false);
+    await expect(
+      exportSession.run({ sessionId: session.id, slug: "grill-room" }),
+    ).rejects.toMatchObject({ errorCode: "handoff-missing" });
+    await expect(fs.access(bundleDir)).rejects.toThrow();
   });
 
   it("lists HANDOFF.md and the briefs in the preview and manifest, and writes them with repo-relative paths", async () => {

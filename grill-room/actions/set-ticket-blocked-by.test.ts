@@ -9,6 +9,7 @@ import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 import createSession from "./create-session.js";
 import exportSession from "./export-session.js";
+import generateHandoff from "./generate-handoff.js";
 import listTickets from "./list-tickets.js";
 import registerProject from "./register-project.js";
 import setTicketBlockedBy from "./set-ticket-blocked-by.js";
@@ -161,6 +162,7 @@ describe("set-ticket-blocked-by export", () => {
     await insertSpec(session.id);
 
     await setTicketBlockedBy.run({ ticketId: id2, blockedBy: [1] });
+    await generateHandoff.run({ sessionId: session.id });
 
     await exportSession.run({ sessionId: session.id, slug: "grill-room" });
     const bundleDir = path.join(root, ".scratch", "grill-room");
