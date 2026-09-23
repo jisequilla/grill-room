@@ -1,9 +1,11 @@
 /**
  * The export bundle: one directory per session inside its project's export
- * folder, holding `spec.md` at the top and one `issues/NN-slug.md` per ticket.
+ * folder, holding `spec.md` at the top, one `issues/NN-slug.md` per ticket,
+ * and a manifest of what the export wrote.
  *
  *     <project root>/<export folder>/<folder name>/spec.md
  *     <project root>/<export folder>/<folder name>/issues/NN-slug.md
+ *     <project root>/<export folder>/<folder name>/.grill-room-export.json
  *
  * {@link planExportBundle} is the single source of truth for what an export
  * does. `preview-export` returns its plan without writing; `export-session`
@@ -35,11 +37,20 @@
  * root. A dangling symlink on the way is refused too, since writing through it
  * would create its target wherever it points.
  *
- * ## Re-export
+ * ## Manifest and re-export
  *
- * Writing overwrites `spec.md` and the planned issue files, and removes any
- * `*.md` file in an owned subfolder (`OWNED_BUNDLE_SUBFOLDERS`) that the plan
- * no longer contains. Nothing else in the bundle is touched.
+ * Every export writes `.grill-room-export.json` (`EXPORT_MANIFEST_FILE`) at
+ * the top of the bundle, listing the relative paths of every other file it
+ * wrote. The manifest is a planned file like any other: it appears in the
+ * preview's file list and passes the same containment check.
+ *
+ * Writing overwrites every planned file. It removes exactly the paths the
+ * bundle's previous manifest lists that the new plan no longer contains and
+ * that still exist, such as a ticket dropped since the last export. Nothing
+ * the previous manifest does not list is ever removed, whatever its name or
+ * folder. A bundle with no manifest, or with one that is unreadable or
+ * malformed, gets no removals. An entry that is absolute or climbs out of the
+ * bundle is ignored.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -51,11 +62,13 @@ import { getDb, schema } from "./db/index.js";
 import {
   applySlugPattern,
   findSequencedFolder,
+  EXPORT_MANIFEST_FILE,
   formatLocalDate,
   nextSequence,
-  OWNED_BUNDLE_SUBFOLDERS,
+  parseExportManifest,
   planExport,
   proposeSlug,
+  renderExportManifest,
   sanitizeSlug,
 } from "./export.js";
 import { getProject } from "./projects.js";
@@ -90,9 +103,9 @@ export interface ExportBundlePlan {
   bundleDir: string;
   /** Whether the bundle directory already exists, i.e. this export replaces an earlier one. */
   bundleExists: boolean;
-  /** Every file the export writes, spec first, then issues in number order. */
+  /** Every file the export writes: spec, issues in number order, then the manifest. */
   files: BundleFile[];
-  /** Absolute paths of stale owned files the export removes. */
+  /** Absolute paths from the previous manifest that the export removes. */
   removals: string[];
   /** The project's declared-tracker diagnostic, shown as a preview line when present. */
   trackerDiagnostic: string | null;
@@ -182,25 +195,42 @@ async function exists(target: string): Promise<boolean> {
   }
 }
 
-/** `*.md` files (or links) in the bundle's owned subfolders that the plan does not write. */
-async function staleOwnedFiles(bundleDir: string, planned: ReadonlySet<string>): Promise<string[]> {
-  const stale: string[] = [];
-  for (const subfolder of OWNED_BUNDLE_SUBFOLDERS) {
-    const folder = path.join(bundleDir, subfolder);
-    let entries;
+/**
+ * Paths the bundle's previous manifest lists that `planned` no longer
+ * contains and that still exist, as absolute paths. No manifest, or a
+ * malformed one, means none. Entries that are absolute or resolve outside the
+ * bundle directory are ignored.
+ */
+async function manifestRemovals(
+  bundleDir: string,
+  planned: ReadonlySet<string>,
+): Promise<string[]> {
+  let content: string;
+  try {
+    content = await fs.readFile(path.join(bundleDir, EXPORT_MANIFEST_FILE), "utf8");
+  } catch {
+    return [];
+  }
+  const listed = parseExportManifest(content);
+  if (!listed) return [];
+
+  const manifestPath = path.join(bundleDir, EXPORT_MANIFEST_FILE);
+  const removals = new Set<string>();
+  for (const entry of listed) {
+    if (entry.length === 0 || path.isAbsolute(entry) || entry.includes("\0")) continue;
+    const absolute = path.resolve(bundleDir, entry);
+    if (!isStrictlyInside(absolute, bundleDir)) continue;
+    if (absolute === manifestPath || planned.has(absolute)) continue;
+
+    let stats;
     try {
-      entries = await fs.readdir(folder, { withFileTypes: true });
+      stats = await fs.lstat(absolute);
     } catch {
       continue;
     }
-    for (const entry of entries) {
-      if (!entry.name.endsWith(".md")) continue;
-      if (!entry.isFile() && !entry.isSymbolicLink()) continue;
-      const absolute = path.join(folder, entry.name);
-      if (!planned.has(absolute)) stale.push(absolute);
-    }
+    if (stats.isFile() || stats.isSymbolicLink()) removals.add(absolute);
   }
-  return stale.sort();
+  return [...removals].sort();
 }
 
 function checkFolderName(folderName: string): void {
@@ -319,7 +349,15 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     tickets: exportTickets,
   });
 
-  const files: BundleFile[] = plan.files.map((file) => {
+  const plannedFiles = [
+    ...plan.files,
+    {
+      relativePath: EXPORT_MANIFEST_FILE,
+      content: renderExportManifest(plan.files.map((file) => file.relativePath)),
+    },
+  ];
+
+  const files: BundleFile[] = plannedFiles.map((file) => {
     const absolutePath = path.resolve(bundleDir, file.relativePath);
     if (!isStrictlyInside(absolutePath, bundleDir)) {
       fail(
@@ -330,7 +368,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     return { relativePath: file.relativePath, absolutePath, content: file.content };
   });
 
-  const removals = await staleOwnedFiles(
+  const removals = await manifestRemovals(
     bundleDir,
     new Set(files.map((file) => file.absolutePath)),
   );

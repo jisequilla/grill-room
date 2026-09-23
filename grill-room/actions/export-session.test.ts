@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { eq } from "@agent-native/core/db/schema";
 import { describe, expect, it } from "vitest";
 
-import { formatLocalDate } from "../server/export.js";
+import { EXPORT_MANIFEST_FILE, formatLocalDate } from "../server/export.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 import createSession from "./create-session.js";
@@ -195,6 +196,7 @@ describe("preview-export and export-session", () => {
       path.join(bundleDir, "spec.md"),
       path.join(bundleDir, "issues", "01-build-the-workspace.md"),
       path.join(bundleDir, "issues", "02-store-on-disk.md"),
+      path.join(bundleDir, EXPORT_MANIFEST_FILE),
     ]);
     expect(await pathExists(path.join(root, "docs"))).toBe(false);
 
@@ -222,6 +224,10 @@ describe("preview-export and export-session", () => {
     expect(
       await fs.readFile(path.join(bundleDir, "issues", "02-store-on-disk.md"), "utf8"),
     ).toBe("# 02 Ticket 2\n\nStatus: ready-for-agent\nBlocked by: 01\n\nDo the work of ticket 2.");
+    expect(JSON.parse(await fs.readFile(path.join(bundleDir, EXPORT_MANIFEST_FILE), "utf8"))).toEqual({
+      version: 1,
+      files: ["spec.md", "issues/01-build-the-workspace.md", "issues/02-store-on-disk.md"],
+    });
   });
 
   it("proposes a slug of at most four title words, and uses an edited slug instead", async () => {
@@ -312,15 +318,18 @@ describe("preview-export and export-session", () => {
     expect(again.bundleExists).toBe(true);
   });
 
-  it("re-export overwrites owned files, removes a dropped ticket's file, and leaves other files alone", async () => {
+  it("re-export removes a dropped ticket's file, the preview's removals match, and hand-written files survive", async () => {
     const { root, session } = await aReadySession();
     await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
     const bundleDir = path.join(root, ".scratch", "grill-room");
-    const unrelated = path.join(bundleDir, "notes.txt");
-    const unrelatedInIssues = path.join(bundleDir, "issues", "README.txt");
-    await fs.writeFile(unrelated, "left alone");
-    await fs.writeFile(unrelatedInIssues, "left alone too");
+    const handWritten = [
+      path.join(bundleDir, "notes.txt"),
+      path.join(bundleDir, "issues", "99-notes.md"),
+      path.join(bundleDir, "issues", "README.txt"),
+      path.join(bundleDir, "HANDOFF.md"),
+    ];
+    for (const file of handWritten) await fs.writeFile(file, "written by hand");
     await fs.writeFile(path.join(bundleDir, "spec.md"), "stale content");
 
     await getDb()
@@ -330,16 +339,83 @@ describe("preview-export and export-session", () => {
     const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
     const dropped = path.join(bundleDir, "issues", "02-store-on-disk.md");
     expect(preview.bundleExists).toBe(true);
+    expect(preview.files).toContain(path.join(bundleDir, EXPORT_MANIFEST_FILE));
     expect(preview.removals).toEqual([dropped]);
 
     const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
     expect(result.files).toEqual(preview.files);
-    expect(result.removed).toEqual([dropped]);
+    expect(result.removed).toEqual(preview.removals);
     expect(await pathExists(dropped)).toBe(false);
     expect(await fs.readFile(path.join(bundleDir, "spec.md"), "utf8")).not.toBe("stale content");
-    expect(await fs.readFile(unrelated, "utf8")).toBe("left alone");
-    expect(await fs.readFile(unrelatedInIssues, "utf8")).toBe("left alone too");
+    for (const file of handWritten) {
+      expect(await fs.readFile(file, "utf8")).toBe("written by hand");
+    }
+    expect(JSON.parse(await fs.readFile(path.join(bundleDir, EXPORT_MANIFEST_FILE), "utf8"))).toEqual({
+      version: 1,
+      files: ["spec.md", "issues/01-build-the-workspace.md"],
+    });
+  });
+
+  it("removes nothing from a bundle that has no manifest", async () => {
+    const { root, session } = await aReadySession({
+      files: {
+        ".scratch/grill-room/issues/03-older-ticket.md": "from before manifests",
+        ".scratch/grill-room/issues/99-notes.md": "written by hand",
+      },
+    });
+
+    const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
+    expect(preview.bundleExists).toBe(true);
+    expect(preview.removals).toEqual([]);
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(result.removed).toEqual([]);
+
+    const issues = path.join(root, ".scratch", "grill-room", "issues");
+    expect(await pathExists(path.join(issues, "03-older-ticket.md"))).toBe(true);
+    expect(await pathExists(path.join(issues, "99-notes.md"))).toBe(true);
+  });
+
+  it.each([
+    ["unparseable JSON", "{ not json"],
+    ["no files array", JSON.stringify({ version: 1 })],
+    ["a non-string entry", JSON.stringify({ version: 1, files: ["issues/03-old.md", 7] })],
+  ])("removes nothing when the manifest is malformed (%s)", async (_label, manifest) => {
+    const { root, session } = await aReadySession({
+      files: {
+        [`.scratch/grill-room/${EXPORT_MANIFEST_FILE}`]: manifest,
+        ".scratch/grill-room/issues/03-old.md": "listed by a broken manifest",
+      },
+    });
+
+    const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
+    expect(preview.removals).toEqual([]);
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(result.removed).toEqual([]);
+    expect(
+      await pathExists(path.join(root, ".scratch", "grill-room", "issues", "03-old.md")),
+    ).toBe(true);
+  });
+
+  it("ignores manifest entries that climb out of the bundle", async () => {
+    const { root, session } = await aReadySession({
+      files: {
+        [`.scratch/grill-room/${EXPORT_MANIFEST_FILE}`]: JSON.stringify({
+          version: 1,
+          files: ["../sibling.md", "../../README.md", path.join(os.tmpdir(), "x.md")],
+        }),
+        ".scratch/sibling.md": "outside the bundle",
+      },
+    });
+
+    const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
+    expect(preview.removals).toEqual([]);
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(await pathExists(path.join(root, ".scratch", "sibling.md"))).toBe(true);
+    expect(await pathExists(path.join(root, "README.md"))).toBe(true);
   });
 
   it("exports the spec only when the session has no tickets or they are out of date", async () => {
@@ -350,7 +426,10 @@ describe("preview-export and export-session", () => {
     const first = await exportSession.run({ sessionId: noTickets.id, slug: "no-tickets" });
     expect(first.ticketsExported).toBe(false);
     expect(first.ticketsSkippedReason).toMatch(/no tickets/i);
-    expect(first.files).toEqual([path.join(root, ".scratch", "no-tickets", "spec.md")]);
+    expect(first.files).toEqual([
+      path.join(root, ".scratch", "no-tickets", "spec.md"),
+      path.join(root, ".scratch", "no-tickets", EXPORT_MANIFEST_FILE),
+    ]);
     expect(await pathExists(path.join(root, ".scratch", "no-tickets", "issues"))).toBe(false);
 
     const staleTickets = await aSession("Stale tickets", project.id);
@@ -362,7 +441,10 @@ describe("preview-export and export-session", () => {
     const second = await exportSession.run({ sessionId: staleTickets.id, slug: "stale" });
     expect(second.ticketsExported).toBe(false);
     expect(second.ticketsSkippedReason).toMatch(/out of date/i);
-    expect(second.files).toEqual([path.join(root, ".scratch", "stale", "spec.md")]);
+    expect(second.files).toEqual([
+      path.join(root, ".scratch", "stale", "spec.md"),
+      path.join(root, ".scratch", "stale", EXPORT_MANIFEST_FILE),
+    ]);
   });
 
   it("shows the project's tracker diagnostic as a preview line", async () => {

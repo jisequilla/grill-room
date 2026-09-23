@@ -88,8 +88,8 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `refresh-project-tracker` | Re-read a project's declared tracker and update only what it governs: the stored commands and diagnostic always, and the export folder and slug pattern only when the tracker is valid. Nothing else about the project changes, and nothing else re-reads the tracker file — every ordinary edit carries these fields over untouched. |
 | `set-session-project` | Set the registered project a session exports into, or clear it with `null`. Export requires one. |
 | `set-docs-folder` | Set the read-only folder the interviewer may read while grilling this session, or clear it with `null`. See "Grill with docs" below. |
-| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written as an absolute path, stale issue files that will be removed, and the project's tracker diagnostic. Built by the same plan `export-session` writes. |
-| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md` plus `issues/NN-slug.md` per ticket (tickets only when current), creating missing folders. Re-export overwrites the bundle's spec and planned issue files and removes `issues/*.md` files the plan no longer has; nothing else is touched. Writes exactly what `preview-export` lists. Refuses with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, or `export-outside-root` when any path resolves (through symlinks) outside the real project root. See "Exporting a session" below. |
+| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written as an absolute path (the manifest included), the files from the previous manifest that will be removed, and the project's tracker diagnostic. Built by the same plan `export-session` writes. |
+| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md` plus `issues/NN-slug.md` per ticket (tickets only when current), creating missing folders. Also writes a manifest (`.grill-room-export.json`) of what it wrote; re-export overwrites the planned files and removes only files the previous manifest lists that the new plan no longer contains, never anything else. Writes exactly what `preview-export` lists. Refuses with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, or `export-outside-root` when any path resolves (through symlinks) outside the real project root. See "Exporting a session" below. |
 | `set-build-record` | Create or edit a ticket's build record — model, whether the first attempt passed, whether it was escalated, what the prompt was missing, and free notes — identifying the ticket by `ticketId` or by `sessionId` + `ticketNumber`. Optionally updates the ticket's `status` in the same call. See "Logging a build from an agent" below. |
 | `get-build-record` | One ticket's build record, or null when none has been logged yet. |
 | `get-build-summary` | A session's build records summarized: ticket and recorded counts, first-attempt pass rate, escalations, a per-model breakdown, and every ticket with its build record or null — one call for the whole build records table. |
@@ -224,7 +224,16 @@ The bundle is one directory per session:
 ```
 <root>/<exportFolder>/<folderName>/spec.md
 <root>/<exportFolder>/<folderName>/issues/NN-slug.md   # "Blocked by: NN, NN" line
+<root>/<exportFolder>/<folderName>/.grill-room-export.json
 ```
+
+`.grill-room-export.json` is the export's manifest: the relative paths of the
+other files that export wrote. It is part of the plan, listed in the preview
+and checked for containment like every other file. Re-export overwrites every
+planned file and removes only the paths the previous manifest lists that the
+new plan no longer contains (a dropped ticket, say). A file the previous
+manifest does not list is never removed, whatever its name or folder; a bundle
+with no manifest, or a malformed one, gets no removals.
 
 `folderName` is the project's slug pattern with its placeholders filled:
 

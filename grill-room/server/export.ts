@@ -31,12 +31,35 @@ export interface ExportPlan {
 }
 
 /**
- * Subfolders of a bundle whose `*.md` files the export owns outright: on
- * re-export, any `.md` file in one of them that the new plan does not contain
- * is removed. Later bundle parts (delegation briefs) join this list; files at
- * the top of the bundle are only ever overwritten, never removed.
+ * The manifest every export writes at the top of its bundle: the relative
+ * paths of the files that export wrote. A re-export removes only paths the
+ * previous manifest lists and the new plan no longer contains, so a file the
+ * export did not write is never removed.
  */
-export const OWNED_BUNDLE_SUBFOLDERS = ["issues"] as const;
+export const EXPORT_MANIFEST_FILE = ".grill-room-export.json";
+
+/** The manifest's content for a set of written relative paths (the manifest itself excluded). */
+export function renderExportManifest(relativePaths: readonly string[]): string {
+  return `${JSON.stringify({ version: 1, files: relativePaths }, null, 2)}\n`;
+}
+
+/**
+ * The relative paths a manifest's content lists, or null when it is not a
+ * manifest this version wrote (unparseable JSON, no `files` array, or a
+ * non-string entry). Null means "no removals": a manifest is never guessed at.
+ */
+export function parseExportManifest(content: string): string[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const files = (parsed as { files?: unknown }).files;
+  if (!Array.isArray(files) || !files.every((file) => typeof file === "string")) return null;
+  return files as string[];
+}
 
 export interface PlanExportInput {
   sessionTitle: string;
