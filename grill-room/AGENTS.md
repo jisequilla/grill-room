@@ -51,7 +51,7 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 
 | Action | Purpose |
 | --- | --- |
-| `create-session` | Start a grilling session from a loose idea, defaulting the interviewer model to the global default. |
+| `create-session` | Start a grilling session from a loose idea, defaulting the interviewer model to the global default. Optionally names the registered project it exports into (`projectId`); refused with `project-not-found` for an unknown one. |
 | `list-sessions` | Every session with its title, state, and last activity, most recently active first. |
 | `get-session` | One session by id, so resuming lands where it left off; carries a derived `modelLocked` flag. |
 | `delete-session` | A session and everything under it: decisions, history, rounds, spec, tickets, build records. |
@@ -80,6 +80,12 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `get-spec` | A session's spec, or null when none has been synthesized yet, plus a `ticketsCurrent` flag: whether any generated tickets still match it. |
 | `break-into-tickets` | Break the session's current spec into implementation tickets, replacing any it already has. Allowed only for a confirmed session with a current spec and no turn working. Refuses to replace tickets carrying a build record unless `force` is set. Returns the same shape as `list-tickets`. |
 | `list-tickets` | A session's tickets in number order, each with `blockedBy` resolved to ticket numbers, plus the same `ticketsCurrent` flag as `get-spec`. |
+| `register-project` | Register a repository sessions export into. The root (any folder inside the repo) is resolved to its git top-level with read-only `git rev-parse`; root, verify command and export folder are required, the rest default (slug pattern `{slug}`, tracker `markdown`, build-record logging off). The visibility flag is seeded from `git check-ignore` on the export folder unless given. Refusals carry a code: `root-required`, `verify-command-required`, `export-folder-required`, `folder-not-absolute`, `folder-not-found`, `folder-not-directory`, `not-a-git-repo`, `git-unavailable`, `export-folder-outside-root`, `export-folder-is-root`, `invalid-slug-pattern`, `project-exists`. |
+| `update-project` | Edit a registered project. Omitted fields keep their value and the result is validated exactly as registration validates it; the visibility flag changes only when given. |
+| `list-projects` | Every registered project, by name. |
+| `get-project` | One registered project by id. |
+| `suggest-project-defaults` | What registering a folder would detect, without registering it: the git root, a default name, a verify command suggested from the repo's justfile, package.json scripts or Makefile (in that order; `verify`, then `check`, then `test` within each), and the visibility `git check-ignore` seeds for a given export folder. |
+| `set-session-project` | Set the registered project a session exports into, or clear it with `null`. |
 | `set-export-target` | Set the absolute folder a session exports into; `~` is expanded and the path normalised. Does not need to exist yet. |
 | `set-docs-folder` | Set the read-only folder the interviewer may read while grilling this session, or clear it with `null`. See "Grill with docs" below. |
 | `export-session` | Write the session's current spec, and its tickets when current, into the export target folder in the local-markdown tracker layout. Refuses a missing or unwritable target and refuses to overwrite existing files unless `overwrite` is set. |

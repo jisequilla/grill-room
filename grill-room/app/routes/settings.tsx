@@ -11,6 +11,7 @@ import { TeamPage } from "@agent-native/core/client/team-page";
 import { useSetPageTitle } from "@agent-native/toolkit/app-shell";
 import { useMemo } from "react";
 
+import { ProjectsSection } from "@/components/projects/projects-section";
 import { DefaultModelPicker } from "@/components/sessions/default-model-picker";
 import { APP_TITLE } from "@/lib/app-config";
 
@@ -36,6 +37,12 @@ export default function SettingsRoute() {
         label: t("settings.defaultModelTitle"),
         keywords: "model interviewer fable opus sonnet grilling",
         hash: "default-model",
+      },
+      {
+        id: "projects",
+        label: t("projects.heading"),
+        keywords: "project repository repo git export folder verify command",
+        hash: "projects",
       },
     ],
     [t],
@@ -78,6 +85,8 @@ export default function SettingsRoute() {
               }
             />
           </SettingsGroup>
+
+          <ProjectsSection />
         </div>
       }
       team={
