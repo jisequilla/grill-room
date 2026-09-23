@@ -1,151 +1,209 @@
 import {
   actionErrorMessage,
   useActionMutation,
+  useActionQuery,
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { IconFolderOpen } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import { actionErrorCode, actionErrorDetails } from "@/lib/decisions";
+import { actionErrorCode } from "@/lib/decisions";
 
-/** Every code `export-session` throws that is not `files-exist` (handled with its own confirm dialog). */
+/** Every code `preview-export` and `export-session` refuse with, mapped to its message. */
 const EXPORT_ERROR_KEY: Record<string, string> = {
-  "no-export-target": "output.exportNoTarget",
+  "no-project": "output.exportNoProject",
+  "project-not-found": "output.exportProjectNotFound",
+  "project-root-missing": "output.exportProjectRootMissing",
   "spec-missing": "output.exportSpecMissing",
   "spec-not-current": "output.exportSpecNotCurrent",
-  "target-not-found": "output.exportTargetNotFound",
-  "target-not-directory": "output.exportTargetNotDirectory",
-  "target-not-writable": "output.exportTargetNotWritable",
+  "invalid-slug": "output.exportInvalidSlug",
+  "invalid-folder-name": "output.exportInvalidFolderName",
+  "export-outside-root": "output.exportOutsideRoot",
 };
 
-type ExportResult = AgentNativeActionRegistry["export-session"]["result"];
+/** How long the slug must sit still before the preview is refreshed. */
+const SLUG_DEBOUNCE_MS = 250;
 
+type ExportResult = AgentNativeActionRegistry["export-session"]["result"];
+type PreviewResult = AgentNativeActionRegistry["preview-export"]["result"];
+
+function useDebounced<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
+
+function PathList({ paths, testId }: { paths: readonly string[]; testId: string }) {
+  return (
+    <ul className="space-y-0.5 font-mono text-xs break-all text-muted-foreground" data-testid={testId}>
+      {paths.map((file) => (
+        <li key={file}>{file}</li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Explicit, project-based export: an editable slug, the exact paths the export
+ * will write under the project root, then the Export button. The preview and
+ * the write come from one server-side plan, so what is listed is what lands.
+ */
 export function ExportSection({
   sessionId,
-  exportTargetFolder,
+  projectId,
 }: {
   sessionId: string;
-  exportTargetFolder: string | null;
+  projectId: string | null;
 }) {
   const t = useT();
-  const [folder, setFolder] = useState(exportTargetFolder ?? "");
-  const [folderError, setFolderError] = useState<string | null>(null);
-  const [existingFiles, setExistingFiles] = useState<string[] | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
+  /** The slug as typed; null until the operator edits it, meaning "use the proposal". */
+  const [slugDraft, setSlugDraft] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<ExportResult | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
-  // The saved target can change from another tab or from the command line;
-  // only overwrite the field while the user has not started editing it.
-  useEffect(() => {
-    setFolder((current) =>
-      current === "" || current === exportTargetFolder
-        ? (exportTargetFolder ?? "")
-        : current,
-    );
-  }, [exportTargetFolder]);
+  const debouncedSlug = useDebounced(slugDraft, SLUG_DEBOUNCE_MS);
+  const slugBlank = slugDraft !== null && slugDraft.trim().length === 0;
+  const settling = debouncedSlug !== slugDraft;
 
-  const setTarget = useActionMutation("set-export-target", {
-    onSuccess: () => setFolderError(null),
-    onError: (error: unknown) => {
-      const code = actionErrorCode(error);
-      if (code === "folder-not-absolute") {
-        setFolderError(t("output.exportFolderNotAbsolute"));
-        return;
-      }
-      toast.error(actionErrorMessage(error) ?? t("output.exportFolderSaveFailed"));
+  const preview = useActionQuery<PreviewResult>(
+    "preview-export",
+    debouncedSlug === null || debouncedSlug.trim().length === 0
+      ? { sessionId }
+      : { sessionId, slug: debouncedSlug },
+    {
+      enabled: projectId !== null && !slugBlank,
+      retry: false,
+      // Keep the last preview on screen while the next slug's preview loads.
+      placeholderData: (previous) => previous,
     },
-  });
+  );
 
   const exportSession = useActionMutation("export-session", {
     onSuccess: (result: ExportResult) => {
       setLastResult(result);
       setExportError(null);
-      setExistingFiles(null);
     },
     onError: (error: unknown) => {
-      const code = actionErrorCode(error);
-      if (code === "files-exist") {
-        const details = actionErrorDetails(error);
-        const existing = details?.existing;
-        setExistingFiles(Array.isArray(existing) ? (existing as string[]) : []);
-        return;
-      }
       setLastResult(null);
-      const key = EXPORT_ERROR_KEY[code ?? ""];
-      setExportError(key ? t(key) : actionErrorMessage(error) ?? t("output.exportFailed"));
+      const key = EXPORT_ERROR_KEY[actionErrorCode(error) ?? ""];
+      setExportError(key ? t(key) : (actionErrorMessage(error) ?? t("output.exportFailed")));
     },
   });
 
-  const folderDirty = folder.trim() !== (exportTargetFolder ?? "");
-
-  function saveFolder() {
-    if (folder.trim().length === 0 || setTarget.isPending) return;
-    setTarget.mutate({ sessionId, folder: folder.trim() });
+  if (projectId === null) {
+    return (
+      <section className="space-y-3" data-testid="output-export-section">
+        <h2 className="text-sm font-medium">{t("output.exportHeading")}</h2>
+        <p className="text-sm text-muted-foreground" data-testid="export-needs-project">
+          {t("output.exportNeedsProject")}
+        </p>
+      </section>
+    );
   }
 
-  function runExport(overwrite: boolean) {
-    if (exportSession.isPending) return;
+  const plan = preview.isError ? null : preview.data;
+  const previewErrorKey = preview.isError
+    ? EXPORT_ERROR_KEY[actionErrorCode(preview.error) ?? ""]
+    : undefined;
+  const previewError = preview.isError
+    ? previewErrorKey
+      ? t(previewErrorKey)
+      : (actionErrorMessage(preview.error) ?? t("output.exportPreviewFailed"))
+    : null;
+
+  const canExport =
+    plan !== undefined &&
+    plan !== null &&
+    !slugBlank &&
+    !settling &&
+    !preview.isFetching &&
+    !exportSession.isPending;
+
+  function runExport() {
+    if (!canExport || !plan) return;
     setExportError(null);
-    exportSession.mutate({ sessionId, overwrite });
+    exportSession.mutate({ sessionId, slug: plan.slug });
   }
 
   return (
     <section className="space-y-3" data-testid="output-export-section">
       <h2 className="text-sm font-medium">{t("output.exportHeading")}</h2>
 
-      <div className="space-y-3 rounded-xl border bg-card px-5 py-4">
-        <div className="flex items-end gap-2">
-          <div className="flex-1 space-y-2">
-            <Label htmlFor="export-folder">{t("output.exportFolderLabel")}</Label>
-            <Input
-              id="export-folder"
-              value={folder}
-              onChange={(event) => {
-                setFolder(event.target.value);
-                setFolderError(null);
-              }}
-              placeholder={t("output.exportFolderPlaceholder")}
-              aria-invalid={folderError !== null}
-              data-testid="export-folder-input"
-            />
-            {folderError ? (
-              <p className="text-xs text-destructive">{folderError}</p>
-            ) : null}
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={!folderDirty || folder.trim().length === 0 || setTarget.isPending}
-            onClick={saveFolder}
-            data-testid="export-folder-save"
-          >
-            {setTarget.isPending && <Spinner className="size-4" />}
-            {t(setTarget.isPending ? "output.exportFolderSaving" : "output.exportFolderSave")}
-          </Button>
+      <div className="space-y-4 rounded-xl border bg-card px-5 py-4">
+        {plan ? (
+          <p className="text-sm" data-testid="export-project">
+            <span className="text-muted-foreground">{t("output.exportProjectLabel")}: </span>
+            <span className="font-medium">{plan.projectName}</span>
+            <span className="font-mono text-xs text-muted-foreground">
+              {" "}
+              {plan.projectRoot}/{plan.exportFolder}
+            </span>
+          </p>
+        ) : null}
+
+        <div className="max-w-sm space-y-2">
+          <Label htmlFor="export-slug">{t("output.exportSlugLabel")}</Label>
+          <Input
+            id="export-slug"
+            value={slugDraft ?? plan?.proposedSlug ?? ""}
+            onChange={(event) => {
+              setSlugDraft(event.target.value);
+              setLastResult(null);
+            }}
+            aria-invalid={slugBlank || previewErrorKey === "output.exportInvalidSlug"}
+            aria-describedby="export-slug-hint"
+            data-testid="export-slug-input"
+          />
+          <p id="export-slug-hint" className="text-xs text-muted-foreground">
+            {slugBlank
+              ? t("output.exportSlugRequired")
+              : t("output.exportSlugHint", { pattern: plan?.slugPattern ?? "{slug}" })}
+          </p>
         </div>
 
-        <Button
-          type="button"
-          disabled={!exportTargetFolder || folderDirty || exportSession.isPending}
-          onClick={() => runExport(false)}
-          data-testid="export-action"
-        >
+        {previewError ? (
+          <Alert variant="destructive" data-testid="export-preview-error">
+            <AlertTitle>{previewError}</AlertTitle>
+          </Alert>
+        ) : null}
+
+        {!plan && !previewError && !slugBlank ? <Skeleton className="h-16 w-full" /> : null}
+
+        {plan ? (
+          <div className="space-y-2" aria-busy={preview.isFetching || settling}>
+            <p className="text-xs font-medium">
+              {t(plan.bundleExists ? "output.exportPreviewReplaceHeading" : "output.exportPreviewHeading")}
+            </p>
+            <PathList paths={plan.files} testId="export-preview-files" />
+            {plan.removals.length > 0 ? (
+              <>
+                <p className="text-xs font-medium">{t("output.exportPreviewRemovalsHeading")}</p>
+                <PathList paths={plan.removals} testId="export-preview-removals" />
+              </>
+            ) : null}
+            {plan.trackerDiagnostic ? (
+              <p className="text-xs text-amber-700 dark:text-amber-300" data-testid="export-tracker-diagnostic">
+                {t("output.exportTrackerDiagnostic")}: {plan.trackerDiagnostic}
+              </p>
+            ) : null}
+            {plan.ticketsSkippedReason ? (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                {t("output.exportTicketsSkipped")}: {plan.ticketsSkippedReason}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        <Button type="button" disabled={!canExport} onClick={runExport} data-testid="export-action">
           {exportSession.isPending ? (
             <Spinner className="size-4" />
           ) : (
@@ -161,59 +219,21 @@ export function ExportSection({
         ) : null}
 
         {lastResult ? (
-          <div className="space-y-1.5 rounded-lg border bg-muted/30 px-3.5 py-3">
-            <p className="text-xs font-medium text-muted-foreground uppercase">
-              {t("output.exportSuccessHeading")}
-            </p>
-            <p className="text-xs font-medium">{t("output.exportedFilesHeading")}</p>
-            <ul className="space-y-0.5 font-mono text-xs text-muted-foreground">
-              {lastResult.files.map((file) => (
-                <li key={file}>{file}</li>
-              ))}
-            </ul>
-            {lastResult.ticketsSkippedReason ? (
-              <p className="text-xs text-amber-700 dark:text-amber-300">
-                {t("output.exportTicketsSkipped")}: {lastResult.ticketsSkippedReason}
-              </p>
-            ) : null}
-          </div>
+          <Alert data-testid="export-result">
+            <AlertTitle>{t("output.exportSuccessHeading")}</AlertTitle>
+            <AlertDescription className="space-y-2">
+              <p className="text-xs font-medium">{t("output.exportedFilesHeading")}</p>
+              <PathList paths={lastResult.files} testId="export-written-files" />
+              {lastResult.removed.length > 0 ? (
+                <>
+                  <p className="text-xs font-medium">{t("output.exportRemovedFilesHeading")}</p>
+                  <PathList paths={lastResult.removed} testId="export-removed-files" />
+                </>
+              ) : null}
+            </AlertDescription>
+          </Alert>
         ) : null}
       </div>
-
-      <AlertDialog
-        open={existingFiles !== null}
-        onOpenChange={(open) => {
-          if (!open) setExistingFiles(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("output.exportOverwriteTitle")}</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2">
-                <p>{t("output.exportOverwriteDescription")}</p>
-                <ul className="max-h-40 space-y-0.5 overflow-y-auto rounded-md bg-muted/40 p-2 font-mono text-xs">
-                  {(existingFiles ?? []).map((file) => (
-                    <li key={file}>{file}</li>
-                  ))}
-                </ul>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("workspace.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={exportSession.isPending}
-              onClick={() => {
-                setExistingFiles(null);
-                runExport(true);
-              }}
-            >
-              {t("output.exportOverwriteConfirm")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </section>
   );
 }
