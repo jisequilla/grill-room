@@ -149,7 +149,7 @@ export function validateTicketSet(
   const cyclic = numbersOnCycles(byNumber).sort((a, b) => a - b);
   if (cyclic.length > 0) {
     reasons.push(
-      `These tickets form a blocking cycle: ${cyclic.join(", ")}. \`blockedBy\` must not form a cycle.`,
+      `These tickets form a blocking cycle: ${cyclic.join(", ")}.`,
     );
   }
 

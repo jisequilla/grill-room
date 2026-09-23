@@ -84,7 +84,7 @@ export default defineAction({
     const cyclic = numbersOnCycles(byNumber).sort((a, b) => a - b);
     if (cyclic.length > 0) {
       fail(
-        `Setting this would create a blocking cycle: ${cyclic.join(", ")}. \`blockedBy\` must not form a cycle.`,
+        `Setting this would create a blocking cycle: ${cyclic.join(", ")}.`,
         { errorCode: "cycle", statusCode: 409, details: { cycle: cyclic } },
       );
     }
