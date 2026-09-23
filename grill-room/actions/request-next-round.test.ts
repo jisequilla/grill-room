@@ -10,8 +10,10 @@ import {
   resetInterviewer,
   scriptInterviewer,
 } from "../server/interviewer/index.js";
+import { anAssessReadinessResult } from "../server/interviewer/test-fixtures.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import addDecision from "./add-decision.js";
+import assessReadiness from "./assess-readiness.js";
 import createSession from "./create-session.js";
 import getCurrentRound from "./get-current-round.js";
 import getSession from "./get-session.js";
@@ -19,6 +21,7 @@ import getTree from "./get-tree.js";
 import requestNextRound from "./request-next-round.js";
 import saveDraftAnswer from "./save-draft-answer.js";
 import submitRound from "./submit-round.js";
+import updateSessionIdea from "./update-session-idea.js";
 
 /*
  * `get-current-round` is covered here rather than in its own file. The harness
@@ -1288,6 +1291,8 @@ describe("get-current-round", () => {
       turnStatus: "idle",
       turnStartedAt: null,
       turnError: null,
+      readiness: null,
+      canEditIdea: true,
       round: null,
     });
   });
@@ -1303,6 +1308,246 @@ describe("get-current-round", () => {
       turnStatus: "working",
       turnStartedAt: "2026-01-01T00:00:00.000Z",
       round: null,
+    });
+  });
+});
+
+/*
+ * Readiness is judged and edited only before the first round, and read back
+ * through `get-current-round`, so its actions travel with this file rather than
+ * adding another test database to the suite.
+ */
+describe("idea readiness", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  function judged(overrides: Parameters<typeof anAssessReadinessResult>[0] = {}) {
+    return {
+      kind: "assess-readiness" as const,
+      result: anAssessReadinessResult(overrides),
+    };
+  }
+
+  async function setTurnWorking(sessionId: string) {
+    await getDb()
+      .update(schema.sessions)
+      .set({ turnStatus: "working", turnStartedAt: new Date().toISOString() })
+      .where(eq(schema.sessions.id, sessionId));
+  }
+
+  describe("assess-readiness", () => {
+    it("stores the verdict with the idea it judged and returns it", async () => {
+      const session = await aSession();
+      const interviewer = scriptInterviewer([
+        judged({ verdict: "not-ready", missing: ["A buildable objective"] }),
+      ]);
+
+      const { readiness } = await assessReadiness.run({ sessionId: session.id });
+
+      expect(readiness).toMatchObject({
+        ideaJudged: session.idea,
+        result: { verdict: "not-ready", missing: ["A buildable objective"] },
+      });
+      expect(readiness?.judgedAt).toBeTruthy();
+      expect(interviewer.requests[0]).toMatchObject({
+        kind: "assess-readiness",
+        rejectionReason: null,
+        context: {
+          idea: session.idea,
+          conversationId: null,
+          decisions: [],
+        },
+      });
+      expect(
+        (await getCurrentRound.run({ sessionId: session.id })).readiness,
+      ).toEqual(readiness);
+    });
+
+    it("leaves the interview's conversation and model untouched", async () => {
+      const session = await aSession();
+      scriptInterviewer([{ ...judged(), conversationId: "judge-conversation" }]);
+
+      await assessReadiness.run({ sessionId: session.id });
+
+      expect(await getSession.run({ id: session.id })).toMatchObject({
+        conversationId: null,
+        modelLocked: false,
+        turnStatus: "idle",
+      });
+    });
+
+    it("refuses once the session has a round", async () => {
+      const session = await aSession();
+      scriptInterviewer([round(proposed())]);
+      await requestNextRound.run({ sessionId: session.id });
+
+      await expect(
+        assessReadiness.run({ sessionId: session.id }),
+      ).rejects.toMatchObject({ errorCode: "has-rounds" });
+    });
+
+    it("refuses while a turn is working", async () => {
+      const session = await aSession();
+      await setTurnWorking(session.id);
+
+      await expect(
+        assessReadiness.run({ sessionId: session.id }),
+      ).rejects.toMatchObject({ errorCode: "turn-working" });
+    });
+
+    it("refuses a session that is not interviewing", async () => {
+      const session = await aSession();
+      await getDb()
+        .update(schema.sessions)
+        .set({ state: "done-proposed" })
+        .where(eq(schema.sessions.id, session.id));
+
+      await expect(
+        assessReadiness.run({ sessionId: session.id }),
+      ).rejects.toMatchObject({ errorCode: "wrong-session-state" });
+    });
+
+    it("sends back a ready verdict that contradicts its own findings", async () => {
+      const session = await aSession();
+      const interviewer = scriptInterviewer([
+        judged({ evidence: [], objectiveIsProcess: true }),
+        judged({ evidence: [], objectiveIsProcess: true, verdict: "not-ready" }),
+      ]);
+
+      const { readiness } = await assessReadiness.run({ sessionId: session.id });
+
+      expect(readiness?.result.verdict).toBe("not-ready");
+      expect(interviewer.requests[1]?.rejectionReason).toMatch(
+        /at least one evidence item.*not a process/,
+      );
+    });
+
+    it("fails the turn once every attempt contradicts itself, storing nothing", async () => {
+      const session = await aSession();
+      const tooManyUnknowns = judged({
+        unknowns: ["a", "b", "c", "d", "e", "f"],
+      });
+      scriptInterviewer([tooManyUnknowns, tooManyUnknowns, tooManyUnknowns]);
+
+      await expect(
+        assessReadiness.run({ sessionId: session.id }),
+      ).rejects.toMatchObject({ errorCode: "invalid-readiness" });
+
+      expect(await getCurrentRound.run({ sessionId: session.id })).toMatchObject(
+        {
+          turnStatus: "failed",
+          turnError: { code: "invalid-readiness" },
+          readiness: null,
+        },
+      );
+    });
+
+    it("records an interviewer failure on the turn", async () => {
+      const session = await aSession();
+      scriptInterviewer([
+        {
+          kind: "assess-readiness",
+          error: new InterviewerError("rate-limited", "Limit reached."),
+        },
+      ]);
+
+      await expect(
+        assessReadiness.run({ sessionId: session.id }),
+      ).rejects.toMatchObject({ errorCode: "rate-limited" });
+
+      expect(await getSession.run({ id: session.id })).toMatchObject({
+        turnStatus: "failed",
+        turnErrorCode: "rate-limited",
+        readinessJson: null,
+      });
+    });
+  });
+
+  describe("update-session-idea", () => {
+    it("trims and stores the idea, clears readiness, and bumps activity", async () => {
+      const session = await aSession();
+      scriptInterviewer([judged()]);
+      await assessReadiness.run({ sessionId: session.id });
+      await getDb()
+        .update(schema.sessions)
+        .set({ updatedAt: "2024-01-01T00:00:00.000Z" })
+        .where(eq(schema.sessions.id, session.id));
+
+      const updated = await updateSessionIdea.run({
+        sessionId: session.id,
+        idea: "  Build a readiness judge for ideas.  ",
+      });
+
+      expect(updated).toMatchObject({
+        idea: "Build a readiness judge for ideas.",
+        readinessJson: null,
+      });
+      expect(updated?.updatedAt > "2024-01-01T00:00:00.000Z").toBe(true);
+      expect(
+        (await getCurrentRound.run({ sessionId: session.id })).readiness,
+      ).toBeNull();
+    });
+
+    it("refuses an empty idea", async () => {
+      const session = await aSession();
+
+      await expect(
+        updateSessionIdea.run({ sessionId: session.id, idea: "   " }),
+      ).rejects.toMatchObject({ errorCode: "idea-required" });
+    });
+
+    it("refuses once the session has a round", async () => {
+      const session = await aSession();
+      scriptInterviewer([round(proposed())]);
+      await requestNextRound.run({ sessionId: session.id });
+
+      await expect(
+        updateSessionIdea.run({ sessionId: session.id, idea: "Another idea" }),
+      ).rejects.toMatchObject({ errorCode: "has-rounds" });
+    });
+
+    it("refuses while a turn is working", async () => {
+      const session = await aSession();
+      await setTurnWorking(session.id);
+
+      await expect(
+        updateSessionIdea.run({ sessionId: session.id, idea: "Another idea" }),
+      ).rejects.toMatchObject({ errorCode: "turn-working" });
+    });
+  });
+
+  describe("reading readiness back", () => {
+    it("reads a judgment of an earlier idea as absent", async () => {
+      const session = await aSession();
+      scriptInterviewer([judged()]);
+      await assessReadiness.run({ sessionId: session.id });
+      await getDb()
+        .update(schema.sessions)
+        .set({ idea: "An idea changed behind the judgment's back" })
+        .where(eq(schema.sessions.id, session.id));
+
+      expect(
+        (await getCurrentRound.run({ sessionId: session.id })).readiness,
+      ).toBeNull();
+    });
+
+    it("lets the idea be edited only before the first round and while idle", async () => {
+      const session = await aSession();
+      const canEdit = async () =>
+        (await getCurrentRound.run({ sessionId: session.id })).canEditIdea;
+
+      expect(await canEdit()).toBe(true);
+
+      await setTurnWorking(session.id);
+      expect(await canEdit()).toBe(false);
+
+      await getDb()
+        .update(schema.sessions)
+        .set({ turnStatus: "idle" })
+        .where(eq(schema.sessions.id, session.id));
+      scriptInterviewer([round(proposed())]);
+      await requestNextRound.run({ sessionId: session.id });
+      expect(await canEdit()).toBe(false);
     });
   });
 });

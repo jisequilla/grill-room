@@ -2,6 +2,7 @@ import { InterviewerError } from "./errors.js";
 import { resultSchemas } from "./schemas.js";
 import type { RequestKind, ResultFor } from "./schemas.js";
 import type {
+  AssessReadinessRequest,
   BreakIntoTicketsRequest,
   FindSupersededRequest,
   Interviewer,
@@ -134,6 +135,8 @@ export function createFakeInterviewer(
       turn(request) as Promise<
         InterviewerTurn<ResultFor<"break-into-tickets">>
       >,
+    assessReadiness: (request: AssessReadinessRequest) =>
+      turn(request) as Promise<InterviewerTurn<ResultFor<"assess-readiness">>>,
   };
 }
 

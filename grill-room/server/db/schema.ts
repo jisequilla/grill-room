@@ -127,6 +127,13 @@ export const sessions = table("gr_sessions", {
    * running. See {@link import("../reopen-batch.js").BatchProgress}.
    */
   batchProgressJson: text("batch_progress_json"),
+  /**
+   * The last readiness judgment of the session's idea, as JSON: the idea text
+   * it judged, the judge's result, and when. Null until judged, and cleared
+   * whenever the idea is edited; a result whose judged idea differs from the
+   * current one reads as absent. See {@link import("../readiness.js").StoredReadiness}.
+   */
+  readinessJson: text("readiness_json"),
   /** Where the current interviewer turn stands. See {@link SESSION_TURN_STATUSES}. */
   turnStatus: text("turn_status", { enum: SESSION_TURN_STATUSES })
     .notNull()

@@ -12,6 +12,8 @@ import {
 import { DOCS_FOLDER_ADDENDUM, loadGrillingSkill } from "./instructions.js";
 import { jsonSchemaFor } from "./schemas.js";
 import {
+  anAssessReadinessRequest,
+  anAssessReadinessResult,
   aProposeRoundRequest,
   aProposeRoundResult,
 } from "./test-fixtures.js";
@@ -172,6 +174,41 @@ describe("what the adapter sends to the command line", () => {
  * own filesystem. These assertions are the security contract: what it may use,
  * where it may use it, and what it can never reach.
  */
+describe("what the adapter sends for a readiness judgment", () => {
+  it("constrains the output to the readiness schema, with every tool disabled", async () => {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: anAssessReadinessResult() })),
+    ]);
+
+    const turn = await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+    }).assessReadiness(anAssessReadinessRequest());
+
+    const { args } = runner.invocations[0];
+    expect(valueOf(args, "--allowed-tools")).toBe("");
+    expect(JSON.parse(valueOf(args, "--json-schema") as string)).toEqual(
+      jsonSchemaFor("assess-readiness"),
+    );
+    expect(turn.result).toEqual(anAssessReadinessResult());
+  });
+
+  it("asks for a judgment of the idea, without the grilling method", async () => {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: anAssessReadinessResult() })),
+    ]);
+    const request = anAssessReadinessRequest();
+
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).assessReadiness(
+      request,
+    );
+
+    const prompt = valueOf(runner.invocations[0].args, "-p") as string;
+    expect(prompt).toContain(request.context.idea);
+    expect(prompt).toContain("judge whether the idea is ready to grill");
+    expect(prompt).not.toContain(loadGrillingSkill().trimEnd());
+  });
+});
+
 describe("what the adapter sends when the session has a docs folder", () => {
   const DOCS_FOLDER = "/Users/someone/projects/observability";
 

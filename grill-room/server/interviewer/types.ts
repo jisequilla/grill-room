@@ -1,4 +1,5 @@
 import type {
+  AssessReadinessResult,
   BreakIntoTicketsResult,
   FindSupersededResult,
   OfferedChoice,
@@ -140,14 +141,24 @@ export interface BreakIntoTicketsRequest extends RequestBase {
   specMarkdown: string;
 }
 
+/**
+ * Judge whether the session's idea is ready to be grilled, before its first
+ * round. Carries only the idea: the tree is empty, and the turn never joins the
+ * interview's conversation.
+ */
+export interface AssessReadinessRequest extends RequestBase {
+  kind: "assess-readiness";
+}
+
 export type InterviewerRequest =
   | ProposeRoundRequest
   | ReviewStaleRequest
   | FindSupersededRequest
   | SynthesizeSpecRequest
-  | BreakIntoTicketsRequest;
+  | BreakIntoTicketsRequest
+  | AssessReadinessRequest;
 
-/** A request narrowed to one kind, for generic code over the five kinds. */
+/** A request narrowed to one kind, for generic code over the six kinds. */
 export type RequestFor<Kind extends RequestKind> = Extract<
   InterviewerRequest,
   { kind: Kind }
@@ -183,4 +194,7 @@ export interface Interviewer {
   breakIntoTickets(
     request: BreakIntoTicketsRequest,
   ): Promise<InterviewerTurn<BreakIntoTicketsResult>>;
+  assessReadiness(
+    request: AssessReadinessRequest,
+  ): Promise<InterviewerTurn<AssessReadinessResult>>;
 }

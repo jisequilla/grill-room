@@ -73,15 +73,15 @@ export function failIfTurnInProgress(
  * working while `take` runs, failed with the reason if it throws, idle with the
  * conversation to resume once it returns.
  *
- * `take` resolves with the conversation id; anything the turn writes to the
- * tree it writes itself, before returning, so a failed turn leaves the tree
- * exactly as it was.
+ * `take` resolves with the conversation id to resume next, or null for a
+ * session that still has none; anything the turn writes it writes itself,
+ * before returning, so a failed turn leaves the session exactly as it was.
  */
 export async function runTurn(input: {
   sessionId: string;
   /** Stored when the failure is neither an interviewer fault nor a refusal. */
   failedMessage: string;
-  take: () => Promise<string>;
+  take: () => Promise<string | null>;
 }): Promise<void> {
   const db = getDb();
   const { sessionId } = input;
@@ -98,7 +98,7 @@ export async function runTurn(input: {
     })
     .where(eq(schema.sessions.id, sessionId));
 
-  let conversationId: string;
+  let conversationId: string | null;
   try {
     conversationId = await input.take();
   } catch (error) {
