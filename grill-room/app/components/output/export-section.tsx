@@ -6,6 +6,7 @@ import {
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { IconFolderOpen, IconRefresh } from "@tabler/icons-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -27,6 +28,14 @@ const EXPORT_ERROR_KEY: Record<string, string> = {
   "invalid-slug": "output.exportInvalidSlug",
   "invalid-folder-name": "output.exportInvalidFolderName",
   "export-outside-root": "output.exportOutsideRoot",
+  "handoff-missing": "output.exportNeedsHandoff",
+  "handoff-stale": "output.exportHandoffStale",
+};
+
+/** The export gate's reason, from `preview-export`'s `exportBlockedReason`, mapped to its message. */
+const EXPORT_GATE_KEY: Record<string, string> = {
+  "handoff-missing": "output.exportNeedsHandoff",
+  "handoff-stale": "output.exportHandoffStale",
 };
 
 /** How long the slug must sit still before the preview is refreshed. */
@@ -68,6 +77,7 @@ export function ExportSection({
   projectId: string | null;
 }) {
   const t = useT();
+  const queryClient = useQueryClient();
   /** The slug as typed; null until the operator edits it, meaning "use the proposal". */
   const [slugDraft, setSlugDraft] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<ExportResult | null>(null);
@@ -102,8 +112,14 @@ export function ExportSection({
     onError: (error: unknown) => {
       setLastResult(null);
       setVisibilityOverride(null);
-      const key = EXPORT_ERROR_KEY[actionErrorCode(error) ?? ""];
+      const code = actionErrorCode(error) ?? "";
+      const key = EXPORT_ERROR_KEY[code];
       setExportError(key ? t(key) : (actionErrorMessage(error) ?? t("output.exportFailed")));
+      if (code === "handoff-missing" || code === "handoff-stale") {
+        // A stale tab: the button read as enabled from data fetched before the
+        // handoff changed elsewhere. Refresh so the gate here catches up.
+        void queryClient.invalidateQueries({ queryKey: ["action"] });
+      }
     },
   });
 
@@ -125,7 +141,7 @@ export function ExportSection({
 
   if (projectId === null) {
     return (
-      <section className="space-y-3" data-testid="output-export-section">
+      <section id="output-export-section" className="space-y-3" data-testid="output-export-section">
         <h2 className="text-sm font-medium">{t("output.exportHeading")}</h2>
         <p className="text-sm text-muted-foreground" data-testid="export-needs-project">
           {t("output.exportNeedsProject")}
@@ -147,10 +163,13 @@ export function ExportSection({
   const canExport =
     plan !== undefined &&
     plan !== null &&
+    !plan.exportBlocked &&
     !slugBlank &&
     !settling &&
     !preview.isFetching &&
     !exportSession.isPending;
+
+  const gateKey = plan?.exportBlockedReason ? EXPORT_GATE_KEY[plan.exportBlockedReason] : undefined;
 
   function runExport() {
     if (!canExport || !plan) return;
@@ -159,7 +178,7 @@ export function ExportSection({
   }
 
   return (
-    <section className="space-y-3" data-testid="output-export-section">
+    <section id="output-export-section" className="space-y-3" data-testid="output-export-section">
       <h2 className="text-sm font-medium">{t("output.exportHeading")}</h2>
 
       <div className="space-y-4 rounded-xl border bg-card px-5 py-4">
@@ -225,6 +244,12 @@ export function ExportSection({
               </p>
             ) : null}
           </div>
+        ) : null}
+
+        {gateKey ? (
+          <p className="text-xs text-amber-700 dark:text-amber-300" data-testid="export-gate-message">
+            {t(gateKey)}
+          </p>
         ) : null}
 
         <Button type="button" disabled={!canExport} onClick={runExport} data-testid="export-action">

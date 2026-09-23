@@ -1,4 +1,4 @@
-import { defineAction } from "@agent-native/core/action";
+import { defineAction, fail } from "@agent-native/core/action";
 import { z } from "zod";
 
 import { planExportBundle, writeExportBundle } from "../server/export-bundle.js";
@@ -7,7 +7,7 @@ import { buildVisibilityReport } from "../server/visibility.js";
 
 export default defineAction({
   description:
-    "Export a session's current spec, and its tickets when current, into one bundle directory in its project: <root>/<exportFolder>/<folderName>/spec.md plus issues/NN-slug.md per ticket, and HANDOFF.md plus briefs/NN-slug.md when the session has a generated handoff (whose bundle paths are filled in and whose export is then recorded), where folderName is the project's slug pattern applied to the given slug. Creates missing folders; re-export overwrites the bundle's spec and issue files and removes exactly the files the previous export's manifest lists that the new export no longer writes. Writes exactly what preview-export lists, and refuses any path that resolves outside the real project root. Also returns a post-export visibility report classifying every written file as tracked, ignored, or untracked, with a remedy when agents will not see it and a warning when the project's visibility flag disagrees with what was observed; see get-export-visibility to re-check without exporting again.",
+    "Export a session's current spec, and its tickets when current, into one bundle directory in its project: <root>/<exportFolder>/<folderName>/spec.md plus issues/NN-slug.md per ticket, and HANDOFF.md plus briefs/NN-slug.md from the session's generated handoff (whose bundle paths are filled in and whose export is then recorded), where folderName is the project's slug pattern applied to the given slug. Creates missing folders; re-export overwrites the bundle's spec, issue and handoff files and removes exactly the files the previous export's manifest lists that the new export no longer writes. Refuses, writing nothing, with `handoff-missing` when the session has no handoff or `handoff-stale` when it no longer matches today's spec, tickets or project (generate or regenerate it first — see generate-handoff); preview-export reports the same gate as `exportBlocked`/`exportBlockedReason` without refusing, so the UI can explain it before the operator tries. Otherwise writes exactly what preview-export lists, and refuses any path that resolves outside the real project root. Also returns a post-export visibility report classifying every written file as tracked, ignored, or untracked, with a remedy when agents will not see it and a warning when the project's visibility flag disagrees with what was observed; see get-export-visibility to re-check without exporting again.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
     slug: z
@@ -17,6 +17,14 @@ export default defineAction({
   }),
   run: async ({ sessionId, slug }) => {
     const plan = await planExportBundle({ sessionId, slug });
+    if (plan.exportBlockedReason) {
+      fail(
+        plan.exportBlockedReason === "handoff-missing"
+          ? "This session has no handoff yet. Generate one before exporting."
+          : "The handoff is stale. Regenerate it before exporting.",
+        { errorCode: plan.exportBlockedReason, statusCode: 409 },
+      );
+    }
     const { written, removed } = await writeExportBundle(plan);
     if (plan.handoff) await recordHandoffExport(plan.handoff);
     const visibility = await buildVisibilityReport({

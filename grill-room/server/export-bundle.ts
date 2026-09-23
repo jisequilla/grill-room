@@ -36,8 +36,17 @@
  * in the preview, checked for containment, and recorded in the manifest, so a
  * brief whose ticket is dropped is removed by the next export. Their
  * `{{BUNDLE}}` placeholders are filled with the bundle path — repo-relative
- * for a `tracked` project, absolute for an `ignored` one. The handoff is
- * written as stored, stale or not; this module applies no gate.
+ * for a `tracked` project, absolute for an `ignored` one.
+ *
+ * ## Export gate
+ *
+ * `exportBlockedReason` ({@link ExportGateReason}, from `getExportGate`) is
+ * `"handoff-missing"` when the session has no handoff at all, or
+ * `"handoff-stale"` when one exists but no longer matches today's inputs
+ * (the same fingerprint check `describeHandoff`'s `stale` makes); `null` once
+ * the handoff is current. This module only reports it — `preview-export`
+ * surfaces it for the UI, and `export-session` is the one that refuses to
+ * write when it is non-null.
  *
  * ## Containment
  *
@@ -87,8 +96,10 @@ import {
 import {
   bundlePathFor,
   fillBundlePath,
+  getExportGate,
   getHandoffRow,
   HANDOFF_FILE,
+  type ExportGateReason,
   type HandoffRow,
   parseBriefs,
 } from "./handoff.js";
@@ -135,6 +146,10 @@ export interface ExportBundlePlan {
   ticketsSkippedReason: string | null;
   /** The handoff row whose HANDOFF.md and briefs this plan writes, or null when the session has none. */
   handoff: HandoffRow | null;
+  /** Whether `export-session` refuses to write this plan: no current handoff. */
+  exportBlocked: boolean;
+  /** Why export is blocked, or null once a current handoff exists. See "Export gate" above. */
+  exportBlockedReason: ExportGateReason | null;
 }
 
 export interface PlanExportBundleInput {
@@ -374,6 +389,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   });
 
   const handoff = (await getHandoffRow(session.id)) ?? null;
+  const gate = await getExportGate(session.id);
   const handoffFiles: { relativePath: string; content: string }[] = [];
   if (handoff) {
     const bundlePath = bundlePathFor(project.visibility, project.rootPath, bundleDir);
@@ -443,6 +459,8 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     ticketsExported: exportTickets.length > 0,
     ticketsSkippedReason,
     handoff,
+    exportBlocked: gate.blocked,
+    exportBlockedReason: gate.reason,
   };
 }
 

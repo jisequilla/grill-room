@@ -11,8 +11,11 @@ import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 import createSession from "./create-session.js";
 import exportSession from "./export-session.js";
+import generateHandoff from "./generate-handoff.js";
+import listTickets from "./list-tickets.js";
 import previewExport from "./preview-export.js";
 import registerProject from "./register-project.js";
+import setTicketBlockedBy from "./set-ticket-blocked-by.js";
 
 const repos = useTempGitRepos();
 
@@ -116,6 +119,11 @@ async function aReadySession(
   return { root, project, session, spec };
 }
 
+async function ticketIdFor(sessionId: string, number: number): Promise<string> {
+  const { tickets } = await listTickets.run({ sessionId });
+  return tickets.find((ticket) => ticket.number === number)!.id;
+}
+
 async function pathExists(target: string): Promise<boolean> {
   try {
     await fs.lstat(target);
@@ -174,8 +182,64 @@ describe("preview-export and export-session", () => {
     ).rejects.toMatchObject({ errorCode: "spec-not-current" });
   });
 
+  describe("export gate: a current handoff is required", () => {
+    it("refuses to export without a handoff, writing nothing", async () => {
+      const { root, session } = await aReadySession();
+
+      const preview = await previewExport.run({ sessionId: session.id });
+      expect(preview.exportBlocked).toBe(true);
+      expect(preview.exportBlockedReason).toBe("handoff-missing");
+      // Everything else in the preview still renders; only the gate blocks.
+      expect(preview.files.length).toBeGreaterThan(0);
+
+      await expect(
+        exportSession.run({ sessionId: session.id, slug: "grill-room" }),
+      ).rejects.toMatchObject({ errorCode: "handoff-missing" });
+      expect(await pathExists(path.join(root, ".scratch"))).toBe(false);
+    });
+
+    it("refuses to export a stale handoff (e.g. after a blocker edit), writing nothing", async () => {
+      const { root, session } = await aReadySession();
+      await generateHandoff.run({ sessionId: session.id });
+
+      // Removing ticket 2's blocker changes the handoff's fingerprint without
+      // touching the spec's `ticketsGeneratedAt`.
+      await setTicketBlockedBy.run({
+        ticketId: await ticketIdFor(session.id, 2),
+        blockedBy: [],
+      });
+
+      const preview = await previewExport.run({ sessionId: session.id });
+      expect(preview.exportBlocked).toBe(true);
+      expect(preview.exportBlockedReason).toBe("handoff-stale");
+
+      await expect(
+        exportSession.run({ sessionId: session.id, slug: "grill-room" }),
+      ).rejects.toMatchObject({ errorCode: "handoff-stale" });
+      expect(await pathExists(path.join(root, ".scratch"))).toBe(false);
+    });
+
+    it("succeeds once the handoff is regenerated", async () => {
+      const { session } = await aReadySession();
+      await generateHandoff.run({ sessionId: session.id });
+      await setTicketBlockedBy.run({
+        ticketId: await ticketIdFor(session.id, 2),
+        blockedBy: [],
+      });
+      await generateHandoff.run({ sessionId: session.id });
+
+      const preview = await previewExport.run({ sessionId: session.id });
+      expect(preview.exportBlocked).toBe(false);
+      expect(preview.exportBlockedReason).toBeNull();
+
+      const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+      expect(result.handoffExported).toBe(true);
+    });
+  });
+
   it("previews without side effects, and writes exactly the files the preview listed", async () => {
     const { root, session } = await aReadySession({ exportFolder: "docs/features" });
+    await generateHandoff.run({ sessionId: session.id });
 
     const preview = await previewExport.run({ sessionId: session.id });
     const bundleDir = path.join(root, "docs", "features", "grill-room");
@@ -191,11 +255,16 @@ describe("preview-export and export-session", () => {
       removals: [],
       trackerDiagnostic: null,
       ticketsExported: true,
+      exportBlocked: false,
+      exportBlockedReason: null,
     });
     expect(preview.files).toEqual([
+      path.join(bundleDir, "HANDOFF.md"),
       path.join(bundleDir, "spec.md"),
       path.join(bundleDir, "issues", "01-build-the-workspace.md"),
       path.join(bundleDir, "issues", "02-store-on-disk.md"),
+      path.join(bundleDir, "briefs", "01-build-the-workspace.md"),
+      path.join(bundleDir, "briefs", "02-store-on-disk.md"),
       path.join(bundleDir, EXPORT_MANIFEST_FILE),
     ]);
     expect(await pathExists(path.join(root, "docs"))).toBe(false);
@@ -209,6 +278,7 @@ describe("preview-export and export-session", () => {
 
   it("creates missing folders and lays the bundle out as spec.md plus issues/NN-slug.md", async () => {
     const { root, session, spec } = await aReadySession({ exportFolder: "a/b/c" });
+    await generateHandoff.run({ sessionId: session.id });
 
     await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
@@ -226,7 +296,14 @@ describe("preview-export and export-session", () => {
     ).toBe("# 02 Ticket 2\n\nStatus: ready-for-agent\nBlocked by: 01\n\nDo the work of ticket 2.");
     expect(JSON.parse(await fs.readFile(path.join(bundleDir, EXPORT_MANIFEST_FILE), "utf8"))).toEqual({
       version: 1,
-      files: ["spec.md", "issues/01-build-the-workspace.md", "issues/02-store-on-disk.md"],
+      files: [
+        "HANDOFF.md",
+        "spec.md",
+        "issues/01-build-the-workspace.md",
+        "issues/02-store-on-disk.md",
+        "briefs/01-build-the-workspace.md",
+        "briefs/02-store-on-disk.md",
+      ],
     });
   });
 
@@ -234,6 +311,7 @@ describe("preview-export and export-session", () => {
     const { root, session } = await aReadySession({
       title: "Export anywhere, and generate a handoff!",
     });
+    await generateHandoff.run({ sessionId: session.id });
 
     const proposal = await previewExport.run({ sessionId: session.id });
     expect(proposal.proposedSlug).toBe("export-anywhere-and-generate");
@@ -271,6 +349,7 @@ describe("preview-export and export-session", () => {
 
   it("applies a {date} pattern with the local date", async () => {
     const { root, session } = await aReadySession({ slugPattern: "{date}-{slug}" });
+    await generateHandoff.run({ sessionId: session.id });
 
     const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
@@ -297,6 +376,7 @@ describe("preview-export and export-session", () => {
         ".scratch/12-a-file.md": "a file, not a folder",
       },
     });
+    await generateHandoff.run({ sessionId: session.id });
 
     const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
@@ -309,6 +389,7 @@ describe("preview-export and export-session", () => {
       slugPattern: "{seq}-{slug}",
       files: { ".scratch/04-older-feature/spec.md": "old" },
     });
+    await generateHandoff.run({ sessionId: session.id });
 
     const first = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
     expect(first.folderName).toBe("05-grill-room");
@@ -318,8 +399,9 @@ describe("preview-export and export-session", () => {
     expect(again.bundleExists).toBe(true);
   });
 
-  it("re-export removes a dropped ticket's file, the preview's removals match, and hand-written files survive", async () => {
+  it("re-export removes a dropped ticket's file and brief, the preview's removals match, and hand-written files survive", async () => {
     const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
     await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
     const bundleDir = path.join(root, ".scratch", "grill-room");
@@ -327,7 +409,7 @@ describe("preview-export and export-session", () => {
       path.join(bundleDir, "notes.txt"),
       path.join(bundleDir, "issues", "99-notes.md"),
       path.join(bundleDir, "issues", "README.txt"),
-      path.join(bundleDir, "HANDOFF.md"),
+      path.join(bundleDir, "extra.md"),
     ];
     for (const file of handWritten) await fs.writeFile(file, "written by hand");
     await fs.writeFile(path.join(bundleDir, "spec.md"), "stale content");
@@ -335,25 +417,31 @@ describe("preview-export and export-session", () => {
     await getDb()
       .delete(schema.tickets)
       .where(eq(schema.tickets.number, 2));
+    // A dropped ticket changes the handoff's fingerprint; without regenerating
+    // it, export would now refuse with `handoff-stale`.
+    await generateHandoff.run({ sessionId: session.id });
 
     const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
     const dropped = path.join(bundleDir, "issues", "02-store-on-disk.md");
+    const droppedBrief = path.join(bundleDir, "briefs", "02-store-on-disk.md");
     expect(preview.bundleExists).toBe(true);
     expect(preview.files).toContain(path.join(bundleDir, EXPORT_MANIFEST_FILE));
-    expect(preview.removals).toEqual([dropped]);
+    expect(preview.removals).toEqual(expect.arrayContaining([dropped, droppedBrief]));
+    expect(preview.removals).toHaveLength(2);
 
     const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
     expect(result.files).toEqual(preview.files);
     expect(result.removed).toEqual(preview.removals);
     expect(await pathExists(dropped)).toBe(false);
+    expect(await pathExists(droppedBrief)).toBe(false);
     expect(await fs.readFile(path.join(bundleDir, "spec.md"), "utf8")).not.toBe("stale content");
     for (const file of handWritten) {
       expect(await fs.readFile(file, "utf8")).toBe("written by hand");
     }
     expect(JSON.parse(await fs.readFile(path.join(bundleDir, EXPORT_MANIFEST_FILE), "utf8"))).toEqual({
       version: 1,
-      files: ["spec.md", "issues/01-build-the-workspace.md"],
+      files: ["HANDOFF.md", "spec.md", "issues/01-build-the-workspace.md", "briefs/01-build-the-workspace.md"],
     });
   });
 
@@ -364,6 +452,7 @@ describe("preview-export and export-session", () => {
         ".scratch/grill-room/issues/99-notes.md": "written by hand",
       },
     });
+    await generateHandoff.run({ sessionId: session.id });
 
     const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
     expect(preview.bundleExists).toBe(true);
@@ -388,6 +477,7 @@ describe("preview-export and export-session", () => {
         ".scratch/grill-room/issues/03-old.md": "listed by a broken manifest",
       },
     });
+    await generateHandoff.run({ sessionId: session.id });
 
     const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
     expect(preview.removals).toEqual([]);
@@ -409,6 +499,7 @@ describe("preview-export and export-session", () => {
         ".scratch/sibling.md": "outside the bundle",
       },
     });
+    await generateHandoff.run({ sessionId: session.id });
 
     const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
     expect(preview.removals).toEqual([]);
@@ -418,19 +509,26 @@ describe("preview-export and export-session", () => {
     expect(await pathExists(path.join(root, "README.md"))).toBe(true);
   });
 
-  it("exports the spec only when the session has no tickets or they are out of date", async () => {
-    const { root, project } = await aProject();
+  it("refuses to export a session with no tickets, since it can never have a handoff", async () => {
+    const { project } = await aProject();
 
     const noTickets = await aSession("No tickets", project.id);
     await insertSpec(noTickets.id);
-    const first = await exportSession.run({ sessionId: noTickets.id, slug: "no-tickets" });
-    expect(first.ticketsExported).toBe(false);
-    expect(first.ticketsSkippedReason).toMatch(/no tickets/i);
-    expect(first.files).toEqual([
-      path.join(root, ".scratch", "no-tickets", "spec.md"),
-      path.join(root, ".scratch", "no-tickets", EXPORT_MANIFEST_FILE),
-    ]);
-    expect(await pathExists(path.join(root, ".scratch", "no-tickets", "issues"))).toBe(false);
+
+    const preview = await previewExport.run({ sessionId: noTickets.id, slug: "no-tickets" });
+    expect(preview.exportBlocked).toBe(true);
+    expect(preview.exportBlockedReason).toBe("handoff-missing");
+
+    await expect(
+      exportSession.run({ sessionId: noTickets.id, slug: "no-tickets" }),
+    ).rejects.toMatchObject({ errorCode: "handoff-missing" });
+    await expect(
+      generateHandoff.run({ sessionId: noTickets.id }),
+    ).rejects.toMatchObject({ errorCode: "no-tickets" });
+  });
+
+  it("exports the spec only, skipping tickets that are out of date, once the handoff is current", async () => {
+    const { root, project } = await aProject();
 
     const staleTickets = await aSession("Stale tickets", project.id);
     await insertSpec(staleTickets.id, {
@@ -438,13 +536,21 @@ describe("preview-export and export-session", () => {
       ticketsGeneratedAt: "2030-01-01T00:00:00.000Z",
     });
     await insertTicket(staleTickets.id, { number: 1, slug: "stale-ticket" });
+    // Generating a handoff only needs a spec and at least one ticket row; it
+    // does not care whether the tickets are current with the spec, so it
+    // succeeds here even though export will still skip the issue files below.
+    await generateHandoff.run({ sessionId: staleTickets.id });
+
     const second = await exportSession.run({ sessionId: staleTickets.id, slug: "stale" });
     expect(second.ticketsExported).toBe(false);
     expect(second.ticketsSkippedReason).toMatch(/out of date/i);
     expect(second.files).toEqual([
+      path.join(root, ".scratch", "stale", "HANDOFF.md"),
       path.join(root, ".scratch", "stale", "spec.md"),
+      path.join(root, ".scratch", "stale", "briefs", "01-stale-ticket.md"),
       path.join(root, ".scratch", "stale", EXPORT_MANIFEST_FILE),
     ]);
+    expect(await pathExists(path.join(root, ".scratch", "stale", "issues"))).toBe(false);
   });
 
   it("shows the project's tracker diagnostic as a preview line", async () => {
@@ -463,11 +569,13 @@ describe("preview-export and export-session", () => {
     const session = await aSession("Grill Room", project.id);
     await insertTicket(session.id, { number: 1, slug: "../../evil" });
     await insertSpec(session.id, { ticketsCurrent: true });
+    await generateHandoff.run({ sessionId: session.id });
 
     const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
     const bundleDir = path.join(root, ".scratch", "grill-room");
-    expect(result.files[1]).toBe(path.join(bundleDir, "issues", "01-evil.md"));
+    expect(result.files).toContain(path.join(bundleDir, "issues", "01-evil.md"));
+    expect(result.files).toContain(path.join(bundleDir, "briefs", "01-evil.md"));
     for (const file of result.files) expect(file.startsWith(bundleDir + path.sep)).toBe(true);
     expect(await pathExists(path.join(root, "evil.md"))).toBe(false);
     expect(await pathExists(path.join(root, ".scratch", "evil.md"))).toBe(false);
@@ -517,6 +625,7 @@ describe("preview-export and export-session", () => {
 
   it("accepts a symlinked export folder that stays inside the project root", async () => {
     const { root, session } = await aReadySession({ exportFolder: "exports" });
+    await generateHandoff.run({ sessionId: session.id });
     await fs.mkdir(path.join(root, "real-exports"));
     await fs.symlink(path.join(root, "real-exports"), path.join(root, "exports"));
 
@@ -546,18 +655,22 @@ describe("preview-export and export-session", () => {
         })),
       );
     await insertSpec(session.id, { ticketsCurrent: true });
+    await generateHandoff.run({ sessionId: session.id });
 
     const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
     const bundleDir = path.join(root, ".scratch", "grill-room");
-    expect(result.files[1]).toBe(path.join(bundleDir, "issues", "001-ticket-1.md"));
-    expect(result.files[100]).toBe(path.join(bundleDir, "issues", "100-ticket-100.md"));
+    expect(result.files).toContain(path.join(bundleDir, "issues", "001-ticket-1.md"));
+    expect(result.files).toContain(path.join(bundleDir, "issues", "100-ticket-100.md"));
+    expect(result.files).toContain(path.join(bundleDir, "briefs", "001-ticket-1.md"));
+    expect(result.files).toContain(path.join(bundleDir, "briefs", "100-ticket-100.md"));
     for (const file of result.files) expect(file.startsWith(root + path.sep)).toBe(true);
   });
 
   describe("post-export visibility report", () => {
     it("reports freshly written files as untracked when the repo has never seen them", async () => {
       const { root, session } = await aReadySession();
+      await generateHandoff.run({ sessionId: session.id });
 
       const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
@@ -581,6 +694,7 @@ describe("preview-export and export-session", () => {
 
     it("reports files under a gitignored export folder as ignored, with the check-ignore remedy", async () => {
       const { root, session } = await aReadySession({ files: { ".gitignore": ".scratch/\n" } });
+      await generateHandoff.run({ sessionId: session.id });
 
       const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
@@ -603,7 +717,9 @@ describe("preview-export and export-session", () => {
         visibility: "tracked",
       });
       const session = await aSession("Grill Room", project.id);
-      await insertSpec(session.id);
+      await insertTicket(session.id, { number: 1, slug: "ticket-one" });
+      await insertSpec(session.id, { ticketsCurrent: true });
+      await generateHandoff.run({ sessionId: session.id });
 
       const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
@@ -615,15 +731,26 @@ describe("preview-export and export-session", () => {
     it("reports no mismatch and no ignored/untracked files once the bundle is already tracked", async () => {
       const { root, session } = await aReadySession({
         files: {
+          ".scratch/grill-room/HANDOFF.md": "old handoff",
           ".scratch/grill-room/spec.md": "old committed content",
           ".scratch/grill-room/issues/01-build-the-workspace.md": "old",
           ".scratch/grill-room/issues/02-store-on-disk.md": "old",
+          ".scratch/grill-room/briefs/01-build-the-workspace.md": "old brief",
+          ".scratch/grill-room/briefs/02-store-on-disk.md": "old brief",
           [`.scratch/grill-room/${EXPORT_MANIFEST_FILE}`]: JSON.stringify({
             version: 1,
-            files: ["spec.md", "issues/01-build-the-workspace.md", "issues/02-store-on-disk.md"],
+            files: [
+              "HANDOFF.md",
+              "spec.md",
+              "issues/01-build-the-workspace.md",
+              "issues/02-store-on-disk.md",
+              "briefs/01-build-the-workspace.md",
+              "briefs/02-store-on-disk.md",
+            ],
           }),
         },
       });
+      await generateHandoff.run({ sessionId: session.id });
 
       const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 

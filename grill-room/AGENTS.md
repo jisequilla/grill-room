@@ -89,8 +89,8 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `refresh-project-tracker` | Re-read a project's declared tracker and update only what it governs: the stored commands and diagnostic always, and the export folder and slug pattern only when the tracker is valid. Nothing else about the project changes, and nothing else re-reads the tracker file — every ordinary edit carries these fields over untouched. |
 | `set-session-project` | Set the registered project a session exports into, or clear it with `null`. Export requires one. |
 | `set-docs-folder` | Set the read-only folder the interviewer may read while grilling this session, or clear it with `null`. See "Grill with docs" below. |
-| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written as an absolute path (HANDOFF.md and the briefs when a handoff exists, and the manifest), `handoffIncluded`, the files from the previous manifest that will be removed, and the project's tracker diagnostic. Built by the same plan `export-session` writes. |
-| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md` plus `issues/NN-slug.md` per ticket (tickets only when current), and `HANDOFF.md` plus `briefs/NN-slug.md` when a handoff exists (recording that export on the handoff), creating missing folders. Also writes a manifest (`.grill-room-export.json`) of what it wrote; re-export overwrites the planned files and removes exactly the files the previous manifest lists that the new plan no longer writes, never anything else. Writes exactly what `preview-export` lists. Refuses with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, or `export-outside-root` when any path resolves (through symlinks) outside the real project root. Also returns a post-export visibility report — see "Exporting a session" below. |
+| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written as an absolute path (HANDOFF.md and the briefs when a handoff exists, and the manifest), `handoffIncluded`, the files from the previous manifest that will be removed, the project's tracker diagnostic, and the export gate as `exportBlocked`/`exportBlockedReason` (`handoff-missing` or `handoff-stale`, null once clear) — the same gate `export-session` refuses on, reported here without refusing so the UI can explain it first. Built by the same plan `export-session` writes. |
+| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md` plus `issues/NN-slug.md` per ticket (tickets only when current), and `HANDOFF.md` plus `briefs/NN-slug.md` from the session's generated handoff (recording that export on the handoff), creating missing folders. Also writes a manifest (`.grill-room-export.json`) of what it wrote; re-export overwrites the planned files and removes exactly the files the previous manifest lists that the new plan no longer writes, never anything else. Writes exactly what `preview-export` lists. Refuses, writing nothing, with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, `export-outside-root` when any path resolves (through symlinks) outside the real project root, `handoff-missing` when the session has no handoff, or `handoff-stale` when its handoff no longer matches today's spec, tickets or project. Also returns a post-export visibility report — see "Exporting a session" below. |
 | `get-export-visibility` | Classify every file a session's export wrote (or would write) as `tracked`, `ignored`, or `untracked` in the project's repository, given the same `sessionId` and `slug` as `preview-export`/`export-session`. Read-only and side-effect-free, so the UI can re-check without exporting again. See "Exporting a session" below. |
 | `generate-handoff` | Generate or regenerate a session's handoff from deterministic templates (no model call): `HANDOFF.md` plus one brief per ticket. Refuses with `no-project`, `project-not-found`, `spec-missing`, `no-tickets` or `ticket-cycle`, and with `handoff-edited` when the stored handoff carries UI edits unless `overwriteEdits` is true. See "Handoff" below. |
 | `get-handoff` | A session's handoff (HANDOFF.md, briefs by ticket number, timestamps) or null, with `stale` (its inputs changed since generation), `exportStale` (edited or regenerated after the last export that included it), `canGenerate`, and `cannotGenerateReason`. |
@@ -224,13 +224,25 @@ first, show its paths, then call `export-session` with the slug the preview
 used. Both build the plan in `server/export-bundle.ts`, so they cannot
 disagree.
 
+**Export is gated on a current handoff.** `export-session` refuses, writing
+nothing, with `handoff-missing` when the session has never generated one, or
+`handoff-stale` when it no longer matches today's spec, tickets or project (the
+same fingerprint `generate-handoff`'s staleness uses — a `set-ticket-blocked-by`
+edit counts, since it never touches `ticketsGeneratedAt`). `preview-export`
+never refuses on this: it reports the same check as `exportBlocked` and
+`exportBlockedReason`, so the UI can explain and disable before the operator
+tries, and still show every other preview detail (paths, removals, tracker
+diagnostic) regardless. Generate or regenerate the handoff (`generate-handoff`)
+to clear it. This means a bundle can no longer reach disk without an entry
+point — see "Handoff" below.
+
 The bundle is one directory per session:
 
 ```
-<root>/<exportFolder>/<folderName>/HANDOFF.md         # when a handoff was generated
+<root>/<exportFolder>/<folderName>/HANDOFF.md
 <root>/<exportFolder>/<folderName>/spec.md
 <root>/<exportFolder>/<folderName>/issues/NN-slug.md   # "Blocked by: NN, NN" line
-<root>/<exportFolder>/<folderName>/briefs/NN-slug.md   # when a handoff was generated
+<root>/<exportFolder>/<folderName>/briefs/NN-slug.md
 <root>/<exportFolder>/<folderName>/.grill-room-export.json
 ```
 
@@ -308,8 +320,23 @@ When a handoff exists, `preview-export`/`export-session` plan `HANDOFF.md`
 and the briefs like any other bundle file (listed, contained, recorded in the
 manifest, so a dropped ticket's brief is removed on re-export), and export
 records the handoff's fingerprint, revision and time. The handoff is
-**export stale** once it is edited or regenerated after that. Export does not
-yet require a handoff.
+**export stale** once it is edited or regenerated after that.
+
+**Export requires a current handoff** — see the gate in "Exporting a session"
+above. `stale` (fingerprint mismatch) is what the gate checks; `exportStale`
+(edited or regenerated since the last export) is a separate, informational
+flag and never blocks export on its own.
+
+The output page's **Generate everything** button (`GenerateAllAction`, next to
+Export) is a secondary shortcut, not a new action: it calls `break-into-tickets`
+only when the session has none or they are out of date, then `generate-handoff`,
+then scrolls to the export preview. It writes nothing to disk — export stays
+its own explicit, confirmed step — and if the stored handoff carries edits it
+pauses on the same overwrite confirmation `generate-handoff`'s `handoff-edited`
+refusal always requires, rather than discarding them. The individual actions
+(write the spec, break into tickets, generate the handoff, export) remain the
+primary, always-visible controls; regenerating the handoff alone stays
+available from the Handoff block regardless.
 
 ### Logging a build from an agent
 
