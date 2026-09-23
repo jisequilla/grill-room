@@ -80,6 +80,18 @@ export const projects = table("gr_projects", {
     .default("markdown"),
   buildRecordLogging: boolean("build_record_logging").notNull().default(false),
   visibility: text("visibility", { enum: PROJECT_VISIBILITIES }).notNull(),
+  /**
+   * The declared tracker's `commands` map, as JSON text, or null when no
+   * tracker was found. Set at registration and by `refresh-project-tracker`
+   * only; ordinary edits never touch it. See `server/tracker.ts`.
+   */
+  trackerCommandsJson: text("tracker_commands_json"),
+  /**
+   * The diagnostic naming the missing or invalid key when the repo's tracker
+   * block is present but incomplete, or null when there is no tracker or a
+   * valid one. Set at registration and by `refresh-project-tracker` only.
+   */
+  trackerDiagnostic: text("tracker_diagnostic"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

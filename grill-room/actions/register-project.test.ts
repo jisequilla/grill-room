@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -8,6 +9,7 @@ import createSession from "./create-session.js";
 import getProject from "./get-project.js";
 import getSession from "./get-session.js";
 import listProjects from "./list-projects.js";
+import refreshProjectTracker from "./refresh-project-tracker.js";
 import registerProject from "./register-project.js";
 import setSessionProject from "./set-session-project.js";
 import suggestProjectDefaults from "./suggest-project-defaults.js";
@@ -83,10 +85,184 @@ describe("project actions", () => {
       verifyCommand: "pnpm test",
       visibility: "ignored",
       exportFolder: ".scratch",
+      trackerExportFolder: null,
+      trackerSlugPattern: null,
     });
     await expect(
       suggestProjectDefaults.run({ folder: repos.plainFolder() }),
     ).rejects.toMatchObject({ errorCode: "not-a-git-repo" });
+  });
+
+  it("suggest-project-defaults proposes an export folder and slug pattern from a valid tracker", async () => {
+    const root = repos.create({
+      files: {
+        "docs/agents/issue-tracker.md": `---
+tickets_dir: .scratch/tickets
+ticket_format: "{seq}-{slug}"
+commands:
+  claim: bd update {id} --claim
+---
+`,
+      },
+    });
+
+    expect(await suggestProjectDefaults.run({ folder: root })).toMatchObject({
+      trackerExportFolder: ".scratch/tickets",
+      trackerSlugPattern: "{seq}-{slug}",
+    });
+  });
+});
+
+describe("a project's declared tracker", () => {
+  useTestDatabase();
+
+  const TRACKER_PATH = "docs/agents/issue-tracker.md";
+
+  function validTrackerBlock(ticketsDir = ".scratch/tickets", commands: Record<string, string> = { claim: "bd update {id} --claim" }) {
+    const commandLines = Object.entries(commands)
+      .map(([name, command]) => `  ${name}: ${command}`)
+      .join("\n");
+    return `---\ntickets_dir: ${ticketsDir}\nticket_format: "{seq}-{slug}"\ncommands:\n${commandLines}\n---\n`;
+  }
+
+  it("pre-fills export folder and slug pattern from a valid tracker and stores its commands", async () => {
+    const root = repos.create({
+      files: { [TRACKER_PATH]: validTrackerBlock() },
+    });
+
+    const project = await registerProject.run({ root, verifyCommand: "pnpm test" });
+
+    expect(project.exportFolder).toBe(".scratch/tickets");
+    expect(project.slugPattern).toBe("{seq}-{slug}");
+    expect(project.trackerDiagnostic).toBeNull();
+    expect(JSON.parse(project.trackerCommandsJson!)).toEqual({
+      claim: "bd update {id} --claim",
+    });
+  });
+
+  it("is missing without the file, and prose-only counts the same as missing", async () => {
+    const noFile = await registerProject.run({
+      root: repos.create(),
+      verifyCommand: "pnpm test",
+      exportFolder: ".scratch",
+    });
+    expect(noFile.trackerCommandsJson).toBeNull();
+    expect(noFile.trackerDiagnostic).toBeNull();
+    expect(noFile.exportFolder).toBe(".scratch");
+
+    const prose = await registerProject.run({
+      root: repos.create({
+        files: { [TRACKER_PATH]: "# Issue tracker\n\nJust prose, no front matter.\n" },
+      }),
+      verifyCommand: "pnpm test",
+      exportFolder: ".scratch",
+    });
+    expect(prose.trackerCommandsJson).toBeNull();
+    expect(prose.trackerDiagnostic).toBeNull();
+  });
+
+  it("explicit export folder and slug pattern override the tracker's pre-fill", async () => {
+    const root = repos.create({ files: { [TRACKER_PATH]: validTrackerBlock() } });
+
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      exportFolder: ".scratch/mine",
+      slugPattern: "{slug}",
+    });
+
+    expect(project.exportFolder).toBe(".scratch/mine");
+    expect(project.slugPattern).toBe("{slug}");
+    // The commands are stored from the tracker read regardless.
+    expect(JSON.parse(project.trackerCommandsJson!)).toEqual({
+      claim: "bd update {id} --claim",
+    });
+  });
+
+  it("keeps the fixed defaults and stores a diagnostic naming tickets_dir when the block is missing it", async () => {
+    const root = repos.create({
+      files: {
+        [TRACKER_PATH]: `---\nticket_format: "{slug}"\ncommands:\n  claim: bd update {id} --claim\n---\n`,
+      },
+    });
+
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      exportFolder: ".scratch",
+    });
+
+    expect(project.exportFolder).toBe(".scratch");
+    expect(project.slugPattern).toBe("{slug}");
+    expect(project.trackerCommandsJson).toBeNull();
+    expect(project.trackerDiagnostic).toMatch(/tickets_dir/);
+  });
+
+  it("is invalid, naming tickets_dir, with a tickets_dir outside the root", async () => {
+    const root = repos.create({
+      files: { [TRACKER_PATH]: validTrackerBlock("../outside") },
+    });
+
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      exportFolder: ".scratch",
+    });
+
+    expect(project.trackerDiagnostic).toMatch(/tickets_dir/);
+    expect(project.exportFolder).toBe(".scratch");
+  });
+
+  it("refuses a blank export folder when there is no valid tracker to fall back on", async () => {
+    await expect(
+      registerProject.run({ root: repos.create(), verifyCommand: "pnpm test" }),
+    ).rejects.toMatchObject({ errorCode: "export-folder-required" });
+  });
+
+  it("is not re-read by an ordinary update; refresh-project-tracker re-reads it", async () => {
+    const root = repos.create({ files: { [TRACKER_PATH]: validTrackerBlock() } });
+    const project = await registerProject.run({ root, verifyCommand: "pnpm test" });
+    expect(project.exportFolder).toBe(".scratch/tickets");
+
+    writeFileSync(
+      path.join(root, TRACKER_PATH),
+      validTrackerBlock(".scratch/renamed", {
+        claim: "bd update {id} --claim",
+        close: "bd close {id}",
+      }),
+    );
+
+    const updated = await updateProject.run({ id: project.id, name: "Renamed" });
+    expect(updated.exportFolder).toBe(".scratch/tickets");
+    expect(JSON.parse(updated.trackerCommandsJson!)).toEqual({
+      claim: "bd update {id} --claim",
+    });
+
+    const refreshed = await refreshProjectTracker.run({ id: project.id });
+    expect(refreshed.exportFolder).toBe(".scratch/renamed");
+    expect(JSON.parse(refreshed.trackerCommandsJson!)).toEqual({
+      claim: "bd update {id} --claim",
+      close: "bd close {id}",
+    });
+
+    expect((await getProject.run({ id: project.id })).exportFolder).toBe(".scratch/renamed");
+  });
+
+  it("surfaces the diagnostic on the project record", async () => {
+    const root = repos.create({
+      files: { [TRACKER_PATH]: `---\ntickets_dir: .scratch\n---\n` },
+    });
+
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      exportFolder: ".scratch",
+    });
+
+    expect((await getProject.run({ id: project.id })).trackerDiagnostic).toMatch(/ticket_format/);
+    expect((await listProjects.run({})).find((p) => p.id === project.id)?.trackerDiagnostic).toMatch(
+      /ticket_format/,
+    );
   });
 });
 

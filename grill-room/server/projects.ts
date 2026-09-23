@@ -8,6 +8,11 @@
  * comes from. Nothing here depends on HTTP: it is plain async functions over
  * the database and read-only git, callable from any Node code.
  *
+ * The repo's declared tracker (`server/tracker.ts`) is read only by
+ * {@link registerProject} and {@link refreshProjectTracker}; {@link
+ * updateProject} never re-reads it, so editing a project cannot change its
+ * stored tracker commands or diagnostic out from under the operator.
+ *
  * Refusals are returned, not thrown, as `{ refusal: { errorCode, message } }`,
  * in the style of `resolveDocsFolder`. The caller decides how to surface one.
  */
@@ -27,6 +32,7 @@ import {
 } from "../shared/session-constants.js";
 import { getDb, schema } from "./db/index.js";
 import { GitUnavailableError, runGit } from "./git.js";
+import { readProjectTracker } from "./tracker.js";
 
 export type Project = typeof schema.projects.$inferSelect;
 
@@ -289,12 +295,19 @@ export interface ProjectFolderInspection {
   visibility: ProjectVisibility | null;
   /** The export folder normalised against the root, or null when none was given. */
   exportFolder: string | null;
+  /** From a valid declared tracker's `tickets_dir`; pre-fills a blank export folder. */
+  trackerExportFolder: string | null;
+  /** From a valid declared tracker's `ticket_format`; pre-fills a blank slug pattern. */
+  trackerSlugPattern: string | null;
 }
 
 /**
  * Everything registration would detect about a folder, without registering it:
- * the resolved root, a default name, a suggested verify command and — given an
- * export folder — its seeded visibility. The form pre-fills itself from this.
+ * the resolved root, a default name, a suggested verify command, a declared
+ * tracker's export folder and slug pattern suggestion when it has a valid one,
+ * and — given an export folder — its seeded visibility. The form pre-fills
+ * itself from this; an explicit value the operator has typed always wins over
+ * a suggestion.
  */
 export async function inspectProjectFolder(
   folder: string,
@@ -313,12 +326,16 @@ export async function inspectProjectFolder(
     visibility = await seedVisibility(root, normalizedExport);
   }
 
+  const tracker = readProjectTracker(root);
+
   return {
     root,
     name: path.basename(root),
     verifyCommand: suggestVerifyCommand(root),
     visibility,
     exportFolder: normalizedExport,
+    trackerExportFolder: tracker.kind === "valid" ? tracker.tracker.ticketsDir : null,
+    trackerSlugPattern: tracker.kind === "valid" ? tracker.tracker.ticketFormat : null,
   };
 }
 
@@ -381,11 +398,15 @@ type ProjectValues = Omit<Project, "id" | "createdAt" | "updatedAt">;
 /**
  * Validate a complete set of fields and resolve them to what is stored. Shared
  * by registration and editing, which differ only in where missing fields come
- * from: defaults for a new project, the stored row for an existing one.
+ * from: defaults for a new project, the stored row for an existing one; and in
+ * whether the repo's declared tracker is read (`readTracker`) — only
+ * registration and the explicit refresh action read it; an ordinary edit
+ * carries the stored tracker fields over unchanged.
  */
 async function validate(
   input: ProjectInput,
   existing: Project | undefined,
+  options: { readTracker?: boolean } = {},
 ): Promise<{ values: ProjectValues } | Refused> {
   if (blank(input.root)) {
     return refuse("root-required", "A project needs a root folder.");
@@ -393,21 +414,45 @@ async function validate(
   if (blank(input.verifyCommand)) {
     return refuse("verify-command-required", "A project needs a verify command.");
   }
-  if (blank(input.exportFolder)) {
-    return refuse("export-folder-required", "A project needs an export folder.");
-  }
 
   const resolved = await resolveGitRoot(input.root as string);
   if ("refusal" in resolved) return resolved;
   const { root } = resolved;
 
-  const normalized = normalizeExportFolder(root, input.exportFolder as string);
+  // The declared tracker is read only at registration (and by the explicit
+  // refresh action, which does not go through this function). Everywhere
+  // else the stored values are carried over untouched.
+  const tracker = options.readTracker ? readProjectTracker(root) : null;
+  const trackerCommandsJson =
+    tracker === null
+      ? (existing?.trackerCommandsJson ?? null)
+      : tracker.kind === "valid"
+        ? JSON.stringify(tracker.tracker.commands)
+        : null;
+  const trackerDiagnostic =
+    tracker === null
+      ? (existing?.trackerDiagnostic ?? null)
+      : tracker.kind === "invalid"
+        ? tracker.diagnostic
+        : null;
+  const trackerExportFolder = tracker?.kind === "valid" ? tracker.tracker.ticketsDir : null;
+  const trackerSlugPattern = tracker?.kind === "valid" ? tracker.tracker.ticketFormat : null;
+
+  // Explicit input always wins; a valid tracker only fills a field the
+  // caller left blank.
+  const exportFolderInput = blank(input.exportFolder) ? trackerExportFolder : input.exportFolder;
+  if (blank(exportFolderInput)) {
+    return refuse("export-folder-required", "A project needs an export folder.");
+  }
+
+  const normalized = normalizeExportFolder(root, exportFolderInput as string);
   if ("refusal" in normalized) return normalized;
   const { exportFolder } = normalized;
 
-  const slugPattern = blank(input.slugPattern)
+  const slugPatternInput = blank(input.slugPattern) ? trackerSlugPattern : input.slugPattern;
+  const slugPattern = blank(slugPatternInput)
     ? DEFAULT_PROJECT_SLUG_PATTERN
-    : (input.slugPattern as string).trim();
+    : (slugPatternInput as string).trim();
   const slugRefusal = checkSlugPattern(slugPattern);
   if (slugRefusal) return slugRefusal;
 
@@ -443,19 +488,23 @@ async function validate(
       trackerKind,
       buildRecordLogging: input.buildRecordLogging ?? false,
       visibility,
+      trackerCommandsJson,
+      trackerDiagnostic,
     },
   };
 }
 
 /**
  * Register a project. Root, verify command and export folder are required;
- * the rest default. The root is resolved to its git top-level, and the
- * visibility flag is seeded from `git check-ignore` unless given.
+ * the rest default. The root is resolved to its git top-level, the visibility
+ * flag is seeded from `git check-ignore` unless given, and the repo's
+ * declared tracker (if any) is read once to pre-fill a blank export folder or
+ * slug pattern and to store its commands and diagnostic.
  */
 export async function registerProject(
   input: ProjectInput,
 ): Promise<{ project: Project } | Refused> {
-  const outcome = await validate(input, undefined);
+  const outcome = await validate(input, undefined, { readTracker: true });
   if ("refusal" in outcome) return outcome;
 
   const now = new Date().toISOString();
@@ -492,12 +541,49 @@ export async function updateProject(
     visibility: patch.visibility ?? existing.visibility,
   };
 
-  const outcome = await validate(merged, existing);
+  const outcome = await validate(merged, existing, { readTracker: false });
   if ("refusal" in outcome) return outcome;
 
   const [project] = await getDb()
     .update(schema.projects)
     .set({ ...outcome.values, updatedAt: new Date().toISOString() })
+    .where(eq(schema.projects.id, id))
+    .returning();
+  return { project };
+}
+
+/**
+ * Re-read a project's declared tracker and update only what it governs: the
+ * stored commands and diagnostic always, and the export folder and slug
+ * pattern only when the tracker is valid. Nothing else about the project
+ * changes, and nothing else in this module re-reads the tracker file — every
+ * other edit carries the stored tracker fields over untouched.
+ */
+export async function refreshProjectTracker(
+  id: string,
+): Promise<{ project: Project } | Refused> {
+  const existing = await getProject(id);
+  if (!existing) {
+    return refuse("project-not-found", `Project not found: ${id}`);
+  }
+
+  const tracker = readProjectTracker(existing.rootPath);
+  const patch: Partial<ProjectValues> = {
+    trackerCommandsJson: tracker.kind === "valid" ? JSON.stringify(tracker.tracker.commands) : null,
+    trackerDiagnostic: tracker.kind === "invalid" ? tracker.diagnostic : null,
+  };
+
+  if (tracker.kind === "valid") {
+    const normalized = normalizeExportFolder(existing.rootPath, tracker.tracker.ticketsDir);
+    if (!("refusal" in normalized)) patch.exportFolder = normalized.exportFolder;
+
+    const slugRefusal = checkSlugPattern(tracker.tracker.ticketFormat);
+    if (!slugRefusal) patch.slugPattern = tracker.tracker.ticketFormat;
+  }
+
+  const [project] = await getDb()
+    .update(schema.projects)
+    .set({ ...patch, updatedAt: new Date().toISOString() })
     .where(eq(schema.projects.id, id))
     .returning();
   return { project };
