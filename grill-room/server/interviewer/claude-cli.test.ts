@@ -442,6 +442,13 @@ describe("what the adapter sends for a project scout", () => {
     );
   });
 
+  it("tells the scout an inferred decision may not claim exclusivity from one citation", async () => {
+    const { invocation } = await scoutInvocation();
+    const prompt = valueOf(invocation.args, "-p") as string;
+
+    expect(prompt).toContain("one cited line cannot show an absence");
+  });
+
   it("sends exactly this argument list", async () => {
     const { invocation } = await scoutInvocation();
     const { args } = invocation;

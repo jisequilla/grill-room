@@ -74,3 +74,52 @@ export async function answerOwnText(card: Locator, text: string): Promise<void> 
     .fill(text);
   await card.getByRole("button", { name: "Save", exact: true }).click();
 }
+
+/**
+ * Registers a repository as a project, over HTTP the same way
+ * {@link chooseScenario} calls `use-fake-scenario` — a POST to the action's
+ * endpoint (`actions/register-project.ts`). Returns the created project (at
+ * least its `id`), which {@link setSessionProject} then attaches to a
+ * session.
+ */
+export async function registerProject(
+  request: APIRequestContext,
+  input: {
+    root: string;
+    verifyCommand: string;
+    exportFolder?: string;
+    name?: string;
+  },
+): Promise<{ id: string }> {
+  const response = await request.post(
+    "/_agent-native/actions/register-project",
+    { data: input },
+  );
+  if (!response.ok()) {
+    throw new Error(
+      `register-project(root=${input.root}) failed: ${response.status()} ${await response.text()}`,
+    );
+  }
+  return response.json();
+}
+
+/**
+ * Sets the registered project a session exports into
+ * (`actions/set-session-project.ts`), over HTTP as {@link registerProject}
+ * and {@link chooseScenario} do.
+ */
+export async function setSessionProject(
+  request: APIRequestContext,
+  sessionId: string,
+  projectId: string,
+): Promise<void> {
+  const response = await request.post(
+    "/_agent-native/actions/set-session-project",
+    { data: { sessionId, projectId } },
+  );
+  if (!response.ok()) {
+    throw new Error(
+      `set-session-project(sessionId=${sessionId}, projectId=${projectId}) failed: ${response.status()} ${await response.text()}`,
+    );
+  }
+}
