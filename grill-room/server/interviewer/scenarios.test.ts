@@ -371,25 +371,32 @@ describe("named scenarios for every request kind", () => {
     expect(interviewer.remainingFor(session.id)).toBe(0);
   });
 
-  it("rate-limit-then-retry scripts a rate limit that stops the turn, then a manual retry that succeeds", async () => {
-    const session = await aSession();
-    const interviewer = useScenario(session.id, "rate-limit-then-retry");
-    expect(fakeScenarios["rate-limit-then-retry"]?.delayMs).toBeGreaterThan(0);
+  it(
+    "rate-limit-then-retry scripts a rate limit that stops the turn, then a manual retry that succeeds",
+    // This test runs the scenario's real, un-mocked `delayMs` twice in
+    // sequence (the rate-limited attempt, then the manual retry), so it
+    // needs more than vitest's default 5 s test timeout.
+    async () => {
+      const session = await aSession();
+      const interviewer = useScenario(session.id, "rate-limit-then-retry");
+      expect(fakeScenarios["rate-limit-then-retry"]?.delayMs).toBeGreaterThan(0);
 
-    await expect(
-      requestNextRound.run({ sessionId: session.id }),
-    ).rejects.toThrow(/rate limited/);
+      await expect(
+        requestNextRound.run({ sessionId: session.id }),
+      ).rejects.toThrow(/rate limited/);
 
-    // The manual retry: a second, separate call to the same action.
-    const opened = await requestNextRound.run({ sessionId: session.id });
+      // The manual retry: a second, separate call to the same action.
+      const opened = await requestNextRound.run({ sessionId: session.id });
 
-    expect(interviewer.requests.map((request) => request.kind)).toEqual([
-      "propose-round",
-      "propose-round",
-    ]);
-    expect(opened.round?.decisions.map((card) => card.key)).toEqual(["shape"]);
-    expect(interviewer.remainingFor(session.id)).toBe(0);
-  });
+      expect(interviewer.requests.map((request) => request.kind)).toEqual([
+        "propose-round",
+        "propose-round",
+      ]);
+      expect(opened.round?.decisions.map((card) => card.key)).toEqual(["shape"]);
+      expect(interviewer.remainingFor(session.id)).toBe(0);
+    },
+    15_000,
+  );
 
   it("scout-project scripts one scout-project request, citing files the fixture project holds", async () => {
     const root = repos.create({
