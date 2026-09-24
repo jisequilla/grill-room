@@ -28,7 +28,7 @@ import {
   type DecisionRow,
 } from "./tree.js";
 import {
-  startTurnRecorder,
+  resumeOrStartTurnRecorder,
   TURN_SUCCEEDED,
   type AttemptRecorder,
   type TurnRecorder,
@@ -88,6 +88,12 @@ export function failIfTurnInProgress(
  * fields: `take` receives the recorder to pass to `askUntilAccepted`, and the
  * record is closed with `"succeeded"` or the same code the session's
  * `turnErrorCode` gets.
+ *
+ * There is no separate retry action: calling in again while the session's
+ * turn is `"failed"` is what a manual retry is. When that is so and the
+ * latest turn record of this `record.turnKind` stopped without succeeding,
+ * the recorder continues it as a new run instead of starting a fresh turn —
+ * see `resumeOrStartTurnRecorder`.
  */
 export async function runTurn(input: {
   sessionId: string;
@@ -99,6 +105,19 @@ export async function runTurn(input: {
 }): Promise<void> {
   const db = getDb();
   const { sessionId } = input;
+
+  // The session's turn status before this call touches it: `"failed"` is the
+  // only way this call can be a manual retry, since retrying is just calling
+  // the same action again. Read before the update just below overwrites it.
+  let isManualRetry = false;
+  if (input.record) {
+    const [priorState] = await db
+      .select({ turnStatus: schema.sessions.turnStatus })
+      .from(schema.sessions)
+      .where(eq(schema.sessions.id, sessionId))
+      .limit(1);
+    isManualRetry = priorState?.turnStatus === "failed";
+  }
 
   const startedAt = new Date().toISOString();
   await db
@@ -116,7 +135,11 @@ export async function runTurn(input: {
   let conversationId: string | null;
   try {
     if (input.record) {
-      recorder = await startTurnRecorder({ sessionId, ...input.record });
+      recorder = await resumeOrStartTurnRecorder({
+        sessionId,
+        ...input.record,
+        isManualRetry,
+      });
     }
     conversationId = await input.take(recorder);
   } catch (error) {

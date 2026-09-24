@@ -1853,6 +1853,11 @@ describe("propose-round turn records", () => {
       }),
     ]);
 
+    // A fresh session, not a retry on the rate-limited one above: this is
+    // checking that an interviewer error's attempt kind is distinct from a
+    // rate limit's, not exercising the manual-retry continuation (covered in
+    // "manual retry" below).
+    const otherSession = await aSession();
     scriptInterviewer([
       {
         kind: "propose-round",
@@ -1860,10 +1865,10 @@ describe("propose-round turn records", () => {
       },
     ]);
     await expect(
-      requestNextRound.run({ sessionId: session.id }),
+      requestNextRound.run({ sessionId: otherSession.id }),
     ).rejects.toThrow("The turn died.");
 
-    const errored = await proposalTurn(session.id);
+    const errored = await proposalTurn(otherSession.id);
     expect(errored.id).not.toBe(rateLimited.id);
     expect(errored.outcome).toBe("failed");
     expect(errored.runs[0]!.attempts).toEqual([
@@ -1944,5 +1949,171 @@ describe("propose-round turn records", () => {
     expect(linked).toHaveLength(2);
     expect(linked).toContain(turn.id);
     expect(linked).toContain(null);
+  });
+});
+
+describe("propose-round manual retry", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  /** The session's latest propose-round turn, read back through `get-turn`. */
+  async function proposalTurn(sessionId: string) {
+    const latest = await findLatestTurn({
+      sessionId,
+      turnKind: "propose-round",
+    });
+    expect(latest).not.toBeNull();
+    return getTurn.run({ turnId: latest!.id });
+  }
+
+  async function roundTurnIds(sessionId: string) {
+    const rows = await getDb()
+      .select()
+      .from(schema.rounds)
+      .where(eq(schema.rounds.sessionId, sessionId));
+    return rows.map((row) => row.turnId);
+  }
+
+  const offFrontier = () => ({
+    kind: "propose-round" as const,
+    result: treeRuleViolation.offFrontier(),
+  });
+
+  it("continues the same turn as a new run after schema-invalid output stopped it", async () => {
+    const session = await aSession();
+    const invalid = schemaInvalidTurn("propose-round", {
+      proposedDecisions: "nope",
+    });
+    scriptInterviewer([invalid]);
+    await expect(
+      requestNextRound.run({ sessionId: session.id }),
+    ).rejects.toThrow();
+
+    const stopped = await proposalTurn(session.id);
+    expect(stopped.outcome).toBe("malformed-output");
+    expect(stopped.runs).toHaveLength(1);
+
+    scriptInterviewer([round(proposed({ key: "shape" }))]);
+    await requestNextRound.run({ sessionId: session.id });
+
+    const retried = await proposalTurn(session.id);
+    expect(retried.id).toBe(stopped.id);
+    expect(retried.outcome).toBe("succeeded");
+    expect(retried.runs).toHaveLength(2);
+    expect(retried.runs[0]).toMatchObject({ runNumber: 1, manualRetry: false });
+    expect(retried.runs[1]).toMatchObject({ runNumber: 2, manualRetry: true });
+    expect(retried.runs[1]!.attempts).toEqual([
+      expect.objectContaining({ attemptNumber: 1, kind: "success" }),
+    ]);
+    expect(retried.totalElapsedMs).toBeGreaterThanOrEqual(
+      stopped.totalElapsedMs ?? 0,
+    );
+    expect(await roundTurnIds(session.id)).toEqual([retried.id]);
+  });
+
+  it("continues the same turn as a new run after a rate limit stopped it", async () => {
+    const session = await aSession();
+    scriptInterviewer([
+      rateLimitedTurn("propose-round", "The subscription pool is spent."),
+    ]);
+    await expect(
+      requestNextRound.run({ sessionId: session.id }),
+    ).rejects.toThrow("The subscription pool is spent.");
+
+    const stopped = await proposalTurn(session.id);
+    expect(stopped.outcome).toBe("rate-limited");
+    expect(stopped.runs).toHaveLength(1);
+
+    scriptInterviewer([round(proposed({ key: "shape" }))]);
+    await requestNextRound.run({ sessionId: session.id });
+
+    const retried = await proposalTurn(session.id);
+    expect(retried.id).toBe(stopped.id);
+    expect(retried.outcome).toBe("succeeded");
+    expect(retried.runs).toHaveLength(2);
+    expect(retried.runs[1]).toMatchObject({ runNumber: 2, manualRetry: true });
+    expect(retried.runs[1]!.attempts).toEqual([
+      expect.objectContaining({ attemptNumber: 1, kind: "success" }),
+    ]);
+  });
+
+  it("continues the same turn as a new run after an exhausted budget stopped it, the budget counter restarting at 1", async () => {
+    const session = await aSession();
+    scriptInterviewer([offFrontier(), offFrontier(), offFrontier()]);
+    await expect(
+      requestNextRound.run({ sessionId: session.id }),
+    ).rejects.toThrow();
+
+    const stopped = await proposalTurn(session.id);
+    expect(stopped.outcome).toBe("invalid-proposal");
+    expect(stopped.runs[0]!.attempts).toHaveLength(3);
+
+    // One more refusal inside the retried run: were the budget not reset,
+    // this alone would exhaust it (it would be the fourth in a row).
+    scriptInterviewer([offFrontier(), round(proposed({ key: "shape" }))]);
+    await requestNextRound.run({ sessionId: session.id });
+
+    const retried = await proposalTurn(session.id);
+    expect(retried.id).toBe(stopped.id);
+    expect(retried.outcome).toBe("succeeded");
+    expect(retried.runs).toHaveLength(2);
+    expect(retried.runs[1]).toMatchObject({ runNumber: 2, manualRetry: true });
+    expect(
+      retried.runs[1]!.attempts.map(({ attemptNumber, kind }) => ({
+        attemptNumber,
+        kind,
+      })),
+    ).toEqual([
+      { attemptNumber: 1, kind: "tree-rule-refusal" },
+      { attemptNumber: 2, kind: "success" },
+    ]);
+    expect(await roundTurnIds(session.id)).toEqual([retried.id]);
+  });
+
+  it("keeps a single run on a stopped turn that is never retried", async () => {
+    const session = await aSession();
+    scriptInterviewer([
+      rateLimitedTurn("propose-round", "The subscription pool is spent."),
+    ]);
+    await expect(
+      requestNextRound.run({ sessionId: session.id }),
+    ).rejects.toThrow();
+
+    const stopped = await proposalTurn(session.id);
+    expect(stopped.runs).toHaveLength(1);
+    expect(stopped.runs[0]).toMatchObject({ runNumber: 1, manualRetry: false });
+  });
+
+  it("starts a new turn once a turn of the kind has succeeded, even though an earlier one of the kind once stopped", async () => {
+    const session = await aSession();
+    scriptInterviewer([offFrontier(), offFrontier(), offFrontier()]);
+    await expect(
+      requestNextRound.run({ sessionId: session.id }),
+    ).rejects.toThrow();
+    const stopped = await proposalTurn(session.id);
+
+    // A manual retry succeeds: same turn, second run.
+    scriptInterviewer([round(proposed({ key: "shape" }))]);
+    const afterRetry = await requestNextRound.run({ sessionId: session.id });
+    const succeeded = await proposalTurn(session.id);
+    expect(succeeded.id).toBe(stopped.id);
+    expect(succeeded.outcome).toBe("succeeded");
+
+    // Submitting settles the round and asks for the next proposal itself.
+    // The session's turn is idle now, not failed, so this is a genuinely
+    // fresh call rather than a retry — a new turn record, not a third run.
+    scriptInterviewer([
+      round(proposed({ key: "tone", title: "How blunt should it be?" })),
+    ]);
+    await saveDraftAnswer.run({
+      decisionId: afterRetry.round!.decisions[0]!.id,
+      answerKind: "accepted-recommendation",
+    });
+    await submitRound.run({ id: afterRetry.round!.id });
+
+    const fresh = await proposalTurn(session.id);
+    expect(fresh.id).not.toBe(succeeded.id);
+    expect(fresh.runs).toHaveLength(1);
+    expect(fresh.runs[0]).toMatchObject({ runNumber: 1, manualRetry: false });
   });
 });
