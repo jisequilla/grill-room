@@ -34,6 +34,11 @@ function renderDecision(decision: DecisionSnapshot): string {
   const lines = [
     `- [${decision.key}] (${decision.state}, added by ${decision.introducedBy}) ${decision.title}`,
   ];
+  if (decision.repo) {
+    lines.push(
+      `  from the repo (${decision.repo.source}, cited at ${decision.repo.citation}): ${decision.repo.statement}`,
+    );
+  }
   if (decision.body) lines.push(`  question: ${decision.body}`);
   if (decision.choices.length > 0) {
     lines.push("  choices:");
@@ -64,11 +69,65 @@ function renderDecision(decision: DecisionSnapshot): string {
   return lines.join("\n");
 }
 
+/**
+ * The session's project, as its scout report describes it: context for the
+ * interview, never decisions. Nothing at all without a report.
+ */
+function renderProjectContext(context: InterviewContext): string[] {
+  const project = context.projectContext;
+  if (!project) return [];
+
+  const currentState =
+    project.currentState.length > 0
+      ? project.currentState
+          .map(
+            (item) =>
+              `- (${item.status}) ${item.summary} — ${item.citations.join(", ")}`,
+          )
+          .join("\n")
+      : "(none)";
+  const dropped =
+    project.droppedDecisions.length > 0
+      ? project.droppedDecisions
+          .map(
+            (decision) =>
+              `- [${decision.key}] (${decision.source}, cited at ${decision.citation}) ${decision.title}: ${decision.statement} — ${decision.reason}`,
+          )
+          .join("\n")
+      : "(none)";
+
+  return [
+    "## The project",
+    "",
+    "The session's project was scouted for this idea.",
+    project.stale
+      ? `The scout report is stale: it was read at commit ${project.commitRead ?? "(no commits yet)"}, and the project or the idea has changed since. Use it as context, but weigh it accordingly.`
+      : `The scout report is current, read at commit ${project.commitRead ?? "(no commits yet)"}.`,
+    "",
+    "What already exists relative to the idea (built, partial, or a gap):",
+    "",
+    currentState,
+    "",
+    "Do not ask the user about ground this already settles; build on what is",
+    "built, and ask about the gaps.",
+    "",
+    "Repo decisions the user dropped. They are context, not constraints: the",
+    "user chose not to enforce them, so a decision may depart from them, but",
+    "say so when one does.",
+    "",
+    dropped,
+    "",
+  ];
+}
+
 function renderContext(context: InterviewContext): string {
   const decisions =
     context.decisions.length > 0
       ? context.decisions.map(renderDecision).join("\n")
       : "(none yet: this is the first round)";
+  const hasRepoDecisions = context.decisions.some(
+    (decision) => decision.introducedBy === "repo",
+  );
 
   return [
     "## The session",
@@ -87,9 +146,22 @@ function renderContext(context: InterviewContext): string {
     "",
     context.idea,
     "",
+    ...renderProjectContext(context),
     "## The design tree so far",
     "",
     decisions,
+    ...(hasRepoDecisions
+      ? [
+          "",
+          "Decisions added by `repo` are choices the project has already made,",
+          "which the user kept from the scout report. They are the project's",
+          "constraints: while settled, never ask one again and never propose a",
+          "decision that contradicts it. New decisions may depend on them by",
+          "key, like any settled decision. Only the user can change one, by",
+          "reopening it; a reopened repo decision is asked like any other, and",
+          "its answer is a deliberate change to the project.",
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -223,6 +295,23 @@ function renderTask(
         request.openQuestions.length > 0
           ? request.openQuestions.map((item) => `- ${item}`).join("\n")
           : "(none)";
+      const reopenedRepo =
+        request.reopenedRepoDecisions.length > 0
+          ? [
+              "- These decisions the project had already made were reopened in",
+              "  the interview and changed. State each one, in Implementation",
+              "  Decisions, as a deliberate change to the project: what the",
+              "  project held, where it was recorded, and what replaces it.",
+              "",
+              request.reopenedRepoDecisions
+                .map(
+                  (decision) =>
+                    `  - [${decision.key}] ${decision.title} (${decision.source}, cited at ${decision.citation}): the project held "${decision.replacedStatement}"; the interview changed it to "${decision.answer}".`,
+                )
+                .join("\n"),
+              "",
+            ]
+          : [];
 
       return [
         "## Your task: synthesize the spec",
@@ -248,6 +337,7 @@ function renderTask(
         "",
         openQuestions,
         "",
+        ...reopenedRepo,
         "Return the whole spec as markdown in `markdown`, starting at the",
         "`## Problem Statement` heading. Do not wrap it in a code fence.",
       ].join("\n");

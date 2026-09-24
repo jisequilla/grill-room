@@ -38,6 +38,7 @@ export function aDecision(
     answer: null,
     previousAnswers: [],
     introducedBy: "interviewer",
+    repo: null,
     ...overrides,
   };
 }
@@ -54,6 +55,7 @@ export function aContext(
     conversationId: null,
     docsFolder: null,
     decisions: [],
+    projectContext: null,
     ...overrides,
   };
 }
@@ -91,6 +93,7 @@ export function aSynthesizeSpecRequest(
     context: aContext(),
     outOfScope: [],
     openQuestions: [],
+    reopenedRepoDecisions: [],
     rejectionReason: null,
     ...overrides,
   };

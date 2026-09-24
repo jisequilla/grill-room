@@ -29,6 +29,7 @@ import {
 import {
   askUntilAccepted,
   decisionSnapshots,
+  projectContextFor,
   failIfTurnInProgress,
   MAX_TURN_RETRIES,
   portAnswerKind,
@@ -309,6 +310,7 @@ export default defineAction({
                 docsFolder: session!.docsFolder,
                 conversationId,
                 decisions: await decisionSnapshots(current),
+                projectContext: await projectContextFor(session!),
               },
               latestAnswers,
               userAddedDecisions: pendingUserAddedDecisions(current),

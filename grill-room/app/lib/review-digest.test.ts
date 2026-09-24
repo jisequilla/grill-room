@@ -34,6 +34,7 @@ function decision(overrides: Partial<TreeDecision> = {}): TreeDecision {
     recommendedAnswer: null,
     dependsOn: [],
     introducedBy: "interviewer",
+    repo: null,
     state: "settled",
     answer: null,
     dispositionTarget: null,

@@ -33,6 +33,7 @@ import {
 import {
   askUntilAccepted,
   decisionSnapshots,
+  projectContextFor,
   MAX_TURN_RETRIES,
   portKey,
   runTurn,
@@ -184,6 +185,7 @@ async function scan(
             docsFolder: session.docsFolder,
             conversationId: attempt.conversationId,
             decisions: await decisionSnapshots(rows),
+            projectContext: await projectContextFor(session),
           },
           looseEndKeys: askedKeys,
           rejectionReason: attempt.rejectionReason,

@@ -36,7 +36,12 @@ export type SessionState = (typeof SESSION_STATES)[number];
 export const SESSION_TURN_STATUSES = ["idle", "working", "failed"] as const;
 export type SessionTurnStatus = (typeof SESSION_TURN_STATUSES)[number];
 
-/** How a decision's current answer was arrived at. `null` means no answer yet. */
+/**
+ * How a decision's current answer was arrived at. `null` means no answer yet.
+ * `repo-established` is a repo decision the user kept from the scout report:
+ * the project had already made it, so its statement is its answer rather than
+ * one chosen in the interview.
+ */
 export const DECISION_ANSWER_KINDS = [
   "accepted-recommendation",
   "own-answer",
@@ -45,6 +50,7 @@ export const DECISION_ANSWER_KINDS = [
   "deferred",
   "prototype-flagged",
   "dispositioned",
+  "repo-established",
 ] as const;
 export type DecisionAnswerKind = (typeof DECISION_ANSWER_KINDS)[number];
 
@@ -56,9 +62,16 @@ export const DECISION_DISPOSITION_TARGETS = [
 export type DecisionDispositionTarget =
   (typeof DECISION_DISPOSITION_TARGETS)[number];
 
-/** Who put a decision into the tree. */
-export const DECISION_INTRODUCED_BY = ["interviewer", "user"] as const;
+/**
+ * Who put a decision into the tree. `repo` is a decision the project had
+ * already made, kept by the user from the session's scout report.
+ */
+export const DECISION_INTRODUCED_BY = ["interviewer", "user", "repo"] as const;
 export type DecisionIntroducedBy = (typeof DECISION_INTRODUCED_BY)[number];
+
+/** Where a repo decision was read: written down, or inferred from code or configuration. */
+export const REPO_DECISION_SOURCES = ["recorded", "inferred"] as const;
+export type RepoDecisionSource = (typeof REPO_DECISION_SOURCES)[number];
 
 /** Whether a round has been submitted to the interviewer yet. */
 export const ROUND_SUBMISSION_STATES = ["open", "submitted"] as const;

@@ -19,7 +19,9 @@ import type {
   DecisionSnapshot,
   DecisionState,
   ModelCallObserver,
+  ProjectContext,
 } from "./interviewer/index.js";
+import { currentScoutReport, projectContextOf } from "./scout-report.js";
 import {
   deriveTreeStates,
   parseChoices,
@@ -320,6 +322,30 @@ export async function decisionSnapshots(
               : [],
           ),
         introducedBy: row.introducedBy,
+        repo:
+          row.introducedBy === "repo"
+            ? {
+                source: row.repoSource ?? "inferred",
+                citation: row.repoCitation ?? "",
+                statement: row.repoStatement ?? "",
+              }
+            : null,
       };
     });
+}
+
+/**
+ * The project context every interviewer turn carries, whatever its kind: the
+ * current state and dropped proposals of the session's current scout report,
+ * marked stale with its commit when the report no longer matches the idea or
+ * the project's HEAD. Null when the session has no report.
+ *
+ * Every request builder calls this one function, so no turn kind can drift
+ * into seeing a different picture of the project than the others.
+ */
+export async function projectContextFor(
+  session: Pick<typeof schema.sessions.$inferSelect, "id" | "idea" | "projectId">,
+): Promise<ProjectContext | null> {
+  const report = await currentScoutReport(session);
+  return report ? projectContextOf(report) : null;
 }

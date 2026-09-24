@@ -15,6 +15,7 @@ import {
   DECISION_INTRODUCED_BY,
   PROJECT_TRACKER_KINDS,
   PROJECT_VISIBILITIES,
+  REPO_DECISION_SOURCES,
   ROUND_SUBMISSION_STATES,
   SESSION_ANSWERING_MODES,
   SESSION_MODELS,
@@ -42,6 +43,8 @@ export {
   type ProjectTrackerKind,
   PROJECT_VISIBILITIES,
   type ProjectVisibility,
+  REPO_DECISION_SOURCES,
+  type RepoDecisionSource,
   ROUND_SUBMISSION_STATES,
   type RoundSubmissionState,
   SESSION_ANSWERING_MODES,
@@ -238,6 +241,22 @@ export const decisions = table(
     supersessionAnswer: text("supersession_answer"),
     /** Which settled decision answers it and why, kept as the history entry's reason. */
     supersessionReason: text("supersession_reason"),
+    /**
+     * A repo decision's origin, set when the user keeps it from the scout
+     * report and never changed afterwards: whether the project wrote it down
+     * or it was inferred, where it was read, and the statement the project
+     * holds. Once the decision is reopened and answered in the interview,
+     * `repoStatement` is the repo statement that answer replaced. All four are
+     * null for a decision the interviewer or the user introduced.
+     */
+    repoSource: text("repo_source", { enum: REPO_DECISION_SOURCES }),
+    repoCitation: text("repo_citation"),
+    repoStatement: text("repo_statement"),
+    /**
+     * The scout report the decision was kept from. Not a reference: a re-scout
+     * replaces the report row, and the decision's origin outlives it.
+     */
+    scoutReportId: text("scout_report_id"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

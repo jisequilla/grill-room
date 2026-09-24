@@ -37,11 +37,14 @@ export type DerivedDecisionState =
  * Answer kinds that count as a real answer. Unknown, pushed back, deferred and
  * prototype flagged are deliberately absent: they are answers the user gave,
  * but they leave the decision open and hold everything downstream blocked.
+ * `repo-established` is a repo decision the user kept: settled from the start,
+ * so the frontier never offers it and a proposal cannot re-ask it.
  */
 export const SETTLING_ANSWER_KINDS = [
   "accepted-recommendation",
   "own-answer",
   "dispositioned",
+  "repo-established",
 ] as const satisfies readonly DecisionAnswerKind[];
 
 /** Answer kinds a decision holds while still open: steering moves, not answers. */
@@ -333,6 +336,30 @@ export interface DecisionSupersession {
   reason: string;
 }
 
+/**
+ * Where a repo decision came from: the scout report's source and citation, and
+ * the statement the project holds. After a reopen answered in the interview,
+ * `statement` is the repo statement that answer replaced.
+ */
+export interface RepoOrigin {
+  source: NonNullable<DecisionRow["repoSource"]>;
+  citation: string;
+  statement: string;
+  /** The scout report it was kept from; it may since have been replaced. */
+  scoutReportId: string | null;
+}
+
+/** A repo decision's origin, or null for any other decision. */
+export function repoOrigin(row: DecisionRow): RepoOrigin | null {
+  if (row.introducedBy !== "repo") return null;
+  return {
+    source: row.repoSource ?? "inferred",
+    citation: row.repoCitation ?? "",
+    statement: row.repoStatement ?? "",
+    scoutReportId: row.scoutReportId,
+  };
+}
+
 /** A decision as every read action reports it: the row with its state resolved. */
 export interface DecisionView {
   id: string;
@@ -348,6 +375,8 @@ export interface DecisionView {
   /** Ids, not keys: the interviewer's keys never leave the interviewer port. */
   dependsOn: string[];
   introducedBy: DecisionRow["introducedBy"];
+  /** Set only for a repo decision: its source, citation and repo statement. */
+  repo: RepoOrigin | null;
   state: DerivedDecisionState;
   answer: { text: string | null; kind: DecisionAnswerKind } | null;
   /**
@@ -444,6 +473,7 @@ export function describeDecisions(
     recommendedAnswer: row.recommendedAnswer,
     dependsOn: parseStringArray(row.dependsOnJson),
     introducedBy: row.introducedBy,
+    repo: repoOrigin(row),
     state: states.get(row.id) ?? "blocked",
     answer: row.answerKind
       ? { text: row.currentAnswer, kind: row.answerKind }

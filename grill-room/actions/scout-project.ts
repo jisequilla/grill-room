@@ -22,6 +22,7 @@ import {
 import {
   askUntilAccepted,
   MAX_TURN_RETRIES,
+  projectContextFor,
   runTurn,
   TurnRejected,
 } from "../server/turn.js";
@@ -63,7 +64,7 @@ export async function scoutProjectCore(input: {
       const accepted = await askUntilAccepted<ScoutProjectResult>({
         conversationId: null,
         recorder,
-        ask: ({ rejectionReason, observer }) =>
+        ask: async ({ rejectionReason, observer }) =>
           getInterviewer().scoutProject(
             {
               kind: "scout-project",
@@ -76,6 +77,7 @@ export async function scoutProjectCore(input: {
                 docsFolder: null,
                 conversationId: null,
                 decisions: [],
+                projectContext: await projectContextFor(session),
               },
               projectRoot: project.rootPath,
               facts,

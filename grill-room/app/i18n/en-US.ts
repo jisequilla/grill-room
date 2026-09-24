@@ -447,6 +447,7 @@ const messages = {
     kindDeferred: "Deferred",
     kindPrototypeFlagged: "Needs a prototype",
     kindDispositioned: "Dispositioned",
+    kindRepoEstablished: "Established by the repo",
 
     reopen: "Reopen",
     reopenTitle: "Reopen this decision?",
