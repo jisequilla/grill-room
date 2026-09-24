@@ -82,8 +82,9 @@ Once the export is committed, the next scout on the project reads it. The server
 
 - The file opens with `# Decisions: <session title>` and one line saying the Grill Room export generated it from the session's settled tree. Provenance metadata (session id, revision, commit) belongs to the export-ownership feature, not here.
 - Each Decisions entry is an HTML anchor whose id is the decision key, then a level-three heading with the title, then a field list:
-  - **Decision:** the current answer.
-  - **Why (interviewer's case):** the rationale of the offered choice whose text equals the answer. Absent when the answer matches no offered choice.
+  - **Decision:** for an accepted recommendation with a recommended choice, that choice's label; otherwise the current answer.
+  - **Why (interviewer's case):** the rationale of the chosen option: the recommended choice for an accepted recommendation, or the offered choice whose text equals an own answer. Absent when there is no such choice.
+  - **Recommendation note (interviewer's):** for an accepted recommendation, the stored recommendation text when it differs from the choice's label.
   - **Origin:** the introducer plus how the answer was reached. Interviewer or user, then one of "accepted recommendation", "another offered option" (an own-answer whose text equals an offered choice) or "own answer". A reopened repo decision reads "repo (recorded) · reopened" or "repo (inferred) · reopened".
   - **Depends on:** a link to the anchor of each dependency that is itself an entry. A dependency on a kept repo decision is plain text with its key and citation. A dependency set aside as an open question is plain text: its title and "(open question, see spec)".
   - **Source:** repo-origin entries only, with the original citation.
