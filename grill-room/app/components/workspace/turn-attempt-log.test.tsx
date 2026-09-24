@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { TurnAttemptLog, type Turn } from "@/components/workspace/turn-attempt-log";
+import {
+  AttemptRow,
+  TurnAttemptLog,
+  type Turn,
+} from "@/components/workspace/turn-attempt-log";
 
 /*
  * These render with no i18n catalog wired up (the same bare
@@ -254,5 +258,52 @@ describe("TurnAttemptLog", () => {
     expect(attr(rows[1]!, "data-budget-number")).toBe("1");
     expect(attr(rows[2]!, "data-attempt-kind")).toBe("running");
     expect(attr(rows[2]!, "data-budget-number")).toBe("2");
+  });
+
+  describe("a kind: null attempt", () => {
+    /*
+     * `TurnAttemptLog` collapses a completed turn by default, and these
+     * tests render statically with no way to simulate the click that
+     * expands it. `AttemptRow` is exported for exactly this: rendering one
+     * row directly, with the `turnCompleted` flag `TurnAttemptLog` would
+     * otherwise compute from `turn.completedAt` and pass down.
+     */
+    function renderRow(turnCompleted: boolean) {
+      return renderToStaticMarkup(
+        <AttemptRow
+          attempt={runningAttempt()}
+          budgetNumber={1}
+          turnCompleted={turnCompleted}
+        />,
+      );
+    }
+
+    it("renders RUNNING with a live-ticking duration while its turn has not completed", () => {
+      const html = renderRow(false);
+
+      expect(attr(html, "data-attempt-kind")).toBe("running");
+      expect(html).not.toContain('data-kind="interrupted"');
+      // The live duration is `m:ss` computed against the real clock, not the
+      // fixed "—" placeholder an interrupted attempt renders.
+      const duration = /data-testid="attempt-duration">([^<]*)</.exec(html)?.[1];
+      expect(duration).toMatch(/^\d+:\d{2}$/);
+    });
+
+    it("renders as interrupted, never RUNNING, once its turn has completed", () => {
+      const html = renderRow(true);
+
+      expect(attr(html, "data-attempt-kind")).toBe("interrupted");
+      expect(html).not.toContain('data-kind="running"');
+      expect(html).toContain('data-kind="interrupted"');
+      // Neutral styling, the same treatment a resume fallback gets, not the
+      // amber/destructive/orange colours any real outcome kind carries.
+      const tag = /<span[^>]*data-kind="interrupted"[^>]*>/.exec(html)?.[0];
+      const tagClass = attr(tag!, "class") ?? "";
+      expect(tagClass).toContain("bg-muted");
+      expect(tagClass).not.toMatch(/amber|destructive|orange|violet|emerald/);
+      // No live ticking: a fixed placeholder instead of a duration.
+      const duration = /data-testid="attempt-duration">([^<]*)</.exec(html)?.[1];
+      expect(duration).toBe("—");
+    });
   });
 });

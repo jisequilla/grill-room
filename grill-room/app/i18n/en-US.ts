@@ -476,6 +476,7 @@ const messages = {
     attemptLogCount_other: "{{count}} attempts",
     attemptNumber: "Attempt {{number}} of {{budget}}",
     attemptRunning: "Running",
+    attemptInterrupted: "Interrupted",
     attemptManualRetry: "Manual retry",
     attemptKindTreeRuleRefusal: "Rule broken",
     attemptKindSchemaInvalid: "Invalid output",

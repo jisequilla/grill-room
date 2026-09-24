@@ -58,19 +58,41 @@ const KIND_CLASS: Record<AttemptKind, string> = {
     "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-300",
 };
 
+/** The pill every kind tag shares, `KindTag`'s own and the interrupted placeholder's alike. */
+const TAG_BASE_CLASS =
+  "inline-flex shrink-0 items-center rounded-full border px-1.5 py-px text-[10px] leading-4 font-medium tracking-wide uppercase";
+
 function KindTag({ kind }: { kind: AttemptKind }) {
   const t = useT();
 
   return (
     <span
-      className={cn(
-        "inline-flex shrink-0 items-center rounded-full border px-1.5 py-px text-[10px] leading-4 font-medium tracking-wide uppercase",
-        KIND_CLASS[kind],
-      )}
+      className={cn(TAG_BASE_CLASS, KIND_CLASS[kind])}
       data-testid="attempt-kind"
       data-kind={kind}
     >
       {t(KIND_LABEL_KEY[kind])}
+    </span>
+  );
+}
+
+/**
+ * What a `kind: null` attempt renders as once its turn has already stopped:
+ * the model call was still running when something else ended the turn — the
+ * server restarting mid-call, say — so its outcome was never recorded and
+ * never will be. Styled neutrally, like a resume fallback: it is missing
+ * evidence, not a failure of its own.
+ */
+function InterruptedTag() {
+  const t = useT();
+
+  return (
+    <span
+      className={cn(TAG_BASE_CLASS, "border-border bg-muted text-muted-foreground")}
+      data-testid="attempt-kind"
+      data-kind="interrupted"
+    >
+      {t("workspace.attemptInterrupted")}
     </span>
   );
 }
@@ -102,32 +124,51 @@ function budgetNumbers(attempts: readonly Attempt[]): (number | null)[] {
   });
 }
 
-function AttemptRow({
+/**
+ * Exported only so a test can render one row directly: once a turn has
+ * completed, `TurnAttemptLog` collapses it by default, and this project's
+ * tests render statically with no way to simulate the click that expands
+ * it — so the running-vs-interrupted distinction below is tested against
+ * this component, not the collapsed parent.
+ */
+export function AttemptRow({
   attempt,
   budgetNumber,
+  turnCompleted,
 }: {
   attempt: Attempt;
   budgetNumber: number | null;
+  /**
+   * Whether the turn this attempt belongs to has already stopped. A `kind:
+   * null` attempt reads as still running only while its turn has not — once
+   * the turn has completed, `kind: null` can only mean the call was
+   * interrupted and never will report an outcome.
+   */
+  turnCompleted: boolean;
 }) {
   const t = useT();
   const { kind } = attempt;
+  const interrupted = kind === null && turnCompleted;
+  const running = kind === null && !turnCompleted;
 
   return (
     <li
       className="flex items-start justify-between gap-3 py-1.5"
       data-testid="attempt-row"
-      data-attempt-kind={kind ?? "running"}
+      data-attempt-kind={kind ?? (turnCompleted ? "interrupted" : "running")}
       data-budget-number={budgetNumber ?? undefined}
     >
       <div className="flex min-w-0 flex-col gap-0.5">
         <div className="flex flex-wrap items-center gap-1.5">
-          {kind === null ? (
+          {running ? (
             <span className="inline-flex items-center gap-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
               <Spinner className="size-3" />
               {t("workspace.attemptRunning")}
             </span>
+          ) : interrupted ? (
+            <InterruptedTag />
           ) : (
-            <KindTag kind={kind} />
+            <KindTag kind={kind as AttemptKind} />
           )}
           {budgetNumber != null ? (
             <span className="text-xs text-muted-foreground">
@@ -146,8 +187,10 @@ function AttemptRow({
         className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
         data-testid="attempt-duration"
       >
-        {kind === null ? (
+        {running ? (
           <LiveDuration startedAt={attempt.startedAt} />
+        ) : interrupted ? (
+          "—"
         ) : (
           formatDuration(attempt.durationMs ?? 0)
         )}
@@ -156,7 +199,15 @@ function AttemptRow({
   );
 }
 
-function RunSection({ run, showSeparator }: { run: Run; showSeparator: boolean }) {
+function RunSection({
+  run,
+  showSeparator,
+  turnCompleted,
+}: {
+  run: Run;
+  showSeparator: boolean;
+  turnCompleted: boolean;
+}) {
   const t = useT();
   const numbers = budgetNumbers(run.attempts);
 
@@ -181,6 +232,7 @@ function RunSection({ run, showSeparator }: { run: Run; showSeparator: boolean }
             key={attempt.id}
             attempt={attempt}
             budgetNumber={numbers[index] ?? null}
+            turnCompleted={turnCompleted}
           />
         ))}
       </ul>
@@ -216,7 +268,12 @@ export function TurnAttemptLog({ turn }: { turn: Turn | null }) {
   const body = (
     <div className="flex flex-col gap-1 pt-1" data-testid="attempt-log-body">
       {turn.runs.map((run, index) => (
-        <RunSection key={run.id} run={run} showSeparator={index > 0} />
+        <RunSection
+          key={run.id}
+          run={run}
+          showSeparator={index > 0}
+          turnCompleted={!running}
+        />
       ))}
     </div>
   );
