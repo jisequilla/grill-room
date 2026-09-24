@@ -26,7 +26,7 @@ import { ApplyBatchDialog } from "@/components/workspace/batch/apply-batch-dialo
 import { DecisionDetailSheet } from "@/components/workspace/decision-detail-sheet";
 import { DesignTree } from "@/components/workspace/design-tree";
 import { DocsFolderChip } from "@/components/workspace/docs-folder-chip";
-import { ReadinessPanel } from "@/components/workspace/readiness-panel";
+import { ReadinessPanel, ScoutReportPanel } from "@/components/workspace/readiness-panel";
 import { RoundHistory } from "@/components/workspace/round-history";
 import { RoundPanel } from "@/components/workspace/round-panel";
 import { SessionIdea } from "@/components/workspace/session-idea";
@@ -96,6 +96,14 @@ const SILENT_ERROR_CODES = new Set([
  */
 const STALE_READINESS_CODES = new Set(["has-rounds", "wrong-session-state"]);
 
+/**
+ * Refusals of a scout run or a keep/drop that only mean the page is out of
+ * date: the session left interviewing, or a turn started, since it was last
+ * read. The refresh that follows every failure catches the page up; nothing
+ * needs saying.
+ */
+const STALE_SCOUT_CODES = new Set(["wrong-session-state", "turn-working"]);
+
 export default function SessionWorkspaceRoute() {
   const t = useT();
   const queryClient = useQueryClient();
@@ -162,8 +170,36 @@ export default function SessionWorkspaceRoute() {
     onSettled: refresh,
   });
 
+  function reportScoutError(fallbackKey: string) {
+    return (error: unknown) => {
+      refresh();
+      const code = actionErrorCode(error) ?? "";
+      if (SILENT_ERROR_CODES.has(code) || STALE_SCOUT_CODES.has(code)) return;
+      toast.error(actionErrorMessage(error) ?? t(fallbackKey));
+    };
+  }
+
+  const scoutProject = useActionMutation("scout-project", {
+    timeoutMs: TURN_TIMEOUT_MS,
+    onError: reportScoutError("workspace.scoutRunFailed"),
+    onSettled: refresh,
+  });
+
+  const keepRepoDecision = useActionMutation("keep-repo-decision", {
+    onError: reportScoutError("workspace.scoutKeepFailed"),
+    onSettled: refresh,
+  });
+
+  const dropRepoDecision = useActionMutation("drop-repo-decision", {
+    onError: reportScoutError("workspace.scoutDropFailed"),
+    onSettled: refresh,
+  });
+
   const startingTurn =
-    nextRound.isPending || submitRound.isPending || assessReadiness.isPending;
+    nextRound.isPending ||
+    submitRound.isPending ||
+    assessReadiness.isPending ||
+    scoutProject.isPending;
 
   // The turn runs on the server whether or not this tab is still waiting on the
   // request that started it, so the workspace polls its way back to the truth
@@ -233,6 +269,25 @@ export default function SessionWorkspaceRoute() {
     "get-turn",
     { turnId: session?.supersessionTurnId ?? "" },
     { enabled: enabled && session?.supersessionTurnId != null },
+  );
+
+  const hasProject = session?.projectId != null;
+
+  // The session's scout report, kept reachable for the whole interview (not
+  // just before the first round) so re-scout and keep/drop stay available.
+  // Polled the same as the tree while a turn works, since a re-scout run
+  // moves this the way any other turn moves its own result.
+  const { data: scoutReportData } = useActionQuery(
+    "get-scout-report",
+    { sessionId: id },
+    { enabled: enabled && hasProject, refetchInterval: pollInterval },
+  );
+  const scoutReport = scoutReportData?.report ?? null;
+
+  const { data: scoutTurn } = useActionQuery(
+    "get-turn",
+    { turnId: scoutReport?.turnId ?? "" },
+    { enabled: enabled && scoutReport?.turnId != null },
   );
 
   // The tree footer counts loose ends the way the loose ends list does, by
@@ -335,6 +390,27 @@ export default function SessionWorkspaceRoute() {
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]">
           <div className="min-w-0 space-y-8">
+            {hasProject ? (
+              <ScoutReportPanel
+                report={scoutReport}
+                busy={
+                  working ||
+                  scoutProject.isPending ||
+                  keepRepoDecision.isPending ||
+                  dropRepoDecision.isPending
+                }
+                isScouting={scoutProject.isPending}
+                onRescout={() => scoutProject.mutate({ sessionId: id })}
+                onKeep={(key) =>
+                  keepRepoDecision.mutate({ sessionId: id, key })
+                }
+                onDrop={(key) =>
+                  dropRepoDecision.mutate({ sessionId: id, key })
+                }
+                turn={scoutTurn ?? null}
+              />
+            ) : null}
+
             <section>
               <h3 className="pb-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
                 {t(PANEL_HEADING_KEY[session.state as SessionState])}
