@@ -13,7 +13,7 @@ Suggested model: sonnet
 
 ## How it will be judged
 
-Also list the scout's actions (`scout-project`, `get-scout-report`, keep and drop) in `grill-room/AGENTS.md` wherever that file lists the app's actions, so the agent side knows them.
+Also list the scout's actions (`scout-project`, `get-scout-report`, keep and drop) and the test-only `use-fake-scenario` in `grill-room/AGENTS.md` wherever that file lists the app's actions, so the agent side knows them.
 
 
 - Component tests (prior art `readiness-panel.test.tsx`): the report renders every group, keep and drop call their actions, stale shows the badge, evidence shows its source; the tree shows the marker.
