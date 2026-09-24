@@ -125,14 +125,17 @@ export function RoundHistory({
 
   if (submitted.length === 0) {
     return (
-      <p className="px-2 py-4 text-sm text-muted-foreground">
+      <p
+        className="px-2 py-4 text-sm text-muted-foreground"
+        data-testid="round-history"
+      >
         {t("workspace.historyEmpty")}
       </p>
     );
   }
 
   return (
-    <div className="space-y-px">
+    <div className="space-y-px" data-testid="round-history">
       {submitted.map((entry) => (
         <RoundSection
           key={entry.round.id}

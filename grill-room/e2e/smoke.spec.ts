@@ -107,18 +107,23 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
   // left running to poll. The same two attempts are read back here instead,
   // from round history's collapsed attempt log, which holds exactly what the
   // live status would have shown.
-  await page.getByRole("button", { name: /Round 1/ }).click();
+  //
+  // Scoped to `round-history`: the done panel's supersession check has its
+  // own attempt log (one attempt), so an unscoped `attempt-log-trigger`
+  // locator matches both and violates Playwright's strict mode.
+  const roundHistory = page.getByTestId("round-history");
+  await roundHistory.getByRole("button", { name: /Round 1/ }).click();
 
-  const attemptLogTrigger = page.getByTestId("attempt-log-trigger");
+  const attemptLogTrigger = roundHistory.getByTestId("attempt-log-trigger");
   await expect(attemptLogTrigger).toHaveAttribute("data-count", "2");
 
   // Collapsed: the attempt rows are not rendered until the log itself is
   // expanded.
-  await expect(page.getByTestId("attempt-row")).toHaveCount(0);
+  await expect(roundHistory.getByTestId("attempt-row")).toHaveCount(0);
 
   await attemptLogTrigger.click();
 
-  const attemptRows = page.getByTestId("attempt-row");
+  const attemptRows = roundHistory.getByTestId("attempt-row");
   await expect(attemptRows).toHaveCount(2);
   await expect(attemptRows.first()).toHaveAttribute(
     "data-attempt-kind",
