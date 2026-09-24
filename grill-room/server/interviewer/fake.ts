@@ -351,14 +351,24 @@ export function createFakeInterviewer(
 }
 
 /**
- * A minimal complete interview: one round of two questions, then a proposal
- * that we are done, the supersession check that follows it, then a spec and
- * its tickets. It is what the fake serves
- * when it is selected by environment variable rather than scripted by a test,
- * so the browser smoke test has an interview to walk through.
+ * A minimal complete interview: a first round proposal the app refuses for a
+ * tree-rule violation, retried and accepted as one round of two questions,
+ * then a proposal that we are done, the supersession check that follows it,
+ * then a spec and its tickets. It is what the fake serves when it is selected
+ * by environment variable rather than scripted by a test, so the browser
+ * smoke test has an interview to walk through — including a turn with more
+ * than one attempt, so the attempt log has something to show.
  */
 export function cannedInterviewTurns(): ScriptedTurn[] {
   return [
+    // Refused: depends on a decision that exists neither in the tree (empty,
+    // this being the first round) nor in the proposal itself. Retried by the
+    // same `askUntilAccepted` loop that serves the real interviewer, with the
+    // next queued turn below the one it succeeds with.
+    {
+      kind: "propose-round",
+      result: treeRuleViolation.unknownKey(),
+    },
     {
       kind: "propose-round",
       result: {

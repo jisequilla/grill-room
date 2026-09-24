@@ -173,7 +173,16 @@ describe("the scripted fake interviewer", () => {
   it("serves a complete canned interview that passes validation", async () => {
     const interviewer = createFakeInterviewer(cannedInterviewTurns());
 
-    await interviewer.proposeRound(aProposeRoundRequest());
+    // Round 1's turn is refused once, for a tree-rule violation, before the
+    // retry that succeeds — see `cannedInterviewTurns()`.
+    const refused = await interviewer.proposeRound(aProposeRoundRequest());
+    expect(refused.result.proposedDecisions[0]?.dependsOn).toContain(
+      "fake-no-such-decision",
+    );
+
+    const round = await interviewer.proposeRound(aProposeRoundRequest());
+    expect(round.result.proposedDecisions).toHaveLength(2);
+
     const done = await interviewer.proposeRound(aProposeRoundRequest());
     const superseded = await interviewer.findSuperseded(
       aFindSupersededRequest(),
@@ -199,6 +208,9 @@ describe("choosing the interviewer", () => {
     process.env[INTERVIEWER_ENV_VAR] = "fake";
     resetInterviewer();
 
+    // Round 1's turn is refused once before the retry that succeeds — see
+    // `cannedInterviewTurns()`.
+    await getInterviewer().proposeRound(aProposeRoundRequest());
     const turn = await getInterviewer().proposeRound(aProposeRoundRequest());
 
     expect(turn.result.proposedDecisions).toHaveLength(2);
