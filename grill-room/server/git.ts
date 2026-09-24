@@ -16,7 +16,19 @@ const READ_ONLY_SUBCOMMANDS = new Set([
   "check-ignore",
   "ls-files",
   "status",
+  "log",
+  "remote",
 ]);
+
+/**
+ * `remote` is read-only only as `git remote -v`; every other form
+ * (`remote add`, `remote set-url`, a bare `remote`, ...) can write to the
+ * repository's configuration, so it is refused here rather than trusted to
+ * the subcommand allow-list above.
+ */
+function isAllowedRemoteInvocation(args: string[]): boolean {
+  return args.length === 2 && args[1] === "-v";
+}
 
 /** Variables that would point git at a different repository than the one named. */
 const INHERITED_REPO_VARIABLES = [
@@ -63,6 +75,11 @@ export function runGit(repo: string, args: string[]): Promise<GitResult> {
   if (!subcommand || !READ_ONLY_SUBCOMMANDS.has(subcommand)) {
     return Promise.reject(
       new Error(`Refusing to run git ${subcommand ?? ""}: only read-only subcommands are allowed.`),
+    );
+  }
+  if (subcommand === "remote" && !isAllowedRemoteInvocation(args)) {
+    return Promise.reject(
+      new Error(`Refusing to run git remote ${args.slice(1).join(" ")}: only "remote -v" is allowed.`),
     );
   }
 
