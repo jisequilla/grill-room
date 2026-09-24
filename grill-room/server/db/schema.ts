@@ -535,3 +535,45 @@ export const turnAttempts = table(
     ),
   }),
 );
+
+/**
+ * One scout run's report on a session's project: what the server knew for
+ * certain, what the scout found, and what it read to find it. A re-run replaces
+ * the session's row; one report per session. Staleness is never stored: see
+ * `server/scout-report.ts`.
+ */
+export const scoutReports = table(
+  "gr_scout_reports",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    /** The project it read, or null once that project is unregistered. */
+    projectId: text("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
+    /** The `ProjectServerFacts` the server collected, as JSON. */
+    factsJson: text("facts_json").notNull(),
+    /** The accepted `ScoutProjectResult`, as JSON. */
+    resultJson: text("result_json").notNull(),
+    /** The HEAD commit read, or null for a repository with no commits yet. */
+    commitRead: text("commit_read"),
+    /** The session's idea as the scout read it. */
+    ideaRead: text("idea_read").notNull(),
+    /** The model the scout ran on. */
+    model: text("model").notNull(),
+    ranAt: text("ran_at").notNull(),
+    /** The turn that produced it. */
+    turnId: text("turn_id").references(() => turns.id, {
+      onDelete: "set null",
+    }),
+    /** Keep or drop per proposed decision, by key, as JSON. Every key starts `undecided`. */
+    dispositionsJson: text("dispositions_json").notNull().default("{}"),
+  },
+  (scoutReportsTable) => ({
+    sessionIdx: index("gr_idx_scout_reports_session").on(
+      scoutReportsTable.sessionId,
+    ),
+  }),
+);
