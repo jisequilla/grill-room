@@ -184,9 +184,11 @@ export const SCOUT_SECRET_FILE_PATTERNS = [
  * command line, so `--restricted` ignoring the settings files leaves them in
  * force.
  */
-export const SCOUT_DENY_RULES = SCOUT_SECRET_FILE_PATTERNS.map(
-  (pattern) => `Read(**/${pattern})`,
-);
+export const SCOUT_DENY_RULES = [
+  ...SCOUT_SECRET_FILE_PATTERNS.map((pattern) => `Read(**/${pattern})`),
+  // The git directory: `.git/config` can hold credentials in a remote URL.
+  "Read(**/.git/**)",
+];
 
 /**
  * The scout's invocation: always sonnet, always a conversation of its own,

@@ -421,9 +421,20 @@ describe("what the adapter sends for a project scout", () => {
       "Read(**/id_rsa*)",
       "Read(**/credentials)",
       "Read(**/credentials.*)",
+      "Read(**/.git/**)",
     ]) {
       expect(denied).toContain(rule);
     }
+  });
+
+  it("tells the scout that a file missing from Glob or Grep may only be hidden", async () => {
+    const { invocation } = await scoutInvocation();
+    const prompt = valueOf(invocation.args, "-p") as string;
+
+    expect(prompt).toContain("hidden from you on purpose");
+    expect(prompt).toContain(
+      "never evidence that it does not",
+    );
   });
 
   it("sends exactly this argument list", async () => {
