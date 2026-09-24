@@ -15,8 +15,10 @@ import {
   type TreeDecision,
 } from "@/lib/decisions";
 import {
+  reviewCompletedAt,
   reviewEvents,
   roundCardAnchorId,
+  visibleReviewEvents,
   type ReviewEvent,
   type ReviewVerdict,
 } from "@/lib/review-digest";
@@ -56,7 +58,8 @@ function dismissedStorageKey(sessionId: string): string {
 
 interface Dismissed {
   id: string;
-  reopenedAt: string;
+  /** The dismissed event's own {@link reviewCompletedAt}, not its reopen time. */
+  reviewedAt: string;
 }
 
 function readDismissed(sessionId: string): Dismissed | null {
@@ -64,8 +67,8 @@ function readDismissed(sessionId: string): Dismissed | null {
     const raw = window.localStorage.getItem(dismissedStorageKey(sessionId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<Dismissed>;
-    if (typeof parsed.id === "string" && typeof parsed.reopenedAt === "string") {
-      return { id: parsed.id, reopenedAt: parsed.reopenedAt };
+    if (typeof parsed.id === "string" && typeof parsed.reviewedAt === "string") {
+      return { id: parsed.id, reviewedAt: parsed.reviewedAt };
     }
     return null;
   } catch {
@@ -239,10 +242,11 @@ function ReviewEventCard({
  * asked for, since those reasons otherwise live only inside each dependent's
  * own history.
  *
- * Shown once a review event is newer than the last submitted round the user
- * has seen, and stays hidden once dismissed until a newer event arrives:
- * dismissing records the newest visible event, and only an event after it (or
- * after the next submitted round) shows again.
+ * Shown once a review event's own verdicts ({@link reviewCompletedAt}, not
+ * its reopen) are newer than the last submitted round the user has seen, and
+ * stays hidden once dismissed until a newer event arrives: dismissing
+ * records the newest visible event's completion time, and only an event
+ * after it (or after the next submitted round) shows again.
  */
 export function ReviewDigestPanel({
   sessionId,
@@ -283,11 +287,10 @@ export function ReviewDigestPanel({
   if (!ready) return null;
 
   const events = reviewEvents(decisions);
-  const threshold = [dismissed?.reopenedAt, lastSubmittedAt].reduce<string>(
-    (max, value) => (value != null && value > max ? value : max),
-    "",
-  );
-  const visible = events.filter((event) => event.reopenedAt > threshold);
+  const visible = visibleReviewEvents(events, {
+    lastSubmittedAt,
+    dismissedReviewedAt: dismissed?.reviewedAt ?? null,
+  });
 
   if (visible.length === 0) return null;
 
@@ -296,7 +299,7 @@ export function ReviewDigestPanel({
   function dismiss() {
     const newest = visible[0];
     if (!newest) return;
-    const value = { id: newest.id, reopenedAt: newest.reopenedAt };
+    const value = { id: newest.id, reviewedAt: reviewCompletedAt(newest) };
     writeDismissed(sessionId, value);
     setDismissed(value);
   }

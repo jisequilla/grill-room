@@ -216,6 +216,47 @@ export function reviewEvents(decisions: readonly TreeDecision[]): ReviewEvent[] 
   );
 }
 
+/**
+ * When `event`'s review actually finished — the latest of every verdict it
+ * carries, or its reopen's own timestamp when it carries none.
+ *
+ * This is deliberately not `event.reopenedAt`: the round that answers a
+ * reopened decision settles it at the same instant that round is submitted,
+ * and the stale review that the answer triggers runs immediately afterward,
+ * in the very next step of the same `request-next-round` call
+ * (`server/stale-review.ts`). Its verdicts are always recorded at or after
+ * that submission, never before, so this is always at or after
+ * `event.reopenedAt` — comparing against it, rather than the reopen, is what
+ * lets the digest show up on the submission that first makes it true instead
+ * of hiding on it. `reviewed` is oldest first (see {@link reviewEvents}), so
+ * its last entry already carries the latest `recordedAt`.
+ */
+export function reviewCompletedAt(event: ReviewEvent): string {
+  const last = event.reviewed[event.reviewed.length - 1];
+  if (!last) return event.reopenedAt;
+  return last.recordedAt > event.reopenedAt ? last.recordedAt : event.reopenedAt;
+}
+
+/**
+ * `events` filtered down to what the digest should actually show right now:
+ * newer than both the last dismissal and the last round the user submitted,
+ * by {@link reviewCompletedAt} rather than by reopen time. Preserves
+ * `events`' own newest-first order.
+ */
+export function visibleReviewEvents(
+  events: readonly ReviewEvent[],
+  {
+    lastSubmittedAt,
+    dismissedReviewedAt,
+  }: { lastSubmittedAt: string | null; dismissedReviewedAt: string | null },
+): ReviewEvent[] {
+  const threshold = [dismissedReviewedAt, lastSubmittedAt].reduce<string>(
+    (max, value) => (value != null && value > max ? value : max),
+    "",
+  );
+  return events.filter((event) => reviewCompletedAt(event) > threshold);
+}
+
 /** The anchor id `RoundPanel` gives each card, so the digest can link into it. */
 export function roundCardAnchorId(decisionId: string): string {
   return `round-card-${decisionId}`;
