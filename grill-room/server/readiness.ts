@@ -74,6 +74,18 @@ export function storeReadiness(
 }
 
 /**
+ * Case, whitespace and trailing-punctuation insensitive form, for comparing an
+ * evidence item against the objective or the idea it was drawn from.
+ */
+function normalizeForComparison(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[.!?]+$/, "");
+}
+
+/**
  * Why a judgment contradicts its own verdict, written for the interviewer.
  * Empty when it can be stored. Only a `ready` verdict is checked: the rule
  * says what ready requires, and a judge may still find an idea that meets it
@@ -81,6 +93,7 @@ export function storeReadiness(
  */
 export function reasonsToRefuseReadiness(
   result: AssessReadinessResult,
+  idea: string,
 ): string[] {
   if (result.verdict !== "ready") return [];
 
@@ -88,6 +101,22 @@ export function reasonsToRefuseReadiness(
   if (result.evidence.length === 0) {
     reasons.push("A ready verdict needs at least one evidence item.");
   }
+
+  const normalizedIdea = normalizeForComparison(idea);
+  const normalizedObjective =
+    result.objective === null ? null : normalizeForComparison(result.objective);
+  const restated = result.evidence.find((item) => {
+    const normalized = normalizeForComparison(item);
+    return (
+      normalized === normalizedIdea || normalized === normalizedObjective
+    );
+  });
+  if (restated !== undefined) {
+    reasons.push(
+      `Evidence item "${restated}" only restates the idea's goal, not a fact about the world. A ready verdict needs evidence other than the objective: a constraint, a user, an existing system, or an observed problem.`,
+    );
+  }
+
   if (result.objective === null) {
     reasons.push("A ready verdict needs an objective.");
   } else if (result.objectiveIsProcess) {

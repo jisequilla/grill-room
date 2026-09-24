@@ -72,7 +72,8 @@ export default defineAction({
               },
               rejectionReason,
             }),
-          reasonsToRefuse: reasonsToRefuseReadiness,
+          reasonsToRefuse: (result) =>
+            reasonsToRefuseReadiness(result, session.idea),
           exhausted: (lastReason) =>
             new TurnRejected(
               "invalid-readiness",
