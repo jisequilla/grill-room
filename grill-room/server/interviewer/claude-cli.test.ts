@@ -6,17 +6,21 @@ import {
   CLEARED_ENVIRONMENT_MARKERS,
   createClaudeCliInterviewer,
   DOCS_MODE_TOOLS,
+  SCOUT_DENY_RULES,
   type CliInvocation,
   type CliOutcome,
 } from "./claude-cli.js";
 import { DOCS_FOLDER_ADDENDUM, loadGrillingSkill } from "./instructions.js";
 import { jsonSchemaFor } from "./schemas.js";
+import { SCOUT_MODEL } from "./types.js";
 import type { ModelCallEnd, ModelCallObserver } from "./types.js";
 import {
   anAssessReadinessRequest,
   anAssessReadinessResult,
   aProposeRoundRequest,
   aProposeRoundResult,
+  aScoutProjectRequest,
+  aScoutProjectResult,
 } from "./test-fixtures.js";
 
 /**
@@ -323,6 +327,226 @@ describe("what the adapter sends when the session has a docs folder", () => {
     );
 
     expect(valueOf(runner.invocations[0].args, "--resume")).toBe("session-7");
+  });
+});
+
+/**
+ * The scout is the one turn pointed at a whole project, secrets and all. These
+ * assertions are its security contract: sonnet, a conversation of its own, the
+ * project root and nothing else, read-only, and the secret files denied.
+ */
+describe("what the adapter sends for a project scout", () => {
+  const PROJECT_ROOT = "/Users/someone/projects/observability";
+
+  async function scoutInvocation(
+    request = aScoutProjectRequest({ projectRoot: PROJECT_ROOT }),
+  ) {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: aScoutProjectResult() })),
+    ]);
+    const turn = await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+    }).scoutProject(request);
+    return { invocation: runner.invocations[0], turn, runner };
+  }
+
+  it("runs on sonnet whatever model the session interviews on", async () => {
+    for (const model of ["fable", "opus", "sonnet"] as const) {
+      const base = aScoutProjectRequest({ projectRoot: PROJECT_ROOT });
+      const { invocation } = await scoutInvocation({
+        ...base,
+        context: { ...base.context, model },
+      });
+      expect(SCOUT_MODEL).toBe("sonnet");
+      expect(valueOf(invocation.args, "--model")).toBe("sonnet");
+    }
+  });
+
+  it("runs in a conversation of its own, never resuming the session's", async () => {
+    const base = aScoutProjectRequest({ projectRoot: PROJECT_ROOT });
+    const { invocation } = await scoutInvocation({
+      ...base,
+      context: { ...base.context, conversationId: "session-7" },
+    });
+
+    expect(invocation.args).not.toContain("--resume");
+  });
+
+  it("runs from the project root, its only added directory, even when the session has a docs folder", async () => {
+    const base = aScoutProjectRequest({ projectRoot: PROJECT_ROOT });
+    const { invocation } = await scoutInvocation({
+      ...base,
+      context: { ...base.context, docsFolder: "/Users/someone/notes" },
+    });
+
+    expect(invocation.cwd).toBe(PROJECT_ROOT);
+    expect(invocation.args.filter((arg) => arg === "--add-dir")).toHaveLength(1);
+    expect(valueOf(invocation.args, "--add-dir")).toBe(PROJECT_ROOT);
+    expect(invocation.args).not.toContain("/Users/someone/notes");
+  });
+
+  it("allows exactly the three read tools, and makes them the whole tool set", async () => {
+    const { invocation } = await scoutInvocation();
+
+    expect(valueOf(invocation.args, "--tools")).toBe("Read,Grep,Glob");
+    expect(valueOf(invocation.args, "--allowed-tools")).toBe("Read,Grep,Glob");
+  });
+
+  it("applies every restriction docs mode applies", async () => {
+    const { invocation } = await scoutInvocation();
+    const { args } = invocation;
+
+    expect(args).toContain("--restricted");
+    expect(args).toContain("--strict-mcp-config");
+    expect(args).toContain("--disable-slash-commands");
+    expect(valueOf(args, "--permission-prompts")).toBe("none");
+    expect(args).not.toContain("--permission-mode");
+    expect(args).not.toContain("--dangerously-skip-permissions");
+    expect(args).not.toContain("--allow-dangerously-skip-permissions");
+  });
+
+  it("denies reading environment files, keys, certificates and credentials", async () => {
+    const { invocation } = await scoutInvocation();
+    const denied = (valueOf(invocation.args, "--disallowed-tools") ?? "").split(
+      ",",
+    );
+
+    expect(invocation.args.filter((arg) => arg === "--disallowed-tools")).toHaveLength(1);
+    expect(denied).toEqual(SCOUT_DENY_RULES);
+    for (const rule of [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/id_rsa*)",
+      "Read(**/credentials)",
+      "Read(**/credentials.*)",
+    ]) {
+      expect(denied).toContain(rule);
+    }
+  });
+
+  it("sends exactly this argument list", async () => {
+    const { invocation } = await scoutInvocation();
+    const { args } = invocation;
+
+    expect(args).toEqual([
+      "-p",
+      valueOf(args, "-p"),
+      "--model",
+      "sonnet",
+      "--output-format",
+      "json",
+      "--allowed-tools",
+      "Read,Grep,Glob",
+      "--json-schema",
+      JSON.stringify(jsonSchemaFor("scout-project")),
+      "--tools",
+      "Read,Grep,Glob",
+      "--add-dir",
+      PROJECT_ROOT,
+      "--restricted",
+      "--strict-mcp-config",
+      "--disable-slash-commands",
+      "--permission-prompts",
+      "none",
+      "--disallowed-tools",
+      SCOUT_DENY_RULES.join(","),
+    ]);
+  });
+
+  it("asks for a scout report of the idea, with the facts, without the grilling method", async () => {
+    const request = aScoutProjectRequest({ projectRoot: PROJECT_ROOT });
+    const { invocation } = await scoutInvocation(request);
+    const prompt = valueOf(invocation.args, "-p") as string;
+
+    expect(prompt).toContain(request.context.idea);
+    expect(prompt).toContain(PROJECT_ROOT);
+    expect(prompt).toContain(String(request.facts.headCommit));
+    expect(prompt).toContain("Branch: main");
+    expect(prompt).toContain("Record the broker decision");
+    expect(prompt).toContain("docs/adr");
+    expect(prompt).toContain("Never invent a path");
+    expect(prompt).toContain("`recorded`");
+    expect(prompt).toContain("`inferred`");
+    expect(prompt).toContain("return an empty list");
+    expect(prompt).not.toContain(loadGrillingSkill().trimEnd());
+    expect(prompt.startsWith("-")).toBe(false);
+  });
+
+  it("on a re-run, asks for a verdict on every previous decision by key", async () => {
+    const request = aScoutProjectRequest({
+      projectRoot: PROJECT_ROOT,
+      previousDecisions: [
+        {
+          key: "no-message-broker",
+          title: "No message broker",
+          statement: "Ingest runs on a Postgres-backed queue.",
+          source: "recorded",
+          citation: "docs/adr/0003-queue.md:5-9",
+          disposition: "kept",
+        },
+      ],
+    });
+    const { invocation } = await scoutInvocation(request);
+    const prompt = valueOf(invocation.args, "-p") as string;
+
+    expect(prompt).toContain("[no-message-broker]");
+    expect(prompt).toContain("kept by the user");
+    expect(prompt).toContain("exactly one entry for every one of them");
+  });
+
+  it("passes the rejection reason back on a retry", async () => {
+    const { invocation } = await scoutInvocation(
+      aScoutProjectRequest({
+        rejectionReason: "src/missing.ts:4 does not exist at the commit read.",
+      }),
+    );
+
+    expect(valueOf(invocation.args, "-p")).toContain(
+      "src/missing.ts:4 does not exist at the commit read.",
+    );
+  });
+
+  it("returns the validated report and reports its one call as new", async () => {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: aScoutProjectResult() })),
+    ]);
+    const calls: ModelCallEnd[] = [];
+
+    const turn = await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+    }).scoutProject(aScoutProjectRequest(), {
+      callEnded: (call) => void calls.push(call),
+    });
+
+    expect(turn.result).toEqual(aScoutProjectResult());
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      requestKind: "scout-project",
+      conversation: "new",
+      outcome: { kind: "success" },
+    });
+  });
+
+  it("rejects a report whose citation is malformed", async () => {
+    const result = aScoutProjectResult();
+    const runner = recordingRunner([
+      ok(
+        anEnvelope({
+          structured_output: {
+            ...result,
+            currentState: [{ ...result.currentState[0], citations: ["src/a.ts"] }],
+          },
+        }),
+      ),
+    ]);
+
+    await expect(
+      createClaudeCliInterviewer({ runCli: runner.runCli }).scoutProject(
+        aScoutProjectRequest(),
+      ),
+    ).rejects.toMatchObject({ code: "malformed-output" });
   });
 });
 

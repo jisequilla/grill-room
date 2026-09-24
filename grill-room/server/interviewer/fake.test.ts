@@ -24,6 +24,8 @@ import {
   aFindSupersededRequest,
   aProposeRoundRequest,
   aProposeRoundResult,
+  aScoutProjectRequest,
+  aScoutProjectResult,
   aSynthesizeSpecRequest,
 } from "./test-fixtures.js";
 
@@ -159,6 +161,43 @@ describe("the scripted fake interviewer", () => {
 
     expect(turn.result).toEqual(anAssessReadinessResult());
     expect(interviewer.requests[0]?.kind).toBe("assess-readiness");
+  });
+
+  it("serves a scripted scout report, in a conversation of its own", async () => {
+    const interviewer = createFakeInterviewer([
+      { kind: "scout-project", result: aScoutProjectResult() },
+    ]);
+    const request = aScoutProjectRequest({
+      context: { ...aScoutProjectRequest().context, conversationId: "session-7" },
+    });
+    const calls: ModelCallEnd[] = [];
+
+    const turn = await interviewer.scoutProject(request, {
+      callEnded: (call) => void calls.push(call),
+    });
+
+    expect(turn.result).toEqual(aScoutProjectResult());
+    expect(turn.conversationId).not.toBe("session-7");
+    expect(calls.map((call) => call.conversation)).toEqual(["new"]);
+    expect(interviewer.requests[0]).toMatchObject({
+      kind: "scout-project",
+      facts: request.facts,
+    });
+  });
+
+  it("refuses a scripted scout report the schema rejects", async () => {
+    const interviewer = createFakeInterviewer([
+      schemaInvalidTurn("scout-project", {
+        ...aScoutProjectResult(),
+        proposedDecisions: [
+          { ...aScoutProjectResult().proposedDecisions[0], citation: "/etc/passwd:1" },
+        ],
+      }),
+    ]);
+
+    await expect(
+      interviewer.scoutProject(aScoutProjectRequest()),
+    ).rejects.toMatchObject({ code: "malformed-output" });
   });
 
   it("accepts turns appended after it was created", async () => {

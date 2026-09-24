@@ -17,8 +17,10 @@ import type {
   ModelCallObserver,
   ProposeRoundRequest,
   ReviewStaleRequest,
+  ScoutProjectRequest,
   SynthesizeSpecRequest,
 } from "./types.js";
+import { SCOUT_MODEL } from "./types.js";
 
 /** The command line invocation, as the runner receives it. */
 export interface CliInvocation {
@@ -151,10 +153,80 @@ function docsModeArgs(docsFolder: string): string[] {
   ];
 }
 
+/**
+ * Secret files the scout may never open, as gitignore-style name patterns
+ * matched at any depth of the project: environment files, private keys and
+ * certificates, and credential files.
+ */
+export const SCOUT_SECRET_FILE_PATTERNS = [
+  ".env",
+  ".env.*",
+  "*.pem",
+  "*.key",
+  "*.p12",
+  "*.pfx",
+  "id_rsa*",
+  "id_dsa*",
+  "id_ecdsa*",
+  "id_ed25519*",
+  "credentials",
+  "credentials.*",
+  "*.credentials.json",
+  ".netrc",
+  ".npmrc",
+  ".pypirc",
+] as const;
+
+/**
+ * The permission deny rules the scout runs under, one per secret pattern. A
+ * `Read` rule is what the command line enforces for every file-reading tool:
+ * the file cannot be read, and Grep and Glob pass over it. Passed on the
+ * command line, so `--restricted` ignoring the settings files leaves them in
+ * force.
+ */
+export const SCOUT_DENY_RULES = SCOUT_SECRET_FILE_PATTERNS.map(
+  (pattern) => `Read(**/${pattern})`,
+);
+
+/**
+ * The scout's invocation: always sonnet, always a conversation of its own,
+ * docs mode pointed at the project root, and the secret files denied on top.
+ */
+function scoutCliArgs(request: ScoutProjectRequest, prompt: string): string[] {
+  return [
+    "-p",
+    prompt,
+    "--model",
+    SCOUT_MODEL,
+    "--output-format",
+    "json",
+    "--allowed-tools",
+    DOCS_MODE_TOOLS.join(","),
+    "--json-schema",
+    JSON.stringify(jsonSchemaFor(request.kind)),
+    ...docsModeArgs(request.projectRoot),
+    "--disallowed-tools",
+    SCOUT_DENY_RULES.join(","),
+  ];
+}
+
+/** The folder a request may read, which is also where its child runs. */
+function readableFolder(request: InterviewerRequest): string | null {
+  return request.kind === "scout-project"
+    ? request.projectRoot
+    : request.context.docsFolder;
+}
+
+/** The conversation a request resumes. A scout never resumes one. */
+function conversationToResume(request: InterviewerRequest): string | null {
+  return request.kind === "scout-project" ? null : request.context.conversationId;
+}
+
 export function buildCliArgs(
   request: InterviewerRequest,
   { prompt, resume }: { prompt: string; resume: string | null },
 ): string[] {
+  if (request.kind === "scout-project") return scoutCliArgs(request, prompt);
   const { docsFolder } = request.context;
   const args = [
     "-p",
@@ -247,7 +319,7 @@ export function createClaudeCliInterviewer(
       args: buildCliArgs(request, { prompt, resume }),
       // A docs folder is the child's working directory, which is what makes it
       // the directory `--restricted` confines the file tools to.
-      cwd: request.context.docsFolder ?? cwd,
+      cwd: readableFolder(request) ?? cwd,
       env: childEnvironment(sourceEnv),
     });
 
@@ -329,7 +401,7 @@ export function createClaudeCliInterviewer(
         fallsBack,
       );
 
-    const resume = request.context.conversationId;
+    const resume = conversationToResume(request);
     if (!resume) {
       return call(1, "new", () => attempt(request, { resume: null }));
     }
@@ -393,6 +465,10 @@ export function createClaudeCliInterviewer(
     ) =>
       turn(request, observer) as Promise<
         InterviewerTurn<ResultFor<"assess-readiness">>
+      >,
+    scoutProject: (request: ScoutProjectRequest, observer?: ModelCallObserver) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"scout-project">>
       >,
   };
 }

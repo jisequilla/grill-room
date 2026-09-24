@@ -7,6 +7,7 @@ import type {
   ProposeRoundResult,
   RequestKind,
   ReviewStaleResult,
+  ScoutProjectResult,
   SynthesizeSpecResult,
 } from "./schemas.js";
 
@@ -151,15 +152,70 @@ export interface AssessReadinessRequest extends RequestBase {
   kind: "assess-readiness";
 }
 
+/**
+ * What the server knows for certain about a project's repository before the
+ * scout reads it, collected from git and plain file checks. No model derives
+ * any of it. Mirrors `ProjectServerFacts` in `server/project-facts.ts`, field
+ * for field; this copy goes once that module is on main and can be imported.
+ */
+export interface ProjectServerFacts {
+  /** Null when the repo has no commits yet. */
+  headCommit: string | null;
+  /** Null when the repo has no commits yet. */
+  headBranch: string | null;
+  remotes: Array<{ name: string; url: string; type: "fetch" | "push" }>;
+  /** True when the working tree has uncommitted changes. */
+  dirty: boolean;
+  /** Most recent first, at most ten. */
+  recentCommitSubjects: string[];
+  /** `CLAUDE.md` or `AGENTS.md` at the root. */
+  hasAgentInstructions: boolean;
+  /** `docs/decisions`, `docs/adr` or `adr`, else null. */
+  decisionsFolder: string | null;
+  /** `.claude/rules/` at the root. */
+  hasRulesFolder: boolean;
+}
+
+/** A repo decision from the previous scout report, as the user left it. */
+export interface PreviousRepoDecision {
+  key: string;
+  title: string;
+  statement: string;
+  source: "recorded" | "inferred";
+  citation: string;
+  /** Whether the user kept it, dropped it, or has not ruled on it yet. */
+  disposition: "kept" | "dropped" | "proposed";
+}
+
+/**
+ * Read a project for one idea, before the interview starts. The scout reads
+ * the context's idea and title and nothing else from it: it always runs on
+ * {@link SCOUT_MODEL} whatever the context's model, never resumes the context's
+ * conversation, and reads {@link ScoutProjectRequest.projectRoot}, never the
+ * context's docs folder.
+ */
+export interface ScoutProjectRequest extends RequestBase {
+  kind: "scout-project";
+  /** The absolute root of the project: the only folder the scout can read. */
+  projectRoot: string;
+  facts: ProjectServerFacts;
+  /** The previous report's decisions on a re-run; empty on a first run. */
+  previousDecisions: PreviousRepoDecision[];
+}
+
+/** The model every scout runs on. The session's model lock does not apply. */
+export const SCOUT_MODEL: InterviewerModel = "sonnet";
+
 export type InterviewerRequest =
   | ProposeRoundRequest
   | ReviewStaleRequest
   | FindSupersededRequest
   | SynthesizeSpecRequest
   | BreakIntoTicketsRequest
-  | AssessReadinessRequest;
+  | AssessReadinessRequest
+  | ScoutProjectRequest;
 
-/** A request narrowed to one kind, for generic code over the six kinds. */
+/** A request narrowed to one kind, for generic code over every kind. */
 export type RequestFor<Kind extends RequestKind> = Extract<
   InterviewerRequest,
   { kind: Kind }
@@ -270,4 +326,8 @@ export interface Interviewer {
     request: AssessReadinessRequest,
     observer?: ModelCallObserver,
   ): Promise<InterviewerTurn<AssessReadinessResult>>;
+  scoutProject(
+    request: ScoutProjectRequest,
+    observer?: ModelCallObserver,
+  ): Promise<InterviewerTurn<ScoutProjectResult>>;
 }

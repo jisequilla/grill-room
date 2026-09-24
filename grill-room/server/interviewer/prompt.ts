@@ -1,10 +1,16 @@
 import { interviewerInstructions, loadSpecTemplate } from "./instructions.js";
-import { MAX_READY_UNKNOWNS } from "./schemas.js";
+import {
+  MAX_READY_UNKNOWNS,
+  MAX_SCOUT_CURRENT_STATE,
+  MAX_SCOUT_PROPOSED_DECISIONS,
+} from "./schemas.js";
 import type {
   AssessReadinessRequest,
   DecisionSnapshot,
   InterviewContext,
   InterviewerRequest,
+  ProjectServerFacts,
+  ScoutProjectRequest,
 } from "./types.js";
 
 /**
@@ -99,7 +105,10 @@ function renderRetry(rejectionReason: string | null): string {
 }
 
 function renderTask(
-  request: Exclude<InterviewerRequest, AssessReadinessRequest>,
+  request: Exclude<
+    InterviewerRequest,
+    AssessReadinessRequest | ScoutProjectRequest
+  >,
 ): string {
   switch (request.kind) {
     case "propose-round": {
@@ -332,6 +341,126 @@ function buildReadinessPrompt(request: AssessReadinessRequest): string {
     .trimEnd();
 }
 
+/** The scout's opening line. Like {@link OPENING_LINE}, it cannot be read as an option. */
+const SCOUT_OPENING_LINE =
+  "You are scouting a project's repository, inside the Grill Room app, for one idea that is about to be grilled. You are not interviewing: you read the project and report what it already has and has already decided.";
+
+function renderFacts(facts: ProjectServerFacts): string {
+  const remotes =
+    facts.remotes.length > 0
+      ? facts.remotes
+          .map((remote) => `${remote.name} ${remote.url} (${remote.type})`)
+          .join("; ")
+      : "(none)";
+  const commits =
+    facts.recentCommitSubjects.length > 0
+      ? facts.recentCommitSubjects.map((subject) => `  - ${subject}`).join("\n")
+      : "  (none)";
+  return [
+    `- HEAD commit: ${facts.headCommit ?? "(no commits yet)"}`,
+    `- Branch: ${facts.headBranch ?? "(no commits yet)"}`,
+    `- Remotes: ${remotes}`,
+    `- Uncommitted changes in the working tree: ${facts.dirty ? "yes" : "no"}`,
+    `- Agent instructions at the root (CLAUDE.md, AGENTS.md): ${facts.hasAgentInstructions ? "yes" : "no"}`,
+    `- Decisions folder: ${facts.decisionsFolder ?? "(none found)"}`,
+    `- Rules folder: ${facts.hasRulesFolder ? "yes" : "no"}`,
+    "- Recent commit subjects, newest first:",
+    commits,
+  ].join("\n");
+}
+
+function renderPreviousDecisions(request: ScoutProjectRequest): string[] {
+  if (request.previousDecisions.length === 0) {
+    return [
+      "- `previousDecisions`: this is the first scout of this session, so",
+      "  return an empty list.",
+    ];
+  }
+  const previous = request.previousDecisions
+    .map(
+      (decision) =>
+        `  - [${decision.key}] (${decision.source}, ${decision.disposition} by the user, cited at ${decision.citation}) ${decision.title}: ${decision.statement}`,
+    )
+    .join("\n");
+  return [
+    "- `previousDecisions`: the previous scout report proposed these",
+    "  decisions. Return exactly one entry for every one of them, by key:",
+    "  `unchanged` when the repo still holds it as stated, `changed` when the",
+    "  repo now holds something different (put what it now holds in",
+    "  `statement`), `removed` when the repo no longer supports it. Leave",
+    "  `statement` null unless the change is `changed`. When a previous",
+    "  decision still bears on the idea, propose it again under the same key.",
+    "",
+    previous,
+  ];
+}
+
+/**
+ * The scout reads the project, not the interview: it carries none of the
+ * grilling method, only the idea, the facts the server collected, the report
+ * schema's rules and, on a re-run, the previous report's decisions.
+ */
+function buildScoutPrompt(request: ScoutProjectRequest): string {
+  return [
+    SCOUT_OPENING_LINE,
+    "",
+    "## The idea, in the user's words",
+    "",
+    `Title: ${request.context.title ?? "(untitled)"}`,
+    "",
+    request.context.idea,
+    "",
+    "## The project",
+    "",
+    `The project's root is your working directory: ${request.projectRoot}`,
+    "You can read it with Read, Grep and Glob, and nothing else. Never modify",
+    "anything, and never read outside it. Secret files (environment files,",
+    "keys, certificates, credentials) are denied to you: do not try to open",
+    "them, and never repeat a secret value if you meet one.",
+    "",
+    "What the app already knows about the repository, from git and the file",
+    "system. Use it to decide where to look first: decisions and conventions",
+    "usually live in the agent instructions, the decisions folder and the rules",
+    "folder.",
+    "",
+    renderFacts(request.facts),
+    "",
+    "## Your task: report what the project already has and has decided",
+    "",
+    "Read the project for this idea, and only for this idea. Return:",
+    "",
+    `- \`currentState\`: at most ${MAX_SCOUT_CURRENT_STATE} items, each something that`,
+    "  already exists relative to the idea, with `status` `built` (already does",
+    "  what the idea needs), `partial` (exists but falls short) or `gap` (the idea",
+    "  needs it and nothing is there yet), a one-sentence `summary`, and at least",
+    "  one citation of where it lives, or for a gap, of where it would belong.",
+    `- \`proposedDecisions\`: at most ${MAX_SCOUT_PROPOSED_DECISIONS} choices the project has already`,
+    "  made that bear on this idea. Propose only decisions that constrain how",
+    "  the idea gets built; leave out everything else the project decided.",
+    "  Each has a stable kebab-case `key` (the same key for the same decision",
+    "  on a later scout), a short `title`, the `statement` as the project holds",
+    "  it, a `source`, one `citation`, and a one-line `reason` saying why it",
+    "  matters for this idea. The source is `recorded` only when the decision is",
+    "  written down in an ADR or decisions file, the agent instructions or a",
+    "  rules file, cited there; it is `inferred` when you read it from code or",
+    "  configuration, cited at the line you read it from.",
+    ...renderPreviousDecisions(request),
+    "",
+    "Every citation is a path relative to the project root, a colon, and a",
+    "line number or an inclusive line range: `src/server.ts:42` or",
+    "`docs/adr/0003-queue.md:5-12`. Cite only files you actually opened and",
+    "lines you actually read. Never invent a path, and never cite a line past",
+    "the end of its file: the app checks every citation against the repository",
+    "and rejects the whole report if any one is wrong.",
+    "",
+    "When the project has nothing relevant to the idea, say so with empty",
+    "lists rather than stretching an unrelated item to fit.",
+    renderRetry(request.rejectionReason),
+  ]
+    .join("\n")
+    .trimEnd();
+}
+
 /**
  * Builds the prompt for one turn.
  *
@@ -343,6 +472,7 @@ export function buildPrompt(
   { primed = false }: { primed?: boolean } = {},
 ): string {
   if (request.kind === "assess-readiness") return buildReadinessPrompt(request);
+  if (request.kind === "scout-project") return buildScoutPrompt(request);
 
   const preamble = primed
     ? [
