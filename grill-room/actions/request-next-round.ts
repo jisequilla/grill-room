@@ -36,6 +36,7 @@ import {
   runTurn,
   TurnRejected,
 } from "../server/turn.js";
+import type { AttemptRecorder } from "../server/turn-recorder.js";
 import getCurrentRound from "./get-current-round.js";
 
 /** A row, as `validateProposal` needs an existing decision: tree facts plus its question. */
@@ -146,6 +147,10 @@ export default defineAction({
     // queue — proposal leftovers and newly-unblocked decisions alike — is
     // empty.
     let pending = isOneAtATime ? nextRoundCandidates(rows) : [];
+    // The turn record of the proposal this request asked for, which the round
+    // it opens points at. Null when the round comes from an earlier proposal's
+    // queue without troubling the interviewer.
+    let proposalTurnId: string | null = null;
 
     if (!isOneAtATime || pending.length === 0) {
       const supersessionFailure = await runProposalTurn();
@@ -223,6 +228,7 @@ export default defineAction({
       id: roundId,
       sessionId,
       submissionState: "open",
+      turnId: proposalTurnId,
       createdAt: now,
     });
 
@@ -255,6 +261,9 @@ export default defineAction({
      * Resolves with the failure of a done proposal's supersession scan, when
      * there was one: the scan runs inside this turn, but its error can only be
      * stored after `runTurn` has written the turn's own result.
+     *
+     * Every model call of the turn is recorded as an attempt on a turn record
+     * of kind `propose-round`, whose id is kept for the round it opens.
      */
     async function runProposalTurn(): Promise<SupersessionFailure | null> {
       let failure: SupersessionFailure | null = null;
@@ -262,8 +271,10 @@ export default defineAction({
       await runTurn({
         sessionId,
         failedMessage: "The interviewer turn failed.",
-        take: async () => {
-          const accepted = await propose();
+        record: { turnKind: "propose-round", model: session!.model },
+        take: async (recorder) => {
+          proposalTurnId = recorder?.turnId ?? null;
+          const accepted = await propose(recorder);
           const stored = await store(accepted.result, accepted.conversationId);
           failure = stored.failure;
           return stored.conversationId;
@@ -273,7 +284,7 @@ export default defineAction({
       return failure;
     }
 
-    async function propose() {
+    async function propose(recorder: AttemptRecorder | null) {
       const interviewer = getInterviewer();
       const latestAnswers = await answersOfLastSubmittedRound();
       // The tree cannot change between attempts: nothing is written until one
@@ -282,24 +293,28 @@ export default defineAction({
 
       return askUntilAccepted<ProposeRoundResult>({
         conversationId: session!.conversationId,
-        ask: async ({ conversationId, rejectionReason }) => {
+        recorder,
+        ask: async ({ conversationId, rejectionReason, observer }) => {
           const current = await loadDecisions();
           against = current.map(toKeyedTreeDecision);
-          return interviewer.proposeRound({
-            kind: "propose-round",
-            context: {
-              idea: session!.idea,
-              title: session!.title,
-              model: session!.model,
-              answeringMode: session!.answeringMode,
-              docsFolder: session!.docsFolder,
-              conversationId,
-              decisions: await decisionSnapshots(current),
+          return interviewer.proposeRound(
+            {
+              kind: "propose-round",
+              context: {
+                idea: session!.idea,
+                title: session!.title,
+                model: session!.model,
+                answeringMode: session!.answeringMode,
+                docsFolder: session!.docsFolder,
+                conversationId,
+                decisions: await decisionSnapshots(current),
+              },
+              latestAnswers,
+              userAddedDecisions: pendingUserAddedDecisions(current),
+              rejectionReason,
             },
-            latestAnswers,
-            userAddedDecisions: pendingUserAddedDecisions(current),
-            rejectionReason,
-          });
+            observer,
+          );
         },
         reasonsToRefuse: (result) =>
           validateProposal(against, result.proposedDecisions, {

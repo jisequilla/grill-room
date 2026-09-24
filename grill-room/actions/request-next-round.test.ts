@@ -7,10 +7,16 @@ import {
 } from "@/lib/recommended-choice";
 import {
   InterviewerError,
+  rateLimitedTurn,
   resetInterviewer,
+  schemaInvalidTurn,
   scriptInterviewer,
+  setInterviewer,
+  treeRuleViolation,
+  withResumeFallback,
 } from "../server/interviewer/index.js";
 import { anAssessReadinessResult } from "../server/interviewer/test-fixtures.js";
+import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import addDecision from "./add-decision.js";
 import assessReadiness from "./assess-readiness.js";
@@ -18,6 +24,7 @@ import createSession from "./create-session.js";
 import getCurrentRound from "./get-current-round.js";
 import getSession from "./get-session.js";
 import getTree from "./get-tree.js";
+import getTurn from "./get-turn.js";
 import requestNextRound from "./request-next-round.js";
 import saveDraftAnswer from "./save-draft-answer.js";
 import submitRound from "./submit-round.js";
@@ -1549,5 +1556,333 @@ describe("idea readiness", () => {
       await requestNextRound.run({ sessionId: session.id });
       expect(await canEdit()).toBe(false);
     });
+  });
+});
+
+describe("propose-round turn records", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  /** The session's latest propose-round turn, read back through `get-turn`. */
+  async function proposalTurn(sessionId: string) {
+    const latest = await findLatestTurn({
+      sessionId,
+      turnKind: "propose-round",
+    });
+    expect(latest).not.toBeNull();
+    return getTurn.run({ turnId: latest!.id });
+  }
+
+  async function onlyRunAttempts(sessionId: string) {
+    const turn = await proposalTurn(sessionId);
+    expect(turn.runs).toHaveLength(1);
+    return turn.runs[0]!.attempts;
+  }
+
+  async function roundTurnIds(sessionId: string) {
+    const rows = await getDb()
+      .select()
+      .from(schema.rounds)
+      .where(eq(schema.rounds.sessionId, sessionId));
+    return rows.map((row) => row.turnId);
+  }
+
+  /** The session already has a conversation, so the next turn resumes it. */
+  async function withConversation(sessionId: string) {
+    await getDb()
+      .update(schema.sessions)
+      .set({ conversationId: "earlier-conversation" })
+      .where(eq(schema.sessions.id, sessionId));
+  }
+
+  const offFrontier = () => ({
+    kind: "propose-round" as const,
+    result: treeRuleViolation.offFrontier(),
+  });
+  const unknownKey = () => ({
+    kind: "propose-round" as const,
+    result: treeRuleViolation.unknownKey(),
+  });
+
+  it("records a clean turn as exactly one successful attempt, on the session's model, linked to its round", async () => {
+    const session = await aSession();
+    const clean = round(proposed({ key: "shape" }));
+    scriptInterviewer([clean]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    const turn = await proposalTurn(session.id);
+    expect(turn).toMatchObject({
+      sessionId: session.id,
+      turnKind: "propose-round",
+      model: "sonnet",
+      outcome: "succeeded",
+    });
+    expect(turn.completedAt).not.toBeNull();
+    expect(turn.totalElapsedMs).toBeGreaterThanOrEqual(0);
+    expect(turn.runs).toHaveLength(1);
+    expect(turn.runs[0]).toMatchObject({ runNumber: 1, manualRetry: false });
+    expect(turn.runs[0]!.attempts).toEqual([
+      expect.objectContaining({
+        attemptNumber: 1,
+        kind: "success",
+        reason: null,
+        rawOutput: JSON.stringify(clean.result),
+      }),
+    ]);
+    expect(turn.runs[0]!.attempts[0]!.durationMs).toBeGreaterThanOrEqual(0);
+    expect(await roundTurnIds(session.id)).toEqual([turn.id]);
+  });
+
+  it("records each refusal as its own attempt with the reason sent back, then the success, numbered upward", async () => {
+    const session = await aSession();
+    const first = offFrontier();
+    const second = unknownKey();
+    const accepted = round(proposed({ key: "shape" }));
+    const interviewer = scriptInterviewer([first, second, accepted]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    const attempts = await onlyRunAttempts(session.id);
+    expect(
+      attempts.map(({ attemptNumber, kind }) => ({ attemptNumber, kind })),
+    ).toEqual([
+      { attemptNumber: 1, kind: "tree-rule-refusal" },
+      { attemptNumber: 2, kind: "tree-rule-refusal" },
+      { attemptNumber: 3, kind: "success" },
+    ]);
+    expect(attempts[0]!.reason).toBe(
+      (interviewer.requests[1] as { rejectionReason: string | null })
+        .rejectionReason,
+    );
+    expect(attempts[0]!.reason).toContain("not on the frontier");
+    expect(attempts[1]!.reason).toBe(
+      (interviewer.requests[2] as { rejectionReason: string | null })
+        .rejectionReason,
+    );
+    expect(attempts[1]!.reason).toContain("fake-no-such-decision");
+    expect(attempts[2]!.reason).toBeNull();
+    expect(attempts.map((attempt) => attempt.rawOutput)).toEqual([
+      JSON.stringify(first.result),
+      JSON.stringify(second.result),
+      JSON.stringify(accepted.result),
+    ]);
+    const turn = await proposalTurn(session.id);
+    expect(turn.outcome).toBe("succeeded");
+    expect(await roundTurnIds(session.id)).toEqual([turn.id]);
+  });
+
+  it("stops a turn whose budget is spent and keeps every attempt", async () => {
+    const session = await aSession();
+    const interviewer = scriptInterviewer([
+      offFrontier(),
+      offFrontier(),
+      offFrontier(),
+    ]);
+
+    const failure = await Promise.resolve(
+      requestNextRound.run({ sessionId: session.id }),
+    ).then(
+      () => null,
+      (error: Error) => error,
+    );
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(interviewer.requests).toHaveLength(3);
+    const turn = await proposalTurn(session.id);
+    expect(turn.outcome).toBe("invalid-proposal");
+    expect(turn.completedAt).not.toBeNull();
+    const attempts = turn.runs[0]!.attempts;
+    expect(attempts.map((attempt) => attempt.kind)).toEqual([
+      "tree-rule-refusal",
+      "tree-rule-refusal",
+      "tree-rule-refusal",
+    ]);
+    expect(attempts.every((attempt) => attempt.rawOutput != null)).toBe(true);
+    expect(failure!.message).toContain(`Last reason: ${attempts[2]!.reason}`);
+    expect(await getSession.run({ id: session.id })).toMatchObject({
+      turnStatus: "failed",
+      turnErrorCode: "invalid-proposal",
+    });
+  });
+
+  it("records a resume fallback as its own attempt with no output", async () => {
+    const session = await aSession();
+    await withConversation(session.id);
+    scriptInterviewer([
+      withResumeFallback(
+        round(proposed({ key: "shape" })),
+        "No conversation found.",
+      ),
+    ]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect(await onlyRunAttempts(session.id)).toEqual([
+      expect.objectContaining({
+        attemptNumber: 1,
+        kind: "resume-fallback",
+        reason: "No conversation found.",
+        rawOutput: null,
+      }),
+      expect.objectContaining({ attemptNumber: 2, kind: "success" }),
+    ]);
+  });
+
+  it("does not spend the rejection budget on a resume fallback", async () => {
+    const session = await aSession();
+    await withConversation(session.id);
+    const interviewer = scriptInterviewer([
+      withResumeFallback(offFrontier()),
+      offFrontier(),
+      round(proposed({ key: "shape" })),
+    ]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect(interviewer.requests).toHaveLength(3);
+    const turn = await proposalTurn(session.id);
+    expect(turn.outcome).toBe("succeeded");
+    expect(turn.runs[0]!.attempts.map((attempt) => attempt.kind)).toEqual([
+      "resume-fallback",
+      "tree-rule-refusal",
+      "tree-rule-refusal",
+      "success",
+    ]);
+  });
+
+  it("stops the turn on schema-invalid output with its own kind and the raw output, without retrying", async () => {
+    const session = await aSession();
+    const invalid = schemaInvalidTurn("propose-round", {
+      proposedDecisions: "nope",
+    });
+    const interviewer = scriptInterviewer([offFrontier(), invalid]);
+
+    await expect(
+      requestNextRound.run({ sessionId: session.id }),
+    ).rejects.toThrow(/does not match the expected shape/);
+
+    expect(interviewer.requests).toHaveLength(2);
+    const turn = await proposalTurn(session.id);
+    expect(turn.outcome).toBe("malformed-output");
+    const attempts = turn.runs[0]!.attempts;
+    expect(attempts.map((attempt) => attempt.kind)).toEqual([
+      "tree-rule-refusal",
+      "schema-invalid",
+    ]);
+    expect(attempts[1]!.reason).toMatch(/Schema mismatch at proposedDecisions/);
+    expect(attempts[1]!.rawOutput).toBe(JSON.stringify(invalid.invalidResult));
+    expect(await roundTurnIds(session.id)).toEqual([]);
+  });
+
+  it("stops the turn on a rate limit with its own kind, distinct from an interviewer error", async () => {
+    const session = await aSession();
+    scriptInterviewer([
+      rateLimitedTurn("propose-round", "The subscription pool is spent."),
+    ]);
+
+    await expect(
+      requestNextRound.run({ sessionId: session.id }),
+    ).rejects.toThrow("The subscription pool is spent.");
+
+    const rateLimited = await proposalTurn(session.id);
+    expect(rateLimited.outcome).toBe("rate-limited");
+    expect(rateLimited.runs[0]!.attempts).toEqual([
+      expect.objectContaining({
+        attemptNumber: 1,
+        kind: "rate-limit",
+        reason: "The subscription pool is spent.",
+        rawOutput: null,
+      }),
+    ]);
+
+    scriptInterviewer([
+      {
+        kind: "propose-round",
+        error: new InterviewerError("failed", "The turn died."),
+      },
+    ]);
+    await expect(
+      requestNextRound.run({ sessionId: session.id }),
+    ).rejects.toThrow("The turn died.");
+
+    const errored = await proposalTurn(session.id);
+    expect(errored.id).not.toBe(rateLimited.id);
+    expect(errored.outcome).toBe("failed");
+    expect(errored.runs[0]!.attempts).toEqual([
+      expect.objectContaining({
+        kind: null,
+        reason: "failed: The turn died.",
+        rawOutput: null,
+      }),
+    ]);
+    expect(errored.runs[0]!.attempts[0]!.durationMs).not.toBeNull();
+  });
+
+  it("lets the attempts be read back while the turn is still running", async () => {
+    const session = await aSession();
+    const fake = scriptInterviewer([
+      offFrontier(),
+      round(proposed({ key: "shape" })),
+    ]);
+    const seenMidTurn: Awaited<ReturnType<typeof proposalTurn>>[] = [];
+    let calls = 0;
+    setInterviewer({
+      ...fake,
+      proposeRound: (request, observer) =>
+        fake.proposeRound(request, {
+          ...observer,
+          async callStarted(call) {
+            await observer?.callStarted?.(call);
+            calls += 1;
+            if (calls === 2) seenMidTurn.push(await proposalTurn(session.id));
+          },
+        }),
+    });
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect(seenMidTurn).toHaveLength(1);
+    const [midTurn] = seenMidTurn;
+    expect(midTurn!.outcome).toBeNull();
+    expect(midTurn!.completedAt).toBeNull();
+    expect(midTurn!.runs[0]!.attempts).toEqual([
+      expect.objectContaining({ attemptNumber: 1, kind: "tree-rule-refusal" }),
+      expect.objectContaining({
+        attemptNumber: 2,
+        kind: null,
+        durationMs: null,
+        reason: null,
+        rawOutput: null,
+      }),
+    ]);
+    expect(
+      (await proposalTurn(session.id)).runs[0]!.attempts.map(
+        (attempt) => attempt.kind,
+      ),
+    ).toEqual(["tree-rule-refusal", "success"]);
+  });
+
+  it("links no turn to a round served from an earlier proposal's queue", async () => {
+    const session = await aSession({ answeringMode: "one-at-a-time" });
+    scriptInterviewer([
+      round(
+        proposed({ key: "shape" }),
+        proposed({ key: "tone", title: "How blunt should it be?" }),
+      ),
+    ]);
+
+    const first = await requestNextRound.run({ sessionId: session.id });
+    await saveDraftAnswer.run({
+      decisionId: first.round!.decisions[0]!.id,
+      answerKind: "accepted-recommendation",
+    });
+    await submitRound.run({ id: first.round!.id });
+
+    const turn = await proposalTurn(session.id);
+    const linked = await roundTurnIds(session.id);
+    expect(linked).toHaveLength(2);
+    expect(linked).toContain(turn.id);
+    expect(linked).toContain(null);
   });
 });
