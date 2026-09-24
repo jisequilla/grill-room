@@ -41,11 +41,16 @@ export default defineConfig({
   testDir: "./e2e",
   timeout: 120_000,
   expect: { timeout: 15_000 },
-  // The fake interviewer's turn queue lives once per server process (see
-  // `server/interviewer/fake.ts` and `cannedInterviewTurns()`): two specs, or
-  // two workers sharing the one `webServer` below, would drain each other's
-  // queued turns. One test, one worker, no retries — a retry would replay the
-  // same UI actions against an already-drained queue.
+  // The fake interviewer keeps one scripted turn queue per session
+  // (`server/interviewer/fake.ts`'s `createScenarioInterviewer`), built from
+  // a named scenario chosen for it (`actions/use-fake-scenario.ts`) before
+  // its first request. That is what lets more than one spec file run
+  // against this one `webServer`: each test creates its own session and
+  // chooses its own scenario, so one test's requests can never drain
+  // another's queue. Workers still default to one — nothing here has proven
+  // a need for more — and retries stay off, since a retry would replay the
+  // same UI actions against a session whose queue the first attempt may
+  // already have consumed partway through.
   fullyParallel: false,
   workers: 1,
   retries: 0,

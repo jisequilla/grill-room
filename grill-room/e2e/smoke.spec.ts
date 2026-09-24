@@ -7,10 +7,12 @@ import { expect, test } from "@playwright/test";
  * in this app is tested at the action boundary (see `actions/*.test.ts`); this
  * is the one place the browser itself is exercised.
  *
- * The fake interviewer's turn queue is scripted once, at server startup, by
- * `cannedInterviewTurns()` (`server/interviewer/fake.ts`) and lives for the
- * whole server process — not per session. `playwright.config.ts` starts a
- * fresh server for this suite, so the queue below is this test's alone:
+ * The fake interviewer keeps one scripted turn queue per session
+ * (`server/interviewer/fake.ts`'s `createScenarioInterviewer`), built from a
+ * named scenario chosen for the session, or — when none was chosen, as here,
+ * since this test drives only the UI — from the default `canned-interview`
+ * scenario, `cannedInterviewTurns()`. This test's session gets exactly the
+ * five turns below, in order:
  *
  *   1. propose-round  -> refused for a tree-rule violation (a dependency on
  *                         a decision that does not exist), then retried and
@@ -24,8 +26,13 @@ import { expect, test } from "@playwright/test";
  *   5. break-into-tickets -> two tickets, the second blocked by the first.
  *
  * This test drives exactly one session, consuming those five turns in order.
- * A second test in this file would starve on an empty queue, which is why the
- * suite is one test, one worker, no retries (see the config).
+ * Other spec files in this suite (`e2e/*.spec.ts`) run against the same
+ * `webServer` alongside it: each creates its own session and chooses its own
+ * scenario (`actions/use-fake-scenario.ts`), and a session's queue is its
+ * own. This file stays one test regardless, since its canned interview is
+ * written to be walked start to finish in a single session; the suite still
+ * runs on one worker with no retries (see the config) — nothing yet has
+ * proven a need for more.
  */
 test("walks the canned interview from a new session to broken-out tickets", async ({
   page,
