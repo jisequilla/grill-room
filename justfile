@@ -89,8 +89,13 @@ restart: stop dev
 test:
     pnpm test
 
-# Browser smoke test (own port and throwaway database; safe alongside dev)
+# Browser smoke test: picks a free E2E_PORT when unset, so two worktrees running this at once don't collide
 e2e:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "${E2E_PORT:-}" ]; then
+      export E2E_PORT="$(node -e 'const s=require("net").createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})')"
+    fi
     pnpm test:e2e
 
 typecheck:

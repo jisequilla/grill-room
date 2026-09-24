@@ -57,7 +57,14 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
 
   // ---- Land on the workspace -------------------------------------------
   await page.waitForURL(/\/sessions\/[^/]+$/);
-  await expect(page.getByText("Interviewing")).toBeVisible();
+  // Scoped to the route's own header (inside `<main>`, as opposed to the
+  // shell's global `<header>` that also sits on this page): an unscoped
+  // `getByText("Interviewing")` matches every session's status badge once
+  // other specs in this suite have created sessions of their own against the
+  // same `webServer` and database (see `e2e/support.ts`'s `chooseScenario`
+  // doc comment).
+  const workspaceHeader = page.locator("main header");
+  await expect(workspaceHeader.getByText("Interviewing")).toBeVisible();
 
   // ---- Start the interview: round 1 (two decisions, both recommended) --
   await page.getByRole("button", { name: "Start the interview" }).click();
