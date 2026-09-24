@@ -13,6 +13,7 @@ import {
   completeAttempt,
   completeTurn,
   createTurn,
+  findRunningTurn,
   getTurnWithRuns,
   startAttempt,
 } from "./turn-records.js";
@@ -358,5 +359,75 @@ describe("turn-records", () => {
     const nestedTurn = await getTurnWithRuns(nested.turnId);
     expect(nestedTurn?.outcome).toBe(TURN_SUCCEEDED);
     expect(nestedTurn?.runs).toHaveLength(1);
+  });
+
+  describe("findRunningTurn", () => {
+    it("returns null for a session with no turn record", async () => {
+      const sessionId = await aSession();
+      expect(await findRunningTurn(sessionId)).toBeNull();
+    });
+
+    it("returns null once the session's only turn has completed", async () => {
+      const sessionId = await aSession();
+      const { turnId } = await createTurn({
+        sessionId,
+        turnKind: "assess-readiness",
+        model: "fable",
+      });
+      await completeTurn({ turnId, outcome: "succeeded" });
+
+      expect(await findRunningTurn(sessionId)).toBeNull();
+    });
+
+    it("finds the running turn of whichever kind is not yet complete", async () => {
+      const sessionId = await aSession();
+      const { turnId } = await createTurn({
+        sessionId,
+        turnKind: "review-stale",
+        model: "sonnet",
+      });
+
+      const running = await findRunningTurn(sessionId);
+      expect(running?.id).toBe(turnId);
+      expect(running?.turnKind).toBe("review-stale");
+      expect(running?.completedAt).toBeNull();
+    });
+
+    it("never returns a turn from a different, unrelated session", async () => {
+      const sessionId = await aSession();
+      const otherSessionId = await aSession();
+      await createTurn({
+        sessionId: otherSessionId,
+        turnKind: "propose-round",
+        model: "fable",
+      });
+
+      expect(await findRunningTurn(sessionId)).toBeNull();
+    });
+
+    it("prefers the most recently started turn still running, once a nested one has finished", async () => {
+      const sessionId = await aSession();
+      const outer = await createTurn({
+        sessionId,
+        turnKind: "propose-round",
+        model: "sonnet",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const nested = await createTurn({
+        sessionId,
+        turnKind: "find-superseded",
+        model: "sonnet",
+      });
+
+      // Both still running: the more recently started (nested) turn is the one
+      // actually doing work right now.
+      expect((await findRunningTurn(sessionId))?.id).toBe(nested.turnId);
+
+      await completeTurn({ turnId: nested.turnId, outcome: "succeeded" });
+
+      // Once the nested turn finishes, the outer one is again the only turn
+      // still running.
+      expect((await findRunningTurn(sessionId))?.id).toBe(outer.turnId);
+    });
   });
 });

@@ -4,6 +4,7 @@ import { IconAlertTriangle } from "@tabler/icons-react";
 import { ReadinessBadge } from "@/components/sessions/readiness-badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { TurnAttemptLog, type Turn } from "@/components/workspace/turn-attempt-log";
 
 type RoundResult = AgentNativeActionRegistry["get-current-round"]["result"];
 
@@ -43,6 +44,7 @@ export function ReadinessPanel({
   working,
   isAssessing,
   onAssess,
+  turn = null,
 }: {
   readiness: Readiness | null;
   /** The session's interviewer is working on some turn. */
@@ -50,6 +52,14 @@ export function ReadinessPanel({
   /** This tab's assess request is in flight. */
   isAssessing: boolean;
   onAssess: () => void;
+  /**
+   * The turn that produced the current judgment (the session's
+   * `readinessTurnId`), collapsed beside the verdict. The live attempt log
+   * while a judgment runs is shown in the turn status below this panel
+   * instead, since the stored turn status cannot say whether the turn working
+   * is this judgment or the first round.
+   */
+  turn?: Turn | null;
 }) {
   const t = useT();
   const result = readiness?.result ?? null;
@@ -85,6 +95,8 @@ export function ReadinessPanel({
           )}
         </Button>
       </div>
+
+      <TurnAttemptLog turn={turn} />
 
       {result ? (
         <dl className="flex flex-col gap-4">

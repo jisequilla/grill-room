@@ -123,15 +123,37 @@ export default function SessionWorkspaceRoute() {
     { enabled, refetchInterval: working ? TURN_POLL_MS : false },
   );
 
-  // The turn that proposed the round currently working or failed — found by
-  // kind rather than read off the round, since a round only exists once its
-  // proposal has already succeeded. Feeds the attempt log on the working and
-  // failed panels; a stale (already-completed) turn is filtered out there
-  // when the working status actually belongs to some other turn kind.
-  const { data: proposalTurn } = useActionQuery(
-    "get-latest-turn",
-    { sessionId: id, turnKind: "propose-round" },
+  // The turn the session's current turn status belongs to, of any kind: a
+  // round proposal, a readiness judgment, a stale review, or a supersession
+  // check all share the same turn lock, so the live turn status must read
+  // whichever kind actually started it rather than assuming a round
+  // proposal. Feeds the attempt log on the working and failed panels.
+  const { data: activeTurn } = useActionQuery(
+    "get-active-turn",
+    { sessionId: id },
     { enabled, refetchInterval: working ? TURN_POLL_MS : false },
+  );
+
+  // The turn of the session's stored readiness judgment, stale review, and
+  // supersession check — collapsed beside what each one produced, once it has
+  // stopped. Fetched once the session carries the id, and refreshed like
+  // everything else whenever an action settles.
+  const { data: readinessTurn } = useActionQuery(
+    "get-turn",
+    { turnId: session?.readinessTurnId ?? "" },
+    { enabled: enabled && session?.readinessTurnId != null },
+  );
+
+  const { data: staleReviewTurn } = useActionQuery(
+    "get-turn",
+    { turnId: session?.staleReviewTurnId ?? "" },
+    { enabled: enabled && session?.staleReviewTurnId != null },
+  );
+
+  const { data: supersessionTurn } = useActionQuery(
+    "get-turn",
+    { turnId: session?.supersessionTurnId ?? "" },
+    { enabled: enabled && session?.supersessionTurnId != null },
   );
 
   // The tree footer counts loose ends the way the loose ends list does, by
@@ -285,6 +307,7 @@ export default function SessionWorkspaceRoute() {
                   working={working}
                   isAssessing={assessReadiness.isPending}
                   onAssess={() => assessReadiness.mutate({ sessionId: id })}
+                  turn={readinessTurn ?? null}
                 />
               ) : null}
               <RoundPanel
@@ -293,7 +316,9 @@ export default function SessionWorkspaceRoute() {
                 hasDecisions={decisions.length > 0}
                 decisions={decisions}
                 lastSubmittedAt={lastSubmittedAt}
-                proposalTurn={proposalTurn ?? null}
+                activeTurn={activeTurn ?? null}
+                staleReviewTurn={staleReviewTurn ?? null}
+                supersessionTurn={supersessionTurn ?? null}
                 onRequestNextRound={() => nextRound.mutate({ sessionId: id })}
                 isRequesting={nextRound.isPending}
                 onSubmit={(roundId) => submitRound.mutate({ id: roundId })}
