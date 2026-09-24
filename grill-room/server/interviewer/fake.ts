@@ -220,6 +220,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   // manual retry succeeds.
   "rate-limit-then-retry": { turns: rateLimitThenRetryTurns(), delayMs: 2_000 },
   "scout-project": { turns: scoutProjectTurns() },
+  "scout-project-readiness": { turns: scoutProjectReadinessTurns() },
 };
 
 /** Whether the registry has a scenario of that name. */
@@ -773,6 +774,51 @@ export function scoutProjectTurns(): ScriptedTurn[] {
         ],
         previousDecisions: [],
       },
+    },
+  ];
+}
+
+/**
+ * The scout-project flow through the UI, start to first round: the same
+ * scout report {@link scoutProjectTurns} schedules, followed by the
+ * readiness judge it grounds (evidence, an objective and a ready verdict
+ * that pass `reasonsToRefuseReadiness`), then a first round that proposes a
+ * decision unrelated to either repo proposal — so a test can keep one of the
+ * scout's proposals and confirm the round never re-asks it.
+ * `e2e/project-scout.spec.ts` is the one thing that schedules this; a
+ * separate scenario from `scout-project` so `scenarios.test.ts`'s
+ * `remainingFor(session.id)` assertion (exactly one `scout-project` request)
+ * never has to change.
+ */
+export function scoutProjectReadinessTurns(): ScriptedTurn[] {
+  return [
+    ...scoutProjectTurns(),
+    {
+      kind: "assess-readiness",
+      result: {
+        evidence: [
+          {
+            text: "The idea names ingest lag as the alert target.",
+            source: "idea",
+            citation: null,
+          },
+        ],
+        objective: "Alert when ingest lag crosses a threshold.",
+        objectiveIsProcess: false,
+        expectedOutcome: "An alert fires before ingest falls too far behind.",
+        unknowns: [],
+        verdict: "ready",
+        missing: [],
+      },
+    },
+    {
+      kind: "propose-round",
+      result: aRound([
+        aProposedDecision("alert-trigger", {
+          title: "What should trigger the alert?",
+          body: "The threshold that fires a page.",
+        }),
+      ]),
     },
   ];
 }
