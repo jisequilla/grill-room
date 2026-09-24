@@ -106,6 +106,10 @@ e2e:
 demo:
     #!/usr/bin/env bash
     set -euo pipefail
+    if ! command -v ffmpeg >/dev/null 2>&1; then
+      echo "demo: ffmpeg is not on PATH; install it before running 'just demo'." >&2
+      exit 1
+    fi
     if [ -z "${E2E_PORT:-}" ]; then
       export E2E_PORT="$(node -e 'const s=require("net").createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})')"
     fi
@@ -117,7 +121,7 @@ demo:
       exit 1
     fi
     mkdir -p ../docs/media
-    /opt/homebrew/bin/ffmpeg -y -i "$raw" \
+    ffmpeg -y -i "$raw" \
       -c:v libvpx-vp9 -crf 34 -b:v 0 -deadline good -cpu-used 2 -an \
       ../docs/media/demo.webm
     size=$(stat -f%z ../docs/media/demo.webm 2>/dev/null || stat -c%s ../docs/media/demo.webm)
