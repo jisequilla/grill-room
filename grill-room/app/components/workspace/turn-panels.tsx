@@ -8,20 +8,28 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { TurnAttemptLog, type Turn } from "@/components/workspace/turn-attempt-log";
+import {
+  TurnAttemptLog,
+  type Turn,
+} from "@/components/workspace/turn-attempt-log";
 import { useElapsed } from "@/lib/use-elapsed";
 
 function Panel({
   icon,
   title,
   children,
+  testId,
 }: {
   icon: React.ReactNode;
   title: string;
   children?: React.ReactNode;
+  testId?: string;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-12 text-center">
+    <div
+      className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-12 text-center"
+      data-testid={testId}
+    >
       <div className="text-muted-foreground">{icon}</div>
       <h3 className="text-base font-medium">{title}</h3>
       {children}
@@ -99,6 +107,7 @@ export function TurnWorkingPanel({
     <Panel
       icon={<IconHourglassHigh className="size-6 animate-pulse" />}
       title={t("workspace.workingTitle")}
+      testId="turn-working"
     >
       <p className="max-w-sm text-sm text-muted-foreground">
         {t("workspace.workingDescription")}
@@ -110,7 +119,9 @@ export function TurnWorkingPanel({
       >
         {t("workspace.workingElapsed", { elapsed })}
       </p>
-      <TurnAttemptLog turn={turn != null && turn.completedAt === null ? turn : null} />
+      <TurnAttemptLog
+        turn={turn != null && turn.completedAt === null ? turn : null}
+      />
     </Panel>
   );
 }
@@ -193,7 +204,9 @@ export function TurnFailedPanel({
           {isPending && <Spinner className="size-4" />}
           {t(isPending ? "workspace.retrying" : "workspace.retry")}
         </Button>
-        <TurnAttemptLog turn={turn != null && turn.completedAt !== null ? turn : null} />
+        <TurnAttemptLog
+          turn={turn != null && turn.completedAt !== null ? turn : null}
+        />
       </div>
     </div>
   );
