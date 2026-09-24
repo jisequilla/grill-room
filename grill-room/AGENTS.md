@@ -91,6 +91,10 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `refresh-project-tracker` | Re-read a project's declared tracker and update only what it governs: the stored commands and diagnostic always, and the export folder and slug pattern only when the tracker is valid. Nothing else about the project changes, and nothing else re-reads the tracker file — every ordinary edit carries these fields over untouched. |
 | `set-session-project` | Set the registered project a session exports into, or clear it with `null`. Export requires one. |
 | `set-docs-folder` | Set the read-only folder the interviewer may read while grilling this session, or clear it with `null`. See "Grill with docs" below. |
+| `scout-project` | Run the scout on a session's project: collect the repository's server facts, have the scout (always sonnet, read-only) report the project's current state and proposed repo decisions for the session's idea, check every citation against the project's files, and store the report on the session, replacing any earlier one. Every proposal starts undecided. Refused with `no-project`, `not-a-repo`, `wrong-session-state`, or `turn-working`. See "Project scout" below. |
+| `get-scout-report` | Read a session's scout report, or null when it has none: the server facts, the current state and proposed repo decisions, the commit and idea it read, the model, when it ran, its turn record, the keep/drop state of each proposal, and `stale`. |
+| `keep-repo-decision` | Keep one decision the session's scout report proposes: it enters the design tree settled, introduced by the repo, with the project's statement as its answer. Refused with `no-scout-report`, `proposal-not-found`, `already-kept`, `key-in-use`, `wrong-session-state`, or `turn-working`. See "Project scout" below. |
+| `drop-repo-decision` | Drop one decision the session's scout report proposes: recorded as dropped, still reaching the interviewer as unenforced context. Refused with `no-scout-report`, `proposal-not-found`, `already-kept`, `wrong-session-state`, or `turn-working`. |
 | `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written as an absolute path (HANDOFF.md and the briefs when a handoff exists, and the manifest), `handoffIncluded`, the files from the previous manifest that will be removed, the project's tracker diagnostic, and the export gate as `exportBlocked`/`exportBlockedReason` (`handoff-missing` or `handoff-stale`, null once clear) — the same gate `export-session` refuses on, reported here without refusing so the UI can explain it first. Built by the same plan `export-session` writes. |
 | `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md` plus `issues/NN-slug.md` per ticket (tickets only when current), and `HANDOFF.md` plus `briefs/NN-slug.md` from the session's generated handoff (recording that export on the handoff), creating missing folders. Also writes a manifest (`.grill-room-export.json`) of what it wrote; re-export overwrites the planned files and removes exactly the files the previous manifest lists that the new plan no longer writes, never anything else. Writes exactly what `preview-export` lists. Refuses, writing nothing, with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, `export-outside-root` when any path resolves (through symlinks) outside the real project root, `handoff-missing` when the session has no handoff, or `handoff-stale` when its handoff no longer matches today's spec, tickets or project. Also returns a post-export visibility report — see "Exporting a session" below. |
 | `get-export-visibility` | Classify every file a session's export wrote (or would write) as `tracked`, `ignored`, or `untracked` in the project's repository, given the same `sessionId` and `slug` as `preview-export`/`export-session`. Read-only and side-effect-free, so the UI can re-check without exporting again. See "Exporting a session" below. |
@@ -103,6 +107,7 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `navigate` | Move the UI to a view or path, through application state. |
 | `view-screen` | What the user is looking at. Call it first when the visible context matters. |
 | `provider-api-request` | Call Slack's Web API through the workspace connection. |
+| `use-fake-scenario` | Test only: choose the fake interviewer's scripted scenario for one session, replacing any queue it already has. Works only when `GRILL_ROOM_INTERVIEWER=fake`; refused with `fake-interviewer-only` otherwise and `unknown-scenario` for a name the fake does not have. See "Project scout" below for the `scout-project` scenario. |
 
 `request-next-round`, `submit-round`, `find-superseded`, `synthesize-spec`,
 `break-into-tickets`, `assess-readiness`, and `apply-reopen-batch` (one or two
@@ -219,6 +224,61 @@ filesystem, so the rules are narrow and enforced in three places at once:
   out of date, and a decision the user did not make is not a decision.
 
 No version of this writes to the folder.
+
+### Project scout
+
+When a session has a project, the readiness panel can ground the idea in that
+project before the interview starts. `scout-project` collects the
+repository's server facts (commit, branch, remotes, dirty state, recent
+commits, agent instructions, decisions folder, rules folder) with read-only
+`git` and file checks, then runs a scout — always on `sonnet`, whatever the
+session's interviewer model, with read-only `Read`/`Grep`/`Glob` access to the
+project root under the same restrictions as docs-folder mode, plus deny rules
+for secret files (`.env*`, keys, certificates, credential files). The scout
+reports:
+
+- **Current state** — what already exists relative to the idea, each item
+  `built`, `partial` or `gap`, with citations.
+- **Proposed repo decisions** — choices the project has already made that
+  bear on the idea, each `recorded` (an ADR, agent instructions or a rules
+  file) or `inferred` (read from code or configuration), with a citation and a
+  one-line reason.
+
+Every citation is checked against the project's files before the report is
+accepted; a report citing a missing file or an out-of-range line is refused
+and the scout is asked again. The report is stored on the session with the
+commit and idea it read, so `get-scout-report` can say when it has gone
+**stale** — the idea changed, or the project's `HEAD` moved — without a fresh
+scout run happening on its own.
+
+`keep-repo-decision` turns one proposal into a settled decision in the design
+tree, introduced by the repo, that the interviewer can never ask again;
+reopening it works like any other settled decision. `drop-repo-decision`
+leaves it out of the tree, but it still reaches the interviewer as
+unenforced context, alongside the current state, on every turn. Keeping and
+dropping are allowed any time the session is interviewing and no turn is
+working — including after rounds exist, which is also when `scout-project`
+can be run again (a **re-scout**) to catch a project that moved.
+
+Readiness runs the scout automatically when a session has a project and no
+current report; `assess-readiness`'s judge then reads the report alongside
+the idea, and its evidence says whether each item came from the idea or the
+repo (with the repo item's citation).
+
+In the UI, the readiness panel's project-scout block
+(`scout-panel`) stays reachable for the whole interview, not just before the
+first round: server facts, current state by group, proposed decisions with
+`scout-decision-keep`/`scout-decision-drop`, a `scout-stale-badge` when
+stale, and a re-scout control (`scout-run`/`scout-rescout`). The design tree
+marks a kept repo decision with a `repo-marker` badge (`data-source`
+`recorded` or `inferred`, the citation on hover).
+
+`use-fake-scenario` (test only) chooses the fake interviewer's scripted
+scenario for one session — `scout-project` among them — so a browser check or
+Playwright test can drive a real scout run against a real fixture repository
+without the CLI. Works only when `GRILL_ROOM_INTERVIEWER=fake`; refused with
+`fake-interviewer-only` otherwise and `unknown-scenario` for a name the fake
+does not have.
 
 ### Declared tracker
 

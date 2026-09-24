@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   ReadinessPanel,
+  ScoutReportPanel,
   type Readiness,
+  type ScoutReport,
 } from "@/components/workspace/readiness-panel";
 
 function judged(result: Partial<Readiness["result"]> = {}): Readiness {
@@ -161,5 +163,202 @@ describe("ReadinessPanel", () => {
     );
     expect(reassess).toContain(DISABLED);
     expect(section(render(null), "readiness-assess")).not.toContain(DISABLED);
+  });
+});
+
+function scoutReport(overrides: Partial<ScoutReport> = {}): ScoutReport {
+  return {
+    id: "report-1",
+    sessionId: "session-1",
+    projectId: "project-1",
+    facts: {
+      headCommit: "7ea65ab0e100cafe1234567890abcdef1234567",
+      headBranch: "main",
+      remotes: [],
+      dirty: false,
+      recentCommitSubjects: ["Fixture repo for scout browser check"],
+      hasAgentInstructions: true,
+      decisionsFolder: "docs/adr",
+      hasRulesFolder: false,
+    },
+    result: {
+      currentState: [
+        {
+          status: "partial",
+          summary: "Ingest lag is measured but never alerted on.",
+          citations: ["src/ingest/metrics.ts:12-30"],
+        },
+      ],
+      proposedDecisions: [
+        {
+          key: "no-message-broker",
+          title: "No message broker",
+          statement: "Ingest runs on a Postgres-backed queue, not a message broker.",
+          source: "recorded",
+          citation: "docs/adr/0003-queue.md:5-9",
+          reason: "An alert on ingest lag reads the queue this decision chose.",
+        },
+        {
+          key: "agent-instructions-exist",
+          title: "The repo already documents agent conventions",
+          statement: "CLAUDE.md exists at the repo root.",
+          source: "inferred",
+          citation: "CLAUDE.md:1",
+          reason: "A scouted feature should follow the same conventions.",
+        },
+      ],
+      previousDecisions: [],
+    },
+    commitRead: "7ea65ab0e100cafe1234567890abcdef1234567",
+    ideaRead: "Alert on-call when ingest lag exceeds a threshold.",
+    model: "sonnet",
+    ranAt: "2026-09-24T10:00:00.000Z",
+    turnId: null,
+    dispositions: {
+      "no-message-broker": "undecided",
+      "agent-instructions-exist": "undecided",
+    },
+    stale: false,
+    ...overrides,
+  } as ScoutReport;
+}
+
+function renderScout(
+  report: ScoutReport | null,
+  {
+    busy = false,
+    isScouting = false,
+  }: { busy?: boolean; isScouting?: boolean } = {},
+) {
+  return renderToStaticMarkup(
+    <ScoutReportPanel
+      report={report}
+      busy={busy}
+      isScouting={isScouting}
+      onRescout={() => {}}
+      onKeep={() => {}}
+      onDrop={() => {}}
+    />,
+  );
+}
+
+describe("ScoutReportPanel", () => {
+  it("invites a scout run when the session has no report yet", () => {
+    const html = renderScout(null);
+
+    expect(html).toContain('data-testid="scout-panel"');
+    expect(html).toContain('data-testid="scout-run"');
+    expect(html).not.toContain('data-testid="scout-rescout"');
+    expect(html).not.toContain('data-testid="scout-facts"');
+    expect(html).not.toContain('data-testid="scout-decisions"');
+  });
+
+  it("renders the facts, current state and proposed decisions of a report", () => {
+    const html = renderScout(scoutReport());
+
+    expect(html).toContain('data-testid="scout-rescout"');
+    expect(html).not.toContain('data-testid="scout-run"');
+
+    // `section()` cuts at the next `data-testid`, which is too fine-grained
+    // for these containers — each fact and each decision carries its own —
+    // so this checks the whole markup directly for content unique to the
+    // fixture instead of trying to isolate one container's slice.
+    expect(html).toContain('data-testid="scout-facts"');
+    expect(html).toContain("7ea65ab0e100");
+    expect(html).toContain("main");
+    expect(html).toContain("docs/adr");
+
+    expect(html).toContain('data-status="partial"');
+    expect(html).toContain("Ingest lag is measured but never alerted on.");
+    expect(html).toContain("src/ingest/metrics.ts:12-30");
+
+    expect(html).toContain('data-testid="scout-decisions"');
+    expect(html).toContain("No message broker");
+    expect(html).toContain("docs/adr/0003-queue.md:5-9");
+    expect(html).toContain("An alert on ingest lag reads the queue this decision chose.");
+    expect(html).toContain("The repo already documents agent conventions");
+    expect(html).toContain("CLAUDE.md:1");
+
+    expect(html).toContain("7ea65ab0e100");
+    expect(html).toContain('data-testid="scout-meta"');
+  });
+
+  it("shows keep and drop controls for an undecided proposal", () => {
+    const html = renderScout(scoutReport());
+    const row = html.slice(
+      html.indexOf('data-key="no-message-broker"'),
+      html.indexOf('data-key="agent-instructions-exist"'),
+    );
+
+    expect(row).toContain('data-disposition="undecided"');
+    expect(row).toContain('data-testid="scout-decision-keep"');
+    expect(row).toContain('data-testid="scout-decision-drop"');
+    expect(row).not.toContain('data-testid="scout-decision-kept-note"');
+  });
+
+  it("shows the kept note without controls once a proposal is kept", () => {
+    const html = renderScout(
+      scoutReport({
+        dispositions: {
+          "no-message-broker": "kept",
+          "agent-instructions-exist": "undecided",
+        },
+      }),
+    );
+    const row = html.slice(
+      html.indexOf('data-key="no-message-broker"'),
+      html.indexOf('data-key="agent-instructions-exist"'),
+    );
+
+    expect(row).toContain('data-disposition="kept"');
+    expect(row).toContain('data-testid="scout-decision-kept-note"');
+    expect(row).not.toContain('data-testid="scout-decision-keep"');
+    expect(row).not.toContain('data-testid="scout-decision-drop"');
+  });
+
+  it("shows the dropped note alongside controls once a proposal is dropped", () => {
+    const html = renderScout(
+      scoutReport({
+        dispositions: {
+          "no-message-broker": "dropped",
+          "agent-instructions-exist": "undecided",
+        },
+      }),
+    );
+    const row = html.slice(
+      html.indexOf('data-key="no-message-broker"'),
+      html.indexOf('data-key="agent-instructions-exist"'),
+    );
+
+    expect(row).toContain('data-disposition="dropped"');
+    expect(row).toContain('data-testid="scout-decision-dropped-note"');
+    expect(row).toContain('data-testid="scout-decision-keep"');
+    expect(row).toContain('data-testid="scout-decision-drop"');
+  });
+
+  it("shows the stale badge only once the report is stale", () => {
+    expect(renderScout(scoutReport({ stale: false }))).not.toContain(
+      'data-testid="scout-stale-badge"',
+    );
+    expect(renderScout(scoutReport({ stale: true }))).toContain(
+      'data-testid="scout-stale-badge"',
+    );
+  });
+
+  it("disables the re-scout and every decision control while busy", () => {
+    const html = renderScout(scoutReport(), { busy: true });
+
+    expect(section(html, "scout-rescout")).toContain(DISABLED);
+
+    // `section()` cuts at the next `data-testid`, which each decision row
+    // carries its own of, so this reads from the decisions list to the end
+    // of the markup instead of trying to isolate just that container.
+    const decisions = html.slice(html.indexOf('data-testid="scout-decisions"'));
+    const keepButtons = decisions.match(/data-testid="scout-decision-keep"/g) ?? [];
+    expect(keepButtons.length).toBeGreaterThan(0);
+    // Every button inside the decisions list carries `disabled`.
+    for (const button of decisions.split("<button").slice(1)) {
+      expect(button.slice(0, button.indexOf(">"))).toContain(DISABLED);
+    }
   });
 });

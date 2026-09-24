@@ -1,4 +1,5 @@
 import { useT } from "@agent-native/core/client/i18n";
+import { IconGitBranch } from "@tabler/icons-react";
 
 import {
   DecisionStateBadge,
@@ -14,6 +15,36 @@ import { buildTreeOutline, type OutlineRow } from "@/lib/tree-outline";
 import { cn } from "@/lib/utils";
 
 const INDENT_REM = 0.875;
+
+type RepoOrigin = NonNullable<TreeDecision["repo"]>;
+
+/**
+ * A repo decision's marker: recorded or inferred, with its citation on
+ * hover. Shown beside the state badge for every decision the scout report
+ * introduced and the user kept.
+ */
+function RepoBadge({ repo }: { repo: RepoOrigin }) {
+  const t = useT();
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-sky-600/30 bg-sky-600/10 px-1.5 py-px text-[10px] leading-4 font-medium tracking-wide text-sky-700 uppercase dark:border-sky-400/25 dark:bg-sky-400/10 dark:text-sky-300"
+          data-testid="repo-marker"
+          data-source={repo.source}
+          data-citation={repo.citation}
+        >
+          <IconGitBranch className="size-3" />
+          {t(repo.source === "recorded" ? "workspace.repoRecorded" : "workspace.repoInferred")}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">
+        <p className="text-xs">{repo.citation}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 function DecisionRow({
   decision,
@@ -81,6 +112,7 @@ function DecisionRow({
           ) : null}
         </span>
         <span className="mt-px flex shrink-0 items-center gap-1">
+          {decision.repo ? <RepoBadge repo={decision.repo} /> : null}
           {loose ? <LooseEndBadge /> : null}
           <DecisionStateBadge state={decision.state} />
         </span>
