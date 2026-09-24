@@ -23,9 +23,11 @@ import addDecision from "./add-decision.js";
 import assessReadiness from "./assess-readiness.js";
 import createSession from "./create-session.js";
 import getCurrentRound from "./get-current-round.js";
+import getLatestTurn from "./get-latest-turn.js";
 import getSession from "./get-session.js";
 import getTree from "./get-tree.js";
 import getTurn from "./get-turn.js";
+import listRounds from "./list-rounds.js";
 import requestNextRound from "./request-next-round.js";
 import saveDraftAnswer from "./save-draft-answer.js";
 import submitRound from "./submit-round.js";
@@ -1741,6 +1743,38 @@ describe("propose-round turn records", () => {
     ]);
     expect(turn.runs[0]!.attempts[0]!.durationMs).toBeGreaterThanOrEqual(0);
     expect(await roundTurnIds(session.id)).toEqual([turn.id]);
+  });
+
+  it("exposes the round's turn id through get-current-round and list-rounds, and the live turn through get-latest-turn", async () => {
+    const session = await aSession();
+    scriptInterviewer([
+      round(proposed({ key: "shape" })),
+      round(proposed({ key: "tone", title: "How blunt should it be?" })),
+    ]);
+
+    const opened = await requestNextRound.run({ sessionId: session.id });
+    const turn = await proposalTurn(session.id);
+    expect(opened.round?.turnId).toBe(turn.id);
+    expect(
+      await getLatestTurn.run({ sessionId: session.id, turnKind: "propose-round" }),
+    ).toMatchObject({ id: turn.id });
+
+    await saveDraftAnswer.run({
+      decisionId: opened.round!.decisions[0]!.id,
+      answerKind: "accepted-recommendation",
+    });
+    await submitRound.run({ id: opened.round!.id });
+
+    const history = await listRounds.run({ sessionId: session.id });
+    expect(history.rounds[0]?.turnId).toBe(turn.id);
+  });
+
+  it("reads no turn from get-latest-turn for a kind the session has never run", async () => {
+    const session = await aSession();
+
+    expect(
+      await getLatestTurn.run({ sessionId: session.id, turnKind: "propose-round" }),
+    ).toBeNull();
   });
 
   it("records each refusal as its own attempt with the reason sent back, then the success, numbered upward", async () => {

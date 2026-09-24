@@ -123,6 +123,17 @@ export default function SessionWorkspaceRoute() {
     { enabled, refetchInterval: working ? TURN_POLL_MS : false },
   );
 
+  // The turn that proposed the round currently working or failed — found by
+  // kind rather than read off the round, since a round only exists once its
+  // proposal has already succeeded. Feeds the attempt log on the working and
+  // failed panels; a stale (already-completed) turn is filtered out there
+  // when the working status actually belongs to some other turn kind.
+  const { data: proposalTurn } = useActionQuery(
+    "get-latest-turn",
+    { sessionId: id, turnKind: "propose-round" },
+    { enabled, refetchInterval: working ? TURN_POLL_MS : false },
+  );
+
   // The tree footer counts loose ends the way the loose ends list does, by
   // asking the same action, so the two can never disagree about what is open.
   const { data: looseEnds } = useActionQuery(
@@ -282,6 +293,7 @@ export default function SessionWorkspaceRoute() {
                 hasDecisions={decisions.length > 0}
                 decisions={decisions}
                 lastSubmittedAt={lastSubmittedAt}
+                proposalTurn={proposalTurn ?? null}
                 onRequestNextRound={() => nextRound.mutate({ sessionId: id })}
                 isRequesting={nextRound.isPending}
                 onSubmit={(roundId) => submitRound.mutate({ id: roundId })}

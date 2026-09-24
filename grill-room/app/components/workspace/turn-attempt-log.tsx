@@ -1,0 +1,250 @@
+import { useT } from "@agent-native/core/client/i18n";
+import { IconChevronRight, IconRefresh } from "@tabler/icons-react";
+import { useState } from "react";
+
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Spinner } from "@/components/ui/spinner";
+import { useElapsed } from "@/lib/use-elapsed";
+import { cn } from "@/lib/utils";
+
+import type { AttemptKind } from "@shared/session-constants";
+
+type TurnResult = AgentNativeActionRegistry["get-turn"]["result"];
+
+/**
+ * A turn record with its runs and attempts, as `get-turn` and `get-latest-turn`
+ * both return it. The one shape every attempt log reads, whichever turn kind
+ * or surface it is shown on.
+ */
+export type Turn = TurnResult;
+type Run = Turn["runs"][number];
+type Attempt = Run["attempts"][number];
+
+/**
+ * The rejection budget every run enforces: one attempt, then two retries.
+ * Mirrors `MAX_TURN_RETRIES` in `server/turn.ts`, server-only code this client
+ * bundle cannot import.
+ */
+const RUN_BUDGET = 3;
+
+const KIND_LABEL_KEY: Record<AttemptKind, string> = {
+  "tree-rule-refusal": "workspace.attemptKindTreeRuleRefusal",
+  "schema-invalid": "workspace.attemptKindSchemaInvalid",
+  "resume-fallback": "workspace.attemptKindResumeFallback",
+  "rate-limit": "workspace.attemptKindRateLimit",
+  error: "workspace.attemptKindError",
+  success: "workspace.attemptKindSuccess",
+};
+
+/**
+ * A rate limit gets its own colour, distinct from both a tree-rule refusal and
+ * a plain interviewer error: it is the shared subscription running out, not a
+ * defect, and the log must never read like one.
+ */
+const KIND_CLASS: Record<AttemptKind, string> = {
+  "tree-rule-refusal":
+    "border-amber-600/30 bg-amber-500/15 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300",
+  "schema-invalid":
+    "border-violet-600/25 bg-violet-600/10 text-violet-700 dark:border-violet-400/25 dark:bg-violet-400/10 dark:text-violet-300",
+  "resume-fallback": "border-border bg-muted text-muted-foreground",
+  "rate-limit":
+    "border-orange-600/30 bg-orange-500/15 text-orange-700 dark:border-orange-400/30 dark:bg-orange-400/10 dark:text-orange-300",
+  error: "border-destructive/30 bg-destructive/10 text-destructive",
+  success:
+    "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-300",
+};
+
+function KindTag({ kind }: { kind: AttemptKind }) {
+  const t = useT();
+
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center rounded-full border px-1.5 py-px text-[10px] leading-4 font-medium tracking-wide uppercase",
+        KIND_CLASS[kind],
+      )}
+      data-testid="attempt-kind"
+      data-kind={kind}
+    >
+      {t(KIND_LABEL_KEY[kind])}
+    </span>
+  );
+}
+
+/** `72400` -> `1:12`, the same `m:ss` shape `useElapsed` renders live. */
+function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function LiveDuration({ startedAt }: { startedAt: string }) {
+  const elapsed = useElapsed(startedAt);
+  return <>{elapsed}</>;
+}
+
+/**
+ * Each attempt's number out of the run's rejection budget, or null for a
+ * resume fallback, which never spends it. Counts a still-running attempt too
+ * (its kind reads `null` until the call ends) — it is presumed to count until
+ * it proves otherwise, the same number the run will read back once it
+ * completes.
+ */
+function budgetNumbers(attempts: readonly Attempt[]): (number | null)[] {
+  let count = 0;
+  return attempts.map((attempt) => {
+    if (attempt.kind === "resume-fallback") return null;
+    count += 1;
+    return count;
+  });
+}
+
+function AttemptRow({
+  attempt,
+  budgetNumber,
+}: {
+  attempt: Attempt;
+  budgetNumber: number | null;
+}) {
+  const t = useT();
+  const { kind } = attempt;
+
+  return (
+    <li
+      className="flex items-start justify-between gap-3 py-1.5"
+      data-testid="attempt-row"
+      data-attempt-kind={kind ?? "running"}
+      data-budget-number={budgetNumber ?? undefined}
+    >
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {kind === null ? (
+            <span className="inline-flex items-center gap-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+              <Spinner className="size-3" />
+              {t("workspace.attemptRunning")}
+            </span>
+          ) : (
+            <KindTag kind={kind} />
+          )}
+          {budgetNumber != null ? (
+            <span className="text-xs text-muted-foreground">
+              {t("workspace.attemptNumber", {
+                number: budgetNumber,
+                budget: RUN_BUDGET,
+              })}
+            </span>
+          ) : null}
+        </div>
+        {attempt.reason ? (
+          <p className="text-xs text-muted-foreground">{attempt.reason}</p>
+        ) : null}
+      </div>
+      <span
+        className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
+        data-testid="attempt-duration"
+      >
+        {kind === null ? (
+          <LiveDuration startedAt={attempt.startedAt} />
+        ) : (
+          formatDuration(attempt.durationMs ?? 0)
+        )}
+      </span>
+    </li>
+  );
+}
+
+function RunSection({ run, showSeparator }: { run: Run; showSeparator: boolean }) {
+  const t = useT();
+  const numbers = budgetNumbers(run.attempts);
+
+  return (
+    <>
+      {showSeparator ? (
+        <div
+          className="flex items-center gap-2 py-1"
+          data-testid="manual-retry-separator"
+        >
+          <div className="h-px flex-1 bg-border" />
+          <span className="flex items-center gap-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+            <IconRefresh className="size-3" />
+            {t("workspace.attemptManualRetry")}
+          </span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+      ) : null}
+      <ul className="flex flex-col divide-y divide-border/60">
+        {run.attempts.map((attempt, index) => (
+          <AttemptRow
+            key={attempt.id}
+            attempt={attempt}
+            budgetNumber={numbers[index] ?? null}
+          />
+        ))}
+      </ul>
+    </>
+  );
+}
+
+/**
+ * Every attempt a turn made, the one component used wherever a turn is shown
+ * — the live turn status and, collapsed, next to whatever the turn produced.
+ *
+ * While the turn is still running (`completedAt` is null) it renders open,
+ * plainly, with no collapse control. Once it stops it renders collapsed to a
+ * one-line count, expandable to read every run back. Runs after the first are
+ * preceded by a "manual retry" separator. Raw output is never shown here.
+ *
+ * `turn` is null for a result from before turn records existed, or while no
+ * turn is running yet — either way this renders nothing.
+ */
+export function TurnAttemptLog({ turn }: { turn: Turn | null }) {
+  const t = useT();
+  const running = turn != null && turn.completedAt === null;
+  const [open, setOpen] = useState(running);
+
+  if (!turn) return null;
+
+  const totalAttempts = turn.runs.reduce(
+    (sum, run) => sum + run.attempts.length,
+    0,
+  );
+  if (totalAttempts === 0) return null;
+
+  const body = (
+    <div className="flex flex-col gap-1 pt-1" data-testid="attempt-log-body">
+      {turn.runs.map((run, index) => (
+        <RunSection key={run.id} run={run} showSeparator={index > 0} />
+      ))}
+    </div>
+  );
+
+  if (running) {
+    return (
+      <div className="mt-3 w-full text-left" data-testid="attempt-log">
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 w-full text-left" data-testid="attempt-log">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger
+          className="flex items-center gap-1.5 rounded-md px-1 py-1 text-xs text-muted-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          data-testid="attempt-log-trigger"
+          data-count={totalAttempts}
+        >
+          <IconChevronRight
+            className="size-3.5 shrink-0 transition-transform data-[open=true]:rotate-90"
+            data-open={open}
+          />
+          {t("workspace.attemptLogCount", { count: totalAttempts })}
+        </CollapsibleTrigger>
+        <CollapsibleContent>{body}</CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
+}
