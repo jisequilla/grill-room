@@ -419,6 +419,79 @@ describe("scout-project", () => {
     ]);
   });
 
+  it("carries a dropped or undecided proposal into the new report when the scout reports it unchanged but does not repropose it", async () => {
+    const { session } = await aSessionWithProject();
+    const BROKER_STATEMENT =
+      "Ingest runs on a Postgres-backed queue, not a message broker.";
+    const POSTGRES_STATEMENT = "Every service stores its state in Postgres.";
+    scriptInterviewer([
+      {
+        kind: "scout-project",
+        result: aScoutProjectResult({
+          proposedDecisions: [
+            {
+              key: "no-message-broker",
+              title: "No message broker",
+              statement: BROKER_STATEMENT,
+              source: "recorded",
+              citation: "docs/adr/0003-queue.md:5-9",
+              reason: "An alert on ingest lag reads the queue this decision chose.",
+            },
+            {
+              key: "postgres-only",
+              title: "Postgres only",
+              statement: POSTGRES_STATEMENT,
+              source: "inferred",
+              citation: "src/ingest/metrics.ts:1-2",
+              reason: "Alert state would live beside the queue.",
+            },
+          ],
+        }),
+      },
+      {
+        kind: "scout-project",
+        result: aScoutProjectResult({
+          // Neither proposal is resent — the scout only reports them
+          // unchanged in `previousDecisions` this time.
+          proposedDecisions: [],
+          previousDecisions: [
+            { key: "no-message-broker", change: "unchanged", statement: null },
+            { key: "postgres-only", change: "unchanged", statement: null },
+          ],
+        }),
+      },
+    ]);
+
+    await scoutProject.run({ sessionId: session.id });
+    await dropRepoDecision.run({ sessionId: session.id, key: "no-message-broker" });
+    // "postgres-only" is left undecided.
+
+    await scoutProject.run({ sessionId: session.id });
+
+    // Neither proposal reached the port again, but the app carries both
+    // forward from the previous report row rather than losing them.
+    const read = await getScoutReport.run({ sessionId: session.id });
+    expect(read.report!.dispositions).toEqual({
+      "no-message-broker": "dropped",
+      "postgres-only": "undecided",
+    });
+    const byKey = new Map(
+      read.report!.result.proposedDecisions.map((d) => [d.key, d]),
+    );
+    expect(byKey.get("no-message-broker")).toMatchObject({
+      title: "No message broker",
+      statement: BROKER_STATEMENT,
+      source: "recorded",
+      citation: "docs/adr/0003-queue.md:5-9",
+    });
+    expect(byKey.get("postgres-only")).toMatchObject({
+      title: "Postgres only",
+      statement: POSTGRES_STATEMENT,
+      source: "inferred",
+      citation: "src/ingest/metrics.ts:1-2",
+    });
+  });
+
   it("reopens a kept decision the re-run reports changed or removed, leaves one unchanged, and a new proposal awaits keep or drop — even after rounds exist", async () => {
     const BROKER_STATEMENT =
       "Ingest runs on a Postgres-backed queue, not a message broker.";

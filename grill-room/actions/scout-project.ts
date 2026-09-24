@@ -122,12 +122,10 @@ export async function scoutProjectCore(input: {
     ...droppedOrUndecided,
   ];
   const previousDecisionKeys = previousDecisions.map((decision) => decision.key);
-  // What each non-kept key was decided as before this run, so a proposal the
-  // scout reproposes under the same key (its content, not just a bare
-  // "unchanged" mark — see `renderPreviousDecisions` in
-  // `server/interviewer/prompt.ts`) keeps that disposition on the new report
-  // instead of reverting to `undecided`. A kept key is never carried this
-  // way: it is not report-tracked, it lives in the tree.
+  // What each non-kept key was decided as before this run, so it keeps that
+  // disposition on the new report instead of reverting to `undecided`. A
+  // kept key is never carried this way: it is not report-tracked, it lives
+  // in the tree.
   const priorDispositionByKey: Record<string, ScoutProposalDisposition> =
     Object.fromEntries(
       droppedOrUndecided.map((decision) => [
@@ -135,6 +133,16 @@ export async function scoutProjectCore(input: {
         decision.disposition === "proposed" ? "undecided" : decision.disposition,
       ]),
     );
+  // The previous report's own proposal content, by key, for a non-kept
+  // decision the scout reports `unchanged` or `changed` but does not
+  // repropose itself — the app carries it forward rather than losing it. A
+  // `removed` one is not carried, whether or not it is reproposed.
+  const priorProposalByKey = new Map(
+    (previous?.result.proposedDecisions ?? []).map((decision) => [
+      decision.key,
+      decision,
+    ]),
+  );
 
   let acceptedResult: ScoutProjectResult | undefined;
 
@@ -187,9 +195,30 @@ export async function scoutProjectCore(input: {
       // A kept decision is never a report proposal — it is reopened directly,
       // below, once the turn is no longer marked working. Drop it here in
       // case the scout echoed it back as a proposal anyway.
-      const proposedDecisions = accepted.result.proposedDecisions.filter(
-        (decision) => !keptKeys.has(decision.key),
+      const proposedByKey = new Map(
+        accepted.result.proposedDecisions
+          .filter((decision) => !keptKeys.has(decision.key))
+          .map((decision) => [decision.key, decision]),
       );
+
+      // Carry forward a non-kept previous proposal the scout reports
+      // `unchanged` or `changed` but does not repropose itself — the report
+      // row is what a re-run replaces, so losing it here would be silent.
+      // The scout's own re-proposal, when it sends one, wins.
+      for (const entry of accepted.result.previousDecisions) {
+        if (keptKeys.has(entry.key)) continue;
+        if (entry.change === "removed") continue;
+        if (proposedByKey.has(entry.key)) continue;
+        const prior = priorProposalByKey.get(entry.key);
+        if (!prior) continue;
+        proposedByKey.set(
+          entry.key,
+          entry.change === "changed" && entry.statement
+            ? { ...prior, statement: entry.statement }
+            : prior,
+        );
+      }
+      const proposedDecisions = [...proposedByKey.values()];
 
       await storeScoutReport({
         sessionId: session.id,
