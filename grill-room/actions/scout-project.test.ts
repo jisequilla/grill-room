@@ -15,11 +15,18 @@ import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 import createSession from "./create-session.js";
+import dropRepoDecision from "./drop-repo-decision.js";
+import getCurrentRound from "./get-current-round.js";
 import getScoutReport from "./get-scout-report.js";
 import getSession from "./get-session.js";
+import getTree from "./get-tree.js";
 import getTurn from "./get-turn.js";
+import keepRepoDecision from "./keep-repo-decision.js";
 import registerProject from "./register-project.js";
+import requestNextRound from "./request-next-round.js";
+import saveDraftAnswer from "./save-draft-answer.js";
 import scoutProject from "./scout-project.js";
+import submitRound from "./submit-round.js";
 import updateSessionIdea from "./update-session-idea.js";
 
 const repos = useTempGitRepos();
@@ -86,6 +93,11 @@ function scoutRequests(requests: readonly { kind: string }[]): ScoutProjectReque
   return requests.filter(
     (request): request is ScoutProjectRequest => request.kind === "scout-project",
   );
+}
+
+async function treeByKey(sessionId: string) {
+  const tree = await getTree.run({ sessionId });
+  return new Map(tree.decisions.map((decision) => [decision.key, decision]));
 }
 
 describe("scout-project", () => {
@@ -338,6 +350,312 @@ describe("scout-project", () => {
       second.report!.id,
     );
     expect(await getDb().select().from(schema.scoutReports)).toHaveLength(1);
+  });
+
+  it("still sends a decision kept two re-runs ago, even though the latest report never proposed it again", async () => {
+    const { session } = await aSessionWithProject();
+    const unchanged = {
+      kind: "scout-project" as const,
+      result: aScoutProjectResult({
+        proposedDecisions: [],
+        previousDecisions: [
+          { key: "no-message-broker", change: "unchanged" as const, statement: null },
+        ],
+      }),
+    };
+    const interviewer = scriptInterviewer([
+      { kind: "scout-project", result: aScoutProjectResult() },
+      unchanged,
+      unchanged,
+    ]);
+
+    await scoutProject.run({ sessionId: session.id });
+    await keepRepoDecision.run({ sessionId: session.id, key: "no-message-broker" });
+    await scoutProject.run({ sessionId: session.id }); // first re-run: report row #1 replaced
+    await scoutProject.run({ sessionId: session.id }); // second re-run: report row #2 replaced
+
+    const requests = scoutRequests(interviewer.requests);
+    expect(requests).toHaveLength(3);
+    const kept = {
+      key: "no-message-broker",
+      title: "No message broker",
+      statement: "Ingest runs on a Postgres-backed queue, not a message broker.",
+      source: "recorded",
+      citation: "docs/adr/0003-queue.md:5-9",
+      disposition: "kept",
+    };
+    // Kept two re-runs ago, and the report row of that first run is long gone
+    // (a re-run replaces it) — it is still sent because it lives in the tree.
+    expect(requests[1]!.previousDecisions).toEqual([kept]);
+    expect(requests[2]!.previousDecisions).toEqual([kept]);
+    expect(await getDb().select().from(schema.scoutReports)).toHaveLength(1);
+  });
+
+  it("carries a proposal's disposition forward across a re-run that reports it unchanged", async () => {
+    const { session } = await aSessionWithProject();
+    scriptInterviewer([
+      { kind: "scout-project", result: aScoutProjectResult() },
+      {
+        kind: "scout-project",
+        result: aScoutProjectResult({
+          previousDecisions: [
+            { key: "no-message-broker", change: "unchanged", statement: null },
+          ],
+        }),
+      },
+    ]);
+
+    await scoutProject.run({ sessionId: session.id });
+    await dropRepoDecision.run({ sessionId: session.id, key: "no-message-broker" });
+
+    await scoutProject.run({ sessionId: session.id });
+
+    // Reported unchanged and re-proposed under the same key: the drop is not
+    // forgotten just because the report row was replaced.
+    const read = await getScoutReport.run({ sessionId: session.id });
+    expect(read.report!.dispositions).toEqual({ "no-message-broker": "dropped" });
+    expect(read.report!.result.proposedDecisions.map((d) => d.key)).toEqual([
+      "no-message-broker",
+    ]);
+  });
+
+  it("carries a dropped or undecided proposal into the new report when the scout reports it unchanged but does not repropose it", async () => {
+    const { session } = await aSessionWithProject();
+    const BROKER_STATEMENT =
+      "Ingest runs on a Postgres-backed queue, not a message broker.";
+    const POSTGRES_STATEMENT = "Every service stores its state in Postgres.";
+    scriptInterviewer([
+      {
+        kind: "scout-project",
+        result: aScoutProjectResult({
+          proposedDecisions: [
+            {
+              key: "no-message-broker",
+              title: "No message broker",
+              statement: BROKER_STATEMENT,
+              source: "recorded",
+              citation: "docs/adr/0003-queue.md:5-9",
+              reason: "An alert on ingest lag reads the queue this decision chose.",
+            },
+            {
+              key: "postgres-only",
+              title: "Postgres only",
+              statement: POSTGRES_STATEMENT,
+              source: "inferred",
+              citation: "src/ingest/metrics.ts:1-2",
+              reason: "Alert state would live beside the queue.",
+            },
+          ],
+        }),
+      },
+      {
+        kind: "scout-project",
+        result: aScoutProjectResult({
+          // Neither proposal is resent — the scout only reports them
+          // unchanged in `previousDecisions` this time.
+          proposedDecisions: [],
+          previousDecisions: [
+            { key: "no-message-broker", change: "unchanged", statement: null },
+            { key: "postgres-only", change: "unchanged", statement: null },
+          ],
+        }),
+      },
+    ]);
+
+    await scoutProject.run({ sessionId: session.id });
+    await dropRepoDecision.run({ sessionId: session.id, key: "no-message-broker" });
+    // "postgres-only" is left undecided.
+
+    await scoutProject.run({ sessionId: session.id });
+
+    // Neither proposal reached the port again, but the app carries both
+    // forward from the previous report row rather than losing them.
+    const read = await getScoutReport.run({ sessionId: session.id });
+    expect(read.report!.dispositions).toEqual({
+      "no-message-broker": "dropped",
+      "postgres-only": "undecided",
+    });
+    const byKey = new Map(
+      read.report!.result.proposedDecisions.map((d) => [d.key, d]),
+    );
+    expect(byKey.get("no-message-broker")).toMatchObject({
+      title: "No message broker",
+      statement: BROKER_STATEMENT,
+      source: "recorded",
+      citation: "docs/adr/0003-queue.md:5-9",
+    });
+    expect(byKey.get("postgres-only")).toMatchObject({
+      title: "Postgres only",
+      statement: POSTGRES_STATEMENT,
+      source: "inferred",
+      citation: "src/ingest/metrics.ts:1-2",
+    });
+  });
+
+  it("reopens a kept decision the re-run reports changed or removed, leaves one unchanged, and a new proposal awaits keep or drop — even after rounds exist", async () => {
+    const BROKER_STATEMENT =
+      "Ingest runs on a Postgres-backed queue, not a message broker.";
+    const POSTGRES_STATEMENT = "Every service stores its state in Postgres.";
+    const NEW_BROKER_STATEMENT =
+      "Ingest now runs through a managed message broker.";
+
+    const root = aFixtureRepo();
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      exportFolder: ".scratch",
+    });
+    const session = await createSession.run({
+      title: "Ingest lag alerts",
+      idea: "Alert the on-call engineer when ingest falls behind.",
+      model: "opus",
+      projectId: project.id,
+    });
+
+    scriptInterviewer([
+      {
+        kind: "scout-project",
+        result: aScoutProjectResult({
+          proposedDecisions: [
+            {
+              key: "no-message-broker",
+              title: "No message broker",
+              statement: BROKER_STATEMENT,
+              source: "recorded",
+              citation: "docs/adr/0003-queue.md:5-9",
+              reason: "An alert on ingest lag reads the queue this decision chose.",
+            },
+            {
+              key: "postgres-only",
+              title: "Postgres only",
+              statement: POSTGRES_STATEMENT,
+              source: "inferred",
+              citation: "src/ingest/metrics.ts:1-2",
+              reason: "Alert state would live beside the queue.",
+            },
+            {
+              key: "docs-in-claude-md",
+              title: "Agent instructions live in CLAUDE.md",
+              statement: "Agent instructions for this repo are kept in CLAUDE.md.",
+              source: "recorded",
+              citation: "CLAUDE.md:1",
+              reason: "The scout itself reads that file for conventions.",
+            },
+          ],
+        }),
+      },
+    ]);
+    await scoutProject.run({ sessionId: session.id });
+
+    await keepRepoDecision.run({ sessionId: session.id, key: "no-message-broker" });
+    await keepRepoDecision.run({ sessionId: session.id, key: "postgres-only" });
+    await keepRepoDecision.run({ sessionId: session.id, key: "docs-in-claude-md" });
+
+    // Rounds exist before the re-run: an interviewer-proposed decision depends
+    // on two of the kept decisions and is settled.
+    scriptInterviewer([
+      {
+        kind: "propose-round",
+        result: {
+          proposedDecisions: [
+            {
+              key: "alerting",
+              title: "How is the on-call engineer alerted?",
+              body: "",
+              choices: [],
+              recommendedChoice: null,
+              recommendedAnswer: "Page them",
+              dependsOn: ["no-message-broker", "postgres-only"],
+              ask: true,
+            },
+          ],
+          pushBackResponses: [],
+          userDecisionPlacements: [],
+          done: null,
+        },
+      },
+      {
+        kind: "propose-round",
+        result: {
+          proposedDecisions: [],
+          pushBackResponses: [],
+          userDecisionPlacements: [],
+          done: null,
+        },
+      },
+    ]);
+    await requestNextRound.run({ sessionId: session.id });
+    const open = await getCurrentRound.run({ sessionId: session.id });
+    await saveDraftAnswer.run({
+      decisionId: open.round!.decisions[0]!.id,
+      answerKind: "own-answer",
+      answer: "Page the on-call engineer",
+    });
+    await submitRound.run({ id: open.round!.id });
+
+    // The re-run: one kept decision changed, one removed, one unchanged, and
+    // one brand-new proposal.
+    scriptInterviewer([
+      {
+        kind: "scout-project",
+        result: aScoutProjectResult({
+          proposedDecisions: [
+            {
+              key: "runbook",
+              title: "Add a runbook",
+              statement: "The project has no documented runbook yet.",
+              source: "inferred",
+              citation: "CLAUDE.md:1",
+              reason: "An alert needs somewhere to point the on-call engineer.",
+            },
+          ],
+          previousDecisions: [
+            {
+              key: "no-message-broker",
+              change: "changed",
+              statement: NEW_BROKER_STATEMENT,
+            },
+            { key: "postgres-only", change: "removed", statement: null },
+            { key: "docs-in-claude-md", change: "unchanged", statement: null },
+          ],
+        }),
+      },
+    ]);
+    await scoutProject.run({ sessionId: session.id });
+
+    const tree = await treeByKey(session.id);
+    expect(tree.get("no-message-broker")).toMatchObject({
+      state: "frontier",
+      introducedBy: "repo",
+      answer: null,
+      recommendedAnswer: NEW_BROKER_STATEMENT,
+      repo: { statement: BROKER_STATEMENT },
+    });
+    expect(tree.get("postgres-only")).toMatchObject({
+      state: "frontier",
+      introducedBy: "repo",
+      answer: null,
+      recommendedAnswer: POSTGRES_STATEMENT,
+      repo: { statement: POSTGRES_STATEMENT },
+    });
+    expect(tree.get("docs-in-claude-md")).toMatchObject({
+      state: "settled",
+      introducedBy: "repo",
+      answer: { kind: "repo-established" },
+    });
+    // Its dependent, settled before the re-run, goes stale.
+    expect(tree.get("alerting")!.state).toBe("stale");
+
+    // The new proposal awaits keep or drop and is not yet in the tree.
+    const read = await getScoutReport.run({ sessionId: session.id });
+    expect(read.report!.dispositions).toEqual({ runbook: "undecided" });
+    expect(tree.get("runbook")).toBeUndefined();
+
+    // The re-run itself worked, with rounds already in the session.
+    expect(await getSession.run({ id: session.id })).toMatchObject({
+      state: "interviewing",
+      turnStatus: "idle",
+    });
   });
 
   describe("refusals, before any turn", () => {

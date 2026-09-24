@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
-import { desc, eq } from "@agent-native/core/db/schema";
+import { and, desc, eq, isNull } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "./db/index.js";
@@ -126,7 +126,12 @@ export async function latestScoutReport(
 
 /**
  * Store an accepted report as the session's report, replacing any it had.
- * Every proposed decision starts `undecided`. Returns what was stored.
+ * Every proposed decision starts `undecided`, unless `carriedDispositions`
+ * gives its key a disposition already reached before this run — a re-run's
+ * proposal the scout reports `unchanged` and re-proposes under the same key
+ * keeps whatever the user had it as (kept or dropped) rather than reverting
+ * to undecided; see `.scratch/project-scout/issues/06-rescout-drift.md`
+ * ("Dispositions carry forward"). Returns what was stored.
  */
 export async function storeScoutReport(input: {
   sessionId: string;
@@ -137,12 +142,13 @@ export async function storeScoutReport(input: {
   model: InterviewerModel;
   turnId: string | null;
   ranAt: string;
+  carriedDispositions?: Record<string, ScoutProposalDisposition>;
 }): Promise<ScoutReport> {
   const dispositions: Record<string, ScoutProposalDisposition> =
     Object.fromEntries(
       input.result.proposedDecisions.map((decision) => [
         decision.key,
-        "undecided" as const,
+        input.carriedDispositions?.[decision.key] ?? ("undecided" as const),
       ]),
     );
   const report: ScoutReport = {
@@ -302,6 +308,51 @@ export function previousRepoDecisions(
       disposition: disposition === "undecided" ? "proposed" : disposition,
     };
   });
+}
+
+/**
+ * Every repo decision live in the session's design tree, as the next scout
+ * run is told about it: always disposition `kept`, since a decision only
+ * lives in the tree because the user kept it — dropping never adds one. A
+ * kept decision's key, title, source and citation are exactly as they were
+ * kept with; its statement is the repo statement it was kept with too — the
+ * one the scout is asked to check the project still holds, even once the
+ * interview has since reopened and re-answered the decision itself (the
+ * decision keeps its repo origin; see `actions/reopen-decision.ts`).
+ *
+ * Independent of any report's own content: a decision kept several re-runs
+ * ago is still returned here once its report row has long since been
+ * replaced, because it lives in `gr_decisions`, not in a report. See
+ * `.scratch/project-scout/issues/06-rescout-drift.md`
+ * ("Which decisions a re-run carries").
+ */
+export async function repoDecisionsInTree(
+  sessionId: string,
+): Promise<PreviousRepoDecision[]> {
+  const rows = await getDb()
+    .select()
+    .from(schema.decisions)
+    .where(
+      and(
+        eq(schema.decisions.sessionId, sessionId),
+        eq(schema.decisions.introducedBy, "repo"),
+        isNull(schema.decisions.withdrawnAt),
+      ),
+    );
+  return rows.flatMap((row) =>
+    row.key
+      ? [
+          {
+            key: row.key,
+            title: row.questionTitle,
+            statement: row.repoStatement ?? row.currentAnswer ?? "",
+            source: (row.repoSource ?? "inferred") as "recorded" | "inferred",
+            citation: row.repoCitation ?? "",
+            disposition: "kept" as const,
+          },
+        ]
+      : [],
+  );
 }
 
 /**
