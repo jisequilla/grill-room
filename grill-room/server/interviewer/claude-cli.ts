@@ -1,11 +1,12 @@
 import { spawn } from "node:child_process";
+import { appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 
 import { InterviewerError } from "./errors.js";
 import { observeCall, schemaIssuesReason, type CallResult } from "./observe.js";
 import { buildPrompt } from "./prompt.js";
 import { jsonSchemaFor, resultSchemas } from "./schemas.js";
-import type { ResultFor } from "./schemas.js";
+import type { RequestKind, ResultFor } from "./schemas.js";
 import type {
   AssessReadinessRequest,
   BreakIntoTicketsRequest,
@@ -250,6 +251,27 @@ export function buildCliArgs(
   return args;
 }
 
+/**
+ * Naming this environment variable a file switches the real adapter into
+ * recording mode: each accepted model result (one that passed the request
+ * kind's schema) is appended to it as one JSON line, `{ kind, result }`, in
+ * the order the turns happen. Unset, nothing is recorded. A refused or failed
+ * call is never written, only what the adapter actually returns.
+ *
+ * A recording loads back into a {@link Scenario} with `loadRecording` in
+ * `./recording.js`.
+ */
+export const RECORD_TURNS_ENV_VAR = "GRILL_ROOM_RECORD_TURNS";
+
+/** Appends one accepted turn to the recording file, creating it if needed. */
+async function recordTurn(
+  file: string,
+  kind: RequestKind,
+  result: unknown,
+): Promise<void> {
+  await appendFile(file, `${JSON.stringify({ kind, result })}\n`, "utf8");
+}
+
 /** Turns a failed invocation into the most specific error code it supports. */
 function classifyFailure(outcome: CliOutcome, summary: string): InterviewerError {
   const detail = `${outcome.stderr}\n${outcome.stdout}`.trim();
@@ -310,6 +332,7 @@ export function createClaudeCliInterviewer(
   const command = options.command ?? "claude";
   const cwd = options.cwd ?? tmpdir();
   const sourceEnv = options.env ?? process.env;
+  const recordingFile = sourceEnv[RECORD_TURNS_ENV_VAR];
 
   async function attempt(
     request: InterviewerRequest,
@@ -376,6 +399,10 @@ export function createClaudeCliInterviewer(
         JSON.stringify(parsed.error.issues).slice(0, 2000),
         { rawOutput, reason: schemaIssuesReason(parsed.error.issues) },
       );
+    }
+
+    if (recordingFile) {
+      await recordTurn(recordingFile, request.kind, parsed.data);
     }
 
     return {

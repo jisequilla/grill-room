@@ -1,4 +1,6 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -6,6 +8,7 @@ import {
   CLEARED_ENVIRONMENT_MARKERS,
   createClaudeCliInterviewer,
   DOCS_MODE_TOOLS,
+  RECORD_TURNS_ENV_VAR,
   SCOUT_DENY_RULES,
   type CliInvocation,
   type CliOutcome,
@@ -17,6 +20,8 @@ import type { ModelCallEnd, ModelCallObserver } from "./types.js";
 import {
   anAssessReadinessRequest,
   anAssessReadinessResult,
+  aFindSupersededRequest,
+  aFindSupersededResult,
   aProposeRoundRequest,
   aProposeRoundResult,
   aScoutProjectRequest,
@@ -746,6 +751,112 @@ describe("when a conversation cannot be resumed", () => {
       ),
     ).rejects.toMatchObject({ code: "rate-limited" });
     expect(runner.invocations).toHaveLength(1);
+  });
+});
+
+/**
+ * Recording mode: `GRILL_ROOM_RECORD_TURNS` names a file, and every accepted
+ * result gets appended to it. These write to a fresh temp directory, never
+ * the repository.
+ */
+describe("recording mode", () => {
+  async function tempRecordingFile(): Promise<{ dir: string; file: string }> {
+    const dir = await mkdtemp(path.join(tmpdir(), "grill-room-recording-"));
+    return { dir, file: path.join(dir, "recording.jsonl") };
+  }
+
+  it("appends each accepted result as one JSON line, in the order the turns happen", async () => {
+    const { dir, file } = await tempRecordingFile();
+    try {
+      const runner = recordingRunner([
+        ok(anEnvelope({ structured_output: aProposeRoundResult() })),
+        ok(
+          anEnvelope({ structured_output: aFindSupersededResult() }),
+        ),
+      ]);
+      const interviewer = createClaudeCliInterviewer({
+        runCli: runner.runCli,
+        env: { PATH: "/usr/bin", [RECORD_TURNS_ENV_VAR]: file },
+      });
+
+      await interviewer.proposeRound(aProposeRoundRequest());
+      await interviewer.findSuperseded(aFindSupersededRequest());
+
+      const lines = (await readFile(file, "utf8")).trim().split("\n");
+      expect(lines).toHaveLength(2);
+      expect(JSON.parse(lines[0]!)).toEqual({
+        kind: "propose-round",
+        result: aProposeRoundResult(),
+      });
+      expect(JSON.parse(lines[1]!)).toEqual({
+        kind: "find-superseded",
+        result: aFindSupersededResult(),
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes nothing when the variable is unset", async () => {
+    const { dir, file } = await tempRecordingFile();
+    try {
+      const runner = recordingRunner([ok(anEnvelope())]);
+
+      await createClaudeCliInterviewer({
+        runCli: runner.runCli,
+        env: { PATH: "/usr/bin" },
+      }).proposeRound(aProposeRoundRequest());
+
+      await expect(readFile(file, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never records a refused or failed call", async () => {
+    const { dir, file } = await tempRecordingFile();
+    try {
+      const runner = recordingRunner([
+        { stdout: "", stderr: "boom", exitCode: 1 },
+      ]);
+
+      await expect(
+        createClaudeCliInterviewer({
+          runCli: runner.runCli,
+          env: { PATH: "/usr/bin", [RECORD_TURNS_ENV_VAR]: file },
+        }).proposeRound(aProposeRoundRequest()),
+      ).rejects.toMatchObject({ code: "failed" });
+
+      await expect(readFile(file, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never records output that fails its schema", async () => {
+    const { dir, file } = await tempRecordingFile();
+    try {
+      const runner = recordingRunner([
+        ok(anEnvelope({ structured_output: { proposedDecisions: "not a list" } })),
+      ]);
+
+      await expect(
+        createClaudeCliInterviewer({
+          runCli: runner.runCli,
+          env: { PATH: "/usr/bin", [RECORD_TURNS_ENV_VAR]: file },
+        }).proposeRound(aProposeRoundRequest()),
+      ).rejects.toMatchObject({ code: "malformed-output" });
+
+      await expect(readFile(file, "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
