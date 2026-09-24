@@ -1,15 +1,16 @@
 import { useActionQuery } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { useSetPageTitle } from "@agent-native/toolkit/app-shell";
-import { useQueryClient } from "@tanstack/react-query";
+import type { SessionModel } from "@shared/session-constants";
+import { useIsMutating, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router";
 
 import { BuildRecordsSection } from "@/components/output/build-records-section";
 import { ExportSection } from "@/components/output/export-section";
 import { GenerateAllAction } from "@/components/output/generate-all-action";
 import { HandoffSection } from "@/components/output/handoff-section";
-import { SessionProjectSection } from "@/components/output/session-project-section";
 import { NotConfirmedNotice } from "@/components/output/not-confirmed-notice";
+import { SessionProjectSection } from "@/components/output/session-project-section";
 import { SpecSection } from "@/components/output/spec-section";
 import { TicketsSection } from "@/components/output/tickets-section";
 import { TurnStatusBanner } from "@/components/output/turn-status-banner";
@@ -19,14 +20,29 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { APP_TITLE } from "@/lib/app-config";
 import { MODEL_LABEL_KEY } from "@/lib/session-labels";
 
-import type { SessionModel } from "@shared/session-constants";
-
 export function meta() {
   return [{ title: APP_TITLE }];
 }
 
 /** How often the page re-reads the session while a turn is running. */
 const TURN_POLL_MS = 3000;
+
+/**
+ * How often the page re-reads the session once this tab has sent a request
+ * that may have started a turn (`synthesize-spec`, `break-into-tickets`) but
+ * the session it fetched hasn't caught up to "working" yet. Faster than
+ * {@link TURN_POLL_MS}: the server marks the turn "working" before doing
+ * anything else, so this window normally closes within one round trip, and a
+ * short turn can start and fail inside a single `TURN_POLL_MS` tick.
+ *
+ * `synthesize-spec` and `break-into-tickets` are mutations owned by
+ * `SpecSection` and `TicketsSection`, not this route, so their own
+ * `isPending` isn't available here. Any mutation pending anywhere in this
+ * route's tree — which, mounted, is exactly this page's sections — is close
+ * enough: the extra poll while an unrelated quick edit (e.g. editing a
+ * ticket's blockers) settles is harmless.
+ */
+const STARTING_POLL_MS = 500;
 
 export default function SessionOutputRoute() {
   const t = useT();
@@ -35,13 +51,17 @@ export default function SessionOutputRoute() {
   const id = sessionId ?? "";
   const enabled = id.length > 0;
 
+  const startingTurn = useIsMutating() > 0;
+
   const { data: session, isLoading } = useActionQuery(
     "get-session",
     { id },
     {
       enabled,
-      refetchInterval: (query) =>
-        query.state.data?.turnStatus === "working" ? TURN_POLL_MS : false,
+      refetchInterval: (query) => {
+        if (query.state.data?.turnStatus === "working") return TURN_POLL_MS;
+        return startingTurn ? STARTING_POLL_MS : false;
+      },
     },
   );
 
@@ -55,7 +75,12 @@ export default function SessionOutputRoute() {
     { sessionId: id },
     {
       enabled,
-      refetchInterval: session?.turnStatus === "working" ? TURN_POLL_MS : false,
+      refetchInterval:
+        session?.turnStatus === "working"
+          ? TURN_POLL_MS
+          : startingTurn
+            ? STARTING_POLL_MS
+            : false,
     },
   );
 

@@ -4,13 +4,22 @@ import {
   useActionQuery,
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
-import { useSetHeaderActions, useSetPageTitle } from "@agent-native/toolkit/app-shell";
+import {
+  useSetHeaderActions,
+  useSetPageTitle,
+} from "@agent-native/toolkit/app-shell";
+import type {
+  SessionAnsweringMode,
+  SessionModel,
+} from "@shared/session-constants";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
 
 import { SessionStateBadge } from "@/components/sessions/session-state-badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { AddDecisionDialog } from "@/components/workspace/add-decision-dialog";
 import { AnsweringModeSwitch } from "@/components/workspace/answering-mode-switch";
 import { ApplyBatchDialog } from "@/components/workspace/batch/apply-batch-dialog";
@@ -23,16 +32,12 @@ import { RoundPanel } from "@/components/workspace/round-panel";
 import { SessionIdea } from "@/components/workspace/session-idea";
 import { SessionModelControl } from "@/components/workspace/session-model-control";
 import { TreeFooter } from "@/components/workspace/tree-footer";
-import { Skeleton } from "@/components/ui/skeleton";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { APP_TITLE } from "@/lib/app-config";
 import {
   actionErrorCode,
   type SessionState,
   type TreeDecision,
 } from "@/lib/decisions";
-
-import type { SessionAnsweringMode, SessionModel } from "@shared/session-constants";
 
 export function meta() {
   return [{ title: APP_TITLE }];
@@ -47,6 +52,16 @@ const TURN_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** How often the workspace re-reads the session while the interviewer works. */
 const TURN_POLL_MS = 3000;
+
+/**
+ * How often the workspace re-reads the session once this tab has sent a
+ * turn-starting request but the round it fetched hasn't caught up to
+ * "working" yet. Faster than {@link TURN_POLL_MS}: this window is normally
+ * closed within one round trip to the server (which marks the turn
+ * "working" before doing anything else), and a short turn can start and
+ * fail inside a single `TURN_POLL_MS` tick.
+ */
+const STARTING_POLL_MS = 500;
 
 /** What the centre column is showing, which is the session's state, not "this round". */
 const PANEL_HEADING_KEY: Record<SessionState, string> = {
@@ -96,31 +111,95 @@ export default function SessionWorkspaceRoute() {
     { enabled },
   );
 
+  useSetPageTitle(session?.title ?? t("pages.sessionWorkspaceTitle"));
+
+  function refresh() {
+    void queryClient.invalidateQueries({ queryKey: ["action"] });
+  }
+
+  function reportTurnError(fallbackKey: string) {
+    return (error: unknown) => {
+      refresh();
+      if (SILENT_ERROR_CODES.has(actionErrorCode(error) ?? "")) return;
+      toast.error(actionErrorMessage(error) ?? t(fallbackKey));
+    };
+  }
+
+  // Declared before the polled queries below: the queries' `refetchInterval`
+  // reads these mutations' `isPending`, which is true from the moment this
+  // tab sends a turn-starting request — well before a fetched round can say
+  // "working" itself. Without this, the tab that started the turn shows
+  // nothing until its own request settles, by which point the turn is over.
+  const nextRound = useActionMutation("request-next-round", {
+    timeoutMs: TURN_TIMEOUT_MS,
+    onError: reportTurnError("workspace.errorGeneric"),
+    onSettled: refresh,
+  });
+
+  const submitRound = useActionMutation("submit-round", {
+    timeoutMs: TURN_TIMEOUT_MS,
+    onError: reportTurnError("workspace.submitFailed"),
+    onSettled: refresh,
+  });
+
+  const assessReadiness = useActionMutation("assess-readiness", {
+    timeoutMs: TURN_TIMEOUT_MS,
+    onError: (error: unknown) => {
+      refresh();
+      const code = actionErrorCode(error) ?? "";
+      if (SILENT_ERROR_CODES.has(code) || STALE_READINESS_CODES.has(code))
+        return;
+      toast.error(
+        actionErrorMessage(error) ?? t("workspace.readinessAssessFailed"),
+      );
+    },
+    onSettled: refresh,
+  });
+
+  // Refusals (an empty idea, a round that opened meanwhile) are shown inside
+  // the editor, so this only keeps every view of the session current.
+  const updateIdea = useActionMutation("update-session-idea", {
+    onSettled: refresh,
+  });
+
+  const startingTurn =
+    nextRound.isPending || submitRound.isPending || assessReadiness.isPending;
+
   // The turn runs on the server whether or not this tab is still waiting on the
   // request that started it, so the workspace polls its way back to the truth
-  // rather than trusting a promise it may never see resolve.
+  // rather than trusting a promise it may never see resolve. While this tab's
+  // own request is pending but the round hasn't caught up yet, poll fast; once
+  // the round itself reads "working", the normal cadence is enough to follow
+  // it home.
   const { data: round, isLoading: roundLoading } = useActionQuery(
     "get-current-round",
     { sessionId: id },
     {
       enabled,
-      refetchInterval: (query) =>
-        query.state.data?.turnStatus === "working" ? TURN_POLL_MS : false,
+      refetchInterval: (query) => {
+        if (query.state.data?.turnStatus === "working") return TURN_POLL_MS;
+        return startingTurn ? STARTING_POLL_MS : false;
+      },
     },
   );
 
   const working = round?.turnStatus === "working";
+  const pollInterval = working
+    ? TURN_POLL_MS
+    : startingTurn
+      ? STARTING_POLL_MS
+      : false;
 
   const { data: tree } = useActionQuery(
     "get-tree",
     { sessionId: id },
-    { enabled, refetchInterval: working ? TURN_POLL_MS : false },
+    { enabled, refetchInterval: pollInterval },
   );
 
   const { data: rounds } = useActionQuery(
     "list-rounds",
     { sessionId: id },
-    { enabled, refetchInterval: working ? TURN_POLL_MS : false },
+    { enabled, refetchInterval: pollInterval },
   );
 
   // The turn the session's current turn status belongs to, of any kind: a
@@ -131,7 +210,7 @@ export default function SessionWorkspaceRoute() {
   const { data: activeTurn } = useActionQuery(
     "get-active-turn",
     { sessionId: id },
-    { enabled, refetchInterval: working ? TURN_POLL_MS : false },
+    { enabled, refetchInterval: pollInterval },
   );
 
   // The turn of the session's stored readiness judgment, stale review, and
@@ -161,51 +240,8 @@ export default function SessionWorkspaceRoute() {
   const { data: looseEnds } = useActionQuery(
     "list-loose-ends",
     { sessionId: id },
-    { enabled, refetchInterval: working ? TURN_POLL_MS : false },
+    { enabled, refetchInterval: pollInterval },
   );
-
-  useSetPageTitle(session?.title ?? t("pages.sessionWorkspaceTitle"));
-
-  function refresh() {
-    void queryClient.invalidateQueries({ queryKey: ["action"] });
-  }
-
-  function reportTurnError(fallbackKey: string) {
-    return (error: unknown) => {
-      refresh();
-      if (SILENT_ERROR_CODES.has(actionErrorCode(error) ?? "")) return;
-      toast.error(actionErrorMessage(error) ?? t(fallbackKey));
-    };
-  }
-
-  const nextRound = useActionMutation("request-next-round", {
-    timeoutMs: TURN_TIMEOUT_MS,
-    onError: reportTurnError("workspace.errorGeneric"),
-    onSettled: refresh,
-  });
-
-  const submitRound = useActionMutation("submit-round", {
-    timeoutMs: TURN_TIMEOUT_MS,
-    onError: reportTurnError("workspace.submitFailed"),
-    onSettled: refresh,
-  });
-
-  const assessReadiness = useActionMutation("assess-readiness", {
-    timeoutMs: TURN_TIMEOUT_MS,
-    onError: (error: unknown) => {
-      refresh();
-      const code = actionErrorCode(error) ?? "";
-      if (SILENT_ERROR_CODES.has(code) || STALE_READINESS_CODES.has(code)) return;
-      toast.error(actionErrorMessage(error) ?? t("workspace.readinessAssessFailed"));
-    },
-    onSettled: refresh,
-  });
-
-  // Refusals (an empty idea, a round that opened meanwhile) are shown inside
-  // the editor, so this only keeps every view of the session current.
-  const updateIdea = useActionMutation("update-session-idea", {
-    onSettled: refresh,
-  });
 
   const decisions: TreeDecision[] = tree?.decisions ?? [];
 
@@ -225,7 +261,9 @@ export default function SessionWorkspaceRoute() {
   // (and including) the last round the user actually submitted.
   const lastSubmittedAt =
     rounds?.rounds
-      .filter((round) => round.submissionState === "submitted" && round.submittedAt)
+      .filter(
+        (round) => round.submissionState === "submitted" && round.submittedAt,
+      )
       .reduce<string | null>(
         (latest, round) =>
           !latest || (round.submittedAt as string) > latest
@@ -331,7 +369,10 @@ export default function SessionWorkspaceRoute() {
               <h3 className="pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
                 {t("workspace.historyHeading")}
               </h3>
-              <RoundHistory rounds={rounds?.rounds ?? []} decisions={decisions} />
+              <RoundHistory
+                rounds={rounds?.rounds ?? []}
+                decisions={decisions}
+              />
             </section>
           </div>
 
@@ -351,9 +392,8 @@ export default function SessionWorkspaceRoute() {
               {decisions.length > 0 ? (
                 <TreeFooter
                   settled={
-                    decisions.filter(
-                      (decision) => decision.state === "settled",
-                    ).length
+                    decisions.filter((decision) => decision.state === "settled")
+                      .length
                   }
                   total={
                     decisions.filter(
