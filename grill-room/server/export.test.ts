@@ -137,7 +137,7 @@ describe("planExport: decisions.md", () => {
     );
   });
 
-  it("shows no why for an accepted recommendation or own answer that matches no offered choice", () => {
+  it("renders an accepted recommendation with a choice index as that choice, its case and the interviewer's note", () => {
     const content = decisionsFile([
       decision("accepted", {
         choices: CHOICES,
@@ -145,12 +145,84 @@ describe("planExport: decisions.md", () => {
         recommendedAnswer: "SQLite, because one file is enough.",
         answer: { text: "SQLite, because one file is enough.", kind: "accepted-recommendation" },
       }),
+      decision("same", {
+        choices: CHOICES,
+        recommendedChoice: 1,
+        recommendedAnswer: "Postgres",
+        answer: { text: "Postgres", kind: "accepted-recommendation" },
+      }),
+    ])!;
+
+    expect(content).toContain(
+      [
+        '<a id="accepted"></a>',
+        "### Title of accepted",
+        "",
+        "- **Decision:** SQLite",
+        "- **Why (interviewer's case):** One file, no server to run.",
+        "- **Recommendation note (interviewer's):** SQLite, because one file is enough.",
+        "- **Origin:** interviewer · accepted recommendation",
+      ].join("\n"),
+    );
+    // A note that only repeats the label adds nothing and is left out.
+    expect(content).toContain(
+      [
+        "- **Decision:** Postgres",
+        "- **Why (interviewer's case):** Scales, but needs a server.",
+        "- **Origin:** interviewer · accepted recommendation",
+      ].join("\n"),
+    );
+    expect(content.match(/Recommendation note/g)).toHaveLength(1);
+  });
+
+  it("renders an accepted recommendation without a choice index as its answer, with a why only on a text match", () => {
+    const content = decisionsFile([
+      decision("no-index", {
+        choices: CHOICES,
+        recommendedChoice: null,
+        recommendedAnswer: "Keep it in memory.",
+        answer: { text: "Keep it in memory.", kind: "accepted-recommendation" },
+      }),
+      decision("no-choices", {
+        recommendedChoice: 0,
+        answer: { text: "Ship weekly.", kind: "accepted-recommendation" },
+      }),
+      decision("matched", {
+        choices: CHOICES,
+        recommendedChoice: null,
+        answer: { text: "SQLite", kind: "accepted-recommendation" },
+      }),
+    ])!;
+
+    expect(content).toContain(
+      "- **Decision:** Keep it in memory.\n- **Origin:** interviewer · accepted recommendation",
+    );
+    expect(content).toContain(
+      "- **Decision:** Ship weekly.\n- **Origin:** interviewer · accepted recommendation",
+    );
+    expect(content).toContain(
+      "- **Decision:** SQLite\n- **Why (interviewer's case):** One file, no server to run.\n- **Origin:** interviewer · accepted recommendation",
+    );
+    expect(content).not.toContain("Recommendation note");
+  });
+
+  it("labels an own answer that matches an offered choice as another offered option, with its case", () => {
+    const content = decisionsFile([
+      decision("picked", {
+        choices: CHOICES,
+        recommendedChoice: 0,
+        recommendedAnswer: "SQLite, because one file is enough.",
+        answer: { text: "Postgres", kind: "own-answer" },
+      }),
       decision("typed", { choices: CHOICES, answer: { text: "Flat JSON files", kind: "own-answer" } }),
     ])!;
 
-    expect(content).not.toContain("Why");
-    expect(content).toContain("- **Origin:** interviewer · accepted recommendation");
+    expect(content).toContain(
+      "- **Decision:** Postgres\n- **Why (interviewer's case):** Scales, but needs a server.\n- **Origin:** interviewer · another offered option",
+    );
     expect(content).toContain("- **Decision:** Flat JSON files\n- **Origin:** interviewer · own answer");
+    expect(content).not.toContain("Recommendation note");
+    expect(content).not.toContain("SQLite, because");
   });
 
   it("writes a reopened repo decision as a full entry with its source and a Supersedes line", () => {

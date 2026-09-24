@@ -310,6 +310,18 @@ function matchingChoice(decision: DecisionView) {
   return decision.choices.find((choice) => choice.label.trim() === answer) ?? null;
 }
 
+/**
+ * The offered choice an accepted recommendation picked, by its stored index, or
+ * null when the answer is not an accepted recommendation or has no such choice.
+ * Accepting stores the recommendation's reasoning as the answer text, not the
+ * label, so the index is what names the choice.
+ */
+function recommendedChoiceAccepted(decision: DecisionView) {
+  if (decision.answer?.kind !== "accepted-recommendation") return null;
+  if (decision.recommendedChoice == null) return null;
+  return decision.choices[decision.recommendedChoice] ?? null;
+}
+
 function isSettledAs(decision: DecisionView, kinds: readonly string[]): boolean {
   return decision.state === "settled" && decision.answer != null && kinds.includes(decision.answer.kind);
 }
@@ -366,12 +378,24 @@ function renderEntry(
     `<a id="${decisionKey(decision)}"></a>`,
     `### ${oneLine(decision.questionTitle)}`,
     "",
-    field("Decision", decision.answer?.text ?? ""),
   ];
 
-  const choice = matchingChoice(decision);
-  if (choice && choice.rationale.trim().length > 0) {
-    lines.push(field("Why (interviewer's case)", choice.rationale));
+  const recommended = recommendedChoiceAccepted(decision);
+  if (recommended) {
+    lines.push(field("Decision", recommended.label));
+    if (recommended.rationale.trim().length > 0) {
+      lines.push(field("Why (interviewer's case)", recommended.rationale));
+    }
+    const note = (decision.recommendedAnswer ?? decision.answer?.text ?? "").trim();
+    if (note.length > 0 && note !== recommended.label.trim()) {
+      lines.push(field("Recommendation note (interviewer's)", note));
+    }
+  } else {
+    lines.push(field("Decision", decision.answer?.text ?? ""));
+    const choice = matchingChoice(decision);
+    if (choice && choice.rationale.trim().length > 0) {
+      lines.push(field("Why (interviewer's case)", choice.rationale));
+    }
   }
 
   lines.push(field("Origin", originLabel(decision)));
