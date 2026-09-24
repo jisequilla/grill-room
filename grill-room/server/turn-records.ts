@@ -9,13 +9,13 @@
  * batched at the end, so a running turn's progress survives navigation and
  * reload.
  *
- * Nothing here changes retry behaviour or is wired into `askUntilAccepted`
- * yet — that is later work. This module only creates, appends to and reads
- * back turn records.
+ * This module only creates, appends to and reads back turn records; nothing
+ * here changes retry behaviour. `server/turn-recorder.ts` is what a running
+ * turn writes through.
  */
 import { randomUUID } from "node:crypto";
 
-import { eq, inArray } from "@agent-native/core/db/schema";
+import { and, desc, eq, inArray } from "@agent-native/core/db/schema";
 
 import { getDb, schema } from "./db/index.js";
 import type { AttemptKind } from "./db/schema.js";
@@ -163,6 +163,45 @@ export async function completeAttempt(input: {
 }
 
 /**
+ * Change a completed attempt's kind and reason, keeping its duration and raw
+ * output. What a call the port reported as a success becomes once the app
+ * refuses the result it produced.
+ */
+export async function relabelAttempt(input: {
+  attemptId: string;
+  kind: AttemptKind;
+  reason: string | null;
+}): Promise<void> {
+  await getDb()
+    .update(schema.turnAttempts)
+    .set({ kind: input.kind, reason: input.reason })
+    .where(eq(schema.turnAttempts.id, input.attemptId));
+}
+
+/**
+ * The most recently started turn record of one kind for a session, or null
+ * when the session has none: how a caller finds the turn a stopped action
+ * left behind, which has no round or result to point at it.
+ */
+export async function findLatestTurn(input: {
+  sessionId: string;
+  turnKind: string;
+}): Promise<TurnView | null> {
+  const [latest] = await getDb()
+    .select({ id: schema.turns.id })
+    .from(schema.turns)
+    .where(
+      and(
+        eq(schema.turns.sessionId, input.sessionId),
+        eq(schema.turns.turnKind, input.turnKind),
+      ),
+    )
+    .orderBy(desc(schema.turns.startedAt), desc(schema.turns.id))
+    .limit(1);
+  return latest ? getTurnWithRuns(latest.id) : null;
+}
+
+/**
  * Complete a turn record once it stops, successfully or not: its outcome —
  * `"succeeded"`, or the failure code the turn stopped with — and its total
  * elapsed time since it started, spanning every run. Does nothing if the turn
@@ -226,9 +265,8 @@ export interface TurnView {
 /**
  * Read a turn back with its runs and attempts in order: runs by
  * `runNumber`, attempts within each run by `attemptNumber`. Null when no turn
- * has this id — the caller for existing rounds, specs and readiness
- * judgments with no linked turn, which is every one of them until later
- * tickets wire recording in.
+ * has this id — the caller's case for a round, spec or readiness judgment
+ * from before turn records existed, which has no linked turn.
  */
 export async function getTurnWithRuns(
   turnId: string,

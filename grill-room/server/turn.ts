@@ -18,6 +18,7 @@ import type {
   AnswerKind,
   DecisionSnapshot,
   DecisionState,
+  ModelCallObserver,
 } from "./interviewer/index.js";
 import {
   deriveTreeStates,
@@ -26,6 +27,12 @@ import {
   treeFacts,
   type DecisionRow,
 } from "./tree.js";
+import {
+  startTurnRecorder,
+  TURN_SUCCEEDED,
+  type AttemptRecorder,
+  type TurnRecorder,
+} from "./turn-recorder.js";
 
 /**
  * How many times a result the app refuses is sent back with its reasons before
@@ -76,12 +83,19 @@ export function failIfTurnInProgress(
  * `take` resolves with the conversation id to resume next, or null for a
  * session that still has none; anything the turn writes it writes itself,
  * before returning, so a failed turn leaves the session exactly as it was.
+ *
+ * Given `record`, the turn also gets a turn record beside the session's turn
+ * fields: `take` receives the recorder to pass to `askUntilAccepted`, and the
+ * record is closed with `"succeeded"` or the same code the session's
+ * `turnErrorCode` gets.
  */
 export async function runTurn(input: {
   sessionId: string;
   /** Stored when the failure is neither an interviewer fault nor a refusal. */
   failedMessage: string;
-  take: () => Promise<string | null>;
+  /** The turn record to keep: the turn's kind and the model it runs on. */
+  record?: { turnKind: string; model: string };
+  take: (recorder: TurnRecorder | null) => Promise<string | null>;
 }): Promise<void> {
   const db = getDb();
   const { sessionId } = input;
@@ -98,15 +112,21 @@ export async function runTurn(input: {
     })
     .where(eq(schema.sessions.id, sessionId));
 
+  let recorder: TurnRecorder | null = null;
   let conversationId: string | null;
   try {
-    conversationId = await input.take();
+    if (input.record) {
+      recorder = await startTurnRecorder({ sessionId, ...input.record });
+    }
+    conversationId = await input.take(recorder);
   } catch (error) {
     const [code, message] = isInterviewerError(error)
       ? [error.code, error.message]
       : error instanceof TurnRejected
         ? [error.code, error.message]
         : ["failed", input.failedMessage];
+
+    await recorder?.finish(code);
 
     await db
       .update(schema.sessions)
@@ -126,6 +146,8 @@ export async function runTurn(input: {
     throw error;
   }
 
+  await recorder?.finish(TURN_SUCCEEDED);
+
   await db
     .update(schema.sessions)
     .set({
@@ -143,8 +165,13 @@ export async function runTurn(input: {
  *
  * Each attempt carries forward the conversation the last one returned and the
  * reasons the app gave for refusing it, so the model is corrected in the same
- * thread rather than asked again blind. Nothing here writes: a caller stores
- * only what this resolves with.
+ * thread rather than asked again blind. Nothing here writes the result: a
+ * caller stores only what this resolves with.
+ *
+ * Given a `recorder`, each attempt's `observer` records its model calls, and a
+ * refused result's call is relabelled a tree-rule refusal with the reason sent
+ * back. Only a refusal spends the bound; anything the interviewer throws —
+ * schema-invalid output, a rate limit — stops the loop as it always has.
  */
 export async function askUntilAccepted<Result>(input: {
   /** The conversation to resume, or null to start one. */
@@ -153,11 +180,15 @@ export async function askUntilAccepted<Result>(input: {
     conversationId: string | null;
     /** Why the app refused the previous attempt, or null on the first. */
     rejectionReason: string | null;
+    /** Pass to the interviewer method; undefined when the turn keeps no record. */
+    observer: ModelCallObserver | undefined;
   }) => Promise<{ result: Result; conversationId: string }>;
   /** Why this result cannot be stored, written for the interviewer. Empty when it can. */
   reasonsToRefuse: (result: Result) => string[];
   /** The failure to raise once every attempt has been refused. */
   exhausted: (lastReason: string) => TurnRejected;
+  /** Records each attempt; see `startTurnRecorder`. */
+  recorder?: AttemptRecorder | null;
 }): Promise<{ result: Result; conversationId: string }> {
   let conversationId = input.conversationId;
   let rejectionReason = "";
@@ -166,6 +197,7 @@ export async function askUntilAccepted<Result>(input: {
     const turn = await input.ask({
       conversationId,
       rejectionReason: attempt === 0 ? null : rejectionReason,
+      observer: input.recorder?.observer,
     });
     conversationId = turn.conversationId;
 
@@ -173,6 +205,7 @@ export async function askUntilAccepted<Result>(input: {
     if (reasons.length === 0) return turn;
 
     rejectionReason = reasons.join(" ");
+    await input.recorder?.refused(rejectionReason);
   }
 
   throw input.exhausted(rejectionReason);
