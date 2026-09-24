@@ -1,10 +1,12 @@
 /**
  * The export bundle: one directory per session inside its project's export
- * folder, holding `spec.md` at the top, one `issues/NN-slug.md` per ticket,
+ * folder, holding `spec.md` at the top, `decisions.md` beside it when the
+ * session settled something of its own, one `issues/NN-slug.md` per ticket,
  * and a manifest of what the export wrote.
  *
  *     <project root>/<export folder>/<folder name>/HANDOFF.md        (when a handoff exists)
  *     <project root>/<export folder>/<folder name>/spec.md
+ *     <project root>/<export folder>/<folder name>/decisions.md      (when anything is decided or out of scope)
  *     <project root>/<export folder>/<folder name>/issues/NN-slug.md
  *     <project root>/<export folder>/<folder name>/briefs/NN-slug.md (when a handoff exists)
  *     <project root>/<export folder>/<folder name>/.grill-room-export.json
@@ -105,6 +107,7 @@ import {
 } from "./handoff.js";
 import { getProject } from "./projects.js";
 import { describeTickets, ticketsAreCurrent } from "./tickets.js";
+import { describeDecisions } from "./tree.js";
 
 const NO_TICKETS_REASON = "This session has no tickets to export.";
 const STALE_TICKETS_REASON =
@@ -134,6 +137,8 @@ export interface ExportBundlePlan {
   folderName: string;
   /** Absolute path of the bundle directory. */
   bundleDir: string;
+  /** The bundle directory relative to the project root, forward slashes: what a successful export stores on the session. */
+  bundleFolder: string;
   /** Whether the bundle directory already exists, i.e. this export replaces an earlier one. */
   bundleExists: boolean;
   /** Every file the export writes: spec, issues in number order, then the manifest. */
@@ -382,10 +387,17 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     exportTickets = describeTickets(ticketRows);
   }
 
+  const decisionRows = await db
+    .select()
+    .from(schema.decisions)
+    .where(eq(schema.decisions.sessionId, session.id))
+    .orderBy(schema.decisions.createdAt, schema.decisions.id);
+
   const plan = planExport({
     sessionTitle: session.title,
     specMarkdown: spec.markdown,
     tickets: exportTickets,
+    decisions: describeDecisions(decisionRows),
   });
 
   const handoff = (await getHandoffRow(session.id)) ?? null;
@@ -452,6 +464,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     slug,
     folderName,
     bundleDir,
+    bundleFolder: path.relative(project.rootPath, bundleDir).split(path.sep).join("/"),
     bundleExists: await exists(bundleDir),
     files,
     removals,

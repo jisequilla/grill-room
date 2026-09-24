@@ -469,4 +469,9 @@ ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS repo_citation TEXT;
 ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS repo_statement TEXT;
 ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS scout_report_id TEXT`,
   },
+  {
+    version: 60,
+    name: "sessions-last-export-folder-column",
+    sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS last_export_folder TEXT`,
+  },
 ];

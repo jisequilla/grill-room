@@ -125,6 +125,12 @@ export const sessions = table("gr_sessions", {
   /** A read-only folder the interviewer may read while grilling, or null for the tool-less interview. */
   docsFolder: text("docs_folder"),
   /**
+   * The bundle folder the session's last successful export wrote to, relative
+   * to its project's root, or null until the first export. A scout on this
+   * session leaves out the `decisions.md` under it: the session's own record.
+   */
+  lastExportFolder: text("last_export_folder"),
+  /**
    * The batch of reopens running on this session right now, as JSON: how many
    * items it holds, how many are done, which one it is on, and the outcome of
    * each one finished. A batch is many interviewer turns long, so its progress

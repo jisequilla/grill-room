@@ -1,14 +1,20 @@
 /**
  * Export's pure parts: the bundle's folder name (slug proposal, slug pattern)
  * and the files the local-markdown tracker layout expects (see repo-root
- * `docs/agents/issue-tracker.md`), with their content. Nothing here touches the
+ * `docs/agents/issue-tracker.md`), plus the session's `decisions.md`, with
+ * their content. Nothing here touches the
  * filesystem — `server/export-bundle.ts` reads what already exists, enforces
  * containment and does the writes; this module only decides names and renders
  * content. Tested through the `preview-export` and `export-session` actions,
  * the same convention `tickets.ts` and `tree.ts` follow.
  */
 
+import type { DecisionView } from "./tree.js";
+
 const STATUS_LINE = "Status: ready-for-agent";
+
+/** The decisions record every export with something settled writes beside the spec. */
+export const DECISIONS_FILE = "decisions.md";
 
 /** A ticket as `export-session` hands it here: `blockedBy` already resolved to ticket numbers. */
 export interface ExportTicket {
@@ -26,7 +32,7 @@ export interface PlannedExportFile {
 }
 
 export interface ExportPlan {
-  /** Spec first, then issues in ticket-number order — the order `export-session` writes and reports them in. */
+  /** Spec first, then `decisions.md` when planned, then issues in ticket-number order — the order `export-session` writes and reports them in. */
   files: PlannedExportFile[];
 }
 
@@ -66,6 +72,8 @@ export interface PlanExportInput {
   specMarkdown: string;
   /** Tickets to export, already in ascending number order. Empty when tickets are not being exported. */
   tickets: readonly ExportTicket[];
+  /** The session's whole design tree, states resolved; `decisions.md` is rendered from it. */
+  decisions: readonly DecisionView[];
 }
 
 /** Lowercase; anything not a letter or digit collapses to one hyphen; leading/trailing hyphens trimmed. */
@@ -252,6 +260,202 @@ export function renderTicketFile(params: {
   return `# ${params.label} ${params.title}\n\n${STATUS_LINE}\n${blockedByLine}\n\n${params.body}`;
 }
 
+/** A decision's anchor and tie-break: its key, or its id for a row that has none. */
+function decisionKey(decision: DecisionView): string {
+  return decision.key ?? decision.id;
+}
+
+function byKey(a: DecisionView, b: DecisionView): number {
+  const left = decisionKey(a);
+  const right = decisionKey(b);
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * Every decision in topological order, prerequisites first, ties broken by
+ * key, so an unchanged tree always renders the same order. A dependency on an
+ * id outside the set is ignored; anything left on a cycle (which validation
+ * never lets into a tree) follows in key order.
+ */
+function topologicalOrder(decisions: readonly DecisionView[]): DecisionView[] {
+  const ids = new Set(decisions.map((decision) => decision.id));
+  const placed = new Set<string>();
+  const remaining = [...decisions].sort(byKey);
+  const ordered: DecisionView[] = [];
+
+  while (remaining.length > 0) {
+    const index = remaining.findIndex((decision) =>
+      decision.dependsOn.every((id) => !ids.has(id) || placed.has(id)),
+    );
+    const [next] = remaining.splice(index === -1 ? 0 : index, 1);
+    ordered.push(next!);
+    placed.add(next!.id);
+  }
+  return ordered;
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** A `- **Label:** value` list item; a multi-line value continues indented under it. */
+function field(label: string, value: string): string {
+  return `- **${label}:** ${value.trim().split(/\r?\n/).join("\n  ")}`;
+}
+
+/** The offered choice whose text equals the answer, or null when it matches none. */
+function matchingChoice(decision: DecisionView) {
+  const answer = decision.answer?.text?.trim() ?? "";
+  if (answer.length === 0) return null;
+  return decision.choices.find((choice) => choice.label.trim() === answer) ?? null;
+}
+
+function isSettledAs(decision: DecisionView, kinds: readonly string[]): boolean {
+  return decision.state === "settled" && decision.answer != null && kinds.includes(decision.answer.kind);
+}
+
+/** A full entry: a settled real answer, including a repo decision the interview reopened. */
+function isEntry(decision: DecisionView): boolean {
+  return isSettledAs(decision, ["accepted-recommendation", "own-answer"]);
+}
+
+function isDispositionedTo(decision: DecisionView, target: "out-of-scope" | "open-question"): boolean {
+  return isSettledAs(decision, ["dispositioned"]) && decision.dispositionTarget === target;
+}
+
+/** A repo decision the user kept as it stands. */
+function isBuiltUnder(decision: DecisionView): boolean {
+  return isSettledAs(decision, ["repo-established"]);
+}
+
+function originLabel(decision: DecisionView): string {
+  if (decision.introducedBy === "repo") {
+    return `repo (${decision.repo?.source ?? "inferred"}) · reopened`;
+  }
+  const how =
+    decision.answer?.kind === "accepted-recommendation"
+      ? "accepted recommendation"
+      : matchingChoice(decision)
+        ? "another offered option"
+        : "own answer";
+  return `${decision.introducedBy} · ${how}`;
+}
+
+function dependencyReference(dependency: DecisionView): string | null {
+  if (isEntry(dependency)) {
+    return `[${oneLine(dependency.questionTitle)}](#${decisionKey(dependency)})`;
+  }
+  if (isBuiltUnder(dependency)) {
+    return `\`${decisionKey(dependency)}\` (${dependency.repo?.citation ?? ""})`;
+  }
+  if (isDispositionedTo(dependency, "open-question")) {
+    return `${oneLine(dependency.questionTitle)} (open question, see spec)`;
+  }
+  if (isDispositionedTo(dependency, "out-of-scope")) {
+    return `${oneLine(dependency.questionTitle)} (out of scope)`;
+  }
+  return null;
+}
+
+function renderEntry(
+  decision: DecisionView,
+  order: ReadonlyMap<string, number>,
+  byId: ReadonlyMap<string, DecisionView>,
+): string {
+  const lines = [
+    `<a id="${decisionKey(decision)}"></a>`,
+    `### ${oneLine(decision.questionTitle)}`,
+    "",
+    field("Decision", decision.answer?.text ?? ""),
+  ];
+
+  const choice = matchingChoice(decision);
+  if (choice && choice.rationale.trim().length > 0) {
+    lines.push(field("Why (interviewer's case)", choice.rationale));
+  }
+
+  lines.push(field("Origin", originLabel(decision)));
+
+  const dependencies = decision.dependsOn
+    .map((id) => byId.get(id))
+    .filter((dependency): dependency is DecisionView => dependency !== undefined)
+    .sort((a, b) => order.get(a.id)! - order.get(b.id)!)
+    .map(dependencyReference)
+    .filter((reference): reference is string => reference !== null);
+  if (dependencies.length > 0) lines.push(field("Depends on", dependencies.join(", ")));
+
+  if (decision.introducedBy === "repo" && decision.repo) {
+    lines.push(field("Source", decision.repo.citation));
+    lines.push(field("Supersedes", `"${oneLine(decision.repo.statement)}"`));
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * `decisions.md`'s content, rendered from the session's tree with no model
+ * call, or null when the session settled nothing of its own and set nothing
+ * out of scope (kept repo decisions alone do not make a file).
+ *
+ * Three sections, each omitted when empty and each in topological order with
+ * key ties:
+ *
+ * - **Decisions**: one entry per settled accepted recommendation or own answer,
+ *   a reopened repo decision included, under an anchor named by its key.
+ * - **Out of scope**: every loose end dispositioned out of scope, with its note.
+ * - **Built under**: every kept repo decision, as key and citation only.
+ *
+ * Anything not settled, set aside as an open question, withdrawn or unplaced
+ * appears nowhere, except that a dependency on an open question is named as one.
+ */
+export function renderDecisionsFile(
+  sessionTitle: string,
+  decisions: readonly DecisionView[],
+): string | null {
+  const ordered = topologicalOrder(decisions);
+  const order = new Map(ordered.map((decision, index) => [decision.id, index]));
+  const byId = new Map(decisions.map((decision) => [decision.id, decision]));
+
+  const entries = ordered.filter(isEntry);
+  const outOfScope = ordered.filter((decision) => isDispositionedTo(decision, "out-of-scope"));
+  const builtUnder = ordered.filter(isBuiltUnder);
+
+  if (entries.length === 0 && outOfScope.length === 0) return null;
+
+  const sections = [
+    `# Decisions: ${oneLine(sessionTitle)}`,
+    "Generated by the Grill Room export from this session's settled design tree.",
+  ];
+
+  if (entries.length > 0) {
+    sections.push("## Decisions", ...entries.map((entry) => renderEntry(entry, order, byId)));
+  }
+
+  if (outOfScope.length > 0) {
+    sections.push(
+      "## Out of scope",
+      outOfScope
+        .map((decision) => {
+          const title = `- **${oneLine(decision.questionTitle)}**`;
+          const note = decision.answer?.text?.trim() ?? "";
+          return note.length > 0 ? `${title}: ${note.split(/\r?\n/).join("\n  ")}` : title;
+        })
+        .join("\n"),
+    );
+  }
+
+  if (builtUnder.length > 0) {
+    sections.push(
+      "## Built under",
+      builtUnder
+        .map((decision) => `- \`${decisionKey(decision)}\`: ${decision.repo?.citation ?? ""}`)
+        .join("\n"),
+    );
+  }
+
+  return `${sections.join("\n\n")}\n`;
+}
+
 /**
  * The full set of files an export would write, and their content, with no
  * filesystem access. `server/export-bundle.ts` resolves each `relativePath`
@@ -265,6 +469,11 @@ export function planExport(input: PlanExportInput): ExportPlan {
   const files: PlannedExportFile[] = [
     { relativePath: "spec.md", content: renderSpecFile(input.sessionTitle, input.specMarkdown) },
   ];
+
+  const decisionsFile = renderDecisionsFile(input.sessionTitle, input.decisions);
+  if (decisionsFile !== null) {
+    files.push({ relativePath: DECISIONS_FILE, content: decisionsFile });
+  }
 
   for (const ticket of input.tickets) {
     const label = padTicketNumber(ticket.number, totalTickets);
