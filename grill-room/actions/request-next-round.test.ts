@@ -15,21 +15,30 @@ import {
   treeRuleViolation,
   withResumeFallback,
 } from "../server/interviewer/index.js";
-import { anAssessReadinessResult } from "../server/interviewer/test-fixtures.js";
+import {
+  aScoutProjectResult,
+  anAssessReadinessResult,
+  ideaEvidence,
+  repoEvidence,
+} from "../server/interviewer/test-fixtures.js";
 import { runTurn, TurnRejected } from "../server/turn.js";
 import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
+import { useTempGitRepos } from "../test/git-repos.js";
 import addDecision from "./add-decision.js";
 import assessReadiness from "./assess-readiness.js";
 import createSession from "./create-session.js";
 import getCurrentRound from "./get-current-round.js";
 import getLatestTurn from "./get-latest-turn.js";
+import getScoutReport from "./get-scout-report.js";
 import getSession from "./get-session.js";
 import getTree from "./get-tree.js";
 import getTurn from "./get-turn.js";
 import listRounds from "./list-rounds.js";
+import registerProject from "./register-project.js";
 import requestNextRound from "./request-next-round.js";
 import saveDraftAnswer from "./save-draft-answer.js";
+import scoutProject from "./scout-project.js";
 import submitRound from "./submit-round.js";
 import updateSessionIdea from "./update-session-idea.js";
 
@@ -101,6 +110,37 @@ function aSession(overrides: { answeringMode?: "one-at-a-time" } = {}) {
     model: "sonnet",
     ...overrides,
   });
+}
+
+const readinessRepos = useTempGitRepos();
+
+function readinessFixtureLines(count: number): string {
+  return Array.from({ length: count }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
+}
+
+/** A repo holding every file `aScoutProjectResult()` cites, at the lengths it cites. */
+function aReadinessFixtureRepo(): string {
+  return readinessRepos.create({
+    files: {
+      "src/ingest/metrics.ts": readinessFixtureLines(30),
+      "docs/adr/0003-queue.md": readinessFixtureLines(9),
+    },
+  });
+}
+
+async function aSessionWithProject(root = aReadinessFixtureRepo()) {
+  const project = await registerProject.run({
+    root,
+    verifyCommand: "pnpm test",
+    exportFolder: ".scratch",
+  });
+  const session = await createSession.run({
+    title: "Grill Room",
+    idea: "A local app that grills me about an idea until it is decided.",
+    model: "sonnet",
+    projectId: project.id,
+  });
+  return { root, project, session };
 }
 
 describe("request-next-round", () => {
@@ -1436,7 +1476,11 @@ describe("idea readiness", () => {
       const session = await aSession();
       const interviewer = scriptInterviewer([
         judged({
-          evidence: ["A local app that grills me about an idea until it is decided"],
+          evidence: [
+            ideaEvidence(
+              "A local app that grills me about an idea until it is decided",
+            ),
+          ],
           objective: "A local app that grills me about an idea until it is decided.",
         }),
         judged({ verdict: "not-ready" }),
@@ -1454,7 +1498,7 @@ describe("idea readiness", () => {
       const session = await aSession();
       const interviewer = scriptInterviewer([
         judged({
-          evidence: [session.idea],
+          evidence: [ideaEvidence(session.idea)],
           objective: "A book tracking app.",
         }),
         judged({ verdict: "not-ready" }),
@@ -1491,7 +1535,7 @@ describe("idea readiness", () => {
     it("fails the turn when every attempt's evidence only restates the idea, storing nothing", async () => {
       const session = await aSession();
       const restatedOnly = judged({
-        evidence: [session.idea],
+        evidence: [ideaEvidence(session.idea)],
         objective: "A book tracking app.",
       });
       scriptInterviewer([restatedOnly, restatedOnly, restatedOnly]);
@@ -1581,6 +1625,107 @@ describe("idea readiness", () => {
     });
   });
 
+  describe("assess-readiness with a project", () => {
+    it("runs the scout, then the judge, when there is no current report", async () => {
+      const { session } = await aSessionWithProject();
+      const interviewer = scriptInterviewer([
+        { kind: "scout-project", result: aScoutProjectResult() },
+        judged(),
+      ]);
+
+      const { readiness } = await assessReadiness.run({ sessionId: session.id });
+
+      expect(interviewer.requests.map((request) => request.kind)).toEqual([
+        "scout-project",
+        "assess-readiness",
+      ]);
+      const judgeRequest = interviewer.requests[1]!;
+      expect(judgeRequest.kind).toBe("assess-readiness");
+      expect(judgeRequest).toMatchObject({
+        scoutReport: {
+          stale: false,
+          proposedDecisions: [
+            expect.objectContaining({
+              key: "no-message-broker",
+              disposition: "undecided",
+            }),
+          ],
+        },
+      });
+
+      const { report } = await getScoutReport.run({ sessionId: session.id });
+      expect(readiness?.scoutReportId).toBe(report!.id);
+
+      expect(
+        await findLatestTurn({ sessionId: session.id, turnKind: "scout-project" }),
+      ).not.toBeNull();
+      expect(
+        await findLatestTurn({ sessionId: session.id, turnKind: "assess-readiness" }),
+      ).not.toBeNull();
+    });
+
+    it("runs only the judge when a current report already exists", async () => {
+      const { session } = await aSessionWithProject();
+      scriptInterviewer([{ kind: "scout-project", result: aScoutProjectResult() }]);
+      await scoutProject.run({ sessionId: session.id });
+      const { report: existingReport } = await getScoutReport.run({
+        sessionId: session.id,
+      });
+
+      const interviewer = scriptInterviewer([judged()]);
+      const { readiness } = await assessReadiness.run({ sessionId: session.id });
+
+      expect(interviewer.requests).toHaveLength(1);
+      expect(interviewer.requests[0]?.kind).toBe("assess-readiness");
+      expect(readiness?.scoutReportId).toBe(existingReport!.id);
+    });
+
+    it("refuses repo evidence whose citation does not resolve in the project, and asks again", async () => {
+      const { session } = await aSessionWithProject();
+      const interviewer = scriptInterviewer([
+        { kind: "scout-project", result: aScoutProjectResult() },
+        judged({
+          evidence: [
+            repoEvidence("Ingest runs on a queue.", "docs/missing.md:1"),
+          ],
+        }),
+        judged(),
+      ]);
+
+      await assessReadiness.run({ sessionId: session.id });
+
+      const judgeRequests = interviewer.requests.filter(
+        (request) => request.kind === "assess-readiness",
+      );
+      expect(judgeRequests).toHaveLength(2);
+      expect((judgeRequests[1] as { rejectionReason: string | null }).rejectionReason).toMatch(
+        /does not exist in the project/,
+      );
+    });
+
+    it("does not flag a repo evidence item that echoes the objective, only idea items", async () => {
+      const { session } = await aSessionWithProject();
+      const interviewer = scriptInterviewer([
+        { kind: "scout-project", result: aScoutProjectResult() },
+        judged({
+          evidence: [
+            repoEvidence(session.idea, "docs/adr/0003-queue.md:1-2"),
+          ],
+          objective: session.idea,
+          objectiveIsProcess: false,
+          unknowns: [],
+        }),
+      ]);
+
+      const { readiness } = await assessReadiness.run({ sessionId: session.id });
+
+      expect(readiness?.result.verdict).toBe("ready");
+      expect(
+        interviewer.requests.filter((request) => request.kind === "assess-readiness"),
+      ).toHaveLength(1);
+    });
+  });
+
   describe("update-session-idea", () => {
     it("trims and stores the idea, clears readiness, and bumps activity", async () => {
       const session = await aSession();
@@ -1647,6 +1792,73 @@ describe("idea readiness", () => {
       expect(
         (await getCurrentRound.run({ sessionId: session.id })).readiness,
       ).toBeNull();
+    });
+
+    it("a judgment goes stale when its report does", async () => {
+      const { session } = await aSessionWithProject();
+      scriptInterviewer([
+        { kind: "scout-project", result: aScoutProjectResult() },
+        judged(),
+      ]);
+      await assessReadiness.run({ sessionId: session.id });
+
+      expect(
+        (await getCurrentRound.run({ sessionId: session.id })).readiness,
+      ).not.toBeNull();
+
+      // A re-run replaces the report the judgment was made from. It must
+      // account for the previous report's decision to be accepted.
+      scriptInterviewer([
+        {
+          kind: "scout-project",
+          result: aScoutProjectResult({
+            previousDecisions: [
+              { key: "no-message-broker", change: "unchanged", statement: null },
+            ],
+          }),
+        },
+      ]);
+      await scoutProject.run({ sessionId: session.id });
+
+      expect(
+        (await getCurrentRound.run({ sessionId: session.id })).readiness,
+      ).toBeNull();
+    });
+
+    it("reads an old stored judgment, from before evidence carried a source", async () => {
+      const session = await aSession();
+      const legacy = {
+        ideaJudged: session.idea,
+        judgedAt: "2026-01-01T00:00:00.000Z",
+        result: {
+          evidence: ["A fact from before evidence had a source"],
+          objective: "A local app that interviews the user until an idea is decided.",
+          objectiveIsProcess: false,
+          expectedOutcome: "A settled set of decisions for the idea.",
+          unknowns: [],
+          verdict: "ready",
+          missing: [],
+        },
+      };
+      await getDb()
+        .update(schema.sessions)
+        .set({ readinessJson: JSON.stringify(legacy) })
+        .where(eq(schema.sessions.id, session.id));
+
+      const readiness = (await getCurrentRound.run({ sessionId: session.id }))
+        .readiness;
+      expect(readiness).toMatchObject({
+        scoutReportId: null,
+        result: {
+          evidence: [
+            {
+              text: "A fact from before evidence had a source",
+              source: "idea",
+              citation: null,
+            },
+          ],
+        },
+      });
     });
 
     it("lets the idea be edited only before the first round and while idle", async () => {

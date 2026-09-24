@@ -14,6 +14,40 @@ import { z } from "zod";
 const decisionKey = z.string().min(1);
 
 /**
+ * The shape the model is constrained to: a path, a colon, and a line number or
+ * a line range. Kept to plain regex syntax so the structured-output pattern
+ * stays portable; the refinements below add what the pattern cannot say.
+ */
+const CITATION_PATTERN = /^[^:\n]+:[1-9][0-9]*(-[1-9][0-9]*)?$/;
+
+/**
+ * A repo-relative path with a line number or line range: `path:line` or
+ * `path:start-end`. The path may not be absolute or step outside the repo, and
+ * a range must not run backwards. Whether the file and lines exist at the
+ * commit read is the app's check, not the schema's.
+ */
+export const citation = z
+  .string()
+  .regex(CITATION_PATTERN, "A citation is `path:line` or `path:start-end`.")
+  .refine((value) => {
+    const path = value.slice(0, value.lastIndexOf(":"));
+    return (
+      path.trim() === path &&
+      !path.startsWith("/") &&
+      !path.startsWith("~") &&
+      !/^[A-Za-z]:?[\\/]/.test(path) &&
+      !path.split(/[\\/]/).includes("..")
+    );
+  }, "A citation's path is relative to the repository root and stays inside it.")
+  .refine((value) => {
+    const [start, end] = value
+      .slice(value.lastIndexOf(":") + 1)
+      .split("-")
+      .map(Number);
+    return end === undefined || start <= end;
+  }, "A citation's line range runs from its first line to its last.");
+
+/**
  * One option on offer, and the case for it. The rationale is what makes the
  * alternatives judgeable: without it the user reads a sentence of reasoning for
  * the recommendation and a bare label for everything else, and the only
@@ -131,6 +165,21 @@ export const breakIntoTicketsResultSchema = z.strictObject({
 });
 
 /**
+ * One item of a readiness judgment's evidence: a fact drawn from the idea's
+ * own words, or from the session's scout report. A repo item carries the
+ * citation it was read at; an idea item carries none.
+ */
+export const assessReadinessEvidenceItem = z.strictObject({
+  text: z.string().min(1),
+  source: z.enum(["idea", "repo"]),
+  citation: citation.nullable(),
+});
+
+export type AssessReadinessEvidenceItem = z.infer<
+  typeof assessReadinessEvidenceItem
+>;
+
+/**
  * Whether an idea is ready to be grilled, judged before the first round.
  *
  * The verdict rule is stated to the model and checked by the app: ready needs
@@ -138,8 +187,8 @@ export const breakIntoTicketsResultSchema = z.strictObject({
  * {@link MAX_READY_UNKNOWNS} unknowns. The app derives nothing else from it.
  */
 export const assessReadinessResultSchema = z.strictObject({
-  /** Concrete facts the idea states, each quoted in the idea's own words. */
-  evidence: z.array(z.string().min(1)),
+  /** Concrete facts the idea or the scout report states, sourced and cited. */
+  evidence: z.array(assessReadinessEvidenceItem),
   /** The single buildable thing the idea is after, or null when it names none. */
   objective: z.string().min(1).nullable(),
   /** True when the objective is a process: evaluate, decide how, compare, define a method. */
@@ -161,40 +210,6 @@ export const MAX_SCOUT_CURRENT_STATE = 25;
 
 /** A scout report proposes at most this many repo decisions. */
 export const MAX_SCOUT_PROPOSED_DECISIONS = 15;
-
-/**
- * The shape the model is constrained to: a path, a colon, and a line number or
- * a line range. Kept to plain regex syntax so the structured-output pattern
- * stays portable; the refinements below add what the pattern cannot say.
- */
-const CITATION_PATTERN = /^[^:\n]+:[1-9][0-9]*(-[1-9][0-9]*)?$/;
-
-/**
- * A repo-relative path with a line number or line range: `path:line` or
- * `path:start-end`. The path may not be absolute or step outside the repo, and
- * a range must not run backwards. Whether the file and lines exist at the
- * commit read is the app's check, not the schema's.
- */
-export const citation = z
-  .string()
-  .regex(CITATION_PATTERN, "A citation is `path:line` or `path:start-end`.")
-  .refine((value) => {
-    const path = value.slice(0, value.lastIndexOf(":"));
-    return (
-      path.trim() === path &&
-      !path.startsWith("/") &&
-      !path.startsWith("~") &&
-      !/^[A-Za-z]:?[\\/]/.test(path) &&
-      !path.split(/[\\/]/).includes("..")
-    );
-  }, "A citation's path is relative to the repository root and stays inside it.")
-  .refine((value) => {
-    const [start, end] = value
-      .slice(value.lastIndexOf(":") + 1)
-      .split("-")
-      .map(Number);
-    return end === undefined || start <= end;
-  }, "A citation's line range runs from its first line to its last.");
 
 /**
  * What a scout found reading a project for one idea. Every item cites where it

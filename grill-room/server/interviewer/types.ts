@@ -145,12 +145,41 @@ export interface BreakIntoTicketsRequest extends RequestBase {
 }
 
 /**
+ * One proposed repo decision of the session's current scout report, as the
+ * readiness judge reads it: the scout's finding plus the user's disposition.
+ */
+export interface ScoutReportDecisionForReadiness {
+  key: string;
+  title: string;
+  statement: string;
+  source: "recorded" | "inferred";
+  citation: string;
+  reason: string;
+  disposition: "undecided" | "kept" | "dropped";
+}
+
+/**
+ * The session's current scout report, as the readiness judge reads it: the
+ * scout's current-state findings and proposed decisions to draw repo evidence
+ * from, the commit it read, and whether it is stale.
+ */
+export interface ScoutReportForReadiness {
+  currentState: ScoutProjectResult["currentState"];
+  proposedDecisions: ScoutReportDecisionForReadiness[];
+  commitRead: string | null;
+  stale: boolean;
+}
+
+/**
  * Judge whether the session's idea is ready to be grilled, before its first
- * round. Carries only the idea: the tree is empty, and the turn never joins the
- * interview's conversation.
+ * round. Carries the idea and, when the session has a project and a report,
+ * that report to ground the judgment's evidence. The tree is empty, and the
+ * turn never joins the interview's conversation.
  */
 export interface AssessReadinessRequest extends RequestBase {
   kind: "assess-readiness";
+  /** The session's current scout report, or null without a project or report. */
+  scoutReport: ScoutReportForReadiness | null;
 }
 
 export type { ProjectServerFacts };

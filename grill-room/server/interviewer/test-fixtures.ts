@@ -1,4 +1,5 @@
 import type {
+  AssessReadinessEvidenceItem,
   AssessReadinessResult,
   FindSupersededResult,
   ProposeRoundResult,
@@ -12,6 +13,7 @@ import type {
   ProposeRoundRequest,
   ProjectServerFacts,
   ScoutProjectRequest,
+  ScoutReportForReadiness,
   SynthesizeSpecRequest,
 } from "./types.js";
 
@@ -141,7 +143,50 @@ export function anAssessReadinessRequest(
   return {
     kind: "assess-readiness",
     context: aContext({ decisions: [] }),
+    scoutReport: null,
     rejectionReason: null,
+    ...overrides,
+  };
+}
+
+/** An idea-sourced evidence item, quoted in the idea's own words. */
+export function ideaEvidence(text: string): AssessReadinessEvidenceItem {
+  return { text, source: "idea", citation: null };
+}
+
+/** A repo-sourced evidence item, citing where in the project it was read. */
+export function repoEvidence(
+  text: string,
+  citation: string,
+): AssessReadinessEvidenceItem {
+  return { text, source: "repo", citation };
+}
+
+/** The session's current scout report, as the readiness judge would read it. */
+export function aScoutReportForReadiness(
+  overrides: Partial<ScoutReportForReadiness> = {},
+): ScoutReportForReadiness {
+  return {
+    currentState: [
+      {
+        status: "partial",
+        summary: "Ingest lag is measured but never alerted on.",
+        citations: ["src/ingest/metrics.ts:12-30"],
+      },
+    ],
+    proposedDecisions: [
+      {
+        key: "no-message-broker",
+        title: "No message broker",
+        statement: "Ingest runs on a Postgres-backed queue, not a message broker.",
+        source: "recorded",
+        citation: "docs/adr/0003-queue.md:5-9",
+        reason: "An alert on ingest lag reads the queue this decision chose.",
+        disposition: "undecided",
+      },
+    ],
+    commitRead: "c2167ed4b1f0a9e8d7c6b5a4f3e2d1c0b9a8f7e6",
+    stale: false,
     ...overrides,
   };
 }
@@ -212,7 +257,7 @@ export function anAssessReadinessResult(
   overrides: Partial<AssessReadinessResult> = {},
 ): AssessReadinessResult {
   return {
-    evidence: ["A local app that grills me about an idea"],
+    evidence: [ideaEvidence("A local app that grills me about an idea")],
     objective: "A local app that interviews the user until an idea is decided.",
     objectiveIsProcess: false,
     expectedOutcome: "A settled set of decisions for the idea.",
