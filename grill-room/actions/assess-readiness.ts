@@ -17,6 +17,7 @@ import { currentScoutReport, scoutReportForReadiness } from "../server/scout-rep
 import {
   askUntilAccepted,
   MAX_TURN_RETRIES,
+  projectContextFor,
   runTurn,
   TurnRejected,
 } from "../server/turn.js";
@@ -75,7 +76,7 @@ export default defineAction({
         const accepted = await askUntilAccepted<AssessReadinessResult>({
           conversationId: null,
           recorder,
-          ask: ({ rejectionReason, observer }) =>
+          ask: async ({ rejectionReason, observer }) =>
             getInterviewer().assessReadiness(
               {
                 kind: "assess-readiness",
@@ -88,6 +89,7 @@ export default defineAction({
                   docsFolder: session.docsFolder,
                   conversationId: null,
                   decisions: [],
+                  projectContext: await projectContextFor(session),
                 },
                 scoutReport: report ? scoutReportForReadiness(report) : null,
                 rejectionReason,

@@ -75,6 +75,7 @@ export const ANSWER_KIND_LABEL_KEY: Record<DecisionAnswerKind, string> = {
   deferred: "workspace.kindDeferred",
   "prototype-flagged": "workspace.kindPrototypeFlagged",
   dispositioned: "workspace.kindDispositioned",
+  "repo-established": "workspace.kindRepoEstablished",
 };
 
 export const LOOSE_END_REASON_LABEL_KEY: Record<LooseEndReason, string> = {

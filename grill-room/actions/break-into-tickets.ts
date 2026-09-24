@@ -11,6 +11,7 @@ import { validateTicketSet } from "../server/tickets.js";
 import {
   askUntilAccepted,
   decisionSnapshots,
+  projectContextFor,
   failIfTurnInProgress,
   MAX_TURN_RETRIES,
   runTurn,
@@ -133,6 +134,7 @@ export default defineAction({
                   docsFolder: session!.docsFolder,
                   conversationId,
                   decisions: await decisionSnapshots(rows),
+                  projectContext: await projectContextFor(session!),
                 },
                 specMarkdown: spec!.markdown,
                 rejectionReason,

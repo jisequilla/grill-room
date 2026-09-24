@@ -6,11 +6,15 @@ import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { getInterviewer } from "../server/interviewer/index.js";
-import type { SynthesizeSpecResult } from "../server/interviewer/index.js";
-import type { DecisionRow } from "../server/tree.js";
+import type {
+  ReopenedRepoDecision,
+  SynthesizeSpecResult,
+} from "../server/interviewer/index.js";
+import { repoOrigin, type DecisionRow } from "../server/tree.js";
 import {
   askUntilAccepted,
   decisionSnapshots,
+  projectContextFor,
   failIfTurnInProgress,
   MAX_TURN_RETRIES,
   runTurn,
@@ -48,6 +52,35 @@ function formatDisposition(row: DecisionRow): string {
     .map((part) => part?.trim())
     .filter((part): part is string => Boolean(part))
     .join(" — ");
+}
+
+/**
+ * A repo decision the interview reopened and settled on something other than
+ * the project's statement, as spec synthesis reads it; nothing for any other
+ * decision. A repo decision still holding its repo answer was never changed,
+ * and one reopened only to be given the same statement back changed nothing.
+ */
+function reopenedRepoDecision(row: DecisionRow): ReopenedRepoDecision[] {
+  const origin = repoOrigin(row);
+  if (!origin || row.withdrawnAt != null) return [];
+  if (row.answerKind === null || row.answerKind === "repo-established") {
+    return [];
+  }
+  const answer =
+    row.answerKind === "dispositioned"
+      ? formatDisposition(row)
+      : (row.currentAnswer ?? "").trim();
+  if (answer === origin.statement.trim()) return [];
+  return [
+    {
+      key: row.key ?? row.id,
+      title: row.questionTitle,
+      source: origin.source,
+      citation: origin.citation,
+      replacedStatement: origin.statement,
+      answer,
+    },
+  ];
 }
 
 export default defineAction({
@@ -109,6 +142,7 @@ export default defineAction({
               row.dispositionTarget === "open-question",
           )
           .map(formatDisposition);
+        const reopenedRepoDecisions = rows.flatMap(reopenedRepoDecision);
 
         const interviewer = getInterviewer();
 
@@ -128,9 +162,11 @@ export default defineAction({
                   docsFolder: session!.docsFolder,
                   conversationId,
                   decisions: await decisionSnapshots(rows),
+                  projectContext: await projectContextFor(session!),
                 },
                 outOfScope,
                 openQuestions,
+                reopenedRepoDecisions,
                 rejectionReason,
               },
               observer,

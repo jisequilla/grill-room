@@ -21,7 +21,11 @@ export const INTERVIEWER_MODELS: readonly InterviewerModel[] = [
   "sonnet",
 ];
 
-/** How a decision was answered. Only the first two and the dispositions settle it. */
+/**
+ * How a decision was answered. Only the first two, the dispositions and
+ * `repo-established` settle it. `repo-established` is a repo decision the user
+ * kept from the scout report: the project's statement is its answer.
+ */
 export type AnswerKind =
   | "accepted-recommendation"
   | "own-answer"
@@ -30,7 +34,8 @@ export type AnswerKind =
   | "deferred"
   | "prototype-flagged"
   | "out-of-scope"
-  | "open-question";
+  | "open-question"
+  | "repo-established";
 
 /** Computed by the app, never by the interviewer. Sent so the model can see the tree. */
 export type DecisionState = "settled" | "frontier" | "blocked" | "stale";
@@ -56,7 +61,43 @@ export interface DecisionSnapshot {
   answer: DecisionAnswer | null;
   /** Earlier answers, kept when the decision was reopened, re-asked or reconfirmed. */
   previousAnswers: DecisionAnswer[];
-  introducedBy: "interviewer" | "user";
+  introducedBy: "interviewer" | "user" | "repo";
+  /** A repo decision's origin; null for every other decision. */
+  repo: RepoDecisionOrigin | null;
+}
+
+/**
+ * Where a repo decision came from. `statement` is what the project holds; once
+ * the decision is reopened and answered in the interview, it is the repo
+ * statement that answer replaced.
+ */
+export interface RepoDecisionOrigin {
+  source: "recorded" | "inferred";
+  citation: string;
+  statement: string;
+}
+
+/** A proposed repo decision the user dropped: context, never enforced. */
+export interface DroppedRepoDecision {
+  key: string;
+  title: string;
+  statement: string;
+  source: "recorded" | "inferred";
+  citation: string;
+  reason: string;
+}
+
+/**
+ * What the session's current scout report says about its project, as every
+ * turn reads it: the current state and the proposals the user dropped. Kept
+ * decisions are not here; they are in the tree. A stale report is still sent,
+ * marked stale with the commit it read.
+ */
+export interface ProjectContext {
+  commitRead: string | null;
+  stale: boolean;
+  currentState: ScoutProjectResult["currentState"];
+  droppedDecisions: DroppedRepoDecision[];
 }
 
 /**
@@ -84,6 +125,12 @@ export interface InterviewContext {
   docsFolder: string | null;
   /** Every decision in the tree, in the order the app wants them read. */
   decisions: DecisionSnapshot[];
+  /**
+   * The session's scout report as context, or null when the session has none.
+   * Built for every request kind by one function (`projectContextFor` in
+   * `server/turn.ts`).
+   */
+  projectContext: ProjectContext | null;
 }
 
 /** One answer from the round just submitted. A push back arrives as `pushed-back`. */
@@ -142,6 +189,24 @@ export interface SynthesizeSpecRequest extends RequestBase {
   outOfScope: string[];
   /** Loose ends the user kept as named open questions, for Further Notes. */
   openQuestions: string[];
+  /**
+   * Repo decisions the interview reopened and answered differently, each with
+   * the repo statement it replaced. The spec states each as a deliberate
+   * change to the project.
+   */
+  reopenedRepoDecisions: ReopenedRepoDecision[];
+}
+
+/** A repo decision the interview changed: what the project held, and what it holds now. */
+export interface ReopenedRepoDecision {
+  key: string;
+  title: string;
+  source: "recorded" | "inferred";
+  citation: string;
+  /** The project's statement, which the interview replaced. */
+  replacedStatement: string;
+  /** The answer the interview settled on instead. */
+  answer: string;
 }
 
 export interface BreakIntoTicketsRequest extends RequestBase {

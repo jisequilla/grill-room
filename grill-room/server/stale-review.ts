@@ -34,6 +34,7 @@ import {
 import {
   askUntilAccepted,
   decisionSnapshots,
+  projectContextFor,
   MAX_TURN_RETRIES,
   portKey,
   runTurn,
@@ -251,6 +252,7 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
               docsFolder: session!.docsFolder,
               conversationId,
               decisions: await decisionSnapshots(await loadDecisions()),
+              projectContext: await projectContextFor(session!),
             },
             reopenedDecisionKey: keyOf(group.reopenedId),
             staleDecisionKeys: staleKeys,

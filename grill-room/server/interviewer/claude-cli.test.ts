@@ -696,6 +696,7 @@ describe("when a conversation cannot be resumed", () => {
           answer: { kind: "own-answer", text: "A workspace, but narrower" },
           previousAnswers: [],
           introducedBy: "interviewer",
+          repo: null,
         },
       ],
     },

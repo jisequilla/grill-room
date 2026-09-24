@@ -461,4 +461,12 @@ export const appMigrations: MigrationEntry[] = [
     name: "scout-reports-session-index",
     sql: `CREATE INDEX IF NOT EXISTS gr_idx_scout_reports_session ON gr_scout_reports(session_id)`,
   },
+  {
+    version: 59,
+    name: "decisions-repo-origin-columns",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS repo_source TEXT;
+ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS repo_citation TEXT;
+ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS repo_statement TEXT;
+ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS scout_report_id TEXT`,
+  },
 ];

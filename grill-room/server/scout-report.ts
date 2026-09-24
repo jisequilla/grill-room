@@ -22,6 +22,7 @@ import {
   scoutProjectResultSchema,
   type InterviewerModel,
   type PreviousRepoDecision,
+  type ProjectContext,
   type ProjectServerFacts,
   type ScoutProjectResult,
   type ScoutReportForReadiness,
@@ -175,6 +176,64 @@ export async function storeScoutReport(input: {
     dispositionsJson: JSON.stringify(report.dispositions),
   });
   return report;
+}
+
+/**
+ * Record the user's keep or drop of one proposed decision on a stored report,
+ * leaving every other proposal's disposition as it was. Returns the report's
+ * dispositions as now stored, or null when the report no longer exists.
+ *
+ * The caller checks that `key` is one of the report's proposals and that the
+ * change is allowed; this only writes it.
+ */
+export async function setScoutProposalDisposition(
+  reportId: string,
+  key: string,
+  disposition: ScoutProposalDisposition,
+): Promise<Record<string, ScoutProposalDisposition> | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ dispositionsJson: schema.scoutReports.dispositionsJson })
+    .from(schema.scoutReports)
+    .where(eq(schema.scoutReports.id, reportId))
+    .limit(1);
+  if (!row) return null;
+  const parsed = dispositionsSchema.safeParse(parseJson(row.dispositionsJson));
+  const dispositions = {
+    ...(parsed.success ? parsed.data : {}),
+    [key]: disposition,
+  };
+  await db
+    .update(schema.scoutReports)
+    .set({ dispositionsJson: JSON.stringify(dispositions) })
+    .where(eq(schema.scoutReports.id, reportId));
+  return dispositions;
+}
+
+/**
+ * The report as every interviewer turn reads it: the current state and the
+ * proposals the user dropped, which reach the interviewer as context and are
+ * never enforced. Kept proposals are not here; they are decisions in the tree.
+ * A stale report is still described, marked stale with the commit it read.
+ */
+export function projectContextOf(
+  report: ScoutReportWithStaleness,
+): ProjectContext {
+  return {
+    commitRead: report.commitRead,
+    stale: report.stale,
+    currentState: report.result.currentState,
+    droppedDecisions: report.result.proposedDecisions
+      .filter((decision) => report.dispositions[decision.key] === "dropped")
+      .map((decision) => ({
+        key: decision.key,
+        title: decision.title,
+        statement: decision.statement,
+        source: decision.source,
+        citation: decision.citation,
+        reason: decision.reason,
+      })),
+  };
 }
 
 /**

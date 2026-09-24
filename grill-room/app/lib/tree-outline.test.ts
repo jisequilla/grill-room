@@ -19,6 +19,7 @@ function decision(
     recommendedAnswer: null,
     dependsOn,
     introducedBy: "interviewer",
+    repo: null,
     state,
     answer: null,
     supersession: null,
