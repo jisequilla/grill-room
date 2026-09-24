@@ -1422,12 +1422,69 @@ describe("idea readiness", () => {
       );
     });
 
+    it("sends back a ready verdict whose only evidence restates the objective", async () => {
+      const session = await aSession();
+      const interviewer = scriptInterviewer([
+        judged({
+          evidence: ["A local app that grills me about an idea until it is decided"],
+          objective: "A local app that grills me about an idea until it is decided.",
+        }),
+        judged({ verdict: "not-ready" }),
+      ]);
+
+      const { readiness } = await assessReadiness.run({ sessionId: session.id });
+
+      expect(readiness?.result.verdict).toBe("not-ready");
+      expect(interviewer.requests[1]?.rejectionReason).toMatch(
+        /restates the idea's goal/,
+      );
+    });
+
+    it("sends back a ready verdict whose only evidence is the whole idea, quoted verbatim", async () => {
+      const session = await aSession();
+      const interviewer = scriptInterviewer([
+        judged({
+          evidence: [session.idea],
+          objective: "A book tracking app.",
+        }),
+        judged({ verdict: "not-ready" }),
+      ]);
+
+      const { readiness } = await assessReadiness.run({ sessionId: session.id });
+
+      expect(readiness?.result.verdict).toBe("not-ready");
+      expect(interviewer.requests[1]?.rejectionReason).toMatch(
+        /restates the idea's goal/,
+      );
+    });
+
     it("fails the turn once every attempt contradicts itself, storing nothing", async () => {
       const session = await aSession();
       const tooManyUnknowns = judged({
         unknowns: ["a", "b", "c", "d", "e", "f"],
       });
       scriptInterviewer([tooManyUnknowns, tooManyUnknowns, tooManyUnknowns]);
+
+      await expect(
+        assessReadiness.run({ sessionId: session.id }),
+      ).rejects.toMatchObject({ errorCode: "invalid-readiness" });
+
+      expect(await getCurrentRound.run({ sessionId: session.id })).toMatchObject(
+        {
+          turnStatus: "failed",
+          turnError: { code: "invalid-readiness" },
+          readiness: null,
+        },
+      );
+    });
+
+    it("fails the turn when every attempt's evidence only restates the idea, storing nothing", async () => {
+      const session = await aSession();
+      const restatedOnly = judged({
+        evidence: [session.idea],
+        objective: "A book tracking app.",
+      });
+      scriptInterviewer([restatedOnly, restatedOnly, restatedOnly]);
 
       await expect(
         assessReadiness.run({ sessionId: session.id }),
