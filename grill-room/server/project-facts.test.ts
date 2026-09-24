@@ -202,4 +202,71 @@ describe("collectProjectFacts", () => {
       expect(result.hasRulesFolder).toBe(false);
     });
   });
+
+  describe("decisionFiles", () => {
+    it("lists tracked decisions.md files at several depths, sorted by path", async () => {
+      const root = repos.create({
+        files: {
+          "decisions.md": "# root\n",
+          "packages/api/decisions.md": "# api\n",
+          "packages/api/nested/deep/decisions.md": "# deep\n",
+          "docs/decisions.md": "# docs\n",
+        },
+      });
+
+      const result = facts(await collectProjectFacts(root));
+
+      expect(result.decisionFiles).toEqual([
+        "decisions.md",
+        "docs/decisions.md",
+        "packages/api/decisions.md",
+        "packages/api/nested/deep/decisions.md",
+      ]);
+    });
+
+    it("does not list an untracked decisions.md", async () => {
+      const root = repos.create({ files: { "tracked/decisions.md": "# tracked\n" } });
+      await fs.writeFile(path.join(root, "untracked-decisions.md"), "# untracked\n");
+      // An untracked decisions.md, added to disk after the commit.
+      const untrackedDir = path.join(root, "loose");
+      await fs.mkdir(untrackedDir, { recursive: true });
+      await fs.writeFile(path.join(untrackedDir, "decisions.md"), "# loose\n");
+
+      const result = facts(await collectProjectFacts(root));
+
+      expect(result.decisionFiles).toEqual(["tracked/decisions.md"]);
+    });
+
+    it("leaves out files under the excluded folder, matching on the path segment boundary", async () => {
+      const root = repos.create({
+        files: {
+          ".scratch/a/decisions.md": "# a\n",
+          ".scratch/ab/decisions.md": "# ab\n",
+          "kept/decisions.md": "# kept\n",
+        },
+      });
+
+      const result = facts(await collectProjectFacts(root, ".scratch/a"));
+
+      expect(result.decisionFiles).toEqual([".scratch/ab/decisions.md", "kept/decisions.md"]);
+    });
+
+    it("excludes a decisions.md that is exactly the excluded folder", async () => {
+      // decisions.md is a file, not a folder, but the boundary check must
+      // still treat an exact path match as excluded, not just a prefix.
+      const root = repos.create({ files: { "bundle/decisions.md": "# bundle\n" } });
+
+      const result = facts(await collectProjectFacts(root, "bundle/decisions.md"));
+
+      expect(result.decisionFiles).toEqual([]);
+    });
+
+    it("gets an empty list when a project has no decisions.md", async () => {
+      const root = repos.create();
+
+      const result = facts(await collectProjectFacts(root));
+
+      expect(result.decisionFiles).toEqual([]);
+    });
+  });
 });
