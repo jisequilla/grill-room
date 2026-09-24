@@ -217,8 +217,10 @@ export const fakeScenarios: Record<string, Scenario> = {
   supersession: { turns: supersessionTurns() },
   "refusal-then-success": { turns: refusalThenSuccessTurns() },
   // Long enough to see the turn running before it fails, and again before the
-  // manual retry succeeds.
-  "rate-limit-then-retry": { turns: rateLimitThenRetryTurns(), delayMs: 2_000 },
+  // manual retry succeeds — with enough margin that a slow machine (several
+  // worktrees' browsers running at once) still catches the running state
+  // before it lands, rather than racing the workspace's 500 ms poll.
+  "rate-limit-then-retry": { turns: rateLimitThenRetryTurns(), delayMs: 5_000 },
   "scout-project": { turns: scoutProjectTurns() },
 };
 

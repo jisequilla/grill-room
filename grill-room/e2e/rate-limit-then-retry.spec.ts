@@ -5,15 +5,17 @@ import { chooseScenario, createSession } from "./support";
 /**
  * `rate-limit-then-retry` (`server/interviewer/fake.ts`) scripts round 1's
  * proposal rate limited, then accepted on a manual retry — two separate
- * calls, each delayed 2 s (the scenario's `delayMs`). The registry comment
+ * calls, each delayed 5 s (the scenario's `delayMs`). The registry comment
  * calls this "long enough to see the turn running before it fails, and
- * again before the manual retry succeeds": `sessions.$sessionId.tsx` polls
- * `get-current-round`, `get-tree`, `list-rounds`, `get-active-turn` and
- * `list-loose-ends` every `STARTING_POLL_MS` (500 ms) from the moment this
- * tab's own `request-next-round` request is pending, rather than only once
- * the round it already has says `turnStatus === "working"` — so the
- * running-turn panel actually appears inside the 2 s window below, for both
- * the rate-limited first call and the manual retry, and both calls' panels
+ * again before the manual retry succeeds", with enough margin for a slow
+ * machine (several worktrees' browsers running at once) to still catch it:
+ * `sessions.$sessionId.tsx` polls `get-current-round`, `get-tree`,
+ * `list-rounds`, `get-active-turn` and `list-loose-ends` every
+ * `STARTING_POLL_MS` (500 ms) from the moment this tab's own
+ * `request-next-round` request is pending, rather than only once the round
+ * it already has says `turnStatus === "working"` — so the running-turn
+ * panel actually appears inside the 5 s window below, for both the
+ * rate-limited first call and the manual retry, and both calls' panels
  * carry the live attempt log (gr-93t, gr-auw): `addRun`
  * (`server/turn-records.ts`) clears the turn's `completedAt` and `outcome`
  * when a manual retry starts a new run, so `findRunningTurn` finds the turn
