@@ -72,7 +72,9 @@ defaulting to the current git top-level. `just --list` shows every recipe, and
 
 ## Demo
 
-[`docs/media/demo.webm`](docs/media/demo.webm) — a recording of one real
+![Grill Room, one interview end to end](docs/media/demo.webp)
+
+[`docs/media/demo.webm`](docs/media/demo.webm) is the full-quality video: a recording of one real
 interview (idea, project scout, rounds, a reopen and its stale review, done,
 spec, tickets, export) walked through the UI at a watchable pace. Regenerate
 it with `just demo` after a UI change; it replays the committed recording in
