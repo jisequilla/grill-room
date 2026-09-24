@@ -243,6 +243,7 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
           {
             kind: "review-stale",
             context: {
+              sessionId: session!.id,
               idea: session!.idea,
               title: session!.title,
               model: session!.model,

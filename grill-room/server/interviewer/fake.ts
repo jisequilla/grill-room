@@ -193,6 +193,62 @@ function conversationOf(request: InterviewerRequest): string | null {
 }
 
 /**
+ * A named script for the fake: the turns a session is served, in order, and
+ * how long each answer takes. The delay runs inside the model call, so the
+ * attempt log shows the call running for that long.
+ */
+export interface Scenario {
+  turns: ScriptedTurn[];
+  delayMs?: number;
+}
+
+/** The scenario a session gets when none was chosen for it. */
+export const DEFAULT_SCENARIO = "canned-interview";
+
+/**
+ * Every scenario the fake can serve, by name. A plain map: add a scenario by
+ * adding an entry. The app's fake builds each session's queue from here.
+ */
+export const fakeScenarios: Record<string, Scenario> = {
+  [DEFAULT_SCENARIO]: { turns: cannedInterviewTurns() },
+};
+
+/** Whether the registry has a scenario of that name. */
+export function isFakeScenario(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(fakeScenarios, name);
+}
+
+/**
+ * The fake the app serves when it is selected by environment variable: one
+ * queue per session, so sessions never consume each other's turns.
+ */
+export interface ScenarioInterviewer extends Interviewer {
+  /** Every request the fake was given, across every session, in order. */
+  readonly requests: InterviewerRequest[];
+  /**
+   * Serves the session from the named scenario, from the start, replacing any
+   * queue the session already has. Throws for a name not in the registry.
+   */
+  useScenario(sessionId: string, name: string): void;
+  /** Turns still queued for the session, or null before its queue exists. */
+  remainingFor(sessionId: string): number | null;
+}
+
+/** Where a scripted fake takes each request's turn from. */
+interface TurnSource {
+  /** Removes and returns the next turn for the request, if there is one. */
+  take(request: InterviewerRequest): ScriptedTurn | undefined;
+  /** Names the queue the request was served from, for fault messages. */
+  queueName(request: InterviewerRequest): string;
+  /** How long to wait before answering the request. */
+  delayMs(request: InterviewerRequest): number;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * The scripted fake. It returns queued results in order, records what it was
  * asked, and validates every scripted payload against the same schema the real
  * adapter uses, so a fake turn can never be a shape the real one could not
@@ -203,38 +259,116 @@ function conversationOf(request: InterviewerRequest): string | null {
  * Given an observer, it reports each scripted turn as the real adapter would:
  * one call, or a `resume-fallback` call followed by the turn's own call when
  * the turn is scripted with `resumeFallback`.
+ *
+ * Every session shares the one queue. The app's fake, which keeps a queue per
+ * session, is {@link createScenarioInterviewer}.
  */
 export function createFakeInterviewer(
   turns: ScriptedTurn[] = [],
 ): FakeInterviewer {
   const queue = [...turns];
   const requests: InterviewerRequest[] = [];
+  const interviewer = createScriptedInterviewer(requests, {
+    take: () => queue.shift(),
+    queueName: () => "queued turn",
+    delayMs: () => 0,
+  });
 
+  return {
+    ...interviewer,
+    requests,
+    get remaining() {
+      return queue.length;
+    },
+    push(...more: ScriptedTurn[]) {
+      queue.push(...more);
+    },
+  };
+}
+
+/**
+ * The fake with one queue per session, keyed by the session id every request
+ * carries. A session's queue is built from the scenario chosen for it, or from
+ * `defaultScenario` on its first request when none was. A fault in one
+ * session's script fails only that session's request.
+ */
+export function createScenarioInterviewer(
+  registry: Record<string, Scenario> = fakeScenarios,
+  defaultScenario: string = DEFAULT_SCENARIO,
+): ScenarioInterviewer {
+  const sessions = new Map<string, { queue: ScriptedTurn[]; delayMs: number }>();
+  const requests: InterviewerRequest[] = [];
+
+  function scenarioNamed(name: string): Scenario {
+    if (!Object.prototype.hasOwnProperty.call(registry, name)) {
+      throw new Error(
+        `Fake interviewer: no scenario named "${name}". Known: ${Object.keys(registry).join(", ")}.`,
+      );
+    }
+    return registry[name]!;
+  }
+
+  function start(sessionId: string, name: string) {
+    const scenario = scenarioNamed(name);
+    const state = { queue: [...scenario.turns], delayMs: scenario.delayMs ?? 0 };
+    sessions.set(sessionId, state);
+    return state;
+  }
+
+  function sessionOf(request: InterviewerRequest) {
+    const { sessionId } = request.context;
+    return sessions.get(sessionId) ?? start(sessionId, defaultScenario);
+  }
+
+  const interviewer = createScriptedInterviewer(requests, {
+    take: (request) => sessionOf(request).queue.shift(),
+    queueName: (request) =>
+      `scripted turn of session "${request.context.sessionId}"`,
+    delayMs: (request) => sessionOf(request).delayMs,
+  });
+
+  return {
+    ...interviewer,
+    requests,
+    useScenario(sessionId, name) {
+      start(sessionId, name);
+    },
+    remainingFor(sessionId) {
+      return sessions.get(sessionId)?.queue.length ?? null;
+    },
+  };
+}
+
+function createScriptedInterviewer(
+  requests: InterviewerRequest[],
+  source: TurnSource,
+): Interviewer {
   // Like the real adapter, the payload is validated against
   // `resultSchemas[request.kind]`, which is what makes the cast at each method
   // below sound.
-  function serve(
+  async function serve(
     next: ScriptedTurn,
     request: InterviewerRequest,
     fellBack: boolean,
   ): Promise<CallResult<unknown>> {
-    if (isError(next)) return Promise.reject(next.error);
+    const delay = source.delayMs(request);
+    if (delay > 0) await sleep(delay);
+
+    if (isError(next)) throw next.error;
 
     const payload = "result" in next ? next.result : next.invalidResult;
     const rawOutput = JSON.stringify(payload ?? null);
     const parsed = resultSchemas[request.kind].safeParse(payload);
     if (!parsed.success) {
-      return Promise.reject(
-        new InterviewerError(
-          "malformed-output",
-          "The interviewer returned a result that does not match the expected shape.",
-          JSON.stringify(parsed.error.issues).slice(0, 2000),
-          { rawOutput, reason: schemaIssuesReason(parsed.error.issues) },
-        ),
+      throw new InterviewerError(
+        "malformed-output",
+        "The interviewer returned a result that does not match the expected shape.",
+        JSON.stringify(parsed.error.issues).slice(0, 2000),
+        { rawOutput, reason: schemaIssuesReason(parsed.error.issues) },
       );
     }
 
-    return Promise.resolve({
+    return {
       turn: {
         result: parsed.data,
         // A fallback is a fresh conversation, so it never keeps the old id.
@@ -244,7 +378,7 @@ export function createFakeInterviewer(
           FAKE_CONVERSATION_ID,
       },
       rawOutput,
-    });
+    };
   }
 
   async function turn(
@@ -253,15 +387,16 @@ export function createFakeInterviewer(
   ): Promise<InterviewerTurn<unknown>> {
     requests.push(request);
 
-    const next = queue.shift();
+    const next = source.take(request);
+    const queueName = source.queueName(request);
     if (!next) {
       throw new Error(
-        `Fake interviewer: no queued turn for a "${request.kind}" request (${requests.length} requests so far). Script one.`,
+        `Fake interviewer: no ${queueName} for a "${request.kind}" request (${requests.length} requests so far). Script one.`,
       );
     }
     if (next.kind !== request.kind) {
       throw new Error(
-        `Fake interviewer: next queued turn is "${next.kind}" but the request was "${request.kind}".`,
+        `Fake interviewer: next ${queueName} is "${next.kind}" but the request was "${request.kind}".`,
       );
     }
 
@@ -310,13 +445,6 @@ export function createFakeInterviewer(
   }
 
   return {
-    requests,
-    get remaining() {
-      return queue.length;
-    },
-    push(...more: ScriptedTurn[]) {
-      queue.push(...more);
-    },
     proposeRound: (request: ProposeRoundRequest, observer?: ModelCallObserver) =>
       turn(request, observer) as Promise<
         InterviewerTurn<ResultFor<"propose-round">>

@@ -64,6 +64,11 @@ export interface DecisionSnapshot {
  * The port holds no state and reads no tables: this is its whole view of the world.
  */
 export interface InterviewContext {
+  /**
+   * The session the request belongs to. The real adapter ignores it; the fake
+   * uses it to keep one scripted queue per session.
+   */
+  sessionId: string;
   /** The loose idea the session started from. */
   idea: string;
   title: string | null;

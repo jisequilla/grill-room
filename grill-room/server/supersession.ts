@@ -176,6 +176,7 @@ async function scan(
         {
           kind: "find-superseded",
           context: {
+            sessionId: session.id,
             idea: session.idea,
             title: session.title,
             model: session.model,

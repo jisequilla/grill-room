@@ -44,6 +44,7 @@ export function aContext(
   overrides: Partial<InterviewContext> = {},
 ): InterviewContext {
   return {
+    sessionId: "session-1",
     idea: "A local app that grills me about an idea until it is decided.",
     title: "Grill Room",
     model: "sonnet",
