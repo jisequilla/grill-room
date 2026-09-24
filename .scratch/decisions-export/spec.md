@@ -99,7 +99,7 @@ Once the export is committed, the next scout on the project reads it. The server
 ### The scout loop
 
 - The project's server facts gain the list of every `decisions.md` git tracks anywhere in the project, found with the read-only git commands already allowed. The list is uncapped and sorted by path. Uncommitted files are excluded, which matches the citation check requiring every cited path to exist at HEAD.
-- When facts are collected for a scout, the path the scouting session's own export would write its decisions.md to is excluded.
+- A successful export stores the bundle folder it wrote to, relative to the project root, on the session (an additive migration; null until the first export). When facts are collected for a scout, any decisions.md under the scouting session's stored folder is excluded. A session that has never exported excludes nothing.
 - The scout prompt lists these files as recorded decision sources, beside the ADR folder, agent instructions and rules files it already names.
 - The scout prompt says an entry carrying a Supersedes line overrides the source it quotes: propose the entry's decision, cited to the decisions.md line, and not the superseded statement.
 
@@ -117,7 +117,8 @@ Once the export is committed, the next scout on the project reads it. The server
   - topological order with key ties, and two renders are byte-identical;
   - the file is planned with one entry or one out-of-scope item, and not planned with only Built under or nothing.
 - **Export bundle** (the existing preview and export-session tests): decisions.md appears in the preview, is written and listed in the manifest, and a re-export that no longer plans it removes it and nothing else.
-- **Project facts** (the existing temp-git-repo tests): tracked decisions.md files anywhere are listed and sorted; an untracked one is not; the session's own export path is excluded.
+- **Project facts** (the existing temp-git-repo tests): tracked decisions.md files anywhere are listed and sorted; an untracked one is not; files under an excluded folder are left out.
+- **Export session** (the existing action test): a successful export stores its bundle folder on the session; the scout action excludes that folder's decisions.md.
 - **Scout prompt** (the existing adapter contract test): the prompt names the listed files as recorded sources and carries the Supersedes rule.
 - **Browser**: the smoke test's export step asserts decisions.md is in the preview and written with at least one entry.
 - **Real round trip** (main session, once): export a real session on a temp copy of a project, commit it, run the scout from a second session, and check it proposes the exported decisions as recorded, cited to decisions.md, and proposes a Supersedes entry over its original source.
