@@ -361,6 +361,52 @@ describe("turn-records", () => {
     expect(nestedTurn?.runs).toHaveLength(1);
   });
 
+  it("a manual retry's new run reads the turn as running again until it finishes", async () => {
+    const sessionId = await aSession();
+    const { turnId, runId: firstRunId } = await createTurn({
+      sessionId,
+      turnKind: "propose-round",
+      model: "fable",
+    });
+    const firstAttempt = await startAttempt(firstRunId);
+    await completeAttempt({
+      attemptId: firstAttempt.attemptId,
+      kind: "rate-limit",
+      reason: "The shared subscription's usage is exhausted for now.",
+    });
+    await completeTurn({ turnId, outcome: "rate-limited" });
+
+    // Stopped: not the running turn, and its outcome is the failed run's.
+    expect(await findRunningTurn(sessionId)).toBeNull();
+    const stopped = await getTurnWithRuns(turnId);
+    expect(stopped?.completedAt).not.toBeNull();
+    expect(stopped?.outcome).toBe("rate-limited");
+
+    const { runId: retryRunId } = await addRun(turnId);
+
+    // Mid-retry: the turn reads as running again, with no stale outcome from
+    // the run that just failed.
+    const running = await findRunningTurn(sessionId);
+    expect(running?.id).toBe(turnId);
+    expect(running?.completedAt).toBeNull();
+    expect(running?.outcome).toBeNull();
+
+    const retryAttempt = await startAttempt(retryRunId);
+    await completeAttempt({ attemptId: retryAttempt.attemptId, kind: "success" });
+    await completeTurn({ turnId, outcome: "succeeded" });
+
+    // Finished: completed again with the new outcome, no longer the running
+    // turn, and its total elapsed time still spans both runs (measured from
+    // the turn's original `startedAt`, not restarted for the retry).
+    expect(await findRunningTurn(sessionId)).toBeNull();
+    const finished = await getTurnWithRuns(turnId);
+    expect(finished?.completedAt).not.toBeNull();
+    expect(finished?.outcome).toBe("succeeded");
+    expect(finished?.totalElapsedMs).not.toBeNull();
+    expect(finished?.totalElapsedMs).toBeGreaterThanOrEqual(0);
+    expect(finished?.runs).toHaveLength(2);
+  });
+
   describe("findRunningTurn", () => {
     it("returns null for a session with no turn record", async () => {
       const sessionId = await aSession();

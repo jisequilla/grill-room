@@ -69,6 +69,14 @@ export async function createTurn(input: {
  * ever comes from {@link createTurn} — and the run number picks up after the
  * highest one the turn already has, so the attempt/budget counter for the new
  * run starts again at 1.
+ *
+ * The turn's `completedAt` and `outcome` — set by the run that just stopped —
+ * are cleared back to null in the same write, so the turn reads as running
+ * again for as long as this new run is in flight: {@link findRunningTurn}
+ * finds it, and a caller reading the turn back sees no stale outcome from the
+ * run that failed. {@link completeTurn} sets them again once this run
+ * finishes, computing total elapsed time from the turn's `startedAt` as
+ * always, so it keeps spanning every run rather than restarting.
  */
 export async function addRun(
   turnId: string,
@@ -90,6 +98,11 @@ export async function addRun(
     manualRetry: true,
     createdAt: new Date().toISOString(),
   });
+
+  await db
+    .update(schema.turns)
+    .set({ completedAt: null, outcome: null })
+    .where(eq(schema.turns.id, turnId));
 
   return { runId, runNumber };
 }

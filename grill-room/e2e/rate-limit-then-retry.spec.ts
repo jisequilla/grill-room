@@ -7,30 +7,24 @@ import { chooseScenario, createSession } from "./support";
  * proposal rate limited, then accepted on a manual retry — two separate
  * calls, each delayed 2 s (the scenario's `delayMs`). The registry comment
  * calls this "long enough to see the turn running before it fails, and
- * again before the manual retry succeeds": `sessions.$sessionId.tsx` now
- * polls `get-current-round`, `get-tree`, `list-rounds`, `get-active-turn`
- * and `list-loose-ends` every `STARTING_POLL_MS` (500 ms) from the moment
- * this tab's own `request-next-round` request is pending, rather than only
- * once the round it already has says `turnStatus === "working"` — so the
+ * again before the manual retry succeeds": `sessions.$sessionId.tsx` polls
+ * `get-current-round`, `get-tree`, `list-rounds`, `get-active-turn` and
+ * `list-loose-ends` every `STARTING_POLL_MS` (500 ms) from the moment this
+ * tab's own `request-next-round` request is pending, rather than only once
+ * the round it already has says `turnStatus === "working"` — so the
  * running-turn panel actually appears inside the 2 s window below, for both
- * the rate-limited first call and the manual retry, and the first call's
- * panel carries the live attempt log too (gr-93t).
+ * the rate-limited first call and the manual retry, and both calls' panels
+ * carry the live attempt log (gr-93t, gr-auw): `addRun`
+ * (`server/turn-records.ts`) clears the turn's `completedAt` and `outcome`
+ * when a manual retry starts a new run, so `findRunningTurn` finds the turn
+ * again while the retry is in flight, `get-active-turn` returns it as
+ * running, and `TurnWorkingPanel` (`turn-panels.tsx`) renders its log
+ * instead of treating it as already stopped.
  *
- * The manual retry's own panel does not get the live log, and this test
- * does not claim it does: `resumeOrStartTurnRecorder` /
- * `addRun` (`server/turn-records.ts`) continue the same turn record for a
- * manual retry without clearing its `completedAt`, so `findRunningTurn`
- * (also `server/turn-records.ts`, `isNull(schema.turns.completedAt)`) never
- * finds it while the retry is in flight — `get-active-turn` falls back to
- * the stale, already-completed record, and `TurnWorkingPanel`
- * (`turn-panels.tsx`) treats a turn whose `completedAt` isn't null as
- * stopped and renders no log at all. That is a server-side turn-recording
- * gap, not this ticket's client polling/visibility bug, and out of this
- * ticket's file boundary (`server code`) to fix; flagged in the PR.
- *
- * What was already checkable, and still is: the rate limit fails apart from
- * a plain interviewer error, and the manual retry is a second run of the
- * same turn — round history's attempt log shows both, exactly like
+ * What this test checks: the rate limit fails apart from a plain
+ * interviewer error, the running panel (with its live log) comes back for
+ * the manual retry, and the retry is a second run of the same turn — round
+ * history's attempt log shows both, exactly like
  * `refusal-then-success.spec.ts`'s single-turn refusal-then-success, with
  * the added manual-retry separator and a budget that restarts at 1 for the
  * new run.
@@ -74,10 +68,24 @@ test("rate limit then manual retry, and round history's attempt log shows both r
 
   // Manual retry: a second, separate call. It goes through the same failed
   // -> working transition as the first one, so the running panel comes back
-  // for it too rather than only ever appearing once — its attempt log does
-  // not, for the separate, pre-existing reason the comment above explains.
+  // for it too rather than only ever appearing once — and this time its
+  // attempt log comes back too, carrying the whole turn: the first run's
+  // rate limit, a manual-retry separator, and the retry's own attempt still
+  // in flight, the same shape round history shows once the turn stops.
   await failed.getByRole("button", { name: "Try again" }).click();
   await expect(working).toBeVisible();
+  await expect(workingLog).toBeVisible();
+  await expect(workingLog.getByTestId("manual-retry-separator")).toBeVisible();
+  const workingRows = workingLog.getByTestId("attempt-row");
+  await expect(workingRows).toHaveCount(2);
+  await expect(workingRows.first()).toHaveAttribute(
+    "data-attempt-kind",
+    "rate-limit",
+  );
+  await expect(workingRows.last()).toHaveAttribute(
+    "data-attempt-kind",
+    "running",
+  );
 
   // It succeeds: the round opens with its one card.
   const cards = page.getByTestId("round-card");
