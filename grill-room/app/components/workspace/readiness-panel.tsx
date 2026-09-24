@@ -121,7 +121,15 @@ export function ReadinessPanel({
             {result.evidence.length > 0 ? (
               <ul className="flex list-disc flex-col gap-1 pl-5">
                 {result.evidence.map((item, index) => (
-                  <li key={index}>{item}</li>
+                  <li key={index}>
+                    {item.text}
+                    {item.source === "repo" ? (
+                      <span className="ml-1.5 text-xs text-muted-foreground">
+                        ({t("workspace.readinessEvidenceRepo")}
+                        {item.citation ? `: ${item.citation}` : ""})
+                      </span>
+                    ) : null}
+                  </li>
                 ))}
               </ul>
             ) : (

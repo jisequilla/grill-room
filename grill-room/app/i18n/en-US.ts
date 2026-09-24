@@ -205,6 +205,7 @@ const messages = {
     readinessProcessWarning:
       "This objective is a process (evaluate, decide how, compare), not something to build. The first round will likely ask about method.",
     readinessEvidence: "Evidence",
+    readinessEvidenceRepo: "repo",
     readinessNoEvidence: "Nothing in the idea states what to build.",
     readinessExpectedOutcome: "Expected outcome",
     readinessNotStated: "Not stated",

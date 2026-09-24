@@ -10,8 +10,12 @@ function judged(result: Partial<Readiness["result"]> = {}): Readiness {
   return {
     ideaJudged: "A PWA for 16-week marathon training",
     judgedAt: "2026-09-24T10:00:00.000Z",
+    scoutReportId: null,
     result: {
-      evidence: ["16-week plan", "runs offline as a PWA"],
+      evidence: [
+        { text: "16-week plan", source: "idea", citation: null },
+        { text: "runs offline as a PWA", source: "idea", citation: null },
+      ],
       objective: "A training-plan PWA for one runner",
       objectiveIsProcess: false,
       expectedOutcome: "The runner follows the plan from their phone",
@@ -82,6 +86,24 @@ describe("ReadinessPanel", () => {
     expect(unknowns).toContain("How workouts are logged");
     expect(html).toContain('data-testid="readiness-reassess"');
     expect(html).not.toContain('data-testid="readiness-assess"');
+  });
+
+  it("marks repo-sourced evidence with its citation", () => {
+    const html = render(
+      judged({
+        evidence: [
+          {
+            text: "Ingest runs on a Postgres-backed queue, not a message broker.",
+            source: "repo",
+            citation: "docs/adr/0003-queue.md:5-9",
+          },
+        ],
+      }),
+    );
+
+    const evidence = section(html, "readiness-evidence");
+    expect(evidence).toContain("Ingest runs on a Postgres-backed queue");
+    expect(evidence).toContain("docs/adr/0003-queue.md:5-9");
   });
 
   it("marks a not-ready verdict and lists what is missing", () => {

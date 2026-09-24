@@ -24,6 +24,7 @@ import {
   type PreviousRepoDecision,
   type ProjectServerFacts,
   type ScoutProjectResult,
+  type ScoutReportForReadiness,
 } from "./interviewer/index.js";
 
 /** Where the user stands on one proposed repo decision. */
@@ -242,6 +243,26 @@ export function previousRepoDecisions(
       disposition: disposition === "undecided" ? "proposed" : disposition,
     };
   });
+}
+
+/**
+ * The session's current scout report, shaped for the readiness judge: its
+ * current-state findings and proposed decisions (each with the user's
+ * disposition), its commit, and its own staleness. Used whether or not the
+ * report is stale — the judge is told either way (`server/interviewer/prompt.ts`).
+ */
+export function scoutReportForReadiness(
+  report: ScoutReportWithStaleness,
+): ScoutReportForReadiness {
+  return {
+    currentState: report.result.currentState,
+    proposedDecisions: report.result.proposedDecisions.map((decision) => ({
+      ...decision,
+      disposition: report.dispositions[decision.key] ?? "undecided",
+    })),
+    commitRead: report.commitRead,
+    stale: report.stale,
+  };
 }
 
 function isInside(root: string, candidate: string): boolean {

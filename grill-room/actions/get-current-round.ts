@@ -40,7 +40,7 @@ export default defineAction({
             message: session.turnErrorMessage ?? "",
           }
         : null,
-      readiness: currentReadiness(session),
+      readiness: await currentReadiness(session),
       canEditIdea: canEditIdea(session, await sessionHasRounds(sessionId)),
     };
 

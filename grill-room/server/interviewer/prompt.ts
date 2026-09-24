@@ -11,6 +11,7 @@ import type {
   InterviewerRequest,
   ProjectServerFacts,
   ScoutProjectRequest,
+  ScoutReportForReadiness,
 } from "./types.js";
 
 /**
@@ -280,9 +281,72 @@ const READINESS_OPENING_LINE =
   "You are judging, inside the Grill Room app, whether an idea is ready for a grilling interview. You are not interviewing: you read the idea once and report on it.";
 
 /**
+ * The scout report a readiness judge reads, rendered the same way whether it
+ * is current or stale: current state grouped loosely and proposed repo
+ * decisions with their disposition, both cited, so the judge can turn them
+ * into repo-sourced evidence.
+ */
+function renderReadinessScoutReport(
+  report: ScoutReportForReadiness | null,
+): string[] {
+  if (!report) {
+    return [
+      "## The project",
+      "",
+      "This session has no current scout report of its project (no project is",
+      "registered, or none has been scouted yet). Every evidence item you",
+      "return must be sourced from the idea.",
+      "",
+    ];
+  }
+
+  const currentState =
+    report.currentState.length > 0
+      ? report.currentState
+          .map(
+            (item) =>
+              `- (${item.status}) ${item.summary} — ${item.citations.join(", ")}`,
+          )
+          .join("\n")
+      : "(none)";
+  const proposedDecisions =
+    report.proposedDecisions.length > 0
+      ? report.proposedDecisions
+          .map(
+            (decision) =>
+              `- [${decision.key}] (${decision.source}, ${decision.disposition} by the user, cited at ${decision.citation}) ${decision.title}: ${decision.statement} — ${decision.reason}`,
+          )
+          .join("\n")
+      : "(none)";
+
+  return [
+    "## The project's scout report",
+    "",
+    report.stale
+      ? `This report is stale: it no longer matches the project's current commit or the current idea. Its commit was ${report.commitRead ?? "(no commits yet)"}. Use it for context, but weigh it accordingly.`
+      : `This report is current, read at commit ${report.commitRead ?? "(no commits yet)"}.`,
+    "",
+    "Current state relative to the idea:",
+    "",
+    currentState,
+    "",
+    "Proposed repo decisions bearing on the idea:",
+    "",
+    proposedDecisions,
+    "",
+    "Use the current state and the proposed decisions above as repo evidence:",
+    "an evidence item drawn from one of them has `source` `repo` and a",
+    "`citation` copied exactly from the item it came from. Never invent a",
+    "citation, and never give a repo item a citation you did not read above.",
+    "",
+  ];
+}
+
+/**
  * The readiness judge is not an interview turn, so it carries none of the
- * grilling method: only the idea, the rule the app checks the verdict against,
- * and, when the session has one, the docs folder it may read for context.
+ * grilling method: only the idea, the session's scout report when it has one,
+ * the rule the app checks the verdict against, and, when the session has one,
+ * the docs folder it may read for context.
  */
 function buildReadinessPrompt(request: AssessReadinessRequest): string {
   const { context } = request;
@@ -301,11 +365,13 @@ function buildReadinessPrompt(request: AssessReadinessRequest): string {
           "",
           `The session has a read-only docs folder, which is your working directory: ${context.docsFolder}`,
           "You may read it to understand what the idea refers to. Never modify",
-          "anything, and never read outside it. Evidence still comes only from",
-          "the idea's own words: the folder can explain an item, it cannot add one.",
+          "anything, and never read outside it. Evidence from the idea still",
+          "comes only from the idea's own words: the folder can explain an item,",
+          "it cannot add one.",
           "",
         ]
       : []),
+    ...renderReadinessScoutReport(request.scoutReport),
     "## Your task: judge whether the idea is ready to grill",
     "",
     "A grilling interview settles the design decisions of one buildable thing.",
@@ -313,11 +379,16 @@ function buildReadinessPrompt(request: AssessReadinessRequest): string {
     "the interviewer can only ask about methodology. Return:",
     "",
     "- `evidence`: facts about the world *other than the objective* — a",
-    "  constraint, a user, an existing system, an observed problem — each",
-    "  quoted in the idea's own words. A sentence that only states what to",
-    "  build, or restates the objective in other words, is never evidence,",
-    "  even quoted verbatim. Never paraphrase into something the idea does",
-    "  not say, and never invent a fact. An idea that is only its goal has an",
+    "  constraint, a user, an existing system, an observed problem. Each item",
+    "  is `{ text, source, citation }`. When `source` is `idea`, `text` is",
+    "  quoted in the idea's own words and `citation` is null. When `source` is",
+    "  `repo`, `text` is drawn from the scout report's current state or",
+    "  proposed decisions above and `citation` is copied from that item. A",
+    "  sentence that only states what to build, or restates the objective in",
+    "  other words, is never evidence, even quoted verbatim, whatever its",
+    "  source. Never paraphrase into something the idea or the report does",
+    "  not say, and never invent a fact or a citation. An idea that is only",
+    "  its goal, scouted against a project with nothing relevant, has an",
     "  empty evidence list.",
     "- `objective`: the single buildable thing the idea is after, in one",
     "  sentence, or null when it names none.",
