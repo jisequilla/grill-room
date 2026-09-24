@@ -511,7 +511,11 @@ export const turnAttempts = table(
     runId: text("run_id")
       .notNull()
       .references(() => turnRuns.id, { onDelete: "cascade" }),
-    /** 1-based order within the run; matches the rejection budget counter. */
+    /**
+     * 1-based order within the run. Counts a resume fallback too, which does
+     * not spend the rejection budget, so this can run ahead of the budget
+     * counter rather than matching it.
+     */
     attemptNumber: integer("attempt_number").notNull(),
     startedAt: text("started_at").notNull(),
     /** Set once the attempt's model call returns or fails. Null while running. */

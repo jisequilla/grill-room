@@ -4,6 +4,11 @@ import { describe, expect, it } from "vitest";
 import createSession from "../actions/create-session.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import {
+  resumeOrStartTurnRecorder,
+  startTurnRecorder,
+  TURN_SUCCEEDED,
+} from "./turn-recorder.js";
+import {
   addRun,
   completeAttempt,
   completeTurn,
@@ -308,5 +313,50 @@ describe("turn-records", () => {
       .where(eq(schema.rounds.id, "round-2"));
 
     expect(round?.turnId).toBe(turnId);
+  });
+
+  it("a manual retry joins the outer turn, not a turn nested inside it that finished first", async () => {
+    const sessionId = await aSession();
+
+    // The outer turn: a round proposal.
+    const outer = await startTurnRecorder({
+      sessionId,
+      turnKind: "propose-round",
+      model: "sonnet",
+    });
+
+    // A turn nested inside it — the supersession scan a done proposal runs
+    // inside its `propose-round` turn, say. It starts after the outer turn
+    // and finishes before it.
+    const nested = await startTurnRecorder({
+      sessionId,
+      turnKind: "find-superseded",
+      model: "sonnet",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await nested.finish(TURN_SUCCEEDED);
+
+    // The outer turn keeps running a while longer, then fails — the session's
+    // `turnStatus` becomes `"failed"` because of *this* turn, even though the
+    // nested one, by start time, looks more recent.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await outer.finish("rate-limited");
+
+    const retried = await resumeOrStartTurnRecorder({
+      sessionId,
+      turnKind: "propose-round",
+      model: "sonnet",
+      isManualRetry: true,
+    });
+
+    expect(retried.turnId).toBe(outer.turnId);
+    const turn = await getTurnWithRuns(outer.turnId);
+    expect(turn?.runs).toHaveLength(2);
+    expect(turn?.runs[1]).toMatchObject({ runNumber: 2, manualRetry: true });
+
+    // The nested turn is untouched: it succeeded and stays a turn of its own.
+    const nestedTurn = await getTurnWithRuns(nested.turnId);
+    expect(nestedTurn?.outcome).toBe(TURN_SUCCEEDED);
+    expect(nestedTurn?.runs).toHaveLength(1);
   });
 });
