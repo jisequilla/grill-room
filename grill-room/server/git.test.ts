@@ -35,6 +35,16 @@ describe("runGit's read-only guard", () => {
     );
   });
 
+  it("refuses `log --output`, in either spelling, but allows an ordinary log call", async () => {
+    const root = repos.create();
+
+    await expect(runGit(root, ["log", "--output=/tmp/x"])).rejects.toThrow(/"--output" writes to a file/);
+    await expect(runGit(root, ["log", "--output", "/tmp/x"])).rejects.toThrow(/"--output" writes to a file/);
+
+    const log = await runGit(root, ["log", "-n", "10", "--format=%s"]);
+    expect(log.exitCode).toBe(0);
+  });
+
   it("refuses subcommands outside the read-only set", async () => {
     const root = repos.create();
 
