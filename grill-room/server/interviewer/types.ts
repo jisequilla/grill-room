@@ -1,3 +1,4 @@
+import type { InterviewerErrorCode } from "./errors.js";
 import type {
   AssessReadinessResult,
   BreakIntoTicketsResult,
@@ -171,30 +172,102 @@ export interface InterviewerTurn<Result> {
 }
 
 /**
+ * How one model call ended. Every call ends in exactly one of these, and none
+ * is ever folded into another:
+ *
+ * - `success`: the output passed the schema. Whether the app then accepts it
+ *   is the app's call, not the port's.
+ * - `schema-invalid`: the model answered, but not in the request's shape (not
+ *   JSON, no conversation id, or failing the schema). The port rejects the
+ *   method with `malformed-output`.
+ * - `rate-limited`: the shared subscription pool is exhausted. Never an
+ *   interviewer error. The port rejects the method with `rate-limited`.
+ * - `resume-fallback`: resuming the conversation failed, so the port starts a
+ *   fresh, primed one. Another call always follows within the same method call.
+ * - `error`: anything else. The port rejects the method with this code.
+ */
+export type ModelCallOutcome =
+  | { kind: "success"; rawOutput: string }
+  | { kind: "schema-invalid"; rawOutput: string; reason: string }
+  | { kind: "rate-limited"; reason: string }
+  | { kind: "resume-fallback"; reason: string }
+  | {
+      kind: "error";
+      code: Exclude<InterviewerErrorCode, "rate-limited" | "malformed-output">;
+      reason: string;
+    };
+
+export type ModelCallOutcomeKind = ModelCallOutcome["kind"];
+
+/**
+ * Which conversation a call ran in: a new one, the session's resumed one, or
+ * the fresh, primed one started after resuming failed.
+ */
+export type ModelCallConversation = "new" | "resumed" | "primed-after-resume";
+
+/** A model call as it starts. */
+export interface ModelCallStart {
+  requestKind: RequestKind;
+  /** 1-based position among the calls of one port method call. */
+  call: number;
+  conversation: ModelCallConversation;
+  startedAt: Date;
+}
+
+/** A model call as it ends. */
+export interface ModelCallEnd extends ModelCallStart {
+  endedAt: Date;
+  durationMs: number;
+  outcome: ModelCallOutcome;
+}
+
+/**
+ * Told when each model call starts and ends, in order, so a caller can record
+ * attempts as they happen. One port method call makes one model call, or two
+ * when a resume falls back to a fresh conversation. Every `callStarted` is
+ * followed by exactly one `callEnded`, before the next call starts and before
+ * the method settles. A returned promise is awaited; a throw or rejection
+ * from the observer fails the method with that error.
+ */
+export interface ModelCallObserver {
+  callStarted?(call: ModelCallStart): void | Promise<void>;
+  callEnded?(call: ModelCallEnd): void | Promise<void>;
+}
+
+/**
  * The interviewer port. The only place the app talks to Claude.
  *
  * Every method either resolves with a schema-valid result or rejects with an
  * {@link import("./errors.js").InterviewerError}. The port guarantees nothing
  * beyond schema validity: the frontier rule, cycles and dangling dependency
  * links are the app's to enforce on the result.
+ *
+ * Each method takes an optional {@link ModelCallObserver}, which is told the
+ * outcome of every model call the method makes. Without one, nothing changes.
  */
 export interface Interviewer {
   proposeRound(
     request: ProposeRoundRequest,
+    observer?: ModelCallObserver,
   ): Promise<InterviewerTurn<ProposeRoundResult>>;
   reviewStale(
     request: ReviewStaleRequest,
+    observer?: ModelCallObserver,
   ): Promise<InterviewerTurn<ReviewStaleResult>>;
   findSuperseded(
     request: FindSupersededRequest,
+    observer?: ModelCallObserver,
   ): Promise<InterviewerTurn<FindSupersededResult>>;
   synthesizeSpec(
     request: SynthesizeSpecRequest,
+    observer?: ModelCallObserver,
   ): Promise<InterviewerTurn<SynthesizeSpecResult>>;
   breakIntoTickets(
     request: BreakIntoTicketsRequest,
+    observer?: ModelCallObserver,
   ): Promise<InterviewerTurn<BreakIntoTicketsResult>>;
   assessReadiness(
     request: AssessReadinessRequest,
+    observer?: ModelCallObserver,
   ): Promise<InterviewerTurn<AssessReadinessResult>>;
 }

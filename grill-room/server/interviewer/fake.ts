@@ -1,4 +1,5 @@
 import { InterviewerError } from "./errors.js";
+import { observeCall, schemaIssuesReason, type CallResult } from "./observe.js";
 import { resultSchemas } from "./schemas.js";
 import type { RequestKind, ResultFor } from "./schemas.js";
 import type {
@@ -8,6 +9,7 @@ import type {
   Interviewer,
   InterviewerRequest,
   InterviewerTurn,
+  ModelCallObserver,
   ProposeRoundRequest,
   ReviewStaleRequest,
   SynthesizeSpecRequest,
@@ -16,9 +18,20 @@ import type {
 /** The conversation id the fake hands back when the session has none yet. */
 export const FAKE_CONVERSATION_ID = "fake-conversation";
 
+interface ScriptedTurnBase {
+  /**
+   * Resuming the session's conversation fails first, as the real adapter sees
+   * it: the observer hears a `resume-fallback` call, then this turn is served
+   * as the call of a fresh, primed conversation. `true` uses a default reason;
+   * a string is the reason. Only valid for a request that resumes a
+   * conversation, as with the real adapter.
+   */
+  resumeFallback?: true | string;
+}
+
 /** A well-formed turn. `result` is typed against the kind's schema. */
-type ScriptedResult = {
-  [Kind in RequestKind]: {
+export type ScriptedResult = {
+  [Kind in RequestKind]: ScriptedTurnBase & {
     kind: Kind;
     result: ResultFor<Kind>;
     conversationId?: string;
@@ -26,14 +39,14 @@ type ScriptedResult = {
 }[RequestKind];
 
 /** A turn whose output does not match the schema, to exercise the error path. */
-interface ScriptedInvalidResult {
+export interface ScriptedInvalidResult extends ScriptedTurnBase {
   kind: RequestKind;
   invalidResult: unknown;
   conversationId?: string;
 }
 
 /** A turn that fails, to exercise a typed error path. */
-interface ScriptedError {
+export interface ScriptedError extends ScriptedTurnBase {
   kind: RequestKind;
   error: InterviewerError;
 }
@@ -42,6 +55,123 @@ export type ScriptedTurn =
   | ScriptedResult
   | ScriptedInvalidResult
   | ScriptedError;
+
+const DEFAULT_RESUME_FAILURE =
+  "The interviewer turn failed (exit code 1): no conversation found to resume.";
+
+/** A turn the shared subscription pool refuses. Reported as a rate limit, never an interviewer error. */
+export function rateLimitedTurn(
+  kind: RequestKind,
+  message = "The Claude subscription is rate limited right now. This is not an interviewer failure: wait and retry the turn.",
+): ScriptedError {
+  return { kind, error: new InterviewerError("rate-limited", message) };
+}
+
+/** A turn whose output fails the kind's schema. Anything not matching it will do. */
+export function schemaInvalidTurn(
+  kind: RequestKind,
+  invalidResult: unknown = { unexpected: true },
+): ScriptedInvalidResult {
+  return { kind, invalidResult };
+}
+
+/** The same turn, served only after resuming the conversation failed. */
+export function withResumeFallback<Turn extends ScriptedTurn>(
+  turn: Turn,
+  reason: true | string = true,
+): Turn {
+  return { ...turn, resumeFallback: reason };
+}
+
+type ProposedDecision = ResultFor<"propose-round">["proposedDecisions"][number];
+
+function aProposedDecision(
+  key: string,
+  overrides: Partial<ProposedDecision> = {},
+): ProposedDecision {
+  return {
+    key,
+    title: `Question ${key}?`,
+    body: `Why ${key} matters.`,
+    choices: [],
+    recommendedChoice: null,
+    recommendedAnswer: "",
+    dependsOn: [],
+    ask: true,
+    ...overrides,
+  };
+}
+
+function aRound(
+  proposedDecisions: ProposedDecision[],
+  extra: Partial<ResultFor<"propose-round">> = {},
+): ResultFor<"propose-round"> {
+  return {
+    proposedDecisions,
+    pushBackResponses: [],
+    userDecisionPlacements: [],
+    done: null,
+    ...extra,
+  };
+}
+
+/**
+ * Round proposals that pass the schema but break one tree rule each, so the
+ * app refuses them. Script one as `{ kind: "propose-round", result }`. Each
+ * is refused against any tree, except where it names what it needs from it.
+ */
+export const treeRuleViolation = {
+  /** Asks a question that depends on another asked in the same round, so it is not on the frontier. */
+  offFrontier: (): ResultFor<"propose-round"> =>
+    aRound([
+      aProposedDecision("fake-first"),
+      aProposedDecision("fake-off-frontier", { dependsOn: ["fake-first"] }),
+    ]),
+  /** Depends on a key that is neither in the tree nor in the proposal. */
+  unknownKey: (
+    missingKey = "fake-no-such-decision",
+  ): ResultFor<"propose-round"> =>
+    aRound([aProposedDecision("fake-dangling", { dependsOn: [missingKey] })]),
+  /** Two new decisions that depend on each other. */
+  cycle: (): ResultFor<"propose-round"> =>
+    aRound([
+      aProposedDecision("fake-cycle-a", {
+        dependsOn: ["fake-cycle-b"],
+        ask: false,
+      }),
+      aProposedDecision("fake-cycle-b", {
+        dependsOn: ["fake-cycle-a"],
+        ask: false,
+      }),
+    ]),
+  /** Answers a push back by replacing the decision with the same question, unchanged. */
+  unchangedReAsk: (pushedBack: {
+    key: string;
+    title: string;
+    body: string;
+  }): ResultFor<"propose-round"> =>
+    aRound(
+      [
+        aProposedDecision("fake-re-ask", {
+          title: pushedBack.title,
+          body: pushedBack.body,
+        }),
+      ],
+      {
+        pushBackResponses: [
+          {
+            decisionKey: pushedBack.key,
+            response: "replace",
+            explanation: "Asking it again.",
+            replacementKey: "fake-re-ask",
+          },
+        ],
+      },
+    ),
+  /** Proposes, under a new key, a question already in the tree. */
+  duplicateTitle: (existingTitle: string): ResultFor<"propose-round"> =>
+    aRound([aProposedDecision("fake-duplicate", { title: existingTitle })]),
+};
 
 export interface FakeInterviewer extends Interviewer {
   /** Every request the fake was given, in order. */
@@ -63,6 +193,10 @@ function isError(turn: ScriptedTurn): turn is ScriptedError {
  * produce. Running out of queued turns, or being asked for a kind the next
  * queued turn does not match, is a fault in the test rather than an interviewer
  * error, and is reported as a plain error.
+ *
+ * Given an observer, it reports each scripted turn as the real adapter would:
+ * one call, or a `resume-fallback` call followed by the turn's own call when
+ * the turn is scripted with `resumeFallback`.
  */
 export function createFakeInterviewer(
   turns: ScriptedTurn[] = [],
@@ -73,28 +207,15 @@ export function createFakeInterviewer(
   // Like the real adapter, the payload is validated against
   // `resultSchemas[request.kind]`, which is what makes the cast at each method
   // below sound.
-  function turn(request: InterviewerRequest): Promise<InterviewerTurn<unknown>> {
-    requests.push(request);
-
-    const next = queue.shift();
-    if (!next) {
-      return Promise.reject(
-        new Error(
-          `Fake interviewer: no queued turn for a "${request.kind}" request (${requests.length} requests so far). Script one.`,
-        ),
-      );
-    }
-    if (next.kind !== request.kind) {
-      return Promise.reject(
-        new Error(
-          `Fake interviewer: next queued turn is "${next.kind}" but the request was "${request.kind}".`,
-        ),
-      );
-    }
-
+  function serve(
+    next: ScriptedTurn,
+    request: InterviewerRequest,
+    fellBack: boolean,
+  ): Promise<CallResult<unknown>> {
     if (isError(next)) return Promise.reject(next.error);
 
     const payload = "result" in next ? next.result : next.invalidResult;
+    const rawOutput = JSON.stringify(payload ?? null);
     const parsed = resultSchemas[request.kind].safeParse(payload);
     if (!parsed.success) {
       return Promise.reject(
@@ -102,17 +223,84 @@ export function createFakeInterviewer(
           "malformed-output",
           "The interviewer returned a result that does not match the expected shape.",
           JSON.stringify(parsed.error.issues).slice(0, 2000),
+          { rawOutput, reason: schemaIssuesReason(parsed.error.issues) },
         ),
       );
     }
 
     return Promise.resolve({
-      result: parsed.data,
-      conversationId:
-        next.conversationId ??
-        request.context.conversationId ??
-        FAKE_CONVERSATION_ID,
+      turn: {
+        result: parsed.data,
+        // A fallback is a fresh conversation, so it never keeps the old id.
+        conversationId:
+          next.conversationId ??
+          (fellBack ? null : request.context.conversationId) ??
+          FAKE_CONVERSATION_ID,
+      },
+      rawOutput,
     });
+  }
+
+  async function turn(
+    request: InterviewerRequest,
+    observer: ModelCallObserver | undefined,
+  ): Promise<InterviewerTurn<unknown>> {
+    requests.push(request);
+
+    const next = queue.shift();
+    if (!next) {
+      throw new Error(
+        `Fake interviewer: no queued turn for a "${request.kind}" request (${requests.length} requests so far). Script one.`,
+      );
+    }
+    if (next.kind !== request.kind) {
+      throw new Error(
+        `Fake interviewer: next queued turn is "${next.kind}" but the request was "${request.kind}".`,
+      );
+    }
+
+    const resumes = request.context.conversationId != null;
+    if (next.resumeFallback && !resumes) {
+      throw new Error(
+        `Fake interviewer: the queued "${next.kind}" turn scripts a resume fallback, but the request has no conversation to resume.`,
+      );
+    }
+
+    if (next.resumeFallback) {
+      const lost = new InterviewerError(
+        "failed",
+        next.resumeFallback === true ? DEFAULT_RESUME_FAILURE : next.resumeFallback,
+      );
+      try {
+        await observeCall(
+          observer,
+          { requestKind: request.kind, call: 1, conversation: "resumed" },
+          () => Promise.reject(lost),
+          () => true,
+        );
+      } catch (error) {
+        if (error !== lost) throw error;
+      }
+      return observeCall(
+        observer,
+        {
+          requestKind: request.kind,
+          call: 2,
+          conversation: "primed-after-resume",
+        },
+        () => serve(next, request, true),
+      );
+    }
+
+    return observeCall(
+      observer,
+      {
+        requestKind: request.kind,
+        call: 1,
+        conversation: resumes ? "resumed" : "new",
+      },
+      () => serve(next, request, false),
+    );
   }
 
   return {
@@ -123,20 +311,42 @@ export function createFakeInterviewer(
     push(...more: ScriptedTurn[]) {
       queue.push(...more);
     },
-    proposeRound: (request: ProposeRoundRequest) =>
-      turn(request) as Promise<InterviewerTurn<ResultFor<"propose-round">>>,
-    reviewStale: (request: ReviewStaleRequest) =>
-      turn(request) as Promise<InterviewerTurn<ResultFor<"review-stale">>>,
-    findSuperseded: (request: FindSupersededRequest) =>
-      turn(request) as Promise<InterviewerTurn<ResultFor<"find-superseded">>>,
-    synthesizeSpec: (request: SynthesizeSpecRequest) =>
-      turn(request) as Promise<InterviewerTurn<ResultFor<"synthesize-spec">>>,
-    breakIntoTickets: (request: BreakIntoTicketsRequest) =>
-      turn(request) as Promise<
+    proposeRound: (request: ProposeRoundRequest, observer?: ModelCallObserver) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"propose-round">>
+      >,
+    reviewStale: (request: ReviewStaleRequest, observer?: ModelCallObserver) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"review-stale">>
+      >,
+    findSuperseded: (
+      request: FindSupersededRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"find-superseded">>
+      >,
+    synthesizeSpec: (
+      request: SynthesizeSpecRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"synthesize-spec">>
+      >,
+    breakIntoTickets: (
+      request: BreakIntoTicketsRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
         InterviewerTurn<ResultFor<"break-into-tickets">>
       >,
-    assessReadiness: (request: AssessReadinessRequest) =>
-      turn(request) as Promise<InterviewerTurn<ResultFor<"assess-readiness">>>,
+    assessReadiness: (
+      request: AssessReadinessRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"assess-readiness">>
+      >,
   };
 }
 

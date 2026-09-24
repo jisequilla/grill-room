@@ -24,8 +24,19 @@ export {
   cannedInterviewTurns,
   createFakeInterviewer,
   FAKE_CONVERSATION_ID,
+  rateLimitedTurn,
+  schemaInvalidTurn,
+  treeRuleViolation,
+  withResumeFallback,
 } from "./fake.js";
-export type { FakeInterviewer, ScriptedTurn } from "./fake.js";
+export type {
+  FakeInterviewer,
+  ScriptedError,
+  ScriptedInvalidResult,
+  ScriptedResult,
+  ScriptedTurn,
+} from "./fake.js";
+export { outcomeOfFailure } from "./observe.js";
 export { buildPrompt } from "./prompt.js";
 export {
   APP_ADDENDUM,

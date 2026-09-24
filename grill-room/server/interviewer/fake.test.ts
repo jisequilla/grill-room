@@ -1,7 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { validateProposal, type KeyedTreeDecision } from "../tree.js";
 import { InterviewerError } from "./errors.js";
-import { cannedInterviewTurns, createFakeInterviewer } from "./fake.js";
+import {
+  cannedInterviewTurns,
+  createFakeInterviewer,
+  rateLimitedTurn,
+  schemaInvalidTurn,
+  treeRuleViolation,
+  withResumeFallback,
+} from "./fake.js";
+import type { ProposeRoundResult } from "./schemas.js";
+import type { ModelCallEnd, ModelCallObserver } from "./types.js";
 import {
   getInterviewer,
   INTERVIEWER_ENV_VAR,
@@ -194,5 +204,250 @@ describe("choosing the interviewer", () => {
     expect(turn.result.proposedDecisions).toHaveLength(2);
     // The same instance is reused, so the queue advances across calls.
     expect(getInterviewer()).toBe(getInterviewer());
+  });
+});
+
+function recordingObserver() {
+  const ended: ModelCallEnd[] = [];
+  const events: string[] = [];
+  const observer: ModelCallObserver = {
+    callStarted: (call) => {
+      events.push(`start ${call.call} ${call.conversation}`);
+    },
+    callEnded: (call) => {
+      events.push(`end ${call.call} ${call.outcome.kind}`);
+      ended.push(call);
+    },
+  };
+  return { observer, ended, events };
+}
+
+const resumingRequest = aProposeRoundRequest({
+  context: { ...aProposeRoundRequest().context, conversationId: "session-7" },
+});
+
+describe("scripting every outcome of a model call", () => {
+  it("reports a clean success as one call with the raw output", async () => {
+    const interviewer = createFakeInterviewer([
+      { kind: "propose-round", result: aProposeRoundResult() },
+    ]);
+    const { observer, ended, events } = recordingObserver();
+
+    await interviewer.proposeRound(aProposeRoundRequest(), observer);
+
+    expect(events).toEqual(["start 1 new", "end 1 success"]);
+    expect(ended[0].outcome).toEqual({
+      kind: "success",
+      rawOutput: JSON.stringify(aProposeRoundResult()),
+    });
+  });
+
+  it("reports a resumed conversation as resumed", async () => {
+    const interviewer = createFakeInterviewer([
+      { kind: "propose-round", result: aProposeRoundResult() },
+    ]);
+    const { observer, events } = recordingObserver();
+
+    await interviewer.proposeRound(resumingRequest, observer);
+
+    expect(events).toEqual(["start 1 resumed", "end 1 success"]);
+  });
+
+  it("scripts schema-invalid output, with its raw output and a one-line reason", async () => {
+    const interviewer = createFakeInterviewer([
+      schemaInvalidTurn("propose-round", { proposedDecisions: "nope" }),
+    ]);
+    const { observer, ended } = recordingObserver();
+
+    await expect(
+      interviewer.proposeRound(aProposeRoundRequest(), observer),
+    ).rejects.toMatchObject({ code: "malformed-output" });
+    expect(ended[0].outcome).toMatchObject({
+      kind: "schema-invalid",
+      rawOutput: JSON.stringify({ proposedDecisions: "nope" }),
+      reason: expect.stringContaining("Schema mismatch"),
+    });
+  });
+
+  it("scripts a rate limit, distinct from an interviewer error", async () => {
+    const interviewer = createFakeInterviewer([rateLimitedTurn("propose-round")]);
+    const { observer, ended } = recordingObserver();
+
+    await expect(
+      interviewer.proposeRound(aProposeRoundRequest(), observer),
+    ).rejects.toMatchObject({ code: "rate-limited" });
+    expect(ended.map((call) => call.outcome.kind)).toEqual(["rate-limited"]);
+  });
+
+  it("reports any other scripted error as an error, carrying its code", async () => {
+    const interviewer = createFakeInterviewer([
+      { kind: "propose-round", error: new InterviewerError("not-logged-in", "Log in.") },
+    ]);
+    const { observer, ended } = recordingObserver();
+
+    await interviewer
+      .proposeRound(aProposeRoundRequest(), observer)
+      .catch(() => undefined);
+
+    expect(ended[0].outcome).toEqual({
+      kind: "error",
+      code: "not-logged-in",
+      reason: "Log in.",
+    });
+  });
+
+  it("scripts a resume fallback as a call of its own, before the turn it serves", async () => {
+    const interviewer = createFakeInterviewer([
+      withResumeFallback({ kind: "propose-round", result: aProposeRoundResult() }),
+    ]);
+    const { observer, ended, events } = recordingObserver();
+
+    const turn = await interviewer.proposeRound(resumingRequest, observer);
+
+    expect(events).toEqual([
+      "start 1 resumed",
+      "end 1 resume-fallback",
+      "start 2 primed-after-resume",
+      "end 2 success",
+    ]);
+    expect(ended[0].outcome.kind).toBe("resume-fallback");
+    // The fallback is a fresh conversation, not the one that could not resume.
+    expect(turn.conversationId).toBe("fake-conversation");
+  });
+
+  it("scripts a resume fallback followed by any other outcome", async () => {
+    const interviewer = createFakeInterviewer([
+      withResumeFallback(rateLimitedTurn("propose-round"), "Session is gone."),
+    ]);
+    const { observer, ended } = recordingObserver();
+
+    await expect(
+      interviewer.proposeRound(resumingRequest, observer),
+    ).rejects.toMatchObject({ code: "rate-limited" });
+    expect(ended.map((call) => call.outcome)).toEqual([
+      { kind: "resume-fallback", reason: "Session is gone." },
+      expect.objectContaining({ kind: "rate-limited" }),
+    ]);
+  });
+
+  it("serves a resume fallback without an observer exactly like the turn itself", async () => {
+    const interviewer = createFakeInterviewer([
+      withResumeFallback({ kind: "propose-round", result: aProposeRoundResult() }),
+    ]);
+
+    await expect(
+      interviewer.proposeRound(resumingRequest),
+    ).resolves.toMatchObject({ result: aProposeRoundResult() });
+  });
+
+  it("refuses a resume fallback for a request that resumes nothing, as a fault in the test", async () => {
+    const interviewer = createFakeInterviewer([
+      withResumeFallback({ kind: "propose-round", result: aProposeRoundResult() }),
+    ]);
+
+    const error = await interviewer
+      .proposeRound(aProposeRoundRequest())
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).not.toBeInstanceOf(InterviewerError);
+    expect((error as Error).message).toContain("no conversation to resume");
+  });
+});
+
+describe("scripting proposals that break a tree rule", () => {
+  /** A tree of one settled decision and one the user pushed back on. */
+  const existing: KeyedTreeDecision[] = [
+    {
+      id: "id-shape",
+      key: "shape",
+      title: "What shape should this take?",
+      body: "The first thing to settle.",
+      dependsOn: [],
+      answerKind: "own-answer",
+      settledAt: "2026-01-01T00:00:00.000Z",
+      reopenedAt: null,
+    },
+    {
+      id: "id-storage",
+      key: "storage",
+      title: "Where does the data live?",
+      body: "Storage follows from the shape.",
+      dependsOn: ["id-shape"],
+      answerKind: "pushed-back",
+      settledAt: null,
+      reopenedAt: null,
+    },
+  ];
+
+  /** The reasons the app gives for refusing a proposal against that tree. */
+  function refusals(result: ProposeRoundResult): string[] {
+    const withPushBackAnswered =
+      result.pushBackResponses.length > 0
+        ? result
+        : {
+            ...result,
+            pushBackResponses: [
+              {
+                decisionKey: "storage",
+                response: "withdraw" as const,
+                explanation: "Not needed.",
+                replacementKey: null,
+              },
+            ],
+          };
+    return validateProposal(existing, withPushBackAnswered.proposedDecisions, {
+      pushBackResponses: withPushBackAnswered.pushBackResponses,
+      userDecisionPlacements: withPushBackAnswered.userDecisionPlacements,
+      done: withPushBackAnswered.done != null,
+    }).reasons;
+  }
+
+  it.each([
+    ["off-frontier question", treeRuleViolation.offFrontier(), /not on the frontier/],
+    ["unknown key", treeRuleViolation.unknownKey(), /neither an existing decision/],
+    ["cycle", treeRuleViolation.cycle(), /dependency cycle/],
+    [
+      "unchanged re-ask",
+      treeRuleViolation.unchangedReAsk({
+        key: "storage",
+        title: "Where does the data live?",
+        body: "Storage follows from the shape.",
+      }),
+      /re-asks it unchanged/,
+    ],
+    [
+      "duplicate title",
+      treeRuleViolation.duplicateTitle("What shape should this take?"),
+      /asks the same question/,
+    ],
+  ])("scripts an %s the app refuses", async (_rule, result, reason) => {
+    const interviewer = createFakeInterviewer([
+      { kind: "propose-round", result },
+    ]);
+
+    const turn = await interviewer.proposeRound(aProposeRoundRequest());
+
+    expect(refusals(turn.result).join(" ")).toMatch(reason);
+  });
+
+  it("scripts refusals followed by a success, in sequence", async () => {
+    const interviewer = createFakeInterviewer([
+      { kind: "propose-round", result: treeRuleViolation.cycle() },
+      { kind: "propose-round", result: treeRuleViolation.unknownKey() },
+      { kind: "propose-round", result: aProposeRoundResult() },
+    ]);
+    const { observer, ended } = recordingObserver();
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await interviewer.proposeRound(aProposeRoundRequest(), observer);
+    }
+
+    // Every one is a successful model call: refusing it is the app's call.
+    expect(ended.map((call) => call.outcome.kind)).toEqual([
+      "success",
+      "success",
+      "success",
+    ]);
+    expect(interviewer.remaining).toBe(0);
   });
 });
