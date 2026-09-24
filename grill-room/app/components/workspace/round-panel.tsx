@@ -49,7 +49,9 @@ export function RoundPanel({
   hasDecisions,
   decisions,
   lastSubmittedAt,
-  proposalTurn,
+  activeTurn,
+  staleReviewTurn,
+  supersessionTurn,
   onRequestNextRound,
   isRequesting,
   onSubmit,
@@ -64,8 +66,18 @@ export function RoundPanel({
   decisions: readonly TreeDecision[];
   /** The most recently submitted round's timestamp, or null when none yet. */
   lastSubmittedAt: string | null;
-  /** The session's latest propose-round turn, feeding the attempt log on the working and failed panels. */
-  proposalTurn: Turn | null;
+  /**
+   * The turn the session's current turn status belongs to, of any kind —
+   * whichever one is actually running or just stopped: a round proposal, a
+   * readiness judgment, a stale review, or a supersession check. Feeds the
+   * attempt log on the working and failed panels, which show whichever kind
+   * is live rather than assuming a round proposal.
+   */
+  activeTurn: Turn | null;
+  /** The session's most recent stale review turn, collapsed beside the what-changed digest. */
+  staleReviewTurn: Turn | null;
+  /** The session's most recent supersession check turn, collapsed beside the loose ends it proposed. */
+  supersessionTurn: Turn | null;
   onRequestNextRound: () => void;
   isRequesting: boolean;
   onSubmit: (roundId: string) => void;
@@ -108,6 +120,7 @@ export function RoundPanel({
         new Set((round.round?.decisions ?? []).map((card) => card.id))
       }
       onOpenDecision={onOpenDecision}
+      turn={staleReviewTurn}
     />
   );
 
@@ -118,7 +131,7 @@ export function RoundPanel({
       <div>
         {batch}
         {digest}
-        <TurnWorkingPanel startedAt={round.turnStartedAt} turn={proposalTurn} />
+        <TurnWorkingPanel startedAt={round.turnStartedAt} turn={activeTurn} />
       </div>
     );
   }
@@ -132,7 +145,7 @@ export function RoundPanel({
           error={round.turnError}
           onRetry={onRequestNextRound}
           isPending={isRequesting}
-          turn={proposalTurn}
+          turn={activeTurn}
         />
       </div>
     );
@@ -151,6 +164,7 @@ export function RoundPanel({
           onOpenDecision={onOpenDecision}
           onContinueInterview={onRequestNextRound}
           isContinuing={isRequesting}
+          turn={supersessionTurn}
         />
       </div>
     );

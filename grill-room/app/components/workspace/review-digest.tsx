@@ -8,6 +8,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { TurnAttemptLog, type Turn } from "@/components/workspace/turn-attempt-log";
 import {
   ANSWER_KIND_LABEL_KEY,
   type DecisionAnswerKind,
@@ -249,6 +250,7 @@ export function ReviewDigestPanel({
   lastSubmittedAt,
   openRoundDecisionIds,
   onOpenDecision,
+  turn = null,
 }: {
   sessionId: string;
   decisions: readonly TreeDecision[];
@@ -257,6 +259,13 @@ export function ReviewDigestPanel({
   /** Decision ids on the currently open round, so a link can jump to the card instead of the sheet. */
   openRoundDecisionIds: ReadonlySet<string>;
   onOpenDecision: (decisionId: string) => void;
+  /**
+   * The turn of the session's most recent stale review (its
+   * `staleReviewTurnId`), collapsed beside the digest it produced. The live
+   * attempt log while a review runs is shown in the turn status above this
+   * panel instead.
+   */
+  turn?: Turn | null;
 }) {
   const t = useT();
   const [open, setOpen] = useState(true);
@@ -326,6 +335,7 @@ export function ReviewDigestPanel({
             onOpenDecision={onOpenDecision}
           />
         ))}
+        <TurnAttemptLog turn={turn} />
       </CollapsibleContent>
     </Collapsible>
   );

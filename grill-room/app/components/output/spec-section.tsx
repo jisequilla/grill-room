@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Markdown } from "@/components/workspace/markdown";
+import { TurnAttemptLog, type Turn } from "@/components/workspace/turn-attempt-log";
 import { actionErrorCode } from "@/lib/decisions";
 
 /** A turn takes a minute or more; the default 60 s client timeout cancels one about to succeed. */
@@ -42,17 +43,39 @@ const SILENT_ERROR_CODES = new Set([
 export function SpecSection({
   sessionId,
   working,
+  activeTurn,
   onSettled,
 }: {
   sessionId: string;
   /** Whether the session's stored turn is currently running, of any kind. */
   working: boolean;
+  /** The turn the session's current turn status belongs to, of any kind. */
+  activeTurn: Turn | null;
   onSettled: () => void;
 }) {
   const t = useT();
 
   const { data, isLoading } = useActionQuery("get-spec", { sessionId });
   const spec = data?.spec ?? null;
+
+  // Collapsed once synthesis has stopped: the turn linked from the spec row
+  // itself (`turnId`), only set once a synthesis has actually completed.
+  const { data: completedTurn } = useActionQuery(
+    "get-turn",
+    { turnId: spec?.turnId ?? "" },
+    { enabled: spec?.turnId != null },
+  );
+
+  // Live while this route's active turn is actually a synthesis still
+  // running; the collapsed, already-stopped turn otherwise. `spec.turnId`
+  // stays whatever it was before a regeneration until the new run succeeds,
+  // so the live turn can never be read off the spec itself.
+  const attemptLogTurn =
+    activeTurn != null &&
+    activeTurn.turnKind === "synthesize-spec" &&
+    activeTurn.completedAt === null
+      ? activeTurn
+      : (completedTurn ?? null);
 
   const synthesize = useActionMutation("synthesize-spec", {
     timeoutMs: TURN_TIMEOUT_MS,
@@ -84,6 +107,8 @@ export function SpecSection({
           </Badge>
         ) : null}
       </div>
+
+      <TurnAttemptLog turn={attemptLogTurn} />
 
       {!spec ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
