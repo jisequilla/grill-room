@@ -9,8 +9,13 @@ import { INTERVIEWER_ENV_VAR } from "./server/interviewer/index.js";
 /**
  * A dedicated port, away from `pnpm dev`'s default, so the smoke test can run
  * alongside a developer's normal dev server without a collision.
+ *
+ * Overridable via `E2E_PORT` so two worktrees can run `just e2e`
+ * concurrently without colliding with each other: the `e2e` recipe in the
+ * repo-root `justfile` picks a free port and exports `E2E_PORT` before
+ * calling `pnpm test:e2e` when the caller hasn't already set one.
  */
-const PORT = 5240;
+const PORT = Number(process.env.E2E_PORT) || 5240;
 
 /**
  * A fresh directory per run, outside the repo entirely, so the suite can never

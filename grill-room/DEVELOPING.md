@@ -34,6 +34,10 @@ It starts its own dev server (`playwright.config.ts`'s `webServer`) rather
 than reusing anything already running, with two things forced regardless of
 your shell's environment:
 
+The port defaults to `5240` but is overridable via `E2E_PORT`; `just e2e`
+(run from the repo root) picks a free one automatically so two worktrees can
+run it at the same time without colliding.
+
 - `GRILL_ROOM_INTERVIEWER=fake` — the scripted interviewer
   (`server/interviewer/fake.ts`) serves a fixed, canned interview
   (`cannedInterviewTurns()`) instead of calling the real `claude` CLI. The
