@@ -439,4 +439,26 @@ export const appMigrations: MigrationEntry[] = [
     name: "specs-tickets-turn-id-column",
     sql: `ALTER TABLE gr_specs ADD COLUMN IF NOT EXISTS tickets_turn_id TEXT REFERENCES gr_turns(id) ON DELETE SET NULL`,
   },
+  {
+    version: 57,
+    name: "scout-reports-table",
+    sql: `CREATE TABLE IF NOT EXISTS gr_scout_reports (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES gr_sessions(id) ON DELETE CASCADE,
+      project_id TEXT REFERENCES gr_projects(id) ON DELETE SET NULL,
+      facts_json TEXT NOT NULL,
+      result_json TEXT NOT NULL,
+      commit_read TEXT,
+      idea_read TEXT NOT NULL,
+      model TEXT NOT NULL,
+      ran_at TEXT NOT NULL,
+      turn_id TEXT REFERENCES gr_turns(id) ON DELETE SET NULL,
+      dispositions_json TEXT NOT NULL DEFAULT '{}'
+    )`,
+  },
+  {
+    version: 58,
+    name: "scout-reports-session-index",
+    sql: `CREATE INDEX IF NOT EXISTS gr_idx_scout_reports_session ON gr_scout_reports(session_id)`,
+  },
 ];

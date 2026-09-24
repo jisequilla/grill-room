@@ -1,3 +1,4 @@
+import type { ProjectServerFacts } from "../project-facts.js";
 import type { InterviewerErrorCode } from "./errors.js";
 import type {
   AssessReadinessResult,
@@ -152,29 +153,7 @@ export interface AssessReadinessRequest extends RequestBase {
   kind: "assess-readiness";
 }
 
-/**
- * What the server knows for certain about a project's repository before the
- * scout reads it, collected from git and plain file checks. No model derives
- * any of it. Mirrors `ProjectServerFacts` in `server/project-facts.ts`, field
- * for field; this copy goes once that module is on main and can be imported.
- */
-export interface ProjectServerFacts {
-  /** Null when the repo has no commits yet. */
-  headCommit: string | null;
-  /** Null when the repo has no commits yet. */
-  headBranch: string | null;
-  remotes: Array<{ name: string; url: string; type: "fetch" | "push" }>;
-  /** True when the working tree has uncommitted changes. */
-  dirty: boolean;
-  /** Most recent first, at most ten. */
-  recentCommitSubjects: string[];
-  /** `CLAUDE.md` or `AGENTS.md` at the root. */
-  hasAgentInstructions: boolean;
-  /** `docs/decisions`, `docs/adr` or `adr`, else null. */
-  decisionsFolder: string | null;
-  /** `.claude/rules/` at the root. */
-  hasRulesFolder: boolean;
-}
+export type { ProjectServerFacts };
 
 /** A repo decision from the previous scout report, as the user left it. */
 export interface PreviousRepoDecision {

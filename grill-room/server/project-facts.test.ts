@@ -108,6 +108,22 @@ describe("collectProjectFacts", () => {
     expect(result.remotes).toEqual([]);
   });
 
+  it("strips userinfo from remote URLs, leaving scp-like remotes as they are", async () => {
+    const root = repos.create();
+    addRemote(root, "origin", "https://user:secret@example.invalid/x.git");
+    addRemote(root, "mirror", "ssh://deploy@example.invalid/y.git");
+    addRemote(root, "scp", "git@example.invalid:owner/z.git");
+
+    const result = facts(await collectProjectFacts(root));
+    const urls = Object.fromEntries(result.remotes.map((remote) => [remote.name, remote.url]));
+    expect(urls).toEqual({
+      origin: "https://example.invalid/x.git",
+      mirror: "ssh://example.invalid/y.git",
+      scp: "git@example.invalid:owner/z.git",
+    });
+    expect(JSON.stringify(result)).not.toContain("secret");
+  });
+
   it("does not crash on a repository with no commits yet", async () => {
     // `repos.create` still writes README.md; with `commit: false` it stays
     // untracked, which is itself a fact worth getting right: an uncommitted

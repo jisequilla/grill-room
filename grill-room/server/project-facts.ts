@@ -78,13 +78,30 @@ function findDecisionsFolder(root: string): string | null {
 
 const REMOTE_LINE = /^(\S+)\t(\S+)\s+\((fetch|push)\)$/;
 
+/** A URL with a scheme, split before and after any userinfo in its authority. */
+const URL_USERINFO = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/]*@/;
+
+/**
+ * A remote URL with any userinfo (`user:token@`) removed from its authority.
+ * A remote can carry a token, and these facts are stored and sent to a model,
+ * so nothing downstream of this module ever sees one. scp-like remotes
+ * (`git@host:path`) have no scheme and name only an SSH user; they pass as-is.
+ */
+export function stripRemoteCredentials(url: string): string {
+  return url.replace(URL_USERINFO, "$1");
+}
+
 function parseRemotes(stdout: string): ProjectRemote[] {
   const remotes: ProjectRemote[] = [];
   for (const rawLine of stdout.split("\n")) {
     const match = REMOTE_LINE.exec(rawLine.trim());
     if (!match) continue;
     const [, name, url, type] = match;
-    remotes.push({ name, url, type: type as "fetch" | "push" });
+    remotes.push({
+      name,
+      url: stripRemoteCredentials(url),
+      type: type as "fetch" | "push",
+    });
   }
   return remotes;
 }

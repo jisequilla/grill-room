@@ -142,7 +142,7 @@ describe("app tables next to the framework's", () => {
 describe("the gr_ prefix", () => {
   it("covers every table the Drizzle schema declares", () => {
     const names = schemaTableNames();
-    expect(names).toHaveLength(14);
+    expect(names).toHaveLength(15);
     expect(names.filter((name) => !name.startsWith(APP_TABLE_PREFIX))).toEqual(
       [],
     );
