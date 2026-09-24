@@ -658,6 +658,60 @@ describe("scout-project", () => {
     });
   });
 
+  describe("excludes the session's own export folder from decisionFiles", () => {
+    it("does not see its own decisions.md; another session on the same project does", async () => {
+      const root = repos.create({
+        files: {
+          "src/ingest/metrics.ts": lines(30),
+          "docs/adr/0003-queue.md": lines(9),
+          "CLAUDE.md": "# Agent instructions\n",
+          ".scratch/ingest-lag-alerts/decisions.md": "# Decisions\n",
+          "docs/decisions.md": "# Project decisions\n",
+        },
+      });
+      const project = await registerProject.run({
+        root,
+        verifyCommand: "pnpm test",
+        exportFolder: ".scratch",
+      });
+
+      const exportedSession = await createSession.run({
+        title: "Ingest lag alerts",
+        idea: "Alert the on-call engineer when ingest falls behind.",
+        model: "opus",
+        projectId: project.id,
+      });
+      await getDb()
+        .update(schema.sessions)
+        .set({ lastExportFolder: ".scratch/ingest-lag-alerts" })
+        .where(eq(schema.sessions.id, exportedSession.id));
+
+      const otherSession = await createSession.run({
+        title: "Another idea",
+        idea: "Something else entirely.",
+        model: "opus",
+        projectId: project.id,
+      });
+
+      const exportedInterviewer = scriptInterviewer([
+        { kind: "scout-project", result: aScoutProjectResult() },
+      ]);
+      await scoutProject.run({ sessionId: exportedSession.id });
+      const [exportedRequest] = scoutRequests(exportedInterviewer.requests);
+      expect(exportedRequest!.facts.decisionFiles).toEqual(["docs/decisions.md"]);
+
+      const otherInterviewer = scriptInterviewer([
+        { kind: "scout-project", result: aScoutProjectResult() },
+      ]);
+      await scoutProject.run({ sessionId: otherSession.id });
+      const [otherRequest] = scoutRequests(otherInterviewer.requests);
+      expect(otherRequest!.facts.decisionFiles).toEqual([
+        ".scratch/ingest-lag-alerts/decisions.md",
+        "docs/decisions.md",
+      ]);
+    });
+  });
+
   describe("refusals, before any turn", () => {
     it("refuses a session with no project", async () => {
       const session = await createSession.run({

@@ -26,6 +26,7 @@ import {
   aProposeRoundResult,
   aScoutProjectRequest,
   aScoutProjectResult,
+  someProjectServerFacts,
 } from "./test-fixtures.js";
 
 /**
@@ -495,6 +496,41 @@ describe("what the adapter sends for a project scout", () => {
     expect(prompt).toContain("return an empty list");
     expect(prompt).not.toContain(loadGrillingSkill().trimEnd());
     expect(prompt.startsWith("-")).toBe(false);
+  });
+
+  it("lists the facts' decisionFiles as recorded decision sources", async () => {
+    const request = aScoutProjectRequest({
+      projectRoot: PROJECT_ROOT,
+      facts: someProjectServerFacts({
+        decisionFiles: ["docs/decisions.md", "packages/api/decisions.md"],
+      }),
+    });
+    const { invocation } = await scoutInvocation(request);
+    const prompt = valueOf(invocation.args, "-p") as string;
+
+    expect(prompt).toContain("Recorded decision files (decisions.md)");
+    expect(prompt).toContain("docs/decisions.md");
+    expect(prompt).toContain("packages/api/decisions.md");
+  });
+
+  it("says there are none when the facts' decisionFiles list is empty", async () => {
+    const request = aScoutProjectRequest({
+      projectRoot: PROJECT_ROOT,
+      facts: someProjectServerFacts({ decisionFiles: [] }),
+    });
+    const { invocation } = await scoutInvocation(request);
+    const prompt = valueOf(invocation.args, "-p") as string;
+
+    expect(prompt).toContain("Recorded decision files (decisions.md)");
+    expect(prompt).toContain("(none)");
+  });
+
+  it("states the Supersedes rule", async () => {
+    const { invocation } = await scoutInvocation();
+    const prompt = valueOf(invocation.args, "-p") as string;
+
+    expect(prompt).toContain("Supersedes line overrides the source");
+    expect(prompt).toContain("not the statement it supersedes");
   });
 
   it("on a re-run, asks for a verdict on every previous decision by key", async () => {

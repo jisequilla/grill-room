@@ -97,7 +97,10 @@ export async function scoutProjectCore(input: {
 }): Promise<ScoutReportWithStaleness | null> {
   const { session, project } = input;
 
-  const collected = await collectProjectFacts(project.rootPath);
+  const collected = await collectProjectFacts(
+    project.rootPath,
+    session.lastExportFolder ?? undefined,
+  );
   if ("refusal" in collected) failWithProjectFactsRefusal(collected.refusal);
   const { facts } = collected;
 
