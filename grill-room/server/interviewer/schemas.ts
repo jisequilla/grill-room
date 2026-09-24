@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * The output schemas of the six request kinds. Each one is both the contract
+ * The output schemas of the request kinds. Each one is both the contract
  * the model is constrained by (converted to JSON Schema for the command line)
  * and the validator every result is checked against before it leaves the port.
  *
@@ -156,6 +156,91 @@ export const assessReadinessResultSchema = z.strictObject({
 /** A ready verdict tolerates at most this many unknowns. */
 export const MAX_READY_UNKNOWNS = 5;
 
+/** A scout report lists at most this many current-state items. */
+export const MAX_SCOUT_CURRENT_STATE = 25;
+
+/** A scout report proposes at most this many repo decisions. */
+export const MAX_SCOUT_PROPOSED_DECISIONS = 15;
+
+/**
+ * The shape the model is constrained to: a path, a colon, and a line number or
+ * a line range. Kept to plain regex syntax so the structured-output pattern
+ * stays portable; the refinements below add what the pattern cannot say.
+ */
+const CITATION_PATTERN = /^[^:\n]+:[1-9][0-9]*(-[1-9][0-9]*)?$/;
+
+/**
+ * A repo-relative path with a line number or line range: `path:line` or
+ * `path:start-end`. The path may not be absolute or step outside the repo, and
+ * a range must not run backwards. Whether the file and lines exist at the
+ * commit read is the app's check, not the schema's.
+ */
+export const citation = z
+  .string()
+  .regex(CITATION_PATTERN, "A citation is `path:line` or `path:start-end`.")
+  .refine((value) => {
+    const path = value.slice(0, value.lastIndexOf(":"));
+    return (
+      path.trim() === path &&
+      !path.startsWith("/") &&
+      !path.startsWith("~") &&
+      !/^[A-Za-z]:?[\\/]/.test(path) &&
+      !path.split(/[\\/]/).includes("..")
+    );
+  }, "A citation's path is relative to the repository root and stays inside it.")
+  .refine((value) => {
+    const [start, end] = value
+      .slice(value.lastIndexOf(":") + 1)
+      .split("-")
+      .map(Number);
+    return end === undefined || start <= end;
+  }, "A citation's line range runs from its first line to its last.");
+
+/**
+ * What a scout found reading a project for one idea. Every item cites where it
+ * lives. `previousDecisions` is empty on a first run and holds one entry per
+ * decision of the previous report on a re-run; the app checks that coverage,
+ * the uniqueness of keys, and every citation against the repo.
+ */
+export const scoutProjectResultSchema = z.strictObject({
+  /** What already exists relative to the idea. */
+  currentState: z
+    .array(
+      z.strictObject({
+        status: z.enum(["built", "partial", "gap"]),
+        summary: z.string().min(1),
+        citations: z.array(citation).min(1),
+      }),
+    )
+    .max(MAX_SCOUT_CURRENT_STATE),
+  /** Choices the project has already made that bear on the idea. */
+  proposedDecisions: z
+    .array(
+      z.strictObject({
+        /** Stable across re-runs for the same decision. */
+        key: decisionKey,
+        title: z.string().min(1),
+        /** The decision, stated as the project holds it. */
+        statement: z.string().min(1),
+        /** Written down (ADR, agent instructions, rules) or read from code or configuration. */
+        source: z.enum(["recorded", "inferred"]),
+        citation,
+        /** One line: why it matters for this idea. */
+        reason: z.string().min(1),
+      }),
+    )
+    .max(MAX_SCOUT_PROPOSED_DECISIONS),
+  /** On a re-run, how each decision of the previous report fared. */
+  previousDecisions: z.array(
+    z.strictObject({
+      key: decisionKey,
+      change: z.enum(["unchanged", "changed", "removed"]),
+      /** The decision as the repo now holds it, when it changed; otherwise null. */
+      statement: z.string().min(1).nullable(),
+    }),
+  ),
+});
+
 export const resultSchemas = {
   "propose-round": proposeRoundResultSchema,
   "review-stale": reviewStaleResultSchema,
@@ -163,6 +248,7 @@ export const resultSchemas = {
   "synthesize-spec": synthesizeSpecResultSchema,
   "break-into-tickets": breakIntoTicketsResultSchema,
   "assess-readiness": assessReadinessResultSchema,
+  "scout-project": scoutProjectResultSchema,
 } as const;
 
 export type RequestKind = keyof typeof resultSchemas;
@@ -177,6 +263,7 @@ export type FindSupersededResult = ResultFor<"find-superseded">;
 export type SynthesizeSpecResult = ResultFor<"synthesize-spec">;
 export type BreakIntoTicketsResult = ResultFor<"break-into-tickets">;
 export type AssessReadinessResult = ResultFor<"assess-readiness">;
+export type ScoutProjectResult = ResultFor<"scout-project">;
 
 /** The JSON Schema handed to the command line's `--json-schema` flag. */
 export function jsonSchemaFor(kind: RequestKind): Record<string, unknown> {

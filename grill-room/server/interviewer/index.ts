@@ -13,6 +13,8 @@ export * from "./types.js";
 export {
   createClaudeCliInterviewer,
   DOCS_MODE_TOOLS,
+  SCOUT_DENY_RULES,
+  SCOUT_SECRET_FILE_PATTERNS,
 } from "./claude-cli.js";
 export type {
   CliInvocation,

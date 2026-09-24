@@ -12,6 +12,7 @@ import type {
   ModelCallObserver,
   ProposeRoundRequest,
   ReviewStaleRequest,
+  ScoutProjectRequest,
   SynthesizeSpecRequest,
 } from "./types.js";
 
@@ -186,6 +187,11 @@ function isError(turn: ScriptedTurn): turn is ScriptedError {
   return "error" in turn;
 }
 
+/** The conversation a request resumes. A scout never resumes one, as with the real adapter. */
+function conversationOf(request: InterviewerRequest): string | null {
+  return request.kind === "scout-project" ? null : request.context.conversationId;
+}
+
 /**
  * The scripted fake. It returns queued results in order, records what it was
  * asked, and validates every scripted payload against the same schema the real
@@ -234,7 +240,7 @@ export function createFakeInterviewer(
         // A fallback is a fresh conversation, so it never keeps the old id.
         conversationId:
           next.conversationId ??
-          (fellBack ? null : request.context.conversationId) ??
+          (fellBack ? null : conversationOf(request)) ??
           FAKE_CONVERSATION_ID,
       },
       rawOutput,
@@ -259,7 +265,7 @@ export function createFakeInterviewer(
       );
     }
 
-    const resumes = request.context.conversationId != null;
+    const resumes = conversationOf(request) != null;
     if (next.resumeFallback && !resumes) {
       throw new Error(
         `Fake interviewer: the queued "${next.kind}" turn scripts a resume fallback, but the request has no conversation to resume.`,
@@ -346,6 +352,10 @@ export function createFakeInterviewer(
     ) =>
       turn(request, observer) as Promise<
         InterviewerTurn<ResultFor<"assess-readiness">>
+      >,
+    scoutProject: (request: ScoutProjectRequest, observer?: ModelCallObserver) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"scout-project">>
       >,
   };
 }
