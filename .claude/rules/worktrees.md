@@ -17,6 +17,7 @@ The Agent tool creates each worktree from `origin/main`, not from local `main`. 
 - Runs the verification the prompt names (for grill-room: `pnpm test` and `pnpm typecheck` from `grill-room/`, plus `just e2e` when the ticket touches the UI).
 - Pushes its branch and opens a pull request against `main` with `gh pr create`. The title names the bead (`gr-xxx: <summary>`); the body carries the ticket path, files changed, the exact verification output, and anything the prompt left ambiguous. `gh` must be on the `jisequilla` account.
 - Reports the PR number, then stops. It never merges.
+- Stops only processes it started, by the PID it recorded when starting them. It never finds processes by name (`pgrep`, `pkill`, `killall`) or runs `just stop`/`just restart`: the user's own dev server runs the same command line and has been killed that way.
 
 ## Browser checks
 
