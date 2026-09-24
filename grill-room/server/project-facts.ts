@@ -46,11 +46,10 @@ export interface ProjectServerFacts {
   /**
    * Project-relative paths of every `decisions.md` git tracks anywhere in the
    * project, sorted and uncapped. An untracked `decisions.md` is excluded, and
-   * so is one under the folder passed as `excludeFolder`. Optional so that
-   * existing facts consumers (the scout schema and prompt, wired in ticket 03)
-   * do not need this field yet; `collectProjectFacts` always sets it.
+   * so is one under the folder passed as `excludeFolder`. The scout prompt
+   * lists these as recorded decision sources.
    */
-  decisionFiles?: string[];
+  decisionFiles: string[];
 }
 
 type Refused = { refusal: ProjectFactsRefusal };

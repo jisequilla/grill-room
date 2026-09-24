@@ -210,6 +210,7 @@ export function someProjectServerFacts(
     hasAgentInstructions: true,
     decisionsFolder: "docs/adr",
     hasRulesFolder: false,
+    decisionFiles: [],
     ...overrides,
   };
 }

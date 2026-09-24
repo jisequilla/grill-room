@@ -51,11 +51,9 @@ const factsSchema = z.object({
   hasAgentInstructions: z.boolean(),
   decisionsFolder: z.string().nullable(),
   hasRulesFolder: z.boolean(),
-  // Optional and unread here: gr-qs7.2 adds this to collectProjectFacts, so
-  // every request now carries it, but only gr-qs7.3 wires it into the scout
-  // itself. Naming it here just stops safeParse's default strip behavior
-  // from silently dropping it on the DB round trip.
-  decisionFiles: z.array(z.string()).optional(),
+  // Defaults to empty for a report stored before this field existed, so an
+  // old row still parses; every report collected now carries it.
+  decisionFiles: z.array(z.string()).default([]),
 }) satisfies z.ZodType<ProjectServerFacts>;
 
 /** A stored scout report, as every reader sees it. */

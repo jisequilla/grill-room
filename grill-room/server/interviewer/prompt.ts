@@ -517,6 +517,10 @@ function renderFacts(facts: ProjectServerFacts): string {
     facts.recentCommitSubjects.length > 0
       ? facts.recentCommitSubjects.map((subject) => `  - ${subject}`).join("\n")
       : "  (none)";
+  const decisionFiles =
+    facts.decisionFiles.length > 0
+      ? facts.decisionFiles.map((filePath) => `  - ${filePath}`).join("\n")
+      : "  (none)";
   return [
     `- HEAD commit: ${facts.headCommit ?? "(no commits yet)"}`,
     `- Branch: ${facts.headBranch ?? "(no commits yet)"}`,
@@ -525,6 +529,8 @@ function renderFacts(facts: ProjectServerFacts): string {
     `- Agent instructions at the root (CLAUDE.md, AGENTS.md): ${facts.hasAgentInstructions ? "yes" : "no"}`,
     `- Decisions folder: ${facts.decisionsFolder ?? "(none found)"}`,
     `- Rules folder: ${facts.hasRulesFolder ? "yes" : "no"}`,
+    "- Recorded decision files (decisions.md) the project tracks:",
+    decisionFiles,
     "- Recent commit subjects, newest first:",
     commits,
   ].join("\n");
@@ -586,8 +592,8 @@ function buildScoutPrompt(request: ScoutProjectRequest): string {
     "",
     "What the app already knows about the repository, from git and the file",
     "system. Use it to decide where to look first: decisions and conventions",
-    "usually live in the agent instructions, the decisions folder and the rules",
-    "folder.",
+    "usually live in the agent instructions, the decisions folder, the rules",
+    "folder, and the decision files listed below.",
     "",
     renderFacts(request.facts),
     "",
@@ -616,6 +622,10 @@ function buildScoutPrompt(request: ScoutProjectRequest): string {
     "  recorded decision whose document states an exclusivity may claim it; if",
     "  you believe one holds but no document records it, state the positive",
     "  part alone or leave the decision out.",
+    "",
+    "A decisions.md entry that carries a Supersedes line overrides the source",
+    "it quotes: propose the entry's own decision, cited to its line in",
+    "decisions.md, and not the statement it supersedes.",
     ...renderPreviousDecisions(request),
     "",
     "Every citation is a path relative to the project root, a colon, and a",
