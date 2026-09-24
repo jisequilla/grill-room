@@ -1526,6 +1526,57 @@ describe("idea readiness", () => {
         readinessJson: null,
       });
     });
+
+    describe("turn records", () => {
+      it("records a clean judgment as one successful attempt, on the session's model, linked to the session", async () => {
+        const session = await aSession();
+        scriptInterviewer([judged()]);
+
+        await assessReadiness.run({ sessionId: session.id });
+
+        const latest = await findLatestTurn({
+          sessionId: session.id,
+          turnKind: "assess-readiness",
+        });
+        expect(latest).not.toBeNull();
+        const turn = await getTurn.run({ turnId: latest!.id });
+        expect(turn).toMatchObject({
+          sessionId: session.id,
+          turnKind: "assess-readiness",
+          model: session.model,
+          outcome: "succeeded",
+        });
+        expect(turn.runs).toHaveLength(1);
+        expect(turn.runs[0]!.attempts).toEqual([
+          expect.objectContaining({ attemptNumber: 1, kind: "success" }),
+        ]);
+        expect(
+          (await getSession.run({ id: session.id })).readinessTurnId,
+        ).toBe(turn.id);
+      });
+
+      it("keeps no turn linked once retries are exhausted", async () => {
+        const session = await aSession();
+        const tooManyUnknowns = judged({
+          unknowns: ["a", "b", "c", "d", "e", "f"],
+        });
+        scriptInterviewer([tooManyUnknowns, tooManyUnknowns, tooManyUnknowns]);
+
+        await expect(
+          assessReadiness.run({ sessionId: session.id }),
+        ).rejects.toMatchObject({ errorCode: "invalid-readiness" });
+
+        const latest = await findLatestTurn({
+          sessionId: session.id,
+          turnKind: "assess-readiness",
+        });
+        expect(latest).not.toBeNull();
+        expect(latest!.outcome).toBe("invalid-readiness");
+        expect(
+          (await getSession.run({ id: session.id })).readinessTurnId,
+        ).toBeNull();
+      });
+    });
   });
 
   describe("update-session-idea", () => {

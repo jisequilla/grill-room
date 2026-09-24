@@ -39,6 +39,7 @@ import {
   runTurn,
   TurnRejected,
 } from "./turn.js";
+import type { AttemptRecorder } from "./turn-recorder.js";
 
 /** One review turn's worth of work: a reopened decision and what it put in doubt. */
 export interface DueStaleReview {
@@ -186,18 +187,31 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
   await runTurn({
     sessionId,
     failedMessage: "The stale review turn failed.",
-    take: async () => {
+    record: { turnKind: "review-stale", model: session.model },
+    take: async (recorder) => {
       let conversationId = session.conversationId;
 
       // Each turn takes its group out of the stale set, so the list shrinks;
       // the bound only stops a pathological tree from looping.
       for (let guard = rows.length + 1; due.length > 0 && guard > 0; guard -= 1) {
-        const turn = await reviewOne(due[0] as DueStaleReview, conversationId);
+        const turn = await reviewOne(
+          due[0] as DueStaleReview,
+          conversationId,
+          recorder,
+        );
         conversationId = turn.conversationId;
         await applyReviews(turn.result);
         rows = await loadDecisions();
         due = dueStaleReviews(treeFacts(rows));
       }
+
+      await db
+        .update(schema.sessions)
+        .set({
+          staleReviewTurnId: recorder?.turnId ?? null,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.sessions.id, sessionId));
 
       return conversationId ?? "";
     },
@@ -211,6 +225,7 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
   async function reviewOne(
     group: DueStaleReview,
     resumeFrom: string | null,
+    recorder: AttemptRecorder | null,
   ): Promise<{ result: ReviewStaleResult; conversationId: string }> {
     const interviewer = getInterviewer();
     const byId = new Map(rows.map((row) => [row.id, row]));
@@ -222,22 +237,26 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
 
     return askUntilAccepted<ReviewStaleResult>({
       conversationId: resumeFrom,
-      ask: async ({ conversationId, rejectionReason }) =>
-        interviewer.reviewStale({
-          kind: "review-stale",
-          context: {
-            idea: session!.idea,
-            title: session!.title,
-            model: session!.model,
-            answeringMode: session!.answeringMode,
-            docsFolder: session!.docsFolder,
-            conversationId,
-            decisions: await decisionSnapshots(await loadDecisions()),
+      recorder,
+      ask: async ({ conversationId, rejectionReason, observer }) =>
+        interviewer.reviewStale(
+          {
+            kind: "review-stale",
+            context: {
+              idea: session!.idea,
+              title: session!.title,
+              model: session!.model,
+              answeringMode: session!.answeringMode,
+              docsFolder: session!.docsFolder,
+              conversationId,
+              decisions: await decisionSnapshots(await loadDecisions()),
+            },
+            reopenedDecisionKey: keyOf(group.reopenedId),
+            staleDecisionKeys: staleKeys,
+            rejectionReason,
           },
-          reopenedDecisionKey: keyOf(group.reopenedId),
-          staleDecisionKeys: staleKeys,
-          rejectionReason,
-        }),
+          observer,
+        ),
       reasonsToRefuse: (result) => reviewRejectionReasons(staleKeys, result),
       exhausted: (lastReason) =>
         new TurnRejected(

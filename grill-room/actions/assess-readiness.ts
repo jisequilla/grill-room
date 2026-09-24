@@ -55,23 +55,28 @@ export default defineAction({
     await runTurn({
       sessionId,
       failedMessage: "The readiness turn failed.",
-      take: async () => {
+      record: { turnKind: "assess-readiness", model: session.model },
+      take: async (recorder) => {
         const accepted = await askUntilAccepted<AssessReadinessResult>({
           conversationId: null,
-          ask: ({ rejectionReason }) =>
-            getInterviewer().assessReadiness({
-              kind: "assess-readiness",
-              context: {
-                idea: session.idea,
-                title: session.title,
-                model: session.model,
-                answeringMode: session.answeringMode,
-                docsFolder: session.docsFolder,
-                conversationId: null,
-                decisions: [],
+          recorder,
+          ask: ({ rejectionReason, observer }) =>
+            getInterviewer().assessReadiness(
+              {
+                kind: "assess-readiness",
+                context: {
+                  idea: session.idea,
+                  title: session.title,
+                  model: session.model,
+                  answeringMode: session.answeringMode,
+                  docsFolder: session.docsFolder,
+                  conversationId: null,
+                  decisions: [],
+                },
+                rejectionReason,
               },
-              rejectionReason,
-            }),
+              observer,
+            ),
           reasonsToRefuse: (result) =>
             reasonsToRefuseReadiness(result, session.idea),
           exhausted: (lastReason) =>
@@ -86,6 +91,7 @@ export default defineAction({
           .update(schema.sessions)
           .set({
             readinessJson: storeReadiness(session.idea, accepted.result, now),
+            readinessTurnId: recorder?.turnId ?? null,
             updatedAt: now,
           })
           .where(eq(schema.sessions.id, sessionId));

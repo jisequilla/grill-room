@@ -84,7 +84,8 @@ export default defineAction({
     await runTurn({
       sessionId,
       failedMessage: "The interviewer turn failed.",
-      take: async () => {
+      record: { turnKind: "synthesize-spec", model: session!.model },
+      take: async (recorder) => {
         const rows = await db
           .select()
           .from(schema.decisions)
@@ -113,22 +114,26 @@ export default defineAction({
 
         const accepted = await askUntilAccepted<SynthesizeSpecResult>({
           conversationId: session!.conversationId,
-          ask: async ({ conversationId, rejectionReason }) =>
-            interviewer.synthesizeSpec({
-              kind: "synthesize-spec",
-              context: {
-                idea: session!.idea,
-                title: session!.title,
-                model: session!.model,
-                answeringMode: session!.answeringMode,
-                docsFolder: session!.docsFolder,
-                conversationId,
-                decisions: await decisionSnapshots(rows),
+          recorder,
+          ask: async ({ conversationId, rejectionReason, observer }) =>
+            interviewer.synthesizeSpec(
+              {
+                kind: "synthesize-spec",
+                context: {
+                  idea: session!.idea,
+                  title: session!.title,
+                  model: session!.model,
+                  answeringMode: session!.answeringMode,
+                  docsFolder: session!.docsFolder,
+                  conversationId,
+                  decisions: await decisionSnapshots(rows),
+                },
+                outOfScope,
+                openQuestions,
+                rejectionReason,
               },
-              outOfScope,
-              openQuestions,
-              rejectionReason,
-            }),
+              observer,
+            ),
           reasonsToRefuse: (result) => {
             const missing = missingSpecHeadings(result.markdown);
             return missing.length === 0
@@ -157,6 +162,7 @@ export default defineAction({
             .set({
               markdown: accepted.result.markdown,
               current: true,
+              turnId: recorder?.turnId ?? null,
               updatedAt: now,
             })
             .where(eq(schema.specs.sessionId, sessionId))
@@ -169,6 +175,7 @@ export default defineAction({
               sessionId,
               markdown: accepted.result.markdown,
               current: true,
+              turnId: recorder?.turnId ?? null,
               createdAt: now,
               updatedAt: now,
             })

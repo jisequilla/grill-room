@@ -2,11 +2,13 @@ import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  rateLimitedTurn,
   resetInterviewer,
   scriptInterviewer,
   type FakeInterviewer,
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
+import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import addDecision from "./add-decision.js";
 import answerDecision from "./answer-decision.js";
@@ -14,6 +16,7 @@ import createSession from "./create-session.js";
 import getCurrentRound from "./get-current-round.js";
 import getSession from "./get-session.js";
 import getTree from "./get-tree.js";
+import getTurn from "./get-turn.js";
 import listRounds from "./list-rounds.js";
 import reopenDecision from "./reopen-decision.js";
 import requestNextRound from "./request-next-round.js";
@@ -1071,6 +1074,74 @@ describe("stale review", () => {
       previousAnswers: [],
     });
     expect(tree.sync).toMatchObject({ state: "stale", previousAnswers: [] });
+  });
+
+  describe("turn records", () => {
+    it("records a clean review as one successful attempt, on the session's model, linked to the session", async () => {
+      const { sessionId } = await aSettledChain(
+        nothingMore,
+        review(
+          { key: "storage", verdict: "reconfirm" },
+          { key: "sync", verdict: "reconfirm" },
+        ),
+        nothingMore,
+      );
+      const session = await getSession.run({ id: sessionId });
+
+      const reopened = (await treeBy(sessionId)).shape!;
+      await reopenDecision.run({ decisionId: reopened.id });
+      await answerOpenRound(sessionId, "A page, after all");
+
+      const latest = await findLatestTurn({
+        sessionId,
+        turnKind: "review-stale",
+      });
+      expect(latest).not.toBeNull();
+      const turn = await getTurn.run({ turnId: latest!.id });
+      expect(turn).toMatchObject({
+        sessionId,
+        turnKind: "review-stale",
+        model: session.model,
+        outcome: "succeeded",
+      });
+      expect(turn.runs).toHaveLength(1);
+      expect(turn.runs[0]!.attempts).toEqual([
+        expect.objectContaining({ attemptNumber: 1, kind: "success" }),
+      ]);
+      expect((await getSession.run({ id: sessionId })).staleReviewTurnId).toBe(
+        turn.id,
+      );
+    });
+
+    it("stops on a rate limit with its own kind and keeps the record", async () => {
+      const { sessionId } = await aSettledChain(
+        nothingMore,
+        rateLimitedTurn("review-stale", "The subscription pool is spent."),
+      );
+
+      const reopened = (await treeBy(sessionId)).shape!;
+      await reopenDecision.run({ decisionId: reopened.id });
+
+      await expect(
+        answerOpenRound(sessionId, "A page, after all"),
+      ).rejects.toThrow("The subscription pool is spent.");
+
+      const latest = await findLatestTurn({
+        sessionId,
+        turnKind: "review-stale",
+      });
+      expect(latest).not.toBeNull();
+      expect(latest!.outcome).toBe("rate-limited");
+      expect(latest!.runs[0]!.attempts).toEqual([
+        expect.objectContaining({
+          kind: "rate-limit",
+          reason: "The subscription pool is spent.",
+        }),
+      ]);
+      expect(
+        (await getSession.run({ id: sessionId })).staleReviewTurnId,
+      ).toBeNull();
+    });
   });
 });
 

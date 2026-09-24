@@ -38,6 +38,11 @@ import {
   runTurn,
   TurnRejected,
 } from "./turn.js";
+import {
+  startTurnRecorder,
+  TURN_SUCCEEDED,
+  type AttemptRecorder,
+} from "./turn-recorder.js";
 
 /**
  * The loose ends worth asking about: the ones the user could answer themselves.
@@ -136,6 +141,7 @@ export function supersessionRejectionReasons(input: {
 async function scan(
   session: SupersessionSession,
   conversationId: string | null,
+  recorder: AttemptRecorder | null | undefined,
 ): Promise<string | null> {
   const db = getDb();
 
@@ -164,21 +170,25 @@ async function scan(
 
   const turn = await askUntilAccepted<FindSupersededResult>({
     conversationId,
+    recorder,
     ask: async (attempt) =>
-      interviewer.findSuperseded({
-        kind: "find-superseded",
-        context: {
-          idea: session.idea,
-          title: session.title,
-          model: session.model,
-          answeringMode: session.answeringMode,
-          docsFolder: session.docsFolder,
-          conversationId: attempt.conversationId,
-          decisions: await decisionSnapshots(rows),
+      interviewer.findSuperseded(
+        {
+          kind: "find-superseded",
+          context: {
+            idea: session.idea,
+            title: session.title,
+            model: session.model,
+            answeringMode: session.answeringMode,
+            docsFolder: session.docsFolder,
+            conversationId: attempt.conversationId,
+            decisions: await decisionSnapshots(rows),
+          },
+          looseEndKeys: askedKeys,
+          rejectionReason: attempt.rejectionReason,
         },
-        looseEndKeys: askedKeys,
-        rejectionReason: attempt.rejectionReason,
-      }),
+        attempt.observer,
+      ),
     reasonsToRefuse: (result) =>
       supersessionRejectionReasons({
         askedKeys,
@@ -224,6 +234,12 @@ async function scan(
  * back at the start of a minute-long turn for a convenience they did not ask
  * for. The failure is handed back instead, for the caller to record once the
  * turn's own bookkeeping has finished writing.
+ *
+ * This runs nested inside the propose-round turn, not through `runTurn`, but
+ * it still gets its own `find-superseded` turn record: `startTurnRecorder` is
+ * used directly, and the recorder is closed here rather than by `runTurn`.
+ * Does nothing at all — not even a turn record — when the session has no
+ * loose end this could apply to.
  */
 export async function findSupersessionsForDone(input: {
   session: SupersessionSession;
@@ -232,11 +248,38 @@ export async function findSupersessionsForDone(input: {
   conversationId: string | null;
   failure: SupersessionFailure | null;
 }> {
+  const db = getDb();
+
+  const rows = await db
+    .select()
+    .from(schema.decisions)
+    .where(eq(schema.decisions.sessionId, input.session.id));
+
+  if (supersedableLooseEnds(rows).length === 0) {
+    return { conversationId: input.conversationId, failure: null };
+  }
+
+  const recorder = await startTurnRecorder({
+    sessionId: input.session.id,
+    turnKind: "find-superseded",
+    model: input.session.model,
+  });
+
   try {
-    return {
-      conversationId: await scan(input.session, input.conversationId),
-      failure: null,
-    };
+    const conversationId = await scan(
+      input.session,
+      input.conversationId,
+      recorder,
+    );
+    await recorder.finish(TURN_SUCCEEDED);
+    await db
+      .update(schema.sessions)
+      .set({
+        supersessionTurnId: recorder.turnId,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.sessions.id, input.session.id));
+    return { conversationId, failure: null };
   } catch (error) {
     const failure: SupersessionFailure =
       isInterviewerError(error) || error instanceof TurnRejected
@@ -246,6 +289,7 @@ export async function findSupersessionsForDone(input: {
             message:
               "The done proposal was accepted, but the check for loose ends a later decision already answered failed.",
           };
+    await recorder.finish(failure.code);
     return { conversationId: input.conversationId, failure };
   }
 }
@@ -277,7 +321,20 @@ export async function runSupersessionTurn(sessionId: string): Promise<void> {
   await runTurn({
     sessionId,
     failedMessage: "The check for superseded loose ends failed.",
-    take: async () =>
-      (await scan(session, session.conversationId)) ?? session.conversationId ?? "",
+    record: { turnKind: "find-superseded", model: session.model },
+    take: async (recorder) => {
+      const conversationId =
+        (await scan(session, session.conversationId, recorder)) ??
+        session.conversationId ??
+        "";
+      await db
+        .update(schema.sessions)
+        .set({
+          supersessionTurnId: recorder?.turnId ?? null,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.sessions.id, sessionId));
+      return conversationId;
+    },
   });
 }

@@ -6,10 +6,13 @@ import {
   scriptInterviewer,
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
+import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import breakIntoTickets from "./break-into-tickets.js";
 import createSession from "./create-session.js";
 import getSession from "./get-session.js";
+import getSpec from "./get-spec.js";
+import getTurn from "./get-turn.js";
 import listTickets from "./list-tickets.js";
 import synthesizeSpec from "./synthesize-spec.js";
 
@@ -363,6 +366,62 @@ describe("break-into-tickets", () => {
       expect(
         await getDb().select().from(schema.buildRecords),
       ).toEqual([]);
+    });
+  });
+
+  describe("turn records", () => {
+    it("records a clean breakdown as one successful attempt, on the session's model, linked to the spec", async () => {
+      const sessionId = await aConfirmedSessionWithSpec();
+      const session = await getSession.run({ id: sessionId });
+      scriptInterviewer([oneGoodTicket]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      const latest = await findLatestTurn({
+        sessionId,
+        turnKind: "break-into-tickets",
+      });
+      expect(latest).not.toBeNull();
+      const turn = await getTurn.run({ turnId: latest!.id });
+      expect(turn).toMatchObject({
+        sessionId,
+        turnKind: "break-into-tickets",
+        model: session.model,
+        outcome: "succeeded",
+      });
+      expect(turn.runs).toHaveLength(1);
+      expect(turn.runs[0]!.attempts).toEqual([
+        expect.objectContaining({ attemptNumber: 1, kind: "success" }),
+      ]);
+      expect(
+        (await getSpec.run({ sessionId })).spec?.ticketsTurnId,
+      ).toBe(turn.id);
+    });
+
+    it("records a cyclic blockedBy proposal as a refusal, then the accepted retry as a success", async () => {
+      const sessionId = await aConfirmedSessionWithSpec();
+      scriptInterviewer([
+        ticketsTurn([
+          { number: 1, slug: "one", blockedBy: [2] },
+          { number: 2, slug: "two", blockedBy: [1] },
+        ]),
+        oneGoodTicket,
+      ]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      const latest = await findLatestTurn({
+        sessionId,
+        turnKind: "break-into-tickets",
+      });
+      expect(latest).not.toBeNull();
+      expect(latest!.outcome).toBe("succeeded");
+      expect(
+        latest!.runs[0]!.attempts.map((attempt) => attempt.kind),
+      ).toEqual(["tree-rule-refusal", "success"]);
+      expect(latest!.runs[0]!.attempts[0]!.reason).toContain(
+        "blocking cycle",
+      );
     });
   });
 });
