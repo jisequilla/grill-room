@@ -89,14 +89,43 @@ restart: stop dev
 test:
     pnpm test
 
-# Browser smoke test: picks a free E2E_PORT when unset, so two worktrees running this at once don't collide
+# Browser smoke test: picks a free E2E_PORT when unset, so two worktrees running this at once don't collide.
+# Scoped to the "chromium" project (playwright.config.ts) so the slow, video-recording
+# "demo" project never runs here — use `just demo` for that.
 e2e:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -z "${E2E_PORT:-}" ]; then
       export E2E_PORT="$(node -e 'const s=require("net").createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})')"
     fi
-    pnpm test:e2e
+    pnpm exec playwright test --project=chromium
+
+# Record and compress the demo video: replays the `demo` scenario end to end with Playwright
+# video on, then shrinks the result into docs/media/demo.webm (target under 5 MB), replacing
+# any previous file. See e2e/demo.spec.ts for the walk and e2e/fixtures/ for its recording.
+demo:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v ffmpeg >/dev/null 2>&1; then
+      echo "demo: ffmpeg is not on PATH; install it before running 'just demo'." >&2
+      exit 1
+    fi
+    if [ -z "${E2E_PORT:-}" ]; then
+      export E2E_PORT="$(node -e 'const s=require("net").createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})')"
+    fi
+    rm -rf e2e/artifacts
+    pnpm exec playwright test --project=demo
+    raw="$(find e2e/artifacts -name '*.webm' -print -quit)"
+    if [ -z "$raw" ]; then
+      echo "demo: Playwright produced no video" >&2
+      exit 1
+    fi
+    mkdir -p ../docs/media
+    ffmpeg -y -i "$raw" \
+      -c:v libvpx-vp9 -crf 34 -b:v 0 -deadline good -cpu-used 2 -an \
+      ../docs/media/demo.webm
+    size=$(stat -f%z ../docs/media/demo.webm 2>/dev/null || stat -c%s ../docs/media/demo.webm)
+    echo "docs/media/demo.webm: ${size} bytes"
 
 typecheck:
     pnpm typecheck
