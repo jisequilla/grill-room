@@ -68,6 +68,7 @@ export async function scoutProjectCore(input: {
             {
               kind: "scout-project",
               context: {
+                sessionId: session.id,
                 idea: session.idea,
                 title: session.title,
                 model: SCOUT_MODEL,

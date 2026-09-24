@@ -125,6 +125,7 @@ export default defineAction({
               {
                 kind: "break-into-tickets",
                 context: {
+                  sessionId: session!.id,
                   idea: session!.idea,
                   title: session!.title,
                   model: session!.model,

@@ -301,6 +301,7 @@ export default defineAction({
             {
               kind: "propose-round",
               context: {
+                sessionId: session!.id,
                 idea: session!.idea,
                 title: session!.title,
                 model: session!.model,

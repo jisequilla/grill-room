@@ -80,6 +80,7 @@ export default defineAction({
               {
                 kind: "assess-readiness",
                 context: {
+                  sessionId: session.id,
                   idea: session.idea,
                   title: session.title,
                   model: session.model,

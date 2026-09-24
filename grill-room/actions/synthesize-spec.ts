@@ -120,6 +120,7 @@ export default defineAction({
               {
                 kind: "synthesize-spec",
                 context: {
+                  sessionId: session!.id,
                   idea: session!.idea,
                   title: session!.title,
                   model: session!.model,
