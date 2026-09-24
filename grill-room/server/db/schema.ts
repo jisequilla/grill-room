@@ -8,6 +8,7 @@ import {
 } from "@agent-native/core/db/schema";
 
 import {
+  ATTEMPT_KINDS,
   DEFAULT_PROJECT_SLUG_PATTERN,
   DECISION_ANSWER_KINDS,
   DECISION_DISPOSITION_TARGETS,
@@ -28,6 +29,8 @@ import {
  * server code can reach them from the schema it is already importing.
  */
 export {
+  ATTEMPT_KINDS,
+  type AttemptKind,
   DECISION_ANSWER_KINDS,
   type DecisionAnswerKind,
   DECISION_DISPOSITION_TARGETS,
@@ -134,6 +137,18 @@ export const sessions = table("gr_sessions", {
    * current one reads as absent. See {@link import("../readiness.js").StoredReadiness}.
    */
   readinessJson: text("readiness_json"),
+  /**
+   * The turn that produced the current readiness judgment, or null when none
+   * is linked. Not typed as a Drizzle reference — `gr_turns` itself
+   * references `gr_sessions`, and a reference back here would make the two
+   * tables' Drizzle types depend on each other. The `REFERENCES` constraint
+   * still exists at the database level; see `server/db/migrations.ts`.
+   */
+  readinessTurnId: text("readiness_turn_id"),
+  /** The turn of the most recent stale review, or null when none is linked. See `readinessTurnId`. */
+  staleReviewTurnId: text("stale_review_turn_id"),
+  /** The turn of the most recent supersession check, or null when none is linked. See `readinessTurnId`. */
+  supersessionTurnId: text("supersession_turn_id"),
   /** Where the current interviewer turn stands. See {@link SESSION_TURN_STATUSES}. */
   turnStatus: text("turn_status", { enum: SESSION_TURN_STATUSES })
     .notNull()
@@ -276,6 +291,10 @@ export const rounds = table(
     })
       .notNull()
       .default("open"),
+    /** The turn that proposed this round, or null for a round from before turn records existed. */
+    turnId: text("turn_id").references(() => turns.id, {
+      onDelete: "set null",
+    }),
     createdAt: text("created_at").notNull(),
     submittedAt: text("submitted_at"),
   },
@@ -333,6 +352,14 @@ export const specs = table("gr_specs", {
    * enough to mark them out of date.
    */
   ticketsGeneratedAt: text("tickets_generated_at"),
+  /** The turn that synthesized this spec, or null for a spec from before turn records existed. */
+  turnId: text("turn_id").references(() => turns.id, {
+    onDelete: "set null",
+  }),
+  /** The turn that broke this spec into tickets, or null for tickets from before turn records existed. */
+  ticketsTurnId: text("tickets_turn_id").references(() => turns.id, {
+    onDelete: "set null",
+  }),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -410,3 +437,97 @@ export const handoffs = table("gr_handoffs", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+/**
+ * One model turn: a call to the interviewer that can retry itself several
+ * times before the app accepts its result or gives up. See
+ * `server/turn-records.ts` for how these are created, appended to and read.
+ *
+ * `turnKind` is open text, not a closed enum: the six request kinds that run
+ * through `askUntilAccepted` today (`assess-readiness`, `propose-round`,
+ * `review-stale`, `find-superseded`, `synthesize-spec`, `break-into-tickets`)
+ * and any later kind both need no migration to get turn records.
+ */
+export const turns = table(
+  "gr_turns",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    turnKind: text("turn_kind").notNull(),
+    /** The interviewer model this turn ran on. */
+    model: text("model").notNull(),
+    startedAt: text("started_at").notNull(),
+    /** Set once the turn stops, whether it succeeded or was refused. */
+    completedAt: text("completed_at"),
+    /** `completedAt` minus `startedAt`, in milliseconds. Null while the turn is running. */
+    totalElapsedMs: integer("total_elapsed_ms"),
+    /**
+     * `"succeeded"`, or the failure code the turn stopped with — the same
+     * vocabulary `gr_sessions.turn_error_code` already uses (an interviewer
+     * error code, a `TurnRejected`'s code for an exhausted budget, or
+     * `"failed"`). Null while the turn is running.
+     */
+    outcome: text("outcome"),
+  },
+  (turnsTable) => ({
+    sessionIdx: index("gr_idx_turns_session").on(turnsTable.sessionId),
+  }),
+);
+
+/**
+ * One pass through the app's retry loop, belonging to a turn. The first run
+ * starts with the turn; each manual retry adds another. The rejection budget
+ * counter is per run, starting again at 1 each time.
+ */
+export const turnRuns = table(
+  "gr_turn_runs",
+  {
+    id: text("id").primaryKey(),
+    turnId: text("turn_id")
+      .notNull()
+      .references(() => turns.id, { onDelete: "cascade" }),
+    /** 1-based order within the turn. */
+    runNumber: integer("run_number").notNull(),
+    /** True for every run after the first: one the user started with a manual retry. */
+    manualRetry: boolean("manual_retry").notNull().default(false),
+    createdAt: text("created_at").notNull(),
+  },
+  (turnRunsTable) => ({
+    turnIdx: index("gr_idx_turn_runs_turn").on(turnRunsTable.turnId),
+    uniqueRunNumber: uniqueIndex("gr_idx_turn_runs_unique").on(
+      turnRunsTable.turnId,
+      turnRunsTable.runNumber,
+    ),
+  }),
+);
+
+/** One model call within a run. */
+export const turnAttempts = table(
+  "gr_turn_attempts",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => turnRuns.id, { onDelete: "cascade" }),
+    /** 1-based order within the run; matches the rejection budget counter. */
+    attemptNumber: integer("attempt_number").notNull(),
+    startedAt: text("started_at").notNull(),
+    /** Set once the attempt's model call returns or fails. Null while running. */
+    durationMs: integer("duration_ms"),
+    /** Set once the attempt completes. See {@link AttemptKind}. */
+    kind: text("kind", { enum: ATTEMPT_KINDS }),
+    /** One-line reason for anything that is not a success. */
+    reason: text("reason"),
+    /** The model's raw output, where there is one. */
+    rawOutput: text("raw_output"),
+  },
+  (turnAttemptsTable) => ({
+    runIdx: index("gr_idx_turn_attempts_run").on(turnAttemptsTable.runId),
+    uniqueAttemptNumber: uniqueIndex("gr_idx_turn_attempts_unique").on(
+      turnAttemptsTable.runId,
+      turnAttemptsTable.attemptNumber,
+    ),
+  }),
+);
