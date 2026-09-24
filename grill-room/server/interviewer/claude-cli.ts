@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 
 import { InterviewerError } from "./errors.js";
+import { observeCall, schemaIssuesReason, type CallResult } from "./observe.js";
 import { buildPrompt } from "./prompt.js";
 import { jsonSchemaFor, resultSchemas } from "./schemas.js";
 import type { ResultFor } from "./schemas.js";
@@ -12,6 +13,8 @@ import type {
   Interviewer,
   InterviewerRequest,
   InterviewerTurn,
+  ModelCallConversation,
+  ModelCallObserver,
   ProposeRoundRequest,
   ReviewStaleRequest,
   SynthesizeSpecRequest,
@@ -237,7 +240,7 @@ export function createClaudeCliInterviewer(
   async function attempt(
     request: InterviewerRequest,
     { resume, primed = false }: { resume: string | null; primed?: boolean },
-  ): Promise<InterviewerTurn<unknown>> {
+  ): Promise<CallResult<unknown>> {
     const prompt = buildPrompt(request, { primed });
     const outcome = await runCli({
       command,
@@ -263,6 +266,7 @@ export function createClaudeCliInterviewer(
         "malformed-output",
         "The interviewer returned output that is not JSON.",
         `${(error as Error).message}\n${outcome.stdout.slice(0, 2000)}`,
+        { rawOutput: outcome.stdout, reason: "The output is not JSON." },
       );
     }
 
@@ -278,11 +282,16 @@ export function createClaudeCliInterviewer(
         "malformed-output",
         "The interviewer returned no conversation id.",
         outcome.stdout.slice(0, 2000),
+        {
+          rawOutput: outcome.stdout,
+          reason: "The output carries no conversation id.",
+        },
       );
     }
 
     // Second validation: `--json-schema` constrains the model, it does not
     // guarantee the envelope carries anything usable.
+    const rawOutput = JSON.stringify(envelope.structured_output ?? null);
     const parsed = resultSchemas[request.kind].safeParse(
       envelope.structured_output,
     );
@@ -291,51 +300,106 @@ export function createClaudeCliInterviewer(
         "malformed-output",
         "The interviewer returned a result that does not match the expected shape.",
         JSON.stringify(parsed.error.issues).slice(0, 2000),
+        { rawOutput, reason: schemaIssuesReason(parsed.error.issues) },
       );
     }
 
-    return { result: parsed.data, conversationId: envelope.session_id };
+    return {
+      turn: { result: parsed.data, conversationId: envelope.session_id },
+      rawOutput,
+    };
   }
 
   // The result is validated against `resultSchemas[request.kind]` above, which
   // is what makes the cast at each method below sound.
   async function turn(
     request: InterviewerRequest,
+    observer: ModelCallObserver | undefined,
   ): Promise<InterviewerTurn<unknown>> {
+    const call = (
+      number: number,
+      conversation: ModelCallConversation,
+      run: () => Promise<CallResult<unknown>>,
+      fallsBack?: (error: unknown) => boolean,
+    ) =>
+      observeCall(
+        observer,
+        { requestKind: request.kind, call: number, conversation },
+        run,
+        fallsBack,
+      );
+
     const resume = request.context.conversationId;
-    if (!resume) return attempt(request, { resume: null });
+    if (!resume) {
+      return call(1, "new", () => attempt(request, { resume: null }));
+    }
 
     try {
-      return await attempt(request, { resume });
+      return await call(
+        1,
+        "resumed",
+        () => attempt(request, { resume }),
+        isLostConversation,
+      );
     } catch (error) {
       // A conversation that cannot be resumed must never lose the interview:
       // start a fresh one, primed with the full decision history. Only a plain
       // turn failure is retried — a missing CLI, a missing login or a rate
       // limit would fail identically, and malformed output is the model's
-      // answer rather than a lost conversation.
-      if (error instanceof InterviewerError && error.code === "failed") {
-        return attempt(request, { resume: null, primed: true });
+      // answer rather than a lost conversation. The observer hears the failed
+      // resume as a call of its own, so the extra call is never hidden.
+      if (isLostConversation(error)) {
+        return call(2, "primed-after-resume", () =>
+          attempt(request, { resume: null, primed: true }),
+        );
       }
       throw error;
     }
   }
 
   return {
-    proposeRound: (request: ProposeRoundRequest) =>
-      turn(request) as Promise<InterviewerTurn<ResultFor<"propose-round">>>,
-    reviewStale: (request: ReviewStaleRequest) =>
-      turn(request) as Promise<InterviewerTurn<ResultFor<"review-stale">>>,
-    findSuperseded: (request: FindSupersededRequest) =>
-      turn(request) as Promise<InterviewerTurn<ResultFor<"find-superseded">>>,
-    synthesizeSpec: (request: SynthesizeSpecRequest) =>
-      turn(request) as Promise<InterviewerTurn<ResultFor<"synthesize-spec">>>,
-    breakIntoTickets: (request: BreakIntoTicketsRequest) =>
-      turn(request) as Promise<
+    proposeRound: (request: ProposeRoundRequest, observer?: ModelCallObserver) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"propose-round">>
+      >,
+    reviewStale: (request: ReviewStaleRequest, observer?: ModelCallObserver) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"review-stale">>
+      >,
+    findSuperseded: (
+      request: FindSupersededRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"find-superseded">>
+      >,
+    synthesizeSpec: (
+      request: SynthesizeSpecRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"synthesize-spec">>
+      >,
+    breakIntoTickets: (
+      request: BreakIntoTicketsRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
         InterviewerTurn<ResultFor<"break-into-tickets">>
       >,
-    assessReadiness: (request: AssessReadinessRequest) =>
-      turn(request) as Promise<InterviewerTurn<ResultFor<"assess-readiness">>>,
+    assessReadiness: (
+      request: AssessReadinessRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"assess-readiness">>
+      >,
   };
+}
+
+/** A plain turn failure on resume: the conversation is lost, not the CLI, login or quota. */
+function isLostConversation(error: unknown): boolean {
+  return error instanceof InterviewerError && error.code === "failed";
 }
 
 /** The markers the adapter guarantees are absent from the child's environment. */

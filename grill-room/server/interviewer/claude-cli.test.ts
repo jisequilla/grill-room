@@ -11,6 +11,7 @@ import {
 } from "./claude-cli.js";
 import { DOCS_FOLDER_ADDENDUM, loadGrillingSkill } from "./instructions.js";
 import { jsonSchemaFor } from "./schemas.js";
+import type { ModelCallEnd, ModelCallObserver } from "./types.js";
 import {
   anAssessReadinessRequest,
   anAssessReadinessResult,
@@ -510,5 +511,255 @@ describe("when a conversation cannot be resumed", () => {
       ),
     ).rejects.toMatchObject({ code: "rate-limited" });
     expect(runner.invocations).toHaveLength(1);
+  });
+});
+
+/** An observer that records every call it hears about, in order. */
+function recordingObserver() {
+  const events: string[] = [];
+  const ended: ModelCallEnd[] = [];
+  const observer: ModelCallObserver = {
+    callStarted: (call) => {
+      events.push(`start ${call.call} ${call.conversation}`);
+    },
+    callEnded: (call) => {
+      events.push(`end ${call.call} ${call.outcome.kind}`);
+      ended.push(call);
+    },
+  };
+  return { observer, events, ended };
+}
+
+describe("telling each model call's outcome apart", () => {
+  const resumingRequest = aProposeRoundRequest({
+    context: { ...aProposeRoundRequest().context, conversationId: "gone-7" },
+  });
+
+  it("reports a clean call as one success carrying the raw output", async () => {
+    const runner = recordingRunner([ok(anEnvelope())]);
+    const { observer, events, ended } = recordingObserver();
+
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).proposeRound(
+      aProposeRoundRequest(),
+      observer,
+    );
+
+    expect(events).toEqual(["start 1 new", "end 1 success"]);
+    const [call] = ended;
+    expect(call.requestKind).toBe("propose-round");
+    expect(call.outcome).toEqual({
+      kind: "success",
+      rawOutput: JSON.stringify(aProposeRoundResult()),
+    });
+    expect(call.durationMs).toBeGreaterThanOrEqual(0);
+    expect(call.endedAt.getTime()).toBeGreaterThanOrEqual(
+      call.startedAt.getTime(),
+    );
+  });
+
+  it("tells the observer a call started before the command line runs", async () => {
+    const events: string[] = [];
+    const interviewer = createClaudeCliInterviewer({
+      runCli: () => {
+        events.push("spawn");
+        return Promise.resolve(ok(anEnvelope()));
+      },
+    });
+
+    await interviewer.proposeRound(aProposeRoundRequest(), {
+      callStarted: async () => {
+        await Promise.resolve();
+        events.push("started");
+      },
+      callEnded: () => {
+        events.push("ended");
+      },
+    });
+
+    expect(events).toEqual(["started", "spawn", "ended"]);
+  });
+
+  it("reports a failed resume as its own call, then the fresh primed call", async () => {
+    const runner = recordingRunner([
+      { stdout: "", stderr: "No conversation found with session ID", exitCode: 1 },
+      ok(anEnvelope({ session_id: "fresh-9" })),
+    ]);
+    const { observer, events, ended } = recordingObserver();
+
+    const turn = await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+    }).proposeRound(resumingRequest, observer);
+
+    expect(events).toEqual([
+      "start 1 resumed",
+      "end 1 resume-fallback",
+      "start 2 primed-after-resume",
+      "end 2 success",
+    ]);
+    expect(ended[0].outcome).toMatchObject({
+      kind: "resume-fallback",
+      reason: expect.stringContaining("exit code 1"),
+    });
+    expect(turn.conversationId).toBe("fresh-9");
+    // The resume fallback keeps its existing contract.
+    expect(valueOf(runner.invocations[0].args, "--resume")).toBe("gone-7");
+    expect(runner.invocations[1].args).not.toContain("--resume");
+  });
+
+  it("reports a fresh call that also fails as an error, after the fallback", async () => {
+    const runner = recordingRunner([
+      { stdout: "", stderr: "gone", exitCode: 1 },
+      { stdout: "", stderr: "still gone", exitCode: 1 },
+    ]);
+    const { observer, events, ended } = recordingObserver();
+
+    await expect(
+      createClaudeCliInterviewer({ runCli: runner.runCli }).proposeRound(
+        resumingRequest,
+        observer,
+      ),
+    ).rejects.toMatchObject({ code: "failed" });
+    expect(events).toEqual([
+      "start 1 resumed",
+      "end 1 resume-fallback",
+      "start 2 primed-after-resume",
+      "end 2 error",
+    ]);
+    expect(ended[1].outcome).toMatchObject({ kind: "error", code: "failed" });
+  });
+
+  it("reports a rate limit as a rate limit, with no fallback and no error", async () => {
+    const runner = recordingRunner([
+      { stdout: "", stderr: "Claude usage limit reached", exitCode: 1 },
+    ]);
+    const { observer, events, ended } = recordingObserver();
+
+    await expect(
+      createClaudeCliInterviewer({ runCli: runner.runCli }).proposeRound(
+        resumingRequest,
+        observer,
+      ),
+    ).rejects.toMatchObject({ code: "rate-limited" });
+    expect(events).toEqual(["start 1 resumed", "end 1 rate-limited"]);
+    expect(ended[0].outcome).toEqual({
+      kind: "rate-limited",
+      reason: expect.stringContaining("rate limited"),
+    });
+    expect(ended[0].outcome.kind).not.toBe("error");
+  });
+
+  it("reports schema-invalid output with the raw output and a one-line reason", async () => {
+    const invalid = { proposedDecisions: "not a list" };
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: invalid })),
+    ]);
+    const { observer, ended } = recordingObserver();
+
+    const error = await createClaudeCliInterviewer({ runCli: runner.runCli })
+      .proposeRound(aProposeRoundRequest(), observer)
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toMatchObject({
+      code: "malformed-output",
+      rawOutput: JSON.stringify(invalid),
+    });
+    expect(ended).toHaveLength(1);
+    const { outcome } = ended[0];
+    expect(outcome.kind).toBe("schema-invalid");
+    if (outcome.kind !== "schema-invalid") return;
+    expect(outcome.rawOutput).toBe(JSON.stringify(invalid));
+    expect(outcome.reason).toContain("proposedDecisions");
+    expect(outcome.reason).not.toContain("\n");
+  });
+
+  it("reports output that is not JSON as schema-invalid, keeping what came back", async () => {
+    const runner = recordingRunner([ok("Sure! Here is your round:")]);
+    const { observer, ended } = recordingObserver();
+
+    await expect(
+      createClaudeCliInterviewer({ runCli: runner.runCli }).proposeRound(
+        aProposeRoundRequest(),
+        observer,
+      ),
+    ).rejects.toMatchObject({ code: "malformed-output" });
+    expect(ended[0].outcome).toEqual({
+      kind: "schema-invalid",
+      rawOutput: "Sure! Here is your round:",
+      reason: "The output is not JSON.",
+    });
+  });
+
+  it("never reports a failed resume, a rate limit and schema-invalid output alike", async () => {
+    async function outcomeKinds(
+      request: ReturnType<typeof aProposeRoundRequest>,
+      outcomes: CliOutcome[],
+    ): Promise<string[]> {
+      const runner = recordingRunner(outcomes);
+      const { observer, ended } = recordingObserver();
+      await createClaudeCliInterviewer({ runCli: runner.runCli })
+        .proposeRound(request, observer)
+        .catch(() => undefined);
+      return ended.map((call) => call.outcome.kind);
+    }
+
+    const failedResume = await outcomeKinds(resumingRequest, [
+      { stdout: "", stderr: "No conversation found", exitCode: 1 },
+      ok(anEnvelope()),
+    ]);
+    const rateLimited = await outcomeKinds(aProposeRoundRequest(), [
+      { stdout: "", stderr: "429 Too Many Requests", exitCode: 1 },
+    ]);
+    const schemaInvalid = await outcomeKinds(aProposeRoundRequest(), [
+      ok(anEnvelope({ structured_output: { proposedDecisions: 3 } })),
+    ]);
+
+    expect(failedResume).toEqual(["resume-fallback", "success"]);
+    expect(rateLimited).toEqual(["rate-limited"]);
+    expect(schemaInvalid).toEqual(["schema-invalid"]);
+  });
+
+  it("keeps every invocation guarantee while an observer is listening", async () => {
+    const runner = recordingRunner([ok(anEnvelope())]);
+
+    await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+      env: { PATH: "/usr/bin", CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli" },
+    }).proposeRound(
+      aProposeRoundRequest({
+        context: {
+          ...aProposeRoundRequest().context,
+          model: "opus",
+          conversationId: "session-7",
+        },
+      }),
+      recordingObserver().observer,
+    );
+
+    const [invocation] = runner.invocations;
+    expect(valueOf(invocation.args, "--allowed-tools")).toBe("");
+    expect(valueOf(invocation.args, "--model")).toBe("opus");
+    expect(valueOf(invocation.args, "--resume")).toBe("session-7");
+    expect(
+      JSON.parse(valueOf(invocation.args, "--json-schema") as string),
+    ).toEqual(jsonSchemaFor("propose-round"));
+    for (const marker of CLEARED_ENVIRONMENT_MARKERS) {
+      expect(invocation.env).not.toHaveProperty(marker);
+    }
+  });
+
+  it("fails the method when the observer itself fails", async () => {
+    const runner = recordingRunner([ok(anEnvelope())]);
+
+    await expect(
+      createClaudeCliInterviewer({ runCli: runner.runCli }).proposeRound(
+        aProposeRoundRequest(),
+        {
+          callStarted: () => {
+            throw new Error("could not record the attempt");
+          },
+        },
+      ),
+    ).rejects.toThrow("could not record the attempt");
+    expect(runner.invocations).toHaveLength(0);
   });
 });
