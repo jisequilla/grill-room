@@ -11,21 +11,13 @@ import { answerOwnText, chooseScenario, createSession } from "./support";
  * the same name drives the same five turns through the action boundary;
  * this walks the same story through the UI.
  *
- * The ticket asks this to check the what-changed digest and its attempt
- * log, but neither is reachable here: `sessions.$sessionId.tsx` computes
- * `lastSubmittedAt` (what the digest treats as "already seen") from every
- * submitted round, including the one that answers the reopened decision
- * itself — and that round's own submission is what runs the stale review
- * in the first place. Its `submittedAt` is always later than the review's
- * `reopenedAt`, so the digest — and the review-stale turn's attempt log,
- * which the digest is the only place in the UI that shows — hides on the
- * same request that would first make it true. Confirmed against the
- * running app (`get-tree` and `list-rounds` after this exact sequence);
- * out of this ticket's file boundary to fix (it is route logic, not a
- * component or a missing `data-testid`). Flagged in the PR; this test
- * checks the review's effects that are actually visible instead: the
- * reconfirmed dependent stays settled unchanged, and the re-asked one comes
- * back as an open round under its new question.
+ * The round that reanswers the reopened root is the same `request-next-round`
+ * call that runs the stale review (`server/stale-review.ts`), so the digest
+ * must already be showing by the time that round's submission response
+ * lands — not one submission later. That used to be exactly backwards (see
+ * `app/lib/review-digest.ts`'s `reviewCompletedAt`, gr-pcd), which is why
+ * this checks the digest right there, immediately after that submission,
+ * rather than after some later round.
  */
 test("reopening a settled decision runs its stale review and re-asks the affected dependent", async ({
   page,
@@ -77,6 +69,39 @@ test("reopening a settled decision runs its stale review and re-asks the affecte
   await expect(cards.first()).toContainText("What shape should this take?");
   await answerOwnText(cards.first(), "A page, after all.");
   await page.getByRole("button", { name: "Submit round" }).click();
+
+  // ---- The what-changed digest shows on this very submission ---------------
+  // It answered the reopened root and ran the stale review in the same
+  // request-next-round call, so this is the moment the digest first has
+  // something to show — not a submission later (gr-pcd).
+  const digest = page.getByTestId("review-digest");
+  await expect(digest).toBeVisible();
+  await expect(digest).toContainText("What changed");
+  await expect(digest).toContainText("A workspace.");
+  await expect(digest).toContainText("A page, after all.");
+
+  await expect(digest).toContainText("Re-asked");
+  await expect(digest).toContainText("How does a single page stay current?");
+  await expect(digest).toContainText(
+    "A single page syncs differently than a workspace.",
+  );
+
+  // The reconfirmed dependent starts collapsed behind its own count...
+  const reconfirmedTrigger = digest.getByRole("button", {
+    name: "1 reconfirmed",
+  });
+  await expect(reconfirmedTrigger).toBeVisible();
+  await expect(digest).not.toContainText(
+    "Storage still follows from the shape either way.",
+  );
+  // ...and expanding it reads the interviewer's reason.
+  await reconfirmedTrigger.click();
+  await expect(digest).toContainText(
+    "Storage still follows from the shape either way.",
+  );
+
+  // The review-stale turn's own attempt log, collapsed beside the digest.
+  await expect(digest.getByTestId("attempt-log-trigger")).toBeVisible();
 
   // ---- The stale review ran: one dependent reconfirmed, unchanged ----------
   await expect(rootRow).toHaveAttribute("data-state", "settled");

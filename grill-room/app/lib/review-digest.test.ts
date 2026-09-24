@@ -4,8 +4,10 @@ import type { DecisionAnswerKind, TreeDecision } from "@/lib/decisions";
 import {
   classifyHistoryEntry,
   mostRecentReAskBefore,
+  reviewCompletedAt,
   reviewEvents,
   roundCardAnchorId,
+  visibleReviewEvents,
 } from "@/lib/review-digest";
 
 type HistoryEntry = TreeDecision["previousAnswers"][number];
@@ -291,6 +293,76 @@ describe("reviewEvents", () => {
       answer: null,
     });
     expect(reviewEvents([d])).toEqual([]);
+  });
+});
+
+describe("reviewCompletedAt and visibleReviewEvents", () => {
+  // The exact shape `reopen-stale-review.spec.ts` drives through the UI: `d`
+  // is reopened at T1, reanswered by the round submitted at T2 (so
+  // `lastSubmittedAt` reads T2 the moment that submission's response lands),
+  // and the stale review it triggers records its dependent's verdict at T3,
+  // strictly after that same submission.
+  function reopenedWithReview(): ReturnType<typeof reviewEvents> {
+    const d = decision({
+      id: "d",
+      reopenedAt: "T1",
+      previousAnswers: [history("old-d", "own-answer", "T1")],
+      answer: { text: "new-d", kind: "own-answer" },
+    });
+    const dependent = decision({
+      id: "e",
+      dependsOn: ["d"],
+      previousAnswers: [
+        history("e-old", "own-answer", "T3", "doesn't fit anymore", "e"),
+      ],
+      answer: null,
+    });
+    return reviewEvents([d, dependent]);
+  }
+
+  it("reads a reviewed event's completed time off its latest verdict, not its reopen", () => {
+    const [event] = reopenedWithReview();
+    expect(reviewCompletedAt(event!)).toBe("T3");
+  });
+
+  it("falls back to the reopen time when nothing was reviewed", () => {
+    const d = decision({
+      id: "d",
+      reopenedAt: "T1",
+      previousAnswers: [history("old-d", "own-answer", "T1")],
+      answer: { text: "new-d", kind: "own-answer" },
+    });
+    const [event] = reviewEvents([d]);
+    expect(reviewCompletedAt(event!)).toBe("T1");
+  });
+
+  it("is visible on the very submission that answered the reopened decision and triggered the review", () => {
+    const events = reopenedWithReview();
+    // T2 is the round that reanswered `d` and ran the review — the request
+    // that should first show the digest, not hide it.
+    const visible = visibleReviewEvents(events, {
+      lastSubmittedAt: "T2",
+      dismissedReviewedAt: null,
+    });
+    expect(visible).toEqual(events);
+  });
+
+  it("is hidden once dismissed", () => {
+    const events = reopenedWithReview();
+    const visible = visibleReviewEvents(events, {
+      lastSubmittedAt: "T2",
+      dismissedReviewedAt: reviewCompletedAt(events[0]!),
+    });
+    expect(visible).toEqual([]);
+  });
+
+  it("is hidden again after a later, unrelated round is submitted", () => {
+    const events = reopenedWithReview();
+    const visible = visibleReviewEvents(events, {
+      lastSubmittedAt: "T4",
+      dismissedReviewedAt: null,
+    });
+    expect(visible).toEqual([]);
   });
 });
 
