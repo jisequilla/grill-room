@@ -1811,7 +1811,7 @@ describe("propose-round turn records", () => {
     expect(errored.outcome).toBe("failed");
     expect(errored.runs[0]!.attempts).toEqual([
       expect.objectContaining({
-        kind: null,
+        kind: "error",
         reason: "failed: The turn died.",
         rawOutput: null,
       }),
@@ -1856,6 +1856,9 @@ describe("propose-round turn records", () => {
         rawOutput: null,
       }),
     ]);
+    // Only a running attempt has no kind: every completed one carries one.
+    const running = midTurn!.runs[0]!.attempts[1]!;
+    expect([running.kind, running.durationMs]).toEqual([null, null]);
     expect(
       (await proposalTurn(session.id)).runs[0]!.attempts.map(
         (attempt) => attempt.kind,

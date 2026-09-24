@@ -87,14 +87,19 @@ export const DEFAULT_PROJECT_SLUG_PATTERN = "{slug}";
  * How one model-call attempt within a turn's run resolved. `success` is what
  * a turn's winning attempt gets. `tree-rule-refusal` is the only kind that
  * counts against the rejection budget and retries automatically; the rest
- * stop the turn for a manual retry. Closed list, unlike a turn's own kind:
- * every turn kind produces attempts from this same fixed vocabulary.
+ * stop the turn for a manual retry. `error` is an interviewer fault (a
+ * missing CLI, a lost login, any other failed call), kept apart from
+ * `rate-limit` so exhausting the shared subscription is never read as a
+ * defect. An attempt with no kind is still running. Closed list, unlike a
+ * turn's own kind: every turn kind produces attempts from this same fixed
+ * vocabulary.
  */
 export const ATTEMPT_KINDS = [
   "tree-rule-refusal",
   "schema-invalid",
   "resume-fallback",
   "rate-limit",
+  "error",
   "success",
 ] as const;
 export type AttemptKind = (typeof ATTEMPT_KINDS)[number];

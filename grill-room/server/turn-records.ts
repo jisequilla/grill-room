@@ -129,15 +129,13 @@ export async function startAttempt(
 /**
  * Complete an attempt when its model call returns or fails: its kind, the
  * one-line reason for anything that is not a success, the raw output where
- * there is one, and its duration since it started. A null kind is a call that
- * failed outside the attempt vocabulary — an interviewer error such as a
- * missing CLI — and carries its reason like any other failure. Does nothing if the
+ * there is one, and its duration since it started. Does nothing if the
  * attempt id is not found, so a caller racing a database reset never throws
  * on cleanup.
  */
 export async function completeAttempt(input: {
   attemptId: string;
-  kind: AttemptKind | null;
+  kind: AttemptKind;
   reason?: string | null;
   rawOutput?: string | null;
 }): Promise<void> {

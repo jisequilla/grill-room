@@ -46,7 +46,7 @@ export interface TurnRecorder extends AttemptRecorder {
 
 /** How one model call's outcome is stored as an attempt. */
 function attemptOf(outcome: ModelCallOutcome): {
-  kind: AttemptKind | null;
+  kind: AttemptKind;
   reason: string | null;
   rawOutput: string | null;
 } {
@@ -68,10 +68,8 @@ function attemptOf(outcome: ModelCallOutcome): {
         rawOutput: null,
       };
     case "error":
-      // No attempt kind names an interviewer fault; the reason says what it
-      // was and the turn's outcome carries its code.
       return {
-        kind: null,
+        kind: "error",
         reason: `${outcome.code}: ${outcome.reason}`,
         rawOutput: null,
       };
