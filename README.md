@@ -70,6 +70,15 @@ registers a repository for session exports from the command line, root
 defaulting to the current git top-level. `just --list` shows every recipe, and
 `grill-room/DEVELOPING.md` covers the rest.
 
+## Demo
+
+[`docs/media/demo.webm`](docs/media/demo.webm) — a recording of one real
+interview (idea, project scout, rounds, a reopen and its stale review, done,
+spec, tickets, export) walked through the UI at a watchable pace. Regenerate
+it with `just demo` after a UI change; it replays the committed recording in
+`grill-room/e2e/fixtures/` through the fake interviewer, so it costs no model
+calls.
+
 ## Attribution
 
 The skills under `.claude/skills/` are unmodified copies from

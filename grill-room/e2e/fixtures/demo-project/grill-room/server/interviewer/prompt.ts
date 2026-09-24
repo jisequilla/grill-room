@@ -1,0 +1,669 @@
+import { interviewerInstructions, loadSpecTemplate } from "./instructions.js";
+import {
+  MAX_READY_UNKNOWNS,
+  MAX_SCOUT_CURRENT_STATE,
+  MAX_SCOUT_PROPOSED_DECISIONS,
+} from "./schemas.js";
+import type {
+  AssessReadinessRequest,
+  DecisionSnapshot,
+  InterviewContext,
+  InterviewerRequest,
+  ProjectServerFacts,
+  ScoutProjectRequest,
+  ScoutReportForReadiness,
+} from "./types.js";
+
+/**
+ * Every turn carries the full instructions and the full decision history, even
+ * when the conversation is resumed. Resume then buys continuity of the model's
+ * own reasoning rather than the state itself, which is what makes the fresh
+ * fallback after a failed resume equivalent rather than degraded.
+ */
+
+/**
+ * The prompt is passed as a command line argument, and the grilling skill opens
+ * with `---`. Without a line ahead of it the argument parser reads the whole
+ * prompt as an unknown option and the turn fails before it starts, so the
+ * prompt always opens with this framing line.
+ */
+const OPENING_LINE =
+  "You are conducting a grilling interview inside the Grill Room app. Your instructions follow verbatim, then the state of the interview, then your task for this turn.";
+
+function renderDecision(decision: DecisionSnapshot): string {
+  const lines = [
+    `- [${decision.key}] (${decision.state}, added by ${decision.introducedBy}) ${decision.title}`,
+  ];
+  if (decision.repo) {
+    lines.push(
+      `  from the repo (${decision.repo.source}, cited at ${decision.repo.citation}): ${decision.repo.statement}`,
+    );
+  }
+  if (decision.body) lines.push(`  question: ${decision.body}`);
+  if (decision.choices.length > 0) {
+    lines.push("  choices:");
+    for (const [index, choice] of decision.choices.entries()) {
+      const recommended =
+        index === decision.recommendedChoice ? " (you recommended this one)" : "";
+      lines.push(
+        `    ${index}. ${choice.label}${recommended}${
+          choice.rationale ? ` — ${choice.rationale}` : ""
+        }`,
+      );
+    }
+  }
+  if (decision.recommendedAnswer) {
+    lines.push(`  your recommendation was: ${decision.recommendedAnswer}`);
+  }
+  lines.push(
+    `  depends on: ${decision.dependsOn.length > 0 ? decision.dependsOn.join(", ") : "nothing"}`,
+  );
+  lines.push(
+    decision.answer
+      ? `  answer (${decision.answer.kind}): ${decision.answer.text}`
+      : "  answer: none yet",
+  );
+  for (const previous of decision.previousAnswers) {
+    lines.push(`  previously (${previous.kind}): ${previous.text}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * The session's project, as its scout report describes it: context for the
+ * interview, never decisions. Nothing at all without a report.
+ */
+function renderProjectContext(context: InterviewContext): string[] {
+  const project = context.projectContext;
+  if (!project) return [];
+
+  const currentState =
+    project.currentState.length > 0
+      ? project.currentState
+          .map(
+            (item) =>
+              `- (${item.status}) ${item.summary} — ${item.citations.join(", ")}`,
+          )
+          .join("\n")
+      : "(none)";
+  const dropped =
+    project.droppedDecisions.length > 0
+      ? project.droppedDecisions
+          .map(
+            (decision) =>
+              `- [${decision.key}] (${decision.source}, cited at ${decision.citation}) ${decision.title}: ${decision.statement} — ${decision.reason}`,
+          )
+          .join("\n")
+      : "(none)";
+
+  return [
+    "## The project",
+    "",
+    "The session's project was scouted for this idea.",
+    project.stale
+      ? `The scout report is stale: it was read at commit ${project.commitRead ?? "(no commits yet)"}, and the project or the idea has changed since. Use it as context, but weigh it accordingly.`
+      : `The scout report is current, read at commit ${project.commitRead ?? "(no commits yet)"}.`,
+    "",
+    "What already exists relative to the idea (built, partial, or a gap):",
+    "",
+    currentState,
+    "",
+    "Do not ask the user about ground this already settles; build on what is",
+    "built, and ask about the gaps.",
+    "",
+    "Repo decisions the user dropped. They are context, not constraints: the",
+    "user chose not to enforce them, so a decision may depart from them, but",
+    "say so when one does.",
+    "",
+    dropped,
+    "",
+  ];
+}
+
+function renderContext(context: InterviewContext): string {
+  const decisions =
+    context.decisions.length > 0
+      ? context.decisions.map(renderDecision).join("\n")
+      : "(none yet: this is the first round)";
+  const hasRepoDecisions = context.decisions.some(
+    (decision) => decision.introducedBy === "repo",
+  );
+
+  return [
+    "## The session",
+    "",
+    `Title: ${context.title ?? "(untitled)"}`,
+    `Answering mode: ${
+      context.answeringMode === "one-at-a-time"
+        ? "one question at a time — propose at most one decision with `ask` true"
+        : "whole round — ask the entire frontier at once"
+    }`,
+    ...(context.docsFolder
+      ? [`Docs folder (your working directory, read only): ${context.docsFolder}`]
+      : []),
+    "",
+    "The idea being grilled, in the user's words:",
+    "",
+    context.idea,
+    "",
+    ...renderProjectContext(context),
+    "## The design tree so far",
+    "",
+    decisions,
+    ...(hasRepoDecisions
+      ? [
+          "",
+          "Decisions added by `repo` are choices the project has already made,",
+          "which the user kept from the scout report. They are the project's",
+          "constraints: while settled, never ask one again and never propose a",
+          "decision that contradicts it. New decisions may depend on them by",
+          "key, like any settled decision. Only the user can change one, by",
+          "reopening it; a reopened repo decision is asked like any other, and",
+          "its answer is a deliberate change to the project.",
+        ]
+      : []),
+  ].join("\n");
+}
+
+function renderRetry(rejectionReason: string | null): string {
+  if (!rejectionReason) return "";
+  return [
+    "",
+    "## Your previous answer was rejected",
+    "",
+    rejectionReason,
+    "",
+    "Produce a corrected result. Do not repeat the rejected structure.",
+  ].join("\n");
+}
+
+function renderTask(
+  request: Exclude<
+    InterviewerRequest,
+    AssessReadinessRequest | ScoutProjectRequest
+  >,
+): string {
+  switch (request.kind) {
+    case "propose-round": {
+      const answers =
+        request.latestAnswers.length > 0
+          ? request.latestAnswers
+              .map(
+                (answer) =>
+                  `- [${answer.decisionKey}] (${answer.kind}): ${answer.text}`,
+              )
+              .join("\n")
+          : "(nothing submitted yet)";
+
+      const added =
+        request.userAddedDecisions.length > 0
+          ? request.userAddedDecisions
+              .map((added) => `- [${added.key}] ${added.title}: ${added.body}`)
+              .join("\n")
+          : "(none)";
+
+      return [
+        "## What the user just submitted",
+        "",
+        answers,
+        "",
+        "## Decisions the user added themselves",
+        "",
+        added,
+        "",
+        "## Your task: propose the next round",
+        "",
+        "Recompute the frontier from the answers above and return:",
+        "",
+        "- `proposedDecisions`: the decisions to add to the tree. Set `ask` true",
+        "  for those whose prerequisites are all settled and that belong in this",
+        "  round; set `ask` false for decisions that belong in the tree now but",
+        "  must wait for a prerequisite. Give each a stable `key` that is not",
+        "  already used, a `choices` entry per option with its own `rationale`,",
+        "  a `recommendedChoice` index naming the one you recommend (or null),",
+        "  and a `recommendedAnswer` the user can accept in one action.",
+        "- `pushBackResponses`: one entry for every answer above whose kind is",
+        "  `pushed-back`. Withdraw the decision, replace it with a different one",
+        "  (naming the replacement's key, which must be in `proposedDecisions`),",
+        "  or restructure the part of the tree it sat in. Re-asking the same",
+        "  question unchanged is rejected.",
+        "- `userDecisionPlacements`: one entry for each decision the user added,",
+        "  placed in the tree with its dependencies, reusing the user's key.",
+        "- `done`: null unless the frontier is genuinely empty and nothing is",
+        "  left silently assumed, in which case summarise every settled decision.",
+        "",
+        "An answer of `unknown`, `deferred` or `prototype-flagged` does not settle",
+        "its decision: treat it as an open prerequisite and react to it, rather",
+        "than moving past it.",
+      ].join("\n");
+    }
+
+    case "review-stale":
+      return [
+        "## Your task: review the stale decisions",
+        "",
+        `The user reopened [${request.reopenedDecisionKey}] and changed their`,
+        "answer. Every decision below sat downstream of it and is now in doubt.",
+        "",
+        `Stale decisions, in the order to report them: ${request.staleDecisionKeys.join(", ")}`,
+        "",
+        "Return one review per stale decision, in that order. For each, judge",
+        "whether the new answer actually affects it:",
+        "",
+        "- `reconfirm` when the old answer still holds. Leave the question fields",
+        "  null, the choices empty and `recommendedChoice` null; give the reason",
+        "  it still holds.",
+        "- `re-ask` when it does not. Supply an updated `title`, `body`, any",
+        "  `choices` — each with its own `rationale` — a `recommendedChoice`",
+        "  index naming the one you recommend (or null), and a",
+        "  `recommendedAnswer` that takes the new answer into account.",
+        "",
+        "Do not re-ask a decision merely because it is downstream. Reconfirming",
+        "what still holds is the point of this step.",
+      ].join("\n");
+
+    case "find-superseded":
+      return [
+        "## Your task: find the loose ends a later decision already answered",
+        "",
+        "Every decision below marked with a loose-end answer was left open by the",
+        "user at the time. The interview has moved on since, and some of them may",
+        "already be answered by a decision that settled later, under a different",
+        "question.",
+        "",
+        `Loose ends to judge: ${request.looseEndKeys.join(", ")}`,
+        "",
+        "Return one entry in `supersessions` for each loose end above that a",
+        "settled decision in the tree fully answers, naming that decision in",
+        "`answeredByKey`, the answer to record on the loose end in `answer`, in",
+        "the loose end's own terms, and in `reason` which decision answers it and",
+        "why. Leave out every loose end you are not sure about; an empty list is",
+        "the right answer when nothing has been superseded.",
+        "",
+        "Be conservative. A partial overlap is not a supersession: the settled",
+        "decision must answer the whole of the question the loose end asks, not",
+        "merely touch on it. Never invent an answer no settled decision carries —",
+        "the user will see it as something they already decided.",
+      ].join("\n");
+
+    case "synthesize-spec": {
+      const outOfScope =
+        request.outOfScope.length > 0
+          ? request.outOfScope.map((item) => `- ${item}`).join("\n")
+          : "(none)";
+      const openQuestions =
+        request.openQuestions.length > 0
+          ? request.openQuestions.map((item) => `- ${item}`).join("\n")
+          : "(none)";
+      const reopenedRepo =
+        request.reopenedRepoDecisions.length > 0
+          ? [
+              "- These decisions the project had already made were reopened in",
+              "  the interview and changed. State each one, in Implementation",
+              "  Decisions, as a deliberate change to the project: what the",
+              "  project held, where it was recorded, and what replaces it.",
+              "",
+              request.reopenedRepoDecisions
+                .map(
+                  (decision) =>
+                    `  - [${decision.key}] ${decision.title} (${decision.source}, cited at ${decision.citation}): the project held "${decision.replacedStatement}"; the interview changed it to "${decision.answer}".`,
+                )
+                .join("\n"),
+              "",
+            ]
+          : [];
+
+      return [
+        "## Your task: synthesize the spec",
+        "",
+        "The interview is finished and confirmed. Write the spec from the settled",
+        "decisions above. Do not interview and do not ask questions.",
+        "",
+        "Follow this template exactly: its sections, its order, and its rules.",
+        "",
+        loadSpecTemplate().trimEnd(),
+        "",
+        "Further rules for this app:",
+        "",
+        "- There is no codebase to explore and no test seams to negotiate. Base",
+        "  the spec only on the decisions above.",
+        "- The user stories list must be extremely extensive.",
+        "- No file paths and no code snippets.",
+        "- These loose ends were moved out of scope; they belong in Out of Scope:",
+        "",
+        outOfScope,
+        "",
+        "- These were kept as named open questions; they belong in Further Notes:",
+        "",
+        openQuestions,
+        "",
+        ...reopenedRepo,
+        "Return the whole spec as markdown in `markdown`, starting at the",
+        "`## Problem Statement` heading. Do not wrap it in a code fence.",
+      ].join("\n");
+    }
+
+    case "break-into-tickets":
+      return [
+        "## Your task: break the spec into tickets",
+        "",
+        "Here is the finished spec:",
+        "",
+        request.specMarkdown,
+        "",
+        "Break it into implementation tickets, each sized so that one agent can",
+        "complete it. Number them from 1 in the order they should be built. Give",
+        "each a short kebab-case `slug`, a title, and a body that states what to",
+        "build and how it will be judged. In `blockedBy`, list the numbers of the",
+        "tickets that must land first; leave it empty for tickets that can start",
+        "at once. Every number in `blockedBy` must be a ticket in this list, and",
+        "the blocking relation must not form a cycle.",
+      ].join("\n");
+  }
+}
+
+/**
+ * The readiness judge's opening line. Like {@link OPENING_LINE}, it keeps the
+ * prompt from starting with anything the argument parser could read as an
+ * option.
+ */
+const READINESS_OPENING_LINE =
+  "You are judging, inside the Grill Room app, whether an idea is ready for a grilling interview. You are not interviewing: you read the idea once and report on it.";
+
+/**
+ * The scout report a readiness judge reads, rendered the same way whether it
+ * is current or stale: current state grouped loosely and proposed repo
+ * decisions with their disposition, both cited, so the judge can turn them
+ * into repo-sourced evidence.
+ */
+function renderReadinessScoutReport(
+  report: ScoutReportForReadiness | null,
+): string[] {
+  if (!report) {
+    return [
+      "## The project",
+      "",
+      "This session has no current scout report of its project (no project is",
+      "registered, or none has been scouted yet). Every evidence item you",
+      "return must be sourced from the idea.",
+      "",
+    ];
+  }
+
+  const currentState =
+    report.currentState.length > 0
+      ? report.currentState
+          .map(
+            (item) =>
+              `- (${item.status}) ${item.summary} — ${item.citations.join(", ")}`,
+          )
+          .join("\n")
+      : "(none)";
+  const proposedDecisions =
+    report.proposedDecisions.length > 0
+      ? report.proposedDecisions
+          .map(
+            (decision) =>
+              `- [${decision.key}] (${decision.source}, ${decision.disposition} by the user, cited at ${decision.citation}) ${decision.title}: ${decision.statement} — ${decision.reason}`,
+          )
+          .join("\n")
+      : "(none)";
+
+  return [
+    "## The project's scout report",
+    "",
+    report.stale
+      ? `This report is stale: it no longer matches the project's current commit or the current idea. Its commit was ${report.commitRead ?? "(no commits yet)"}. Use it for context, but weigh it accordingly.`
+      : `This report is current, read at commit ${report.commitRead ?? "(no commits yet)"}.`,
+    "",
+    "Current state relative to the idea:",
+    "",
+    currentState,
+    "",
+    "Proposed repo decisions bearing on the idea:",
+    "",
+    proposedDecisions,
+    "",
+    "Use the current state and the proposed decisions above as repo evidence:",
+    "an evidence item drawn from one of them has `source` `repo` and a",
+    "`citation` copied exactly from the item it came from. Never invent a",
+    "citation, and never give a repo item a citation you did not read above.",
+    "",
+  ];
+}
+
+/**
+ * The readiness judge is not an interview turn, so it carries none of the
+ * grilling method: only the idea, the session's scout report when it has one,
+ * the rule the app checks the verdict against, and, when the session has one,
+ * the docs folder it may read for context.
+ */
+function buildReadinessPrompt(request: AssessReadinessRequest): string {
+  const { context } = request;
+  return [
+    READINESS_OPENING_LINE,
+    "",
+    "## The idea, in the user's words",
+    "",
+    `Title: ${context.title ?? "(untitled)"}`,
+    "",
+    context.idea,
+    "",
+    ...(context.docsFolder
+      ? [
+          "## The docs folder",
+          "",
+          `The session has a read-only docs folder, which is your working directory: ${context.docsFolder}`,
+          "You may read it to understand what the idea refers to. Never modify",
+          "anything, and never read outside it. Evidence from the idea still",
+          "comes only from the idea's own words: the folder can explain an item,",
+          "it cannot add one.",
+          "",
+        ]
+      : []),
+    ...renderReadinessScoutReport(request.scoutReport),
+    "## Your task: judge whether the idea is ready to grill",
+    "",
+    "A grilling interview settles the design decisions of one buildable thing.",
+    "It fails when the idea names nothing to build: asked to grill a process,",
+    "the interviewer can only ask about methodology. Return:",
+    "",
+    "- `evidence`: facts about the world *other than the objective* — a",
+    "  constraint, a user, an existing system, an observed problem. Each item",
+    "  is `{ text, source, citation }`. When `source` is `idea`, `text` is",
+    "  quoted in the idea's own words and `citation` is null. When `source` is",
+    "  `repo`, `text` is drawn from the scout report's current state or",
+    "  proposed decisions above and `citation` is copied from that item. A",
+    "  sentence that only states what to build, or restates the objective in",
+    "  other words, is never evidence, even quoted verbatim, whatever its",
+    "  source. Never paraphrase into something the idea or the report does",
+    "  not say, and never invent a fact or a citation. An idea that is only",
+    "  its goal, scouted against a project with nothing relevant, has an",
+    "  empty evidence list.",
+    "- `objective`: the single buildable thing the idea is after, in one",
+    "  sentence, or null when it names none.",
+    "- `objectiveIsProcess`: true when that objective is a process rather than",
+    "  a thing — to evaluate, decide how, compare, research, or define a",
+    "  method. False when there is no objective.",
+    "- `expectedOutcome`: what exists once the objective is done, or null when",
+    "  the idea does not say.",
+    "- `unknowns`: the open questions the idea raises that an interview would",
+    "  have to settle before building could start.",
+    "- `verdict`: `ready` only when all three hold — at least one evidence",
+    "  item, a non-null objective that is not process, and at most",
+    `  ${MAX_READY_UNKNOWNS} unknowns. Otherwise \`not-ready\`.`,
+    "- `missing`: what the idea needs before it is worth grilling, each item",
+    "  naming one gap the user could fill by editing the idea. Empty when the",
+    "  verdict is `ready` and nothing is missing. Name gaps only; do not",
+    "  rewrite the idea.",
+    renderRetry(request.rejectionReason),
+  ]
+    .join("\n")
+    .trimEnd();
+}
+
+/** The scout's opening line. Like {@link OPENING_LINE}, it cannot be read as an option. */
+const SCOUT_OPENING_LINE =
+  "You are scouting a project's repository, inside the Grill Room app, for one idea that is about to be grilled. You are not interviewing: you read the project and report what it already has and has already decided.";
+
+function renderFacts(facts: ProjectServerFacts): string {
+  const remotes =
+    facts.remotes.length > 0
+      ? facts.remotes
+          .map((remote) => `${remote.name} ${remote.url} (${remote.type})`)
+          .join("; ")
+      : "(none)";
+  const commits =
+    facts.recentCommitSubjects.length > 0
+      ? facts.recentCommitSubjects.map((subject) => `  - ${subject}`).join("\n")
+      : "  (none)";
+  return [
+    `- HEAD commit: ${facts.headCommit ?? "(no commits yet)"}`,
+    `- Branch: ${facts.headBranch ?? "(no commits yet)"}`,
+    `- Remotes: ${remotes}`,
+    `- Uncommitted changes in the working tree: ${facts.dirty ? "yes" : "no"}`,
+    `- Agent instructions at the root (CLAUDE.md, AGENTS.md): ${facts.hasAgentInstructions ? "yes" : "no"}`,
+    `- Decisions folder: ${facts.decisionsFolder ?? "(none found)"}`,
+    `- Rules folder: ${facts.hasRulesFolder ? "yes" : "no"}`,
+    "- Recent commit subjects, newest first:",
+    commits,
+  ].join("\n");
+}
+
+function renderPreviousDecisions(request: ScoutProjectRequest): string[] {
+  if (request.previousDecisions.length === 0) {
+    return [
+      "- `previousDecisions`: this is the first scout of this session, so",
+      "  return an empty list.",
+    ];
+  }
+  const previous = request.previousDecisions
+    .map(
+      (decision) =>
+        `  - [${decision.key}] (${decision.source}, ${decision.disposition} by the user, cited at ${decision.citation}) ${decision.title}: ${decision.statement}`,
+    )
+    .join("\n");
+  return [
+    "- `previousDecisions`: the previous scout report proposed these",
+    "  decisions. Return exactly one entry for every one of them, by key:",
+    "  `unchanged` when the repo still holds it as stated, `changed` when the",
+    "  repo now holds something different (put what it now holds in",
+    "  `statement`), `removed` when the repo no longer supports it. Leave",
+    "  `statement` null unless the change is `changed`. When a previous",
+    "  decision still bears on the idea, propose it again under the same key.",
+    "",
+    previous,
+  ];
+}
+
+/**
+ * The scout reads the project, not the interview: it carries none of the
+ * grilling method, only the idea, the facts the server collected, the report
+ * schema's rules and, on a re-run, the previous report's decisions.
+ */
+function buildScoutPrompt(request: ScoutProjectRequest): string {
+  return [
+    SCOUT_OPENING_LINE,
+    "",
+    "## The idea, in the user's words",
+    "",
+    `Title: ${request.context.title ?? "(untitled)"}`,
+    "",
+    request.context.idea,
+    "",
+    "## The project",
+    "",
+    `The project's root is your working directory: ${request.projectRoot}`,
+    "You can read it with Read, Grep and Glob, and nothing else. Never modify",
+    "anything, and never read outside it. Secret files (environment files,",
+    "keys, certificates, credentials) are denied to you: do not try to open",
+    "them, and never repeat a secret value if you meet one.",
+    "Those files, and the `.git` folder, are hidden from you on purpose: Read",
+    "refuses them and Glob and Grep pass over them. The absence of a file or",
+    "folder from Glob or Grep is therefore never evidence that it does not",
+    "exist, and the report must not claim something is missing on that",
+    "absence alone.",
+    "",
+    "What the app already knows about the repository, from git and the file",
+    "system. Use it to decide where to look first: decisions and conventions",
+    "usually live in the agent instructions, the decisions folder and the rules",
+    "folder.",
+    "",
+    renderFacts(request.facts),
+    "",
+    "## Your task: report what the project already has and has decided",
+    "",
+    "Read the project for this idea, and only for this idea. Return:",
+    "",
+    `- \`currentState\`: at most ${MAX_SCOUT_CURRENT_STATE} items, each something that`,
+    "  already exists relative to the idea, with `status` `built` (already does",
+    "  what the idea needs), `partial` (exists but falls short) or `gap` (the idea",
+    "  needs it and nothing is there yet), a one-sentence `summary`, and at least",
+    "  one citation of where it lives, or for a gap, of where it would belong.",
+    `- \`proposedDecisions\`: at most ${MAX_SCOUT_PROPOSED_DECISIONS} choices the project has already`,
+    "  made that bear on this idea. Propose only decisions that constrain how",
+    "  the idea gets built; leave out everything else the project decided.",
+    "  Each has a stable kebab-case `key` (the same key for the same decision",
+    "  on a later scout), a short `title`, the `statement` as the project holds",
+    "  it, a `source`, one `citation`, and a one-line `reason` saying why it",
+    "  matters for this idea. The source is `recorded` only when the decision is",
+    "  written down in an ADR or decisions file, the agent instructions or a",
+    "  rules file, cited there; it is `inferred` when you read it from code or",
+    "  configuration, cited at the line you read it from.",
+    ...renderPreviousDecisions(request),
+    "",
+    "Every citation is a path relative to the project root, a colon, and a",
+    "line number or an inclusive line range: `src/server.ts:42` or",
+    "`docs/adr/0003-queue.md:5-12`. Cite only files you actually opened and",
+    "lines you actually read. Never invent a path, and never cite a line past",
+    "the end of its file: the app checks every citation against the repository",
+    "and rejects the whole report if any one is wrong.",
+    "",
+    "When the project has nothing relevant to the idea, say so with empty",
+    "lists rather than stretching an unrelated item to fit.",
+    renderRetry(request.rejectionReason),
+  ]
+    .join("\n")
+    .trimEnd();
+}
+
+/**
+ * Builds the prompt for one turn.
+ *
+ * @param primed marks a conversation restarted after a failed resume, so the
+ * model is told why it is seeing an interview it has no memory of.
+ */
+export function buildPrompt(
+  request: InterviewerRequest,
+  { primed = false }: { primed?: boolean } = {},
+): string {
+  if (request.kind === "assess-readiness") return buildReadinessPrompt(request);
+  if (request.kind === "scout-project") return buildScoutPrompt(request);
+
+  const preamble = primed
+    ? [
+        "## Note",
+        "",
+        "The earlier conversation of this interview could not be resumed, so you",
+        "are seeing it fresh. The full design tree is reproduced below; treat it",
+        "as your own prior work and continue from it.",
+        "",
+      ].join("\n")
+    : "";
+
+  return [
+    OPENING_LINE,
+    "",
+    interviewerInstructions({ docsFolder: request.context.docsFolder }),
+    "",
+    "---",
+    "",
+    preamble,
+    renderContext(request.context),
+    "",
+    renderTask(request),
+    renderRetry(request.rejectionReason),
+  ]
+    .join("\n")
+    .trimEnd();
+}

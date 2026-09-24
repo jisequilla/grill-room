@@ -70,6 +70,19 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      // The demo is slow by design (it pauses after every step so the
+      // recorded video can be followed) and records real video — it runs
+      // only through the `demo` project below, selected by `just demo`.
+      testIgnore: "demo.spec.ts",
+    },
+    {
+      name: "demo",
+      testMatch: "demo.spec.ts",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1280, height: 800 },
+        video: "on",
+      },
     },
   ],
   webServer: {

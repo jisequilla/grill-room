@@ -1,3 +1,4 @@
+import { DEMO_SCENARIO, loadDemoScenario } from "./demo-scenario.js";
 import { InterviewerError } from "./errors.js";
 import { observeCall, schemaIssuesReason, type CallResult } from "./observe.js";
 import { resultSchemas } from "./schemas.js";
@@ -206,6 +207,15 @@ export interface Scenario {
 export const DEFAULT_SCENARIO = "canned-interview";
 
 /**
+ * The recorded demo session (see `demo-scenario.ts`), loaded once from
+ * `e2e/fixtures/demo-recording.jsonl` when that fixture is present.
+ * `loadDemoScenario` returns null rather than throwing when it is missing,
+ * so a build that does not ship `e2e/` boots normally with one fewer
+ * scenario rather than failing.
+ */
+const demoScenario = loadDemoScenario();
+
+/**
  * Every scenario the fake can serve, by name. A plain map: add a scenario by
  * adding an entry. The app's fake builds each session's queue from here.
  */
@@ -222,6 +232,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   // before it lands, rather than racing the workspace's 500 ms poll.
   "rate-limit-then-retry": { turns: rateLimitThenRetryTurns(), delayMs: 5_000 },
   "scout-project": { turns: scoutProjectTurns() },
+  ...(demoScenario ? { [DEMO_SCENARIO]: demoScenario } : {}),
 };
 
 /** Whether the registry has a scenario of that name. */
