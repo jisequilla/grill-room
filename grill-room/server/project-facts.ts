@@ -43,6 +43,14 @@ export interface ProjectServerFacts {
   /** Repo-relative path of whichever candidate exists, or null. */
   decisionsFolder: string | null;
   hasRulesFolder: boolean;
+  /**
+   * Project-relative paths of every `decisions.md` git tracks anywhere in the
+   * project, sorted and uncapped. An untracked `decisions.md` is excluded, and
+   * so is one under the folder passed as `excludeFolder`. Optional so that
+   * existing facts consumers (the scout schema and prompt, wired in ticket 03)
+   * do not need this field yet; `collectProjectFacts` always sets it.
+   */
+  decisionFiles?: string[];
 }
 
 type Refused = { refusal: ProjectFactsRefusal };
@@ -110,6 +118,20 @@ function parseCommitSubjects(stdout: string): string[] {
   return stdout.split("\n").filter((line) => line.length > 0);
 }
 
+function parseTrackedPaths(stdout: string): string[] {
+  return stdout.split("\n").filter((line) => line.length > 0);
+}
+
+/**
+ * Whether `filePath` (a project-relative path) sits at or under `folder` (a
+ * project-relative folder), matching on the path segment boundary: excluding
+ * `.scratch/a` must not exclude `.scratch/ab/decisions.md`.
+ */
+function isUnderFolder(filePath: string, folder: string): boolean {
+  const normalized = folder.replace(/\/+$/, "");
+  return filePath === normalized || filePath.startsWith(`${normalized}/`);
+}
+
 /**
  * Collect a registered project's server facts from its root.
  *
@@ -118,9 +140,13 @@ function parseCommitSubjects(stdout: string): string[] {
  * but has no commits yet (an unborn branch) does not crash: `headCommit` and
  * `headBranch` come back null and `recentCommitSubjects` comes back empty,
  * since `git rev-parse HEAD` and `git log` both fail until the first commit.
+ *
+ * `excludeFolder`, when given, is a project-relative folder whose
+ * `decisions.md` files are left out of `decisionFiles`.
  */
 export async function collectProjectFacts(
   root: string,
+  excludeFolder?: string,
 ): Promise<{ facts: ProjectServerFacts } | Refused> {
   const insideWorkTree = await runGit(root, ["rev-parse", "--is-inside-work-tree"]);
   if (insideWorkTree.exitCode !== 0 || insideWorkTree.stdout.trim() !== "true") {
@@ -130,13 +156,14 @@ export async function collectProjectFacts(
     );
   }
 
-  const [headCommitResult, headBranchResult, statusResult, logResult, remoteResult] =
+  const [headCommitResult, headBranchResult, statusResult, logResult, remoteResult, lsFilesResult] =
     await Promise.all([
       runGit(root, ["rev-parse", "HEAD"]),
       runGit(root, ["rev-parse", "--abbrev-ref", "HEAD"]),
       runGit(root, ["status", "--porcelain"]),
       runGit(root, ["log", "-n", "10", "--format=%s"]),
       runGit(root, ["remote", "-v"]),
+      runGit(root, ["ls-files", "--", "decisions.md", "**/decisions.md"]),
     ]);
 
   const headCommit = headCommitResult.exitCode === 0 ? headCommitResult.stdout.trim() : null;
@@ -151,6 +178,12 @@ export async function collectProjectFacts(
   const decisionsFolder = findDecisionsFolder(root);
   const hasRulesFolder = directoryExists(path.join(root, ".claude", "rules"));
 
+  const trackedDecisionFiles =
+    lsFilesResult.exitCode === 0 ? parseTrackedPaths(lsFilesResult.stdout) : [];
+  const decisionFiles = trackedDecisionFiles
+    .filter((filePath) => excludeFolder === undefined || !isUnderFolder(filePath, excludeFolder))
+    .sort();
+
   return {
     facts: {
       headCommit,
@@ -161,6 +194,7 @@ export async function collectProjectFacts(
       hasAgentInstructions,
       decisionsFolder,
       hasRulesFolder,
+      decisionFiles,
     },
   };
 }
