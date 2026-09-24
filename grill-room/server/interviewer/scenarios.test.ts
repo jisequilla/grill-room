@@ -1,17 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import assessReadiness from "../../actions/assess-readiness.js";
+import createSession from "../../actions/create-session.js";
+import getTree from "../../actions/get-tree.js";
+import registerProject from "../../actions/register-project.js";
+import reopenDecision from "../../actions/reopen-decision.js";
+import requestNextRound from "../../actions/request-next-round.js";
+import saveDraftAnswer from "../../actions/save-draft-answer.js";
+import scoutProject from "../../actions/scout-project.js";
+import submitRound from "../../actions/submit-round.js";
+import { useTestDatabase } from "../../test/db.js";
+import { useTempGitRepos } from "../../test/git-repos.js";
 import {
   createScenarioInterviewer,
   DEFAULT_SCENARIO,
   fakeScenarios,
   rateLimitedTurn,
   type Scenario,
+  type ScenarioInterviewer,
 } from "./fake.js";
 import {
   getInterviewer,
   INTERVIEWER_ENV_VAR,
   resetInterviewer,
   selectedFakeInterviewer,
+  setInterviewer,
 } from "./index.js";
 import type { ModelCallObserver } from "./types.js";
 import {
@@ -208,5 +221,201 @@ describe("selecting the fake by configuration", () => {
 
   it("has no scenario fake when the real interviewer is selected", () => {
     expect(selectedFakeInterviewer()).toBeNull();
+  });
+});
+
+/*
+ * The named scenarios the registry serves for every request kind (ticket
+ * gr-3uc.2). Each test drives the scenario through the actions its browser
+ * test (ticket 03) will call, from a fresh session's first request, and
+ * checks every scripted turn was consumed in order and the queue ends empty.
+ */
+describe("named scenarios for every request kind", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  const repos = useTempGitRepos();
+
+  /** Installs a fresh per-session fake and puts `sessionId` on `name`. */
+  function useScenario(sessionId: string, name: string): ScenarioInterviewer {
+    const interviewer = createScenarioInterviewer(fakeScenarios);
+    interviewer.useScenario(sessionId, name);
+    setInterviewer(interviewer);
+    return interviewer;
+  }
+
+  function aSession(overrides: { projectId?: string } = {}) {
+    return createSession.run({
+      title: "Marathon Tracker",
+      idea: "A 16-week marathon training tracker for one runner.",
+      ...overrides,
+    });
+  }
+
+  /** Answers every card of the session's open round the same way. */
+  async function answerOpenRound(
+    sessionId: string,
+    answerKind: "own-answer" | "unknown" = "own-answer",
+    answer = "An answer.",
+  ) {
+    const { round } = await requestNextRound.run({ sessionId });
+    for (const card of round?.decisions ?? []) {
+      await saveDraftAnswer.run({ decisionId: card.id, answerKind, answer });
+    }
+    return submitRound.run({ id: round!.id });
+  }
+
+  /** Answers each named card of the session's open round differently. */
+  async function answerOpenRoundByKey(
+    sessionId: string,
+    answers: Record<string, { answerKind: "own-answer" | "unknown"; answer?: string }>,
+  ) {
+    const { round } = await requestNextRound.run({ sessionId });
+    for (const card of round?.decisions ?? []) {
+      const given = card.key ? answers[card.key] : undefined;
+      if (!given) throw new Error(`No scripted answer for card "${card.key}"`);
+      await saveDraftAnswer.run({
+        decisionId: card.id,
+        answerKind: given.answerKind,
+        answer: given.answer ?? "An answer.",
+      });
+    }
+    return submitRound.run({ id: round!.id });
+  }
+
+  it.each(["readiness-ready", "readiness-not-ready"] as const)(
+    "%s scripts one assess-readiness request",
+    async (name) => {
+      const session = await aSession();
+      const interviewer = useScenario(session.id, name);
+
+      const judged = await assessReadiness.run({ sessionId: session.id });
+
+      expect(interviewer.requests.map((request) => request.kind)).toEqual([
+        "assess-readiness",
+      ]);
+      expect(judged.readiness?.result.verdict).toBe(
+        name === "readiness-ready" ? "ready" : "not-ready",
+      );
+      expect(interviewer.remainingFor(session.id)).toBe(0);
+    },
+  );
+
+  it("reopen-stale-review scripts a round, a reopen, its review, and the round the re-ask reopens", async () => {
+    const session = await aSession();
+    const interviewer = useScenario(session.id, "reopen-stale-review");
+
+    // Round 1: the root. Round 2: two dependents. Round 3: nothing more.
+    await answerOpenRound(session.id);
+    await answerOpenRound(session.id);
+
+    const shape = (await getTree.run({ sessionId: session.id })).decisions.find(
+      (decision) => decision.key === "shape",
+    )!;
+    await reopenDecision.run({ decisionId: shape.id });
+    const afterReview = await answerOpenRound(session.id, "own-answer", "A page, after all.");
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "propose-round",
+      "propose-round",
+      "propose-round",
+      "review-stale",
+      "propose-round",
+    ]);
+    expect(interviewer.requests[3]).toMatchObject({
+      kind: "review-stale",
+      reopenedDecisionKey: "shape",
+      staleDecisionKeys: ["storage", "sync"],
+    });
+    // Storage was reconfirmed; sync was re-asked and rejoined the tree as the
+    // round this reopen ends on.
+    expect(afterReview.round?.decisions.map((card) => card.key)).toEqual([
+      "sync",
+    ]);
+    expect(interviewer.remainingFor(session.id)).toBe(0);
+  });
+
+  it("supersession scripts a round, its done proposal, and the check that follows it", async () => {
+    const session = await aSession();
+    const interviewer = useScenario(session.id, "supersession");
+
+    const done = await answerOpenRoundByKey(session.id, {
+      shape: { answerKind: "own-answer", answer: "A workspace, on disk." },
+      storage: { answerKind: "unknown" },
+    });
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "propose-round",
+      "propose-round",
+      "find-superseded",
+    ]);
+    expect(interviewer.requests[2]).toMatchObject({
+      kind: "find-superseded",
+      looseEndKeys: ["storage"],
+    });
+    expect(done.state).toBe("done-proposed");
+    expect(interviewer.remainingFor(session.id)).toBe(0);
+  });
+
+  it("refusal-then-success scripts one refused attempt and the accepted retry, in the same turn", async () => {
+    const session = await aSession();
+    const interviewer = useScenario(session.id, "refusal-then-success");
+
+    const opened = await requestNextRound.run({ sessionId: session.id });
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "propose-round",
+      "propose-round",
+    ]);
+    expect(opened.round?.decisions.map((card) => card.key)).toEqual(["shape"]);
+    expect(interviewer.remainingFor(session.id)).toBe(0);
+  });
+
+  it("rate-limit-then-retry scripts a rate limit that stops the turn, then a manual retry that succeeds", async () => {
+    const session = await aSession();
+    const interviewer = useScenario(session.id, "rate-limit-then-retry");
+    expect(fakeScenarios["rate-limit-then-retry"]?.delayMs).toBeGreaterThan(0);
+
+    await expect(
+      requestNextRound.run({ sessionId: session.id }),
+    ).rejects.toThrow(/rate limited/);
+
+    // The manual retry: a second, separate call to the same action.
+    const opened = await requestNextRound.run({ sessionId: session.id });
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "propose-round",
+      "propose-round",
+    ]);
+    expect(opened.round?.decisions.map((card) => card.key)).toEqual(["shape"]);
+    expect(interviewer.remainingFor(session.id)).toBe(0);
+  });
+
+  it("scout-project scripts one scout-project request, citing files the fixture project holds", async () => {
+    const root = repos.create({
+      files: {
+        "src/ingest/metrics.ts":
+          Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n") + "\n",
+        "docs/adr/0003-queue.md":
+          Array.from({ length: 9 }, (_, i) => `line ${i + 1}`).join("\n") + "\n",
+        "CLAUDE.md": "# Agent instructions\n",
+      },
+    });
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      exportFolder: ".scratch",
+    });
+    const session = await aSession({ projectId: project.id });
+    const interviewer = useScenario(session.id, "scout-project");
+
+    const scouted = await scoutProject.run({ sessionId: session.id });
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "scout-project",
+    ]);
+    expect(scouted.report?.result.proposedDecisions).toHaveLength(2);
+    expect(scouted.report?.result.currentState).toHaveLength(1);
+    expect(interviewer.remainingFor(session.id)).toBe(0);
   });
 });

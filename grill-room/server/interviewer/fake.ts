@@ -211,6 +211,15 @@ export const DEFAULT_SCENARIO = "canned-interview";
  */
 export const fakeScenarios: Record<string, Scenario> = {
   [DEFAULT_SCENARIO]: { turns: cannedInterviewTurns() },
+  "readiness-ready": { turns: readinessReadyTurns() },
+  "readiness-not-ready": { turns: readinessNotReadyTurns() },
+  "reopen-stale-review": { turns: reopenStaleReviewTurns() },
+  supersession: { turns: supersessionTurns() },
+  "refusal-then-success": { turns: refusalThenSuccessTurns() },
+  // Long enough to see the turn running before it fails, and again before the
+  // manual retry succeeds.
+  "rate-limit-then-retry": { turns: rateLimitThenRetryTurns(), delayMs: 2_000 },
+  "scout-project": { turns: scoutProjectTurns() },
 };
 
 /** Whether the registry has a scenario of that name. */
@@ -486,6 +495,286 @@ function createScriptedInterviewer(
         InterviewerTurn<ResultFor<"scout-project">>
       >,
   };
+}
+
+/**
+ * A judged idea, ready to be grilled: one idea-sourced evidence item, a
+ * concrete objective that is not a process, and few enough unknowns. What
+ * `readiness-ready` schedules for a session's one `assess-readiness`
+ * request — the readiness scenarios run without a project, so nothing here
+ * needs a citation.
+ */
+export function readinessReadyTurns(): ScriptedTurn[] {
+  return [
+    {
+      kind: "assess-readiness",
+      result: {
+        evidence: [
+          {
+            text: "The idea names marathon runners preparing for a 16-week training block.",
+            source: "idea",
+            citation: null,
+          },
+        ],
+        objective: "A tracker for a 16-week marathon training plan.",
+        objectiveIsProcess: false,
+        expectedOutcome: "A plan the runner can follow week by week.",
+        unknowns: ["Whether it needs to sync across devices"],
+        verdict: "ready",
+        missing: [],
+      },
+    },
+  ];
+}
+
+/**
+ * A judged idea that is not ready: no evidence, no objective beyond a process
+ * to run. What `readiness-not-ready` schedules for the same one
+ * `assess-readiness` request.
+ */
+export function readinessNotReadyTurns(): ScriptedTurn[] {
+  return [
+    {
+      kind: "assess-readiness",
+      result: {
+        evidence: [],
+        objective: null,
+        objectiveIsProcess: true,
+        expectedOutcome: null,
+        unknowns: [
+          "What would actually get built",
+          "Who the comparison is even for",
+        ],
+        verdict: "not-ready",
+        missing: ["A single buildable thing, not a method for deciding one"],
+      },
+    },
+  ];
+}
+
+/**
+ * A round of one root decision, then a round of two more depending on it,
+ * then nothing left to propose. Shared with {@link reopenStaleReviewTurns}:
+ * this much of the tree has to exist and settle before reopening the root
+ * means anything.
+ */
+function aSettledRootAndTwoDependents(): ScriptedTurn[] {
+  return [
+    {
+      kind: "propose-round",
+      result: aRound([
+        aProposedDecision("shape", {
+          title: "What shape should this take?",
+          body: "The first thing to settle.",
+        }),
+      ]),
+    },
+    {
+      kind: "propose-round",
+      result: aRound([
+        aProposedDecision("storage", {
+          title: "Where does the data live?",
+          body: "Storage follows from the shape.",
+          dependsOn: ["shape"],
+        }),
+        aProposedDecision("sync", {
+          title: "How does it sync?",
+          body: "Sync follows from the shape too.",
+          dependsOn: ["shape"],
+        }),
+      ]),
+    },
+    { kind: "propose-round", result: aRound([]) },
+  ];
+}
+
+/**
+ * A round, then a reopen of its root decision whose two dependents go stale:
+ * one is reconfirmed, the other is re-asked with an updated question. What
+ * `reopen-stale-review` schedules, in the order a session hits it: two rounds
+ * to settle the tree, an empty proposal once nothing more is pending, the
+ * reopened root answered again, the review itself, and one more empty
+ * proposal once the re-asked decision has rejoined the tree on its own.
+ */
+export function reopenStaleReviewTurns(): ScriptedTurn[] {
+  return [
+    ...aSettledRootAndTwoDependents(),
+    {
+      kind: "review-stale",
+      result: {
+        reviews: [
+          {
+            decisionKey: "storage",
+            verdict: "reconfirm",
+            reason: "Storage still follows from the shape either way.",
+            title: null,
+            body: null,
+            choices: [],
+            recommendedChoice: null,
+            recommendedAnswer: null,
+          },
+          {
+            decisionKey: "sync",
+            verdict: "re-ask",
+            reason: "A single page syncs differently than a workspace.",
+            title: "How does a single page stay current?",
+            body: "The old answer assumed a workspace shape.",
+            choices: [
+              {
+                label: "Poll",
+                rationale: "Simple, costs a delay before the page catches up.",
+              },
+              {
+                label: "Push",
+                rationale: "Immediate, costs a channel to keep open.",
+              },
+            ],
+            recommendedChoice: 1,
+            recommendedAnswer: "Push, so the page never shows stale data.",
+          },
+        ],
+      },
+    },
+    { kind: "propose-round", result: aRound([]) },
+  ];
+}
+
+/**
+ * A round of two independent decisions, a done proposal once one of them
+ * settles and the other is left as a loose end, and the supersession check
+ * that runs as the done proposal's second half. What `supersession`
+ * schedules: the round, the empty done proposal, then `find-superseded`
+ * naming the loose end and the decision that already answers it.
+ */
+export function supersessionTurns(): ScriptedTurn[] {
+  return [
+    {
+      kind: "propose-round",
+      result: aRound([
+        aProposedDecision("shape", {
+          title: "What shape should this take?",
+          body: "The first thing to settle.",
+        }),
+        aProposedDecision("storage", {
+          title: "Where does the data live?",
+          body: "Storage is worth naming, even before it is settled.",
+        }),
+      ]),
+    },
+    {
+      kind: "propose-round",
+      result: aRound([], {
+        done: {
+          summary: "The shape is settled; nothing else is left to ask.",
+        },
+      }),
+    },
+    {
+      kind: "find-superseded",
+      result: {
+        supersessions: [
+          {
+            looseEndKey: "storage",
+            answeredByKey: "shape",
+            answer: "On disk, inside the workspace shape.",
+            reason:
+              "The shape decision already commits to data living on disk.",
+          },
+        ],
+      },
+    },
+  ];
+}
+
+/**
+ * A round proposal refused once for a tree-rule violation (a dependency
+ * cycle, which is invalid against any tree, empty or not), then accepted.
+ * What `refusal-then-success` schedules: the retry is automatic, inside the
+ * one turn `askUntilAccepted` runs, so the attempt log shows the refusal and
+ * the success as two attempts of the same turn.
+ */
+export function refusalThenSuccessTurns(): ScriptedTurn[] {
+  return [
+    { kind: "propose-round", result: treeRuleViolation.cycle() },
+    {
+      kind: "propose-round",
+      result: aRound([
+        aProposedDecision("shape", {
+          title: "What shape should this take?",
+          body: "The first thing to settle.",
+        }),
+      ]),
+    },
+  ];
+}
+
+/**
+ * A round proposal that is rate limited — which stops the turn outright,
+ * unlike a tree-rule refusal — then accepted on a manual retry: a second,
+ * separate call to the same action. What `rate-limit-then-retry` schedules;
+ * the scenario's `delayMs`, set on its registry entry rather than here, is
+ * what keeps each attempt's turn running long enough to see.
+ */
+export function rateLimitThenRetryTurns(): ScriptedTurn[] {
+  return [
+    rateLimitedTurn("propose-round"),
+    {
+      kind: "propose-round",
+      result: aRound([
+        aProposedDecision("shape", {
+          title: "What shape should this take?",
+          body: "The first thing to settle.",
+        }),
+      ]),
+    },
+  ];
+}
+
+/**
+ * A first scout report: one current-state item and two proposed repo
+ * decisions. Cites `src/ingest/metrics.ts` and `docs/adr/0003-queue.md` — the
+ * same paths and line counts the shared `aScoutProjectResult` test fixture
+ * cites — plus `CLAUDE.md`, which the same fixture repos carry (see
+ * `scout-project.test.ts`'s `aFixtureRepo`). What `scout-project` schedules,
+ * for a session's one `scout-project` request.
+ */
+export function scoutProjectTurns(): ScriptedTurn[] {
+  return [
+    {
+      kind: "scout-project",
+      result: {
+        currentState: [
+          {
+            status: "partial",
+            summary: "Ingest lag is measured but never alerted on.",
+            citations: ["src/ingest/metrics.ts:12-30"],
+          },
+        ],
+        proposedDecisions: [
+          {
+            key: "no-message-broker",
+            title: "No message broker",
+            statement:
+              "Ingest runs on a Postgres-backed queue, not a message broker.",
+            source: "recorded",
+            citation: "docs/adr/0003-queue.md:5-9",
+            reason:
+              "An alert on ingest lag reads the queue this decision chose.",
+          },
+          {
+            key: "agent-instructions-exist",
+            title: "The repo already documents agent conventions",
+            statement:
+              "CLAUDE.md exists at the repo root and is read by every agent that works here.",
+            source: "inferred",
+            citation: "CLAUDE.md:1",
+            reason: "A scouted feature should follow the same conventions.",
+          },
+        ],
+        previousDecisions: [],
+      },
+    },
+  ];
 }
 
 /**
