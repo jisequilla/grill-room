@@ -345,4 +345,98 @@ export const appMigrations: MigrationEntry[] = [
     name: "sessions-readiness-column",
     sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS readiness_json TEXT`,
   },
+  {
+    version: 43,
+    name: "turns-table",
+    sql: `CREATE TABLE IF NOT EXISTS gr_turns (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES gr_sessions(id) ON DELETE CASCADE,
+      turn_kind TEXT NOT NULL,
+      model TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      total_elapsed_ms INTEGER,
+      outcome TEXT
+    )`,
+  },
+  {
+    version: 44,
+    name: "turns-session-index",
+    sql: `CREATE INDEX IF NOT EXISTS gr_idx_turns_session ON gr_turns(session_id)`,
+  },
+  {
+    version: 45,
+    name: "turn-runs-table",
+    sql: `CREATE TABLE IF NOT EXISTS gr_turn_runs (
+      id TEXT PRIMARY KEY,
+      turn_id TEXT NOT NULL REFERENCES gr_turns(id) ON DELETE CASCADE,
+      run_number INTEGER NOT NULL,
+      manual_retry BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TEXT NOT NULL
+    )`,
+  },
+  {
+    version: 46,
+    name: "turn-runs-turn-index",
+    sql: `CREATE INDEX IF NOT EXISTS gr_idx_turn_runs_turn ON gr_turn_runs(turn_id)`,
+  },
+  {
+    version: 47,
+    name: "turn-runs-unique-index",
+    sql: `CREATE UNIQUE INDEX IF NOT EXISTS gr_idx_turn_runs_unique ON gr_turn_runs(turn_id, run_number)`,
+  },
+  {
+    version: 48,
+    name: "turn-attempts-table",
+    sql: `CREATE TABLE IF NOT EXISTS gr_turn_attempts (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES gr_turn_runs(id) ON DELETE CASCADE,
+      attempt_number INTEGER NOT NULL,
+      started_at TEXT NOT NULL,
+      duration_ms INTEGER,
+      kind TEXT,
+      reason TEXT,
+      raw_output TEXT
+    )`,
+  },
+  {
+    version: 49,
+    name: "turn-attempts-run-index",
+    sql: `CREATE INDEX IF NOT EXISTS gr_idx_turn_attempts_run ON gr_turn_attempts(run_id)`,
+  },
+  {
+    version: 50,
+    name: "turn-attempts-unique-index",
+    sql: `CREATE UNIQUE INDEX IF NOT EXISTS gr_idx_turn_attempts_unique ON gr_turn_attempts(run_id, attempt_number)`,
+  },
+  {
+    version: 51,
+    name: "sessions-readiness-turn-id-column",
+    sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS readiness_turn_id TEXT REFERENCES gr_turns(id) ON DELETE SET NULL`,
+  },
+  {
+    version: 52,
+    name: "sessions-stale-review-turn-id-column",
+    sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS stale_review_turn_id TEXT REFERENCES gr_turns(id) ON DELETE SET NULL`,
+  },
+  {
+    version: 53,
+    name: "sessions-supersession-turn-id-column",
+    sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS supersession_turn_id TEXT REFERENCES gr_turns(id) ON DELETE SET NULL`,
+  },
+  {
+    version: 54,
+    name: "rounds-turn-id-column",
+    sql: `ALTER TABLE gr_rounds ADD COLUMN IF NOT EXISTS turn_id TEXT REFERENCES gr_turns(id) ON DELETE SET NULL`,
+  },
+  {
+    version: 55,
+    name: "specs-turn-id-column",
+    sql: `ALTER TABLE gr_specs ADD COLUMN IF NOT EXISTS turn_id TEXT REFERENCES gr_turns(id) ON DELETE SET NULL`,
+  },
+  {
+    version: 56,
+    name: "specs-tickets-turn-id-column",
+    sql: `ALTER TABLE gr_specs ADD COLUMN IF NOT EXISTS tickets_turn_id TEXT REFERENCES gr_turns(id) ON DELETE SET NULL`,
+  },
 ];

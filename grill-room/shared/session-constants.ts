@@ -82,3 +82,19 @@ export type ProjectVisibility = (typeof PROJECT_VISIBILITIES)[number];
 
 /** The slug pattern a project gets when none is given: the plain session slug. */
 export const DEFAULT_PROJECT_SLUG_PATTERN = "{slug}";
+
+/**
+ * How one model-call attempt within a turn's run resolved. `success` is what
+ * a turn's winning attempt gets. `tree-rule-refusal` is the only kind that
+ * counts against the rejection budget and retries automatically; the rest
+ * stop the turn for a manual retry. Closed list, unlike a turn's own kind:
+ * every turn kind produces attempts from this same fixed vocabulary.
+ */
+export const ATTEMPT_KINDS = [
+  "tree-rule-refusal",
+  "schema-invalid",
+  "resume-fallback",
+  "rate-limit",
+  "success",
+] as const;
+export type AttemptKind = (typeof ATTEMPT_KINDS)[number];
