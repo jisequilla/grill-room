@@ -16,6 +16,7 @@ import { toast } from "sonner";
 
 import { LooseEndList } from "@/components/workspace/loose-end-list";
 import { Markdown } from "@/components/workspace/markdown";
+import { TurnAttemptLog, type Turn } from "@/components/workspace/turn-attempt-log";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { actionErrorCode } from "@/lib/decisions";
@@ -71,12 +72,21 @@ export function DoneProposedPanel({
   onOpenDecision,
   onContinueInterview,
   isContinuing,
+  turn = null,
 }: {
   sessionId: string;
   doneSummary: string | null;
   onOpenDecision: (decisionId: string) => void;
   onContinueInterview: () => void;
   isContinuing: boolean;
+  /**
+   * The turn of the session's most recent supersession check (its
+   * `supersessionTurnId`), collapsed beside the loose ends it proposed
+   * against. The live attempt log while a check runs is shown in the turn
+   * status above this panel instead — a running check leaves this panel
+   * unrendered, since the session's shared turn status reads working.
+   */
+  turn?: Turn | null;
 }) {
   const t = useT();
   const queryClient = useQueryClient();
@@ -157,6 +167,7 @@ export function DoneProposedPanel({
           onContinueInterview={onContinueInterview}
           isContinuing={isContinuing}
         />
+        <TurnAttemptLog turn={turn} />
       </section>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">

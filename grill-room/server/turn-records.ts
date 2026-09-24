@@ -15,7 +15,7 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { and, desc, eq, inArray } from "@agent-native/core/db/schema";
+import { and, desc, eq, inArray, isNull } from "@agent-native/core/db/schema";
 
 import { getDb, schema } from "./db/index.js";
 import type { AttemptKind } from "./db/schema.js";
@@ -199,6 +199,28 @@ export async function findLatestTurn(input: {
     .orderBy(desc(schema.turns.startedAt), desc(schema.turns.id))
     .limit(1);
   return latest ? getTurnWithRuns(latest.id) : null;
+}
+
+/**
+ * The turn currently running for a session, of any kind, or null when none is
+ * running. Only one turn ever runs on a session at a time — the turn lock —
+ * so this is unambiguous. This is how the live turn status finds the record
+ * for whichever kind actually started it (a round proposal, a readiness
+ * judgment, a stale review, or a supersession check) instead of assuming one
+ * kind.
+ */
+export async function findRunningTurn(
+  sessionId: string,
+): Promise<TurnView | null> {
+  const [running] = await getDb()
+    .select({ id: schema.turns.id })
+    .from(schema.turns)
+    .where(
+      and(eq(schema.turns.sessionId, sessionId), isNull(schema.turns.completedAt)),
+    )
+    .orderBy(desc(schema.turns.startedAt), desc(schema.turns.id))
+    .limit(1);
+  return running ? getTurnWithRuns(running.id) : null;
 }
 
 /**

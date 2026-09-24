@@ -37,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TurnAttemptLog, type Turn } from "@/components/workspace/turn-attempt-log";
 import { actionErrorCode, actionErrorDetails } from "@/lib/decisions";
 import { TICKET_STATUS_LABEL_KEY } from "@/lib/ticket-labels";
 
@@ -70,10 +71,13 @@ const STATUS_VARIANT: Record<TicketStatus, "secondary" | "default" | "outline"> 
 export function TicketsSection({
   sessionId,
   working,
+  activeTurn,
   onSettled,
 }: {
   sessionId: string;
   working: boolean;
+  /** The turn the session's current turn status belongs to, of any kind. */
+  activeTurn: Turn | null;
   onSettled: () => void;
 }) {
   const t = useT();
@@ -86,6 +90,23 @@ export function TicketsSection({
 
   const { data: specData } = useActionQuery("get-spec", { sessionId });
   const spec = specData?.spec ?? null;
+
+  // Collapsed once breakdown has stopped: the turn linked from the spec row's
+  // `ticketsTurnId`, only set once a breakdown has actually completed.
+  const { data: completedTurn } = useActionQuery(
+    "get-turn",
+    { turnId: spec?.ticketsTurnId ?? "" },
+    { enabled: spec?.ticketsTurnId != null },
+  );
+
+  // Live while this route's active turn is actually a breakdown still
+  // running; the collapsed, already-stopped turn otherwise.
+  const attemptLogTurn =
+    activeTurn != null &&
+    activeTurn.turnKind === "break-into-tickets" &&
+    activeTurn.completedAt === null
+      ? activeTurn
+      : (completedTurn ?? null);
 
   const { data, isLoading } = useActionQuery("list-tickets", { sessionId });
   const tickets = data?.tickets ?? [];
@@ -173,6 +194,8 @@ export function TicketsSection({
           </Badge>
         ) : null}
       </div>
+
+      <TurnAttemptLog turn={attemptLogTurn} />
 
       {tickets.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">

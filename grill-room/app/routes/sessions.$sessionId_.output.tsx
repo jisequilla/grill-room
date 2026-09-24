@@ -45,6 +45,20 @@ export default function SessionOutputRoute() {
     },
   );
 
+  // The turn the session's current turn status belongs to, of any kind — on
+  // this route, either a spec synthesis or a ticket breakdown, since those
+  // are the only two turn kinds this route can run. Each section shows it
+  // live only while it is both still running and its own kind, so the log
+  // appears beside whichever of the two is actually in flight.
+  const { data: activeTurn } = useActionQuery(
+    "get-active-turn",
+    { sessionId: id },
+    {
+      enabled,
+      refetchInterval: session?.turnStatus === "working" ? TURN_POLL_MS : false,
+    },
+  );
+
   useSetPageTitle(session?.title ?? t("pages.sessionOutputTitle"));
 
   // synthesize-spec and break-into-tickets share the session's turn columns —
@@ -96,11 +110,21 @@ export default function SessionOutputRoute() {
         turnError={turnError}
       />
 
-      <SpecSection sessionId={id} working={working} onSettled={refresh} />
+      <SpecSection
+        sessionId={id}
+        working={working}
+        activeTurn={activeTurn ?? null}
+        onSettled={refresh}
+      />
 
       <Separator />
 
-      <TicketsSection sessionId={id} working={working} onSettled={refresh} />
+      <TicketsSection
+        sessionId={id}
+        working={working}
+        activeTurn={activeTurn ?? null}
+        onSettled={refresh}
+      />
 
       <Separator />
 
