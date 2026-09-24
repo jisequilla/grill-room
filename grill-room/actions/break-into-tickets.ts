@@ -104,7 +104,8 @@ export default defineAction({
     await runTurn({
       sessionId,
       failedMessage: "The interviewer turn failed.",
-      take: async () => {
+      record: { turnKind: "break-into-tickets", model: session!.model },
+      take: async (recorder) => {
         const rows = await db
           .select()
           .from(schema.decisions)
@@ -118,21 +119,25 @@ export default defineAction({
 
         const accepted = await askUntilAccepted<BreakIntoTicketsResult>({
           conversationId: session!.conversationId,
-          ask: async ({ conversationId, rejectionReason }) =>
-            interviewer.breakIntoTickets({
-              kind: "break-into-tickets",
-              context: {
-                idea: session!.idea,
-                title: session!.title,
-                model: session!.model,
-                answeringMode: session!.answeringMode,
-                docsFolder: session!.docsFolder,
-                conversationId,
-                decisions: await decisionSnapshots(rows),
+          recorder,
+          ask: async ({ conversationId, rejectionReason, observer }) =>
+            interviewer.breakIntoTickets(
+              {
+                kind: "break-into-tickets",
+                context: {
+                  idea: session!.idea,
+                  title: session!.title,
+                  model: session!.model,
+                  answeringMode: session!.answeringMode,
+                  docsFolder: session!.docsFolder,
+                  conversationId,
+                  decisions: await decisionSnapshots(rows),
+                },
+                specMarkdown: spec!.markdown,
+                rejectionReason,
               },
-              specMarkdown: spec!.markdown,
-              rejectionReason,
-            }),
+              observer,
+            ),
           reasonsToRefuse: (result) => validateTicketSet(result.tickets).reasons,
           exhausted: (lastReason) =>
             new TurnRejected(
@@ -173,7 +178,10 @@ export default defineAction({
 
         await db
           .update(schema.specs)
-          .set({ ticketsGeneratedAt: now })
+          .set({
+            ticketsGeneratedAt: now,
+            ticketsTurnId: recorder?.turnId ?? null,
+          })
           .where(eq(schema.specs.sessionId, sessionId));
 
         return accepted.conversationId;

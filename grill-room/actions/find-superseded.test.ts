@@ -6,11 +6,13 @@ import {
   resetInterviewer,
   scriptInterviewer,
 } from "../server/interviewer/index.js";
+import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import confirmSession from "./confirm-session.js";
 import createSession from "./create-session.js";
 import findSuperseded from "./find-superseded.js";
 import getSession from "./get-session.js";
+import getTurn from "./get-turn.js";
 import listLooseEnds from "./list-loose-ends.js";
 import requestNextRound from "./request-next-round.js";
 
@@ -411,6 +413,113 @@ describe("find-superseded", () => {
         turnStatus: "failed",
         turnErrorCode: "rate-limited",
       });
+    });
+  });
+
+  describe("turn records", () => {
+    it("records a clean standalone check as one successful attempt, on the session's model, linked to the session", async () => {
+      const session = await aSession();
+      await aTreeWithOneLooseEnd(session.id);
+      scriptInterviewer([
+        supersessions({ looseEndKey: "storage", answeredByKey: "shape" }),
+      ]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      const latest = await findLatestTurn({
+        sessionId: session.id,
+        turnKind: "find-superseded",
+      });
+      expect(latest).not.toBeNull();
+      const turn = await getTurn.run({ turnId: latest!.id });
+      expect(turn).toMatchObject({
+        sessionId: session.id,
+        turnKind: "find-superseded",
+        model: session.model,
+        outcome: "succeeded",
+      });
+      expect(turn.runs).toHaveLength(1);
+      expect(turn.runs[0]!.attempts).toEqual([
+        expect.objectContaining({ attemptNumber: 1, kind: "success" }),
+      ]);
+      expect(
+        (await getSession.run({ id: session.id })).supersessionTurnId,
+      ).toBe(turn.id);
+    });
+
+    it("records the done branch's check as its own find-superseded turn, separate from the propose-round turn", async () => {
+      const session = await aSession();
+      await aTreeWithOneLooseEnd(session.id);
+      scriptInterviewer([
+        DONE_PROPOSAL,
+        supersessions({ looseEndKey: "storage", answeredByKey: "shape" }),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      const proposeTurn = await findLatestTurn({
+        sessionId: session.id,
+        turnKind: "propose-round",
+      });
+      const supersessionTurn = await findLatestTurn({
+        sessionId: session.id,
+        turnKind: "find-superseded",
+      });
+      expect(proposeTurn).not.toBeNull();
+      expect(supersessionTurn).not.toBeNull();
+      expect(supersessionTurn!.id).not.toBe(proposeTurn!.id);
+      expect(supersessionTurn!.outcome).toBe("succeeded");
+      expect(supersessionTurn!.runs[0]!.attempts).toEqual([
+        expect.objectContaining({ kind: "success" }),
+      ]);
+      expect(
+        (await getSession.run({ id: session.id })).supersessionTurnId,
+      ).toBe(supersessionTurn!.id);
+    });
+
+    it("stops the standalone check on a rate limit with its own kind and keeps the record", async () => {
+      const session = await aSession();
+      await aTreeWithOneLooseEnd(session.id);
+      scriptInterviewer([
+        {
+          kind: "find-superseded",
+          error: new InterviewerError(
+            "rate-limited",
+            "The Claude subscription is rate limited.",
+          ),
+        },
+      ]);
+
+      await expect(
+        findSuperseded.run({ sessionId: session.id }),
+      ).rejects.toThrow(/rate limited/);
+
+      const latest = await findLatestTurn({
+        sessionId: session.id,
+        turnKind: "find-superseded",
+      });
+      expect(latest).not.toBeNull();
+      expect(latest!.outcome).toBe("rate-limited");
+      expect(latest!.runs[0]!.attempts).toEqual([
+        expect.objectContaining({ kind: "rate-limit" }),
+      ]);
+      expect(
+        (await getSession.run({ id: session.id })).supersessionTurnId,
+      ).toBeNull();
+    });
+
+    it("records nothing when the session has no loose end it could apply to", async () => {
+      const session = await aSession();
+      scriptInterviewer([]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(
+        await findLatestTurn({
+          sessionId: session.id,
+          turnKind: "find-superseded",
+        }),
+      ).toBeNull();
     });
   });
 });

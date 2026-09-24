@@ -6,11 +6,13 @@ import {
   scriptInterviewer,
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
+import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import breakIntoTickets from "./break-into-tickets.js";
 import createSession from "./create-session.js";
 import getSession from "./get-session.js";
 import getSpec from "./get-spec.js";
+import getTurn from "./get-turn.js";
 import synthesizeSpec from "./synthesize-spec.js";
 
 function aSession() {
@@ -233,6 +235,55 @@ describe("synthesize-spec", () => {
     const after = await getSpec.run({ sessionId: session.id });
     expect(after.spec?.markdown).toContain("Second version.");
     expect(after.ticketsCurrent).toBe(false);
+  });
+
+  describe("turn records", () => {
+    it("records a clean synthesis as one successful attempt, on the session's model, linked to the spec", async () => {
+      const session = await aSession();
+      await confirm(session.id);
+      scriptInterviewer([specTurn(goodSpecMarkdown())]);
+
+      await synthesizeSpec.run({ sessionId: session.id });
+
+      const latest = await findLatestTurn({
+        sessionId: session.id,
+        turnKind: "synthesize-spec",
+      });
+      expect(latest).not.toBeNull();
+      const turn = await getTurn.run({ turnId: latest!.id });
+      expect(turn).toMatchObject({
+        sessionId: session.id,
+        turnKind: "synthesize-spec",
+        model: session.model,
+        outcome: "succeeded",
+      });
+      expect(turn.runs).toHaveLength(1);
+      expect(turn.runs[0]!.attempts).toEqual([
+        expect.objectContaining({ attemptNumber: 1, kind: "success" }),
+      ]);
+      expect((await getSpec.run({ sessionId: session.id })).spec?.turnId).toBe(
+        turn.id,
+      );
+    });
+
+    it("keeps no turn linked on the spec once retries are exhausted", async () => {
+      const session = await aSession();
+      await confirm(session.id);
+      const bad = specTurn("## Problem Statement\n\nIncomplete.");
+      scriptInterviewer([bad, bad, bad]);
+
+      await expect(
+        synthesizeSpec.run({ sessionId: session.id }),
+      ).rejects.toThrow(/missing required sections 3 times/);
+
+      const latest = await findLatestTurn({
+        sessionId: session.id,
+        turnKind: "synthesize-spec",
+      });
+      expect(latest).not.toBeNull();
+      expect(latest!.outcome).toBe("invalid-spec");
+      expect((await getSpec.run({ sessionId: session.id })).spec).toBeNull();
+    });
   });
 });
 
