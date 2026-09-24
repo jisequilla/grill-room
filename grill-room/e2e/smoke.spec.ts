@@ -1,4 +1,52 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { expect, test } from "@playwright/test";
+
+import { registerProject, setSessionProject } from "./support";
+
+/** Variables that would point git at the repository running the tests instead. */
+const INHERITED_REPO_VARIABLES = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"];
+
+function git(repo: string, args: string[]): void {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of INHERITED_REPO_VARIABLES) delete env[name];
+  execFileSync(
+    "git",
+    [
+      "-C",
+      repo,
+      "-c",
+      "user.name=Grill Room E2E",
+      "-c",
+      "user.email=e2e@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "core.hooksPath=/dev/null",
+      ...args,
+    ],
+    { env, stdio: "ignore" },
+  );
+}
+
+/**
+ * A throwaway git repository the export step registers as a project, so the
+ * bundle it writes (including `decisions.md`) has somewhere real to land.
+ * Nothing about its content matters — the export step only needs a project
+ * whose root is a real git repository (`register-project` resolves the root
+ * with a read-only `git rev-parse`), and its visibility report reads the
+ * bundle's files against the repo with `git ls-files`/`git check-ignore`,
+ * both of which work on a freshly committed empty tree.
+ */
+function createExportProjectRepo(): string {
+  const root = mkdtempSync(path.join(os.tmpdir(), "grill-room-e2e-smoke-project-"));
+  git(root, ["init", "-q"]);
+  git(root, ["commit", "-q", "--allow-empty", "-m", "fixture"]);
+  return root;
+}
 
 /**
  * The one browser smoke test the spec calls for (`.scratch/grill-room/spec.md`,
@@ -26,6 +74,12 @@ import { expect, test } from "@playwright/test";
  *   5. break-into-tickets -> two tickets, the second blocked by the first.
  *
  * This test drives exactly one session, consuming those five turns in order.
+ * After the fifth turn, it generates the handoff and exports the session —
+ * both deterministic, template-rendered steps that call no interviewer turn
+ * — and checks that the export wrote `decisions.md` with an entry for each
+ * of the two decisions this session settled (`server/export.ts`'s
+ * `renderDecisionsFile`; see `.scratch/decisions-export/spec.md`).
+ *
  * Other spec files in this suite (`e2e/*.spec.ts`) run against the same
  * `webServer` alongside it: each creates its own session and chooses its own
  * scenario (`actions/use-fake-scenario.ts`), and a session's queue is its
@@ -36,7 +90,11 @@ import { expect, test } from "@playwright/test";
  */
 test("walks the canned interview from a new session to broken-out tickets", async ({
   page,
+  request,
 }) => {
+  // ---- A throwaway project for the export step, way at the end ----------
+  const repoRoot = createExportProjectRepo();
+
   // ---- Session list -> create a session -------------------------------
   await page.goto("/");
   // The shell's page title is plain text mounted into the header, not a
@@ -65,6 +123,22 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
   // doc comment).
   const workspaceHeader = page.locator("main header");
   await expect(workspaceHeader.getByText("Interviewing")).toBeVisible();
+
+  // ---- Register the export project on this session -----------------------
+  // Done over HTTP the same way `e2e/support.ts`'s `chooseScenario` calls
+  // `use-fake-scenario` — a project has no bearing on the interview itself,
+  // only on the export step at the very end.
+  const sessionIdMatch = /\/sessions\/([^/]+)$/.exec(page.url());
+  if (!sessionIdMatch) {
+    throw new Error(`Could not read a session id off ${page.url()}`);
+  }
+  const sessionId = sessionIdMatch[1]!;
+  const project = await registerProject(request, {
+    root: repoRoot,
+    verifyCommand: "true",
+    exportFolder: ".scratch",
+  });
+  await setSessionProject(request, sessionId, project.id);
 
   // ---- Start the interview: round 1 (two decisions, both recommended) --
   await page.getByRole("button", { name: "Start the interview" }).click();
@@ -194,4 +268,45 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
     "Store the data on disk",
   );
   await expect(page.getByTestId("ticket-row-2")).toContainText("Blocked by: #1");
+
+  // ---- Generate the handoff: export is gated on a current one -----------
+  const handoffSection = page.getByTestId("output-handoff-section");
+  await handoffSection.getByTestId("generate-handoff").click();
+  await expect(
+    handoffSection.getByTestId("handoff-document-view"),
+  ).toBeVisible({ timeout: 15_000 });
+
+  // ---- Export: decisions.md is in the preview, before anything is written
+  // Both decisions this session settled — the accepted recommendation and
+  // the loose end answered in its own words above — qualify as entries
+  // (`isEntry` in `server/export.ts`), so `decisions.md` is planned.
+  const exportSection = page.getByTestId("output-export-section");
+  const previewFiles = exportSection.getByTestId("export-preview-files");
+  await expect(previewFiles.getByText(/decisions\.md$/)).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // ---- Export for real: decisions.md is written, with at least one entry
+  const exportButton = exportSection.getByTestId("export-action");
+  await expect(exportButton).toBeEnabled({ timeout: 15_000 });
+  await exportButton.click();
+
+  const writtenDecisionsFile = exportSection
+    .getByTestId("export-written-files")
+    .getByText(/decisions\.md$/);
+  await expect(writtenDecisionsFile).toBeVisible({ timeout: 15_000 });
+
+  // The written-files list renders the exact absolute path export wrote to
+  // (`server/actions/export-session.ts`'s `files`, via `PathList`), so the
+  // bundle is read back from disk at that same path — the same bundle
+  // directory the UI's own preview and result panels are pointing at.
+  const decisionsFilePath = (await writtenDecisionsFile.textContent())?.trim();
+  if (!decisionsFilePath) {
+    throw new Error("Could not read the exported decisions.md path off the export result.");
+  }
+  const decisionsFileContent = readFileSync(decisionsFilePath, "utf-8");
+  expect(decisionsFileContent).toContain("## Decisions");
+  expect(decisionsFileContent).toMatch(/<a id="/);
+
+  rmSync(repoRoot, { recursive: true, force: true });
 });
