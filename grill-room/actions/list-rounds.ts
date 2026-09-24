@@ -7,7 +7,7 @@ import { describeDecisions } from "../server/tree.js";
 
 export default defineAction({
   description:
-    "List every round of a session in order, oldest first, with the questions each round asked and the answer given to each, so the history of the interview can be read back.",
+    "List every round of a session in order, oldest first, with the questions each round asked, the answer given to each, and the id of the turn that proposed the round (null for a round from before turn records existed), so the history of the interview — and the attempt log behind each round — can be read back.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
   }),
@@ -58,6 +58,8 @@ export default defineAction({
       rounds: rounds.map((round) => ({
         id: round.id,
         submissionState: round.submissionState,
+        /** The turn that proposed this round, or null for a round from before turn records existed. Feeds the collapsed attempt log shown on each round. */
+        turnId: round.turnId,
         createdAt: round.createdAt,
         submittedAt: round.submittedAt,
         decisions: placements

@@ -15,6 +15,7 @@ import {
   TurnFailedPanel,
   TurnWorkingPanel,
 } from "@/components/workspace/turn-panels";
+import type { Turn } from "@/components/workspace/turn-attempt-log";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
@@ -48,6 +49,7 @@ export function RoundPanel({
   hasDecisions,
   decisions,
   lastSubmittedAt,
+  proposalTurn,
   onRequestNextRound,
   isRequesting,
   onSubmit,
@@ -62,6 +64,8 @@ export function RoundPanel({
   decisions: readonly TreeDecision[];
   /** The most recently submitted round's timestamp, or null when none yet. */
   lastSubmittedAt: string | null;
+  /** The session's latest propose-round turn, feeding the attempt log on the working and failed panels. */
+  proposalTurn: Turn | null;
   onRequestNextRound: () => void;
   isRequesting: boolean;
   onSubmit: (roundId: string) => void;
@@ -114,7 +118,7 @@ export function RoundPanel({
       <div>
         {batch}
         {digest}
-        <TurnWorkingPanel startedAt={round.turnStartedAt} />
+        <TurnWorkingPanel startedAt={round.turnStartedAt} turn={proposalTurn} />
       </div>
     );
   }
@@ -128,6 +132,7 @@ export function RoundPanel({
           error={round.turnError}
           onRetry={onRequestNextRound}
           isPending={isRequesting}
+          turn={proposalTurn}
         />
       </div>
     );

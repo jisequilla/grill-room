@@ -8,6 +8,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { TurnAttemptLog, type Turn } from "@/components/workspace/turn-attempt-log";
 import { useElapsed } from "@/lib/use-elapsed";
 
 function Panel({
@@ -78,7 +79,19 @@ export function NextRoundPanel({
   );
 }
 
-export function TurnWorkingPanel({ startedAt }: { startedAt: string | null }) {
+export function TurnWorkingPanel({
+  startedAt,
+  turn = null,
+}: {
+  startedAt: string | null;
+  /**
+   * The propose-round turn currently in flight, when this working status is a
+   * round proposal. Rendered only while it is still running — a stale,
+   * already-completed turn (the working status belongs to some other turn
+   * kind instead) shows nothing here.
+   */
+  turn?: Turn | null;
+}) {
   const t = useT();
   const elapsed = useElapsed(startedAt);
 
@@ -97,6 +110,7 @@ export function TurnWorkingPanel({ startedAt }: { startedAt: string | null }) {
       >
         {t("workspace.workingElapsed", { elapsed })}
       </p>
+      <TurnAttemptLog turn={turn != null && turn.completedAt === null ? turn : null} />
     </Panel>
   );
 }
@@ -125,10 +139,17 @@ export function TurnFailedPanel({
   error,
   onRetry,
   isPending,
+  turn = null,
 }: {
   error: { code: string; message: string } | null;
   onRetry: () => void;
   isPending: boolean;
+  /**
+   * The propose-round turn this failure stopped, when there is one. Rendered
+   * only once it has actually stopped — a turn still running belongs to some
+   * other turn kind sharing the session's turn lock, and shows nothing here.
+   */
+  turn?: Turn | null;
 }) {
   const t = useT();
   const code = error?.code ?? "failed";
@@ -172,6 +193,7 @@ export function TurnFailedPanel({
           {isPending && <Spinner className="size-4" />}
           {t(isPending ? "workspace.retrying" : "workspace.retry")}
         </Button>
+        <TurnAttemptLog turn={turn != null && turn.completedAt !== null ? turn : null} />
       </div>
     </div>
   );

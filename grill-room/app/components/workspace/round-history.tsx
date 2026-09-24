@@ -1,8 +1,10 @@
+import { useActionQuery } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { IconChevronRight } from "@tabler/icons-react";
 import { useState } from "react";
 
 import { VerdictTag } from "@/components/workspace/review-digest";
+import { TurnAttemptLog } from "@/components/workspace/turn-attempt-log";
 import {
   Collapsible,
   CollapsibleContent,
@@ -25,6 +27,16 @@ function RoundSection({
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+
+  // Fetched only once the round is actually opened, and only for a round a
+  // turn record proposed — a round from before turn records existed has no
+  // `turnId` and shows no attempt log, per its own read: `get-turn` on a
+  // missing turn would fail rather than read back null.
+  const { data: turn } = useActionQuery(
+    "get-turn",
+    { turnId: round.turnId ?? "" },
+    { enabled: open && round.turnId != null },
+  );
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -84,6 +96,9 @@ function RoundSection({
             );
           })}
         </ul>
+        <div className="pr-2 pb-2 pl-8">
+          <TurnAttemptLog turn={turn ?? null} />
+        </div>
       </CollapsibleContent>
     </Collapsible>
   );

@@ -472,6 +472,19 @@ const messages = {
     historyEmpty: "No rounds yet.",
     noAnswerRecorded: "No answer recorded",
 
+    attemptLogCount_one: "{{count}} attempt",
+    attemptLogCount_other: "{{count}} attempts",
+    attemptNumber: "Attempt {{number}} of {{budget}}",
+    attemptRunning: "Running",
+    attemptInterrupted: "Interrupted",
+    attemptManualRetry: "Manual retry",
+    attemptKindTreeRuleRefusal: "Rule broken",
+    attemptKindSchemaInvalid: "Invalid output",
+    attemptKindResumeFallback: "Resumed fresh",
+    attemptKindRateLimit: "Rate limited",
+    attemptKindError: "Interviewer error",
+    attemptKindSuccess: "Succeeded",
+
     roundNudgeMessage:
       "You have answered 10 questions one at a time. Whole-round mode asks everything that is ready at once: fewer turns, and each turn takes a minute or two either way.",
     roundNudgeSwitch: "Switch to whole round",

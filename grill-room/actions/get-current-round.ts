@@ -12,7 +12,7 @@ import { describeDecisions } from "../server/tree.js";
 
 export default defineAction({
   description:
-    "Read the round a session is currently answering, with each card's question, recommended answer, derived state, and saved draft. Also reports the session's state, its done-proposal summary when it has one, whether the interviewer is working, idle, or failed, the idea's readiness judgment (null when none, or when it judged an earlier idea), and whether the idea can still be edited (no round yet, no turn working).",
+    "Read the round a session is currently answering, with each card's question, recommended answer, derived state, saved draft, and the id of the turn that proposed the round (null for a round from before turn records existed). Also reports the session's state, its done-proposal summary when it has one, whether the interviewer is working, idle, or failed, the idea's readiness judgment (null when none, or when it judged an earlier idea), and whether the idea can still be edited (no round yet, no turn working).",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
   }),
@@ -83,6 +83,8 @@ export default defineAction({
       round: {
         id: round.id,
         submissionState: round.submissionState,
+        /** The turn that proposed this round, or null for a round from before turn records existed. Feeds the collapsed attempt log shown on the round. */
+        turnId: round.turnId,
         createdAt: round.createdAt,
         submittedAt: round.submittedAt,
         decisions: placements.flatMap((placement) => {
