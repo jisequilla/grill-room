@@ -22,7 +22,7 @@ import {
   completeAttempt,
   completeTurn,
   createTurn,
-  findLatestTurn,
+  findLatestCompletedTurn,
   relabelAttempt,
   startAttempt,
 } from "./turn-records.js";
@@ -136,11 +136,28 @@ export async function startTurnRecorder(input: {
 
 /**
  * Start a turn record, or — when `isManualRetry` is set and the session's
- * latest turn record of `turnKind` stopped without succeeding — add a new run
- * to that same record instead of starting a fresh one. This is what makes a
- * manual retry continue the turn it is retrying for every turn kind, without
- * the caller doing anything differently: it still only names the kind and the
- * model, exactly as {@link startTurnRecorder}.
+ * most recently *completed* turn record of any kind is of this `turnKind`
+ * and stopped without succeeding — add a new run to that same record instead
+ * of starting a fresh one. This is what makes a manual retry continue the
+ * turn it is retrying for every turn kind, without the caller doing anything
+ * differently: it still only names the kind and the model, exactly as
+ * {@link startTurnRecorder}.
+ *
+ * The check is deliberately not scoped to `turnKind` alone, and deliberately
+ * ordered by completion rather than start: a manual retry only ever
+ * continues the turn that actually left the session's turn status
+ * `"failed"`, which is always the session's most recently *completed* turn
+ * of any kind at that moment (see {@link findLatestCompletedTurn}). Scoping
+ * by kind alone, or ordering by start time, would wrongly join a call to an
+ * older, unrelated stopped turn of the same kind — for example a stale
+ * review that stopped and was never retried, followed later by a failed
+ * round proposal, followed by a fresh stale review: that fresh review must
+ * start its own turn, not revive the old one and inherit its hours-old
+ * elapsed time. Ordering by start time alone has the same failure for a turn
+ * nested inside another, such as the supersession scan a done proposal runs
+ * inside its `propose-round` turn: the nested turn starts later but finishes
+ * first, so it is never the turn whose later failure left the session
+ * `"failed"`.
  *
  * Once a turn of `turnKind` has succeeded, its record is not a candidate to
  * continue: the next call — manual retry or not — starts a new turn.
@@ -157,11 +174,13 @@ export async function resumeOrStartTurnRecorder(input: {
   isManualRetry: boolean;
 }): Promise<TurnRecorder> {
   if (input.isManualRetry) {
-    const latest = await findLatestTurn({
-      sessionId: input.sessionId,
-      turnKind: input.turnKind,
-    });
-    if (latest && latest.outcome != null && latest.outcome !== TURN_SUCCEEDED) {
+    const latest = await findLatestCompletedTurn(input.sessionId);
+    if (
+      latest &&
+      latest.turnKind === input.turnKind &&
+      latest.outcome != null &&
+      latest.outcome !== TURN_SUCCEEDED
+    ) {
       const { runId } = await addRun(latest.id);
       return recorderFor(latest.id, runId);
     }

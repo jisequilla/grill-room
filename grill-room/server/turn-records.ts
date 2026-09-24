@@ -202,6 +202,45 @@ export async function findLatestTurn(input: {
 }
 
 /**
+ * The most recently *completed* turn record of any kind for a session, or
+ * null when the session has none finished yet. Unlike {@link findLatestTurn},
+ * not scoped to one kind, and ordered by completion time rather than start
+ * time: a turn nested inside another — the supersession scan a done proposal
+ * runs inside its `propose-round` turn, say — starts after and finishes
+ * before the turn around it, so ordering by start time would call the nested
+ * turn "latest" while the outer turn, still running, is the one that goes on
+ * to leave the session's `turnStatus` `"failed"`. Only the turn that actually
+ * left the session failed is ever the latest *completed* turn of any kind at
+ * that moment — this is what a manual retry must find, so it never joins an
+ * older, unrelated stopped turn that only happens to share its kind.
+ *
+ * Read in application code rather than left to the database's ordering of
+ * nulls (running turns have no `completedAt` yet), which differs by engine.
+ */
+export async function findLatestCompletedTurn(
+  sessionId: string,
+): Promise<TurnView | null> {
+  const rows = await getDb()
+    .select({ id: schema.turns.id, completedAt: schema.turns.completedAt })
+    .from(schema.turns)
+    .where(eq(schema.turns.sessionId, sessionId));
+
+  let latest: { id: string; completedAt: string } | null = null;
+  for (const row of rows) {
+    if (row.completedAt == null) continue;
+    if (
+      !latest ||
+      row.completedAt > latest.completedAt ||
+      (row.completedAt === latest.completedAt && row.id > latest.id)
+    ) {
+      latest = { id: row.id, completedAt: row.completedAt };
+    }
+  }
+
+  return latest ? getTurnWithRuns(latest.id) : null;
+}
+
+/**
  * Complete a turn record once it stops, successfully or not: its outcome —
  * `"succeeded"`, or the failure code the turn stopped with — and its total
  * elapsed time since it started, spanning every run. Does nothing if the turn

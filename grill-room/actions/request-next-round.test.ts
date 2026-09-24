@@ -16,6 +16,7 @@ import {
   withResumeFallback,
 } from "../server/interviewer/index.js";
 import { anAssessReadinessResult } from "../server/interviewer/test-fixtures.js";
+import { runTurn, TurnRejected } from "../server/turn.js";
 import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import addDecision from "./add-decision.js";
@@ -2115,5 +2116,68 @@ describe("propose-round manual retry", () => {
     expect(fresh.id).not.toBe(succeeded.id);
     expect(fresh.runs).toHaveLength(1);
     expect(fresh.runs[0]).toMatchObject({ runNumber: 1, manualRetry: false });
+  });
+
+  it("does not join a stopped turn of a different kind that is not what left the session failed", async () => {
+    const session = await aSession();
+
+    // A turn of another kind — a stale review, say — stops and is never
+    // retried. `review-stale` is not yet wired to a real action (that is a
+    // separate ticket), so it is driven directly through `runTurn`, exactly
+    // as the real caller will once it is.
+    await expect(
+      runTurn({
+        sessionId: session.id,
+        failedMessage: "The review turn failed.",
+        record: { turnKind: "review-stale", model: "sonnet" },
+        take: async () => {
+          throw new TurnRejected(
+            "invalid-review",
+            "The review ruled on a decision outside the batch.",
+          );
+        },
+      }),
+    ).rejects.toThrow();
+
+    const staleReviewTurn = await findLatestTurn({
+      sessionId: session.id,
+      turnKind: "review-stale",
+    });
+    expect(staleReviewTurn?.outcome).toBe("invalid-review");
+    expect(staleReviewTurn?.runs).toHaveLength(1);
+
+    // Later, a round proposal fails too. The session's turn is `"failed"`
+    // again, but this time propose-round — not review-stale — is what left
+    // it that way: propose-round is now the session's latest turn of any
+    // kind.
+    scriptInterviewer([offFrontier(), offFrontier(), offFrontier()]);
+    await expect(
+      requestNextRound.run({ sessionId: session.id }),
+    ).rejects.toThrow();
+
+    const proposeRoundTurn = await proposalTurn(session.id);
+    expect(proposeRoundTurn.outcome).toBe("invalid-proposal");
+
+    // The user reopens a decision, which runs a fresh review-stale turn. It
+    // must not join the old, hours-old-in-spirit stopped review-stale turn
+    // above — that turn is not what left the session failed.
+    await runTurn({
+      sessionId: session.id,
+      failedMessage: "The review turn failed.",
+      record: { turnKind: "review-stale", model: "sonnet" },
+      take: async () => null,
+    });
+
+    const freshStaleReviewTurn = await findLatestTurn({
+      sessionId: session.id,
+      turnKind: "review-stale",
+    });
+    expect(freshStaleReviewTurn?.id).not.toBe(staleReviewTurn?.id);
+    expect(freshStaleReviewTurn?.runs).toHaveLength(1);
+    expect(freshStaleReviewTurn?.runs[0]).toMatchObject({
+      runNumber: 1,
+      manualRetry: false,
+    });
+    expect(freshStaleReviewTurn?.outcome).toBe("succeeded");
   });
 });
