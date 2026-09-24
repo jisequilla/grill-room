@@ -14,6 +14,9 @@ Suggested model: opus
 
 ## Shares a boundary with
 
+The stored report (`server/scout-report.ts`, ticket 03) holds `dispositions: Record<key, "undecided" | "kept" | "dropped">` in `dispositions_json`, with no helper to write it yet: add one there and use it from keep and drop.
+
+
 This is the ticket most likely to leave a seam: ticket 03's report keys and keep/drop state, ticket 06's reopen-on-change, and every turn's request builder. Keep the project-context builder in one function used by all turn kinds.
 
 ## How it will be judged
