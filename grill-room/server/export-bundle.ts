@@ -6,6 +6,7 @@
  *
  *     <project root>/<export folder>/<folder name>/HANDOFF.md        (when a handoff exists)
  *     <project root>/<export folder>/<folder name>/spec.md
+ *     <project root>/<export folder>/<folder name>/intent.md
  *     <project root>/<export folder>/<folder name>/decisions.md      (when anything is decided or out of scope)
  *     <project root>/<export folder>/<folder name>/issues/NN-slug.md
  *     <project root>/<export folder>/<folder name>/briefs/NN-slug.md (when a handoff exists)
@@ -106,6 +107,8 @@ import {
   parseBriefs,
 } from "./handoff.js";
 import { getProject } from "./projects.js";
+import { currentReadiness } from "./readiness.js";
+import { currentScoutReport } from "./scout-report.js";
 import { describeTickets, ticketsAreCurrent } from "./tickets.js";
 import { describeDecisions } from "./tree.js";
 
@@ -393,11 +396,19 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     .where(eq(schema.decisions.sessionId, session.id))
     .orderBy(schema.decisions.createdAt, schema.decisions.id);
 
+  const [readiness, scoutReport] = await Promise.all([
+    currentReadiness(session),
+    currentScoutReport(session),
+  ]);
+
   const plan = planExport({
     sessionTitle: session.title,
+    idea: session.idea,
     specMarkdown: spec.markdown,
     tickets: exportTickets,
     decisions: describeDecisions(decisionRows),
+    readiness,
+    scoutReport,
   });
 
   const handoff = (await getHandoffRow(session.id)) ?? null;

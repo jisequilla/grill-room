@@ -115,6 +115,11 @@ describe("get-export-visibility", () => {
         visibility: "untracked",
       },
       {
+        path: path.join(root, ".scratch", "grill-room", "intent.md"),
+        relativePath: ".scratch/grill-room/intent.md",
+        visibility: "untracked",
+      },
+      {
         path: path.join(root, ".scratch", "grill-room", ".grill-room-export.json"),
         relativePath: ".scratch/grill-room/.grill-room-export.json",
         visibility: "untracked",
@@ -141,6 +146,7 @@ describe("get-export-visibility", () => {
     const { project } = await aProject({
       files: {
         ".scratch/grill-room/spec.md": "already committed",
+        ".scratch/grill-room/intent.md": "already committed",
         ".scratch/grill-room/.grill-room-export.json": JSON.stringify({
           version: 1,
           files: [],
