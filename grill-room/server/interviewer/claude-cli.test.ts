@@ -786,6 +786,82 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("Only a ticket that changes no files may name");
   });
 
+  it("says provedBy's testPath must be a real test and its command must fail without the change", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      "`testPath` is a test in the project's own test",
+    );
+    expect(prompt).toContain("layout, never a source file the ticket changes.");
+    expect(prompt).toContain(
+      "`command` must run",
+    );
+    expect(prompt).toContain("that test and fail without this ticket's change");
+    expect(prompt).toContain("is not a proof on its own.");
+    expect(prompt).toContain(
+      "When no existing test",
+    );
+    expect(prompt).toContain("covers the ticket's acceptance criteria, add one: list it as a");
+    expect(prompt).toContain(
+      "A ticket",
+    );
+    expect(prompt).toContain("proved only by a build");
+    expect(prompt).toContain("the test among its files that exercises");
+  });
+
+  it("asks facts to say when the code contradicts the ticket, the spec, or a blocker's scope", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      "the code shows contradicts the ticket, the spec, or what a blocker is",
+    );
+    expect(prompt).toContain("scoped to provide, the statement says so and names the consequence for");
+    expect(prompt).toContain(
+      "a response it must return that the code cannot yet",
+    );
+  });
+
+  it("asks buildsOn.provides to say when this ticket needs something its blocker does not promise", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      "When this ticket needs something its",
+    );
+    expect(prompt).toContain("blocker's ticket text does not promise, say so in `provides` too.");
+  });
+
+  it("asks a statement about a whole file to cite the full range, or split into facts with their own citation", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      "A statement",
+    );
+    expect(prompt).toContain("about a whole file or component cites the full range it describes, or");
+    expect(prompt).toContain("it is split into facts that each carry their own citation.");
+  });
+
+  it("limits buildsOnFiles to code this ticket itself reads, calls or imports", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      "Only code this ticket itself reads, calls or imports: leave out code",
+    );
+    expect(prompt).toContain("elsewhere in the system that this ticket never touches.");
+  });
+
+  it("does not ask the project scout for provedBy at all", async () => {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: aScoutProjectResult() })),
+    ]);
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).scoutProject(
+      aScoutProjectRequest({ projectRoot: "/Users/someone/projects/observability" }),
+    );
+    const prompt = valueOf(runner.invocations[0]!.args, "-p") as string;
+
+    expect(prompt).not.toContain("`testPath` is a test in the project's own test");
+    expect(prompt).not.toContain("provedBy");
+  });
+
   it("passes the rejection reason back on a retry", async () => {
     const { prompt } = await handoffInvocation(
       aHandoffScoutRequest({
