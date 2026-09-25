@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -8,6 +9,16 @@ import { runGit } from "./git.js";
 import { buildVisibilityReport, buildVisibilityWarnings, classifyVisibility } from "./visibility.js";
 
 const repos = useTempGitRepos();
+
+/** Variables that would point git at the repository running the tests instead. */
+const INHERITED_REPO_VARIABLES = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"];
+
+/** Set one git config key on a real test repo (`user.name`/`.email` are already set by `useTempGitRepos`). */
+function setGitConfig(root: string, key: string, value: string): void {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of INHERITED_REPO_VARIABLES) delete env[name];
+  execFileSync("git", ["-C", root, "config", key, value], { env, stdio: "ignore" });
+}
 
 describe("classifyVisibility", () => {
   it("classifies tracked, ignored, and untracked files against a real repo", async () => {
@@ -80,6 +91,60 @@ describe("classifyVisibility", () => {
     const root = repos.create();
     await expect(runGit(root, ["commit", "-m", "nope"])).rejects.toThrow(/read-only/);
     await expect(runGit(root, ["add", "."])).rejects.toThrow(/read-only/);
+  });
+
+  describe.each([
+    ["core.quotePath=true", true],
+    ["core.quotePath=false", false],
+  ] as const)("check-ignore hardening under %s", (_label, quotePath) => {
+    it("classifies a decomposed (NFD) name under an ignored folder as ignored", async () => {
+      const root = repos.create({ gitignore: "dist/\n" });
+      setGitConfig(root, "core.quotePath", String(quotePath));
+      // "é" written as "e" + a combining acute accent (U+0301), not the
+      // single precomposed code point U+00E9 — the shape `check-ignore`
+      // echoes back precomposed under `core.precomposeUnicode`, which a
+      // text comparison against this exact string would miss.
+      setGitConfig(root, "core.precomposeUnicode", "true");
+      const nfdPath = "dist/é.js";
+
+      const files = await classifyVisibility(root, [path.join(root, nfdPath)]);
+
+      expect(files).toEqual([{ path: path.join(root, nfdPath), relativePath: nfdPath, visibility: "ignored" }]);
+    });
+
+    it("classifies a name containing a quote, under an ignored folder, as ignored", async () => {
+      const root = repos.create({ gitignore: "dist/\n" });
+      setGitConfig(root, "core.quotePath", String(quotePath));
+      const quotedPath = 'dist/a"b.js';
+
+      const files = await classifyVisibility(root, [path.join(root, quotedPath)]);
+
+      expect(files).toEqual([
+        { path: path.join(root, quotedPath), relativePath: quotedPath, visibility: "ignored" },
+      ]);
+    });
+
+    it("judges a path of `:/x` as the literal path, not `:/`-magic to `x`", async () => {
+      // Rooted so it matches only a literal top-level `x`, never a path with
+      // a `:` segment in front of it.
+      const root = repos.create({ gitignore: "/x\n" });
+      setGitConfig(root, "core.quotePath", String(quotePath));
+
+      const files = await classifyVisibility(root, [path.join(root, ":/x")]);
+
+      expect(files).toEqual([{ path: path.join(root, ":/x"), relativePath: ":/x", visibility: "untracked" }]);
+    });
+
+    it("treats a negation re-include (`keep/*` + `!keep/keep.js`) as not ignored", async () => {
+      const root = repos.create({ gitignore: "keep/*\n!keep/keep.js\n" });
+      setGitConfig(root, "core.quotePath", String(quotePath));
+
+      const files = await classifyVisibility(root, [path.join(root, "keep/keep.js")]);
+
+      expect(files).toEqual([
+        { path: path.join(root, "keep/keep.js"), relativePath: "keep/keep.js", visibility: "untracked" },
+      ]);
+    });
   });
 });
 

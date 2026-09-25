@@ -37,6 +37,7 @@
 import path from "node:path";
 
 import type { ProjectVisibility } from "../shared/session-constants.js";
+import { checkIgnored } from "./check-ignore.js";
 import { runGit } from "./git.js";
 
 export type FileVisibility = "tracked" | "ignored" | "untracked";
@@ -70,11 +71,6 @@ function toRepoRelative(root: string, absolutePath: string): string {
   return path.relative(root, absolutePath).split(path.sep).join("/");
 }
 
-/** Newline-separated git output, blank lines dropped. */
-function lines(output: string): string[] {
-  return output.split("\n").filter((line) => line.length > 0);
-}
-
 /**
  * Classify each of `absolutePaths` (every one inside `root`) as tracked,
  * ignored, or untracked. See the module doc comment for the rules and the
@@ -98,18 +94,21 @@ export async function classifyVisibility(
   ]);
   const tracked = new Set(lsFiles.stdout.split("\0").filter((entry) => entry.length > 0));
 
-  // `check-ignore` takes literal paths (no pathspec magic — it refuses the
-  // `:(literal)` prefix outright) and has no `-z` mode outside `--stdin`, so
-  // arguments and output are plain, newline-separated paths.
+  // `check-ignore` is classified by the shared, position-based helper (see
+  // `check-ignore.ts`): every argument prefixed with `./` so a leading `:`
+  // is never read as pathspec magic, and a line read off by position rather
+  // than by comparing git's echoed pathname against what was sent.
   const remaining = relativePaths.filter((relative) => !tracked.has(relative));
   const ignored = new Set<string>();
   if (remaining.length > 0) {
-    const checkIgnore = await runGit(root, ["check-ignore", "--", ...remaining]);
-    // Exit 0: at least one of `remaining` is ignored, listed on stdout.
-    // Exit 1: none are. Anything else is a git error; treat it as "none
-    // known ignored" rather than fail a whole report over one bad path.
-    if (checkIgnore.exitCode === 0) {
-      for (const relative of lines(checkIgnore.stdout)) ignored.add(relative);
+    const checked = await checkIgnored(root, remaining);
+    // A non-0/1 exit or a line count that doesn't match the argument count
+    // is a git error; treat it as "none known ignored" rather than fail a
+    // whole report over one bad path.
+    if (checked.status === "ok") {
+      for (const [relative, isIgnored] of checked.ignored) {
+        if (isIgnored) ignored.add(relative);
+      }
     }
   }
 
