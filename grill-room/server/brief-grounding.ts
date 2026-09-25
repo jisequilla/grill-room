@@ -31,6 +31,7 @@ import {
   transitiveBlockers,
 } from "./handoff.js";
 import {
+  CITATION_PATTERN,
   handoffScoutResultSchema,
   staysInsideRepo,
   type HandoffScoutResult,
@@ -458,6 +459,30 @@ function cdReason(command: string, runs: string, projectRoot: string): string | 
   return `${runs} runs \`cd ${dir}\` and then names ${word}; after \`cd ${dir}\`, paths are relative to ${dir}, so it would look for ${dir}/${word}. Write it as ${suggestion}, or run the command from the repository root without the cd.`;
 }
 
+/**
+ * Why a `buildsOn` citation fails the same structural check the project
+ * scout's `citation` schema puts on the model: the `path:line` or
+ * `path:start-end` pattern, and a path that is relative to the project root
+ * and stays inside it. The handoff scout's own schema only requires a
+ * non-empty string, so nothing else enforces this — unlike a backwards range
+ * or an absolute path, which `checkCitation`'s existence check already
+ * refuses on its own, a `../`-carrying path can still resolve to a real file
+ * inside the repo and pass that check silently.
+ */
+function buildsOnCitationStructureReason(
+  ticketNumber: number,
+  blocker: number,
+  value: string,
+): string | null {
+  if (!CITATION_PATTERN.test(value)) {
+    return `Ticket ${ticketNumber}'s buildsOn on ticket ${blocker} cites "${value}", which is not \`path:line\` or \`path:start-end\`.`;
+  }
+  if (!staysInsideRepo(value.slice(0, value.lastIndexOf(":")))) {
+    return `Ticket ${ticketNumber}'s buildsOn on ticket ${blocker} cites "${value}", whose path is not relative to the project root or steps outside it.`;
+  }
+  return null;
+}
+
 /** A path as a case-insensitive, normalising file system such as APFS compares it. */
 function collisionKey(filePath: string): string {
   return path.posix
@@ -477,6 +502,9 @@ function collisionKey(filePath: string): string {
  *   `buildsOn` names a real blocker;
  * - every `buildsOn` sets exactly one of `citation`, `createdPath` and
  *   `editedPath`, and `symbol` exactly when it sets `editedPath`;
+ * - a `buildsOn` citation matches the `path:line`/`path:start-end` pattern
+ *   and its path stays inside the repository, the same structural check the
+ *   project scout's `citation` schema puts on the model;
  * - every path (a file to change, `createdPath`, `editedPath`, the proving
  *   test) is relative to the root and stays inside it;
  * - no file to change has a `.git` segment;
@@ -657,6 +685,14 @@ export async function reasonsToRefuseHandoffGrounding(
           `${on} sets more than one of citation, createdPath and editedPath; set exactly one, and leave the others null.`,
         );
         continue;
+      }
+      if (entry.citation !== null) {
+        const structureReason = buildsOnCitationStructureReason(
+          ticket.number,
+          entry.blocker,
+          entry.citation,
+        );
+        if (structureReason) reasons.push(structureReason);
       }
       if (entry.editedPath !== null && entry.symbol === null) {
         reasons.push(

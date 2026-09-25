@@ -713,6 +713,103 @@ describe("reasonsToRefuseHandoffGrounding on what counts as a proof", () => {
   });
 });
 
+describe("reasonsToRefuseHandoffGrounding on a buildsOn citation's shape", () => {
+  /** Two tickets, ticket 2 blocked by ticket 1, with ticket 2's one buildsOn entry citing `citation` on ticket 1. */
+  function aCitationBuildsOnResult(citation: string): { tickets: ScoutTicket[] } {
+    return {
+      tickets: [
+        {
+          number: 1,
+          filesToChange: [],
+          buildsOnFiles: [],
+          facts: [],
+          buildsOn: [],
+          provedBy: { testPath: null, command: "true" },
+        },
+        {
+          number: 2,
+          filesToChange: [],
+          buildsOnFiles: [],
+          facts: [],
+          buildsOn: [
+            {
+              blocker: 1,
+              provides: "What ticket 1 has.",
+              citation,
+              createdPath: null,
+              editedPath: null,
+              symbol: null,
+              check: "true",
+            },
+          ],
+          provedBy: { testPath: null, command: "true" },
+        },
+      ],
+    };
+  }
+
+  const tickets = [
+    { number: 1, blockedBy: [] },
+    { number: 2, blockedBy: [1] },
+  ];
+
+  it("refuses a buildsOn citation whose path steps outside the repo with `..`, even when it resolves to a real file", async () => {
+    const root = repos.create({
+      files: { "src/ingest/lag-alert.ts": "export {};\n" },
+    });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      aCitationBuildsOnResult("src/ingest/x/../lag-alert.ts:1"),
+      { projectRoot: root, tickets },
+    );
+
+    expect(reasons).toEqual([
+      'Ticket 2\'s buildsOn on ticket 1 cites "src/ingest/x/../lag-alert.ts:1", whose path is not relative to the project root or steps outside it.',
+    ]);
+  });
+
+  it("refuses a buildsOn citation with an absolute path", async () => {
+    const root = repos.create({ files: { "src/ingest/lag-alert.ts": "export {};\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      aCitationBuildsOnResult("/src/ingest/lag-alert.ts:1"),
+      { projectRoot: root, tickets },
+    );
+
+    expect(
+      reasons.some((reason) =>
+        reason.includes('Ticket 2\'s buildsOn on ticket 1 cites "/src/ingest/lag-alert.ts:1"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses a buildsOn citation with a backwards line range", async () => {
+    const root = repos.create({
+      files: { "src/ingest/lag-alert.ts": "export {};\nexport {};\nexport {};\n" },
+    });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      aCitationBuildsOnResult("src/ingest/lag-alert.ts:3-1"),
+      { projectRoot: root, tickets },
+    );
+
+    expect(reasons).toEqual([
+      expect.stringContaining("has a line range that ends before it starts"),
+    ]);
+  });
+
+  it("accepts a valid buildsOn citation", async () => {
+    const root = repos.create({ files: { "src/ingest/lag-alert.ts": "export {};\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      aCitationBuildsOnResult("src/ingest/lag-alert.ts:1"),
+      { projectRoot: root, tickets },
+    );
+
+    expect(reasons).toEqual([]);
+  });
+});
+
 describe("isTestFileByName", () => {
   it.each([
     "backend/export/export_test.go",

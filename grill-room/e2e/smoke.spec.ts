@@ -398,6 +398,14 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
   expect(briefFileContent).toContain("docs/adr/0003-queue.md:5-9");
   expect(briefFileContent).not.toContain("<!-- slot: file-boundaries -->");
   expect(briefFileContent).not.toContain("<!-- slot: codebase-facts -->");
+  // Ticket 2's one `buildsOn` entry is the edited-file form (`editedPath` +
+  // `symbol`), so `server/handoff.ts`'s `buildsOnSection` renders it as
+  // "ticket NN adds `<symbol>` to `<editedPath>`" — the one line the fake's
+  // scripted grounding otherwise never exercises anywhere the browser
+  // renders it.
+  expect(briefFileContent).toContain(
+    "ticket 01 adds `emitLagEvent` to `src/ingest/metrics.ts`",
+  );
 
   // ---- intent.md is planned and written alongside the rest of the bundle -
   // (`.scratch/export-ownership/spec.md`, "intent.md is always planned").

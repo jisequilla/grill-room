@@ -34,7 +34,7 @@ const decisionKey = z.string().min(1);
  * a line range. Kept to plain regex syntax so the structured-output pattern
  * stays portable; the refinements below add what the pattern cannot say.
  */
-const CITATION_PATTERN = /^[^:\n]+:[1-9][0-9]*(-[1-9][0-9]*)?$/;
+export const CITATION_PATTERN = /^[^:\n]+:[1-9][0-9]*(-[1-9][0-9]*)?$/;
 
 /**
  * Whether a path is relative to the repository root and cannot step outside

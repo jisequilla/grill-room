@@ -831,6 +831,21 @@ function codebaseFactsSection(ticket: HandoffTicket, grounding: HandoffGrounding
 }
 
 /**
+ * Wraps `value` as CommonMark inline code, safe for a value that itself
+ * contains a backtick: the fence is one backtick longer than the longest run
+ * of backticks inside the value, and a single space is added on any side the
+ * value starts or ends with a backtick (the CommonMark rule for making the
+ * fence and the content unambiguous).
+ */
+function inlineCode(value: string): string {
+  const longestRun = Math.max(0, ...(value.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longestRun + 1);
+  const padStart = value.startsWith("`") ? " " : "";
+  const padEnd = value.endsWith("`") ? " " : "";
+  return `${fence}${padStart}${value}${padEnd}${fence}`;
+}
+
+/**
  * A new "Builds on" section, one line per blocker: what this ticket needs
  * from it, where — a citation, "created by ticket NN at <path>" for a
  * dependency on a path the blocker has not created yet, or "ticket NN adds
@@ -850,11 +865,11 @@ function buildsOnSection(
     const label = padTicketNumber(dependency.blocker, total);
     const where =
       dependency.citation !== null
-        ? `\`${dependency.citation}\``
+        ? inlineCode(dependency.citation)
         : dependency.createdPath !== null
-          ? `created by ticket ${label} at \`${dependency.createdPath}\``
-          : `ticket ${label} adds \`${dependency.symbol}\` to \`${dependency.editedPath}\``;
-    return `- Ticket ${label}: ${dependency.provides} — ${where} — check: \`${dependency.check}\``;
+          ? `created by ticket ${label} at ${inlineCode(dependency.createdPath)}`
+          : `ticket ${label} adds ${inlineCode(dependency.symbol!)} to ${inlineCode(dependency.editedPath!)}`;
+    return `- Ticket ${label}: ${dependency.provides} — ${where} — check: ${inlineCode(dependency.check)}`;
   });
   return ["## Builds on", "", ...lines].join("\n");
 }

@@ -575,6 +575,86 @@ describe("grounded briefs", () => {
     );
   });
 
+  it("widens the inline-code fence for a value with a backtick in it: one entry with a single backtick, one with a double backtick", () => {
+    const grounding: HandoffGrounding = {
+      ...CURRENT_GROUNDING,
+      tickets: [
+        ...CURRENT_GROUNDING.tickets,
+        {
+          number: 3,
+          filesToChange: [{ path: "server/export.test.ts", change: "edit" }],
+          buildsOnFiles: [],
+          facts: [],
+          buildsOn: [
+            {
+              blocker: 1,
+              provides: "the getter for the raw value",
+              citation: null,
+              createdPath: null,
+              editedPath: "server/db/schema.ts",
+              symbol: "get`Data",
+              check: "grep -n get server/db/schema.ts",
+            },
+          ],
+          provedBy: {
+            testPath: "server/export.test.ts",
+            command: "pnpm exec vitest run server/export.test.ts",
+          },
+        },
+      ],
+    };
+
+    const brief = renderBrief(aSource(), ticketByNumber(3), { grounding });
+
+    expect(section(brief, "## Builds on")).toBe(
+      [
+        "## Builds on",
+        "",
+        "- Ticket 01: the getter for the raw value — ticket 01 adds ``get`Data`` to `server/db/schema.ts` — check: `grep -n get server/db/schema.ts`",
+      ].join("\n"),
+    );
+  });
+
+  it("widens the inline-code fence further for a citation containing a double backtick", () => {
+    const grounding: HandoffGrounding = {
+      ...CURRENT_GROUNDING,
+      tickets: [
+        ...CURRENT_GROUNDING.tickets,
+        {
+          number: 3,
+          filesToChange: [{ path: "server/export.test.ts", change: "edit" }],
+          buildsOnFiles: [],
+          facts: [],
+          buildsOn: [
+            {
+              blocker: 1,
+              provides: "what it confirms",
+              citation: "server/``x``.ts:5",
+              createdPath: null,
+              editedPath: null,
+              symbol: null,
+              check: "true",
+            },
+          ],
+          provedBy: {
+            testPath: "server/export.test.ts",
+            command: "pnpm exec vitest run server/export.test.ts",
+          },
+        },
+      ],
+    };
+
+    const brief = renderBrief(aSource(), ticketByNumber(3), { grounding });
+
+    expect(section(brief, "## Builds on")).toBe(
+      [
+        "## Builds on",
+        "",
+        "- Ticket 01: what it confirms — ```server/``x``.ts:5``` — check: `true`",
+      ].join("\n"),
+    );
+  });
+
   it("marks a file to edit that a blocker creates with the ticket that creates it, and only for a blocker", () => {
     const createsTest = {
       ...TICKET_1_GROUNDING,
