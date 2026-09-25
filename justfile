@@ -102,12 +102,17 @@ e2e:
 
 # Record and compress the demo video: replays the `demo` scenario end to end with Playwright
 # video on, then shrinks the result into docs/media/demo.webm (target under 5 MB), replacing
-# any previous file. See e2e/demo.spec.ts for the walk and e2e/fixtures/ for its recording.
+# any previous file. Also regenerates docs/media/demo.webp, the README's animated preview,
+# from that webm. See e2e/demo.spec.ts for the walk and e2e/fixtures/ for its recording.
 demo:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v ffmpeg >/dev/null 2>&1; then
       echo "demo: ffmpeg is not on PATH; install it before running 'just demo'." >&2
+      exit 1
+    fi
+    if ! command -v gif2webp >/dev/null 2>&1; then
+      echo "demo: gif2webp is not on PATH; install it before running 'just demo'." >&2
       exit 1
     fi
     if [ -z "${E2E_PORT:-}" ]; then
@@ -126,6 +131,14 @@ demo:
       ../docs/media/demo.webm
     size=$(stat -f%z ../docs/media/demo.webm 2>/dev/null || stat -c%s ../docs/media/demo.webm)
     echo "docs/media/demo.webm: ${size} bytes"
+    tmp_gif="$(mktemp -t demo-XXXXXX).gif"
+    trap 'rm -f "$tmp_gif"' EXIT
+    ffmpeg -y -i ../docs/media/demo.webm \
+      -vf "fps=6,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=256:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \
+      "$tmp_gif"
+    gif2webp -quiet -lossy -q 45 -m 6 -mixed "$tmp_gif" -o ../docs/media/demo.webp
+    webp_size=$(stat -f%z ../docs/media/demo.webp 2>/dev/null || stat -c%s ../docs/media/demo.webp)
+    echo "docs/media/demo.webp: ${webp_size} bytes"
 
 typecheck:
     pnpm typecheck
