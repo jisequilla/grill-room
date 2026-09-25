@@ -65,7 +65,7 @@ The main session merges only approved work, and still re-runs the verification i
   - `adversarialReview`: a boolean, default true.
   - Both are additive columns. Existing rows migrate to `pull-request` and review on.
 - **Registration** sets the recipe from the repository's remotes, using the read-only git wrapper, when the caller gives none: any remote means `pull-request`, none means `local-merge`. Updating a project can change either setting. Both appear wherever project settings are shown and edited.
-- **The pure handoff renderer** selects the "before delegating" and "delegation lifecycle" sections by recipe:
+- **The pure handoff renderer** selects the "before delegating" and "delegation lifecycle" sections of HANDOFF.md, and each brief's delivery and report steps, by recipe:
   - **Pull request:** today's text, with the pull request opened as a draft and the rule that a draft is never merged.
   - **Local merge:** commit on main before delegating; each ticket on its worktree branch; the main session reads the branch diff, re-runs verification, and merges locally after approval; the verdict is recorded on the ticket per the project's tracker.
 - **"Reviewing a ticket" section.** When the review switch is on, the renderer adds this one fixed section to HANDOFF.md. It covers:
