@@ -64,17 +64,35 @@
  * ## Manifest and re-export
  *
  * Every export writes `.grill-room-export.json` (`EXPORT_MANIFEST_FILE`) at
- * the top of the bundle, listing the relative paths of every other file it
- * wrote. The manifest is a planned file like any other: it appears in the
- * preview's file list and passes the same containment check.
+ * the top of the bundle: the provenance record described in `export.ts`
+ * (session, revision, scout commit, HEAD at export, and a hash per file Grill
+ * Room wrote). The manifest is a planned file like any other: it appears in
+ * the preview's file list and passes the same containment check.
  *
- * Writing overwrites every planned file. It removes exactly the paths the
- * bundle's previous manifest lists that the new plan no longer contains and
- * that still exist, such as a ticket dropped since the last export. Nothing
- * the previous manifest does not list is ever removed, whatever its name or
- * folder. A bundle with no manifest, or with one that is unreadable or
- * malformed, gets no removals. An entry that is absolute or climbs out of the
- * bundle is ignored.
+ * The removal candidates are exactly the paths the bundle's previous manifest
+ * lists that the new plan no longer contains and that still exist, such as a
+ * ticket dropped since the last export. Nothing the previous manifest does
+ * not list is ever removed, whatever its name or folder. A bundle with no
+ * manifest, or with one that is unreadable or malformed, gets no removals. An
+ * entry that is absolute or climbs out of the bundle is ignored.
+ *
+ * ## The guard
+ *
+ * Every planned file already on disk, and every removal candidate, is
+ * classified from disk when the plan is built:
+ *
+ * - **unedited** — the previous manifest records a hash for the path and the
+ *   file's content hashes to it (CRLF normalised), or the previous manifest is
+ *   version 1 and lists the path (trusted once);
+ * - **edited** — anything else, including a file the previous manifest never
+ *   listed.
+ *
+ * An edited file is **kept** — neither overwritten nor removed — unless its
+ * bundle-relative path is in `overridePaths`. A kept file stays in the new
+ * manifest with the hash Grill Room last wrote for it; one that was never
+ * hashed is not added. Every override must resolve inside the bundle
+ * directory, through symlinks, or the plan is refused with
+ * `override-outside-bundle`.
  */
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -86,16 +104,20 @@ import type { ProjectVisibility } from "../shared/session-constants.js";
 import { getDb, schema } from "./db/index.js";
 import {
   applySlugPattern,
+  buildExportManifest,
   findSequencedFolder,
   EXPORT_MANIFEST_FILE,
   formatLocalDate,
+  hashExportContent,
   nextSequence,
   parseExportManifest,
+  type ParsedExportManifest,
   planExport,
   proposeSlug,
   renderExportManifest,
   sanitizeSlug,
 } from "./export.js";
+import { runGit } from "./git.js";
 import {
   bundlePathFor,
   fillBundlePath,
@@ -121,6 +143,21 @@ export interface BundleFile {
   relativePath: string;
   absolutePath: string;
   content: string;
+  /** The file exists on disk and the guard classifies it as edited. Always false for the manifest. */
+  edited: boolean;
+  /** Edited and not overridden: the export leaves it as it is instead of writing it. */
+  kept: boolean;
+}
+
+/** A file the previous manifest lists that the new plan drops. */
+export interface BundleRemoval {
+  /** Relative to the bundle directory, forward slashes. */
+  relativePath: string;
+  absolutePath: string;
+  /** The guard classifies it as edited. */
+  edited: boolean;
+  /** Edited and not overridden: the export leaves it on disk instead of removing it. */
+  kept: boolean;
 }
 
 export interface ExportBundlePlan {
@@ -144,10 +181,10 @@ export interface ExportBundlePlan {
   bundleFolder: string;
   /** Whether the bundle directory already exists, i.e. this export replaces an earlier one. */
   bundleExists: boolean;
-  /** Every file the export writes: spec, issues in number order, then the manifest. */
+  /** Every planned file, kept ones included: spec, issues in number order, then the manifest. */
   files: BundleFile[];
-  /** Absolute paths from the previous manifest that the export removes. */
-  removals: string[];
+  /** Every file the previous manifest lists that the plan drops and that still exists, kept ones included. */
+  removals: BundleRemoval[];
   /** The project's declared-tracker diagnostic, shown as a preview line when present. */
   trackerDiagnostic: string | null;
   ticketsExported: boolean;
@@ -166,6 +203,8 @@ export interface PlanExportBundleInput {
   slug?: string;
   /** Clock for `{date}`; defaults to now. */
   now?: Date;
+  /** Bundle-relative paths of edited files to overwrite or remove anyway. */
+  overridePaths?: readonly string[];
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -242,31 +281,63 @@ async function exists(target: string): Promise<boolean> {
   }
 }
 
+/** `absolute` relative to `bundleDir`, with forward slashes. */
+function bundleRelative(bundleDir: string, absolute: string): string {
+  return path.relative(bundleDir, absolute).split(path.sep).join("/");
+}
+
 /**
- * Paths the bundle's previous manifest lists that `planned` no longer
- * contains and that still exist, as absolute paths. No manifest, or a
- * malformed one, means none. Entries that are absolute or resolve outside the
- * bundle directory are ignored.
+ * A manifest entry or override as an absolute path inside `bundleDir`, or
+ * null when it is empty, absolute, holds a NUL, or climbs out of the bundle.
  */
-async function manifestRemovals(
-  bundleDir: string,
-  planned: ReadonlySet<string>,
-): Promise<string[]> {
+function resolveInsideBundle(bundleDir: string, entry: string): string | null {
+  if (entry.length === 0 || path.isAbsolute(entry) || entry.includes("\0")) return null;
+  const absolute = path.resolve(bundleDir, entry);
+  return isStrictlyInside(absolute, bundleDir) ? absolute : null;
+}
+
+/**
+ * The bundle's previous manifest with every usable entry keyed by its
+ * normalised bundle-relative path, or null when there is none or it is
+ * malformed. Unusable entries (absolute, escaping the bundle) are dropped.
+ */
+async function readPreviousManifest(bundleDir: string): Promise<ParsedExportManifest | null> {
   let content: string;
   try {
     content = await fs.readFile(path.join(bundleDir, EXPORT_MANIFEST_FILE), "utf8");
   } catch {
-    return [];
+    return null;
   }
-  const listed = parseExportManifest(content);
-  if (!listed) return [];
+  const parsed = parseExportManifest(content);
+  if (!parsed) return null;
 
+  const files: ParsedExportManifest["files"] = [];
+  const seen = new Set<string>();
+  for (const file of parsed.files) {
+    const absolute = resolveInsideBundle(bundleDir, file.path);
+    if (absolute === null) continue;
+    const relativePath = bundleRelative(bundleDir, absolute);
+    if (seen.has(relativePath)) continue;
+    seen.add(relativePath);
+    files.push({ path: relativePath, sha256: file.sha256 });
+  }
+  return { ...parsed, files };
+}
+
+/**
+ * Paths the previous manifest lists that `planned` no longer contains and
+ * that still exist as a file or symlink, as absolute paths, sorted.
+ */
+async function removalCandidates(
+  bundleDir: string,
+  previous: ParsedExportManifest | null,
+  planned: ReadonlySet<string>,
+): Promise<string[]> {
+  if (!previous) return [];
   const manifestPath = path.join(bundleDir, EXPORT_MANIFEST_FILE);
   const removals = new Set<string>();
-  for (const entry of listed) {
-    if (entry.length === 0 || path.isAbsolute(entry) || entry.includes("\0")) continue;
-    const absolute = path.resolve(bundleDir, entry);
-    if (!isStrictlyInside(absolute, bundleDir)) continue;
+  for (const file of previous.files) {
+    const absolute = path.resolve(bundleDir, file.path);
     if (absolute === manifestPath || planned.has(absolute)) continue;
 
     let stats;
@@ -278,6 +349,65 @@ async function manifestRemovals(
     if (stats.isFile() || stats.isSymbolicLink()) removals.add(absolute);
   }
   return [...removals].sort();
+}
+
+/**
+ * Whether the file at `absolutePath` counts as edited against `previous`. A
+ * missing file is not edited. See "The guard" above.
+ */
+async function isEdited(
+  absolutePath: string,
+  relativePath: string,
+  previous: ParsedExportManifest | null,
+): Promise<boolean> {
+  if (!(await exists(absolutePath))) return false;
+  const entry = previous?.files.find((file) => file.path === relativePath);
+  if (!entry) return true;
+  if (previous!.version === 1) return false;
+  if (entry.sha256 === null) return true;
+  try {
+    return hashExportContent(await fs.readFile(absolutePath, "utf8")) !== entry.sha256;
+  } catch {
+    return true;
+  }
+}
+
+function refuseOverride(override: string): never {
+  fail(`Refusing to export: the override ${override} resolves outside the bundle directory.`, {
+    errorCode: "override-outside-bundle",
+    statusCode: 400,
+    details: { path: override },
+  });
+}
+
+/**
+ * The overrides as normalised bundle-relative paths. Each must resolve inside
+ * the bundle directory both lexically and through the filesystem.
+ */
+async function resolveOverrides(
+  bundleDir: string,
+  overrides: readonly string[],
+): Promise<Set<string>> {
+  const resolved = new Set<string>();
+  if (overrides.length === 0) return resolved;
+  const realBundle = await realLocation(bundleDir);
+  for (const override of overrides) {
+    const absolute = resolveInsideBundle(bundleDir, override);
+    if (absolute === null) refuseOverride(override);
+    if (!isStrictlyInside(await realLocation(absolute), realBundle)) refuseOverride(override);
+    resolved.add(bundleRelative(bundleDir, absolute));
+  }
+  return resolved;
+}
+
+/** The project's HEAD commit, or null when it has none or is not a git repository. */
+async function headCommit(root: string): Promise<string | null> {
+  try {
+    const head = await runGit(root, ["rev-parse", "HEAD"]);
+    return head.exitCode === 0 ? head.stdout.trim() || null : null;
+  } catch {
+    return null;
+  }
 }
 
 function checkFolderName(folderName: string): void {
@@ -432,34 +562,70 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     ? [handoffFiles[0]!, ...plan.files, ...handoffFiles.slice(1)]
     : plan.files;
 
-  const plannedFiles = [
-    ...contentFiles,
-    {
-      relativePath: EXPORT_MANIFEST_FILE,
-      content: renderExportManifest(contentFiles.map((file) => file.relativePath)),
-    },
-  ];
-
-  const files: BundleFile[] = plannedFiles.map((file) => {
-    const absolutePath = path.resolve(bundleDir, file.relativePath);
+  const plannedPaths = [
+    ...contentFiles.map((file) => file.relativePath),
+    EXPORT_MANIFEST_FILE,
+  ].map((relativePath) => {
+    const absolutePath = path.resolve(bundleDir, relativePath);
     if (!isStrictlyInside(absolutePath, bundleDir)) {
       fail(
-        `Refusing to export: a planned file would land outside the bundle directory: ${file.relativePath}`,
+        `Refusing to export: a planned file would land outside the bundle directory: ${relativePath}`,
         { errorCode: "path-escape", statusCode: 500 },
       );
     }
-    return { relativePath: file.relativePath, absolutePath, content: file.content };
+    return absolutePath;
   });
 
-  const removals = await manifestRemovals(
-    bundleDir,
-    new Set(files.map((file) => file.absolutePath)),
-  );
+  const previous = await readPreviousManifest(bundleDir);
+  const removalPaths = await removalCandidates(bundleDir, previous, new Set(plannedPaths));
 
-  await assertContained(
-    [bundleDir, ...files.map((file) => file.absolutePath), ...removals],
-    realRoot,
-  );
+  await assertContained([bundleDir, ...plannedPaths, ...removalPaths], realRoot);
+  const overrides = await resolveOverrides(bundleDir, input.overridePaths ?? []);
+
+  const contentBundleFiles: BundleFile[] = [];
+  for (const [index, file] of contentFiles.entries()) {
+    const absolutePath = plannedPaths[index]!;
+    const edited = await isEdited(absolutePath, file.relativePath, previous);
+    contentBundleFiles.push({
+      relativePath: file.relativePath,
+      absolutePath,
+      content: file.content,
+      edited,
+      kept: edited && !overrides.has(file.relativePath),
+    });
+  }
+
+  const removals: BundleRemoval[] = [];
+  for (const absolutePath of removalPaths) {
+    const relativePath = bundleRelative(bundleDir, absolutePath);
+    const edited = await isEdited(absolutePath, relativePath, previous);
+    removals.push({
+      relativePath,
+      absolutePath,
+      edited,
+      kept: edited && !overrides.has(relativePath),
+    });
+  }
+
+  const manifest = buildExportManifest({
+    sessionId: session.id,
+    previous,
+    scoutCommit: scoutReport?.commitRead ?? null,
+    headCommit: await headCommit(project.rootPath),
+    planned: contentBundleFiles,
+    keptRemovals: removals.filter((removal) => removal.kept).map((removal) => removal.relativePath),
+  });
+
+  const files: BundleFile[] = [
+    ...contentBundleFiles,
+    {
+      relativePath: EXPORT_MANIFEST_FILE,
+      absolutePath: plannedPaths[plannedPaths.length - 1]!,
+      content: renderExportManifest(manifest),
+      edited: false,
+      kept: false,
+    },
+  ];
 
   return {
     sessionId: session.id,
@@ -490,14 +656,20 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
 
 /**
  * Carry out a plan from {@link planExportBundle}: create missing folders,
- * write every planned file, then remove the stale owned files. Returns the
- * absolute paths written and removed, in plan order.
+ * write every planned file the guard did not keep, then remove the stale
+ * owned files it did not keep. Returns the absolute paths written, removed
+ * and kept, in plan order (kept writes before kept removals).
  */
 export async function writeExportBundle(
   plan: ExportBundlePlan,
-): Promise<{ written: string[]; removed: string[] }> {
+): Promise<{ written: string[]; removed: string[]; kept: string[] }> {
   const written: string[] = [];
+  const kept: string[] = [];
   for (const file of plan.files) {
+    if (file.kept) {
+      kept.push(file.absolutePath);
+      continue;
+    }
     await fs.mkdir(path.dirname(file.absolutePath), { recursive: true });
     await fs.writeFile(file.absolutePath, file.content, "utf8");
     written.push(file.absolutePath);
@@ -505,9 +677,13 @@ export async function writeExportBundle(
 
   const removed: string[] = [];
   for (const stale of plan.removals) {
-    await fs.rm(stale, { force: true });
-    removed.push(stale);
+    if (stale.kept) {
+      kept.push(stale.absolutePath);
+      continue;
+    }
+    await fs.rm(stale.absolutePath, { force: true });
+    removed.push(stale.absolutePath);
   }
 
-  return { written, removed };
+  return { written, removed, kept };
 }
