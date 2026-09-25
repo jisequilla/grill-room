@@ -196,25 +196,29 @@ function fenced(text: string, language: string): string[] {
 }
 
 /**
- * The handoff scout's retry. Its grounding is large and mostly right when it
- * is refused, and the scout starts each attempt fresh, so it gets its
- * previous answer back and is told to correct only what the reasons name:
- * rewriting everything re-reads the project for minutes and breaks entries
- * that had already passed.
+ * The retry section for a request kind whose scout never resumes a
+ * conversation — the project scout, the readiness judge and the handoff
+ * scout. Each attempt is large and mostly right when it is refused, so the
+ * model gets its previous answer back and is told to correct only what the
+ * reasons name: rewriting everything re-reads the project for minutes and
+ * breaks entries that had already passed.
  */
-function renderHandoffScoutRetry(request: HandoffScoutRequest): string {
-  if (!request.rejectionReason) return "";
+function renderRetryWithPreviousResult(
+  rejectionReason: string | null,
+  previousResult: unknown | null,
+): string {
+  if (!rejectionReason) return "";
   return [
     "",
     "## Your previous answer was rejected",
     "",
-    request.rejectionReason,
-    ...(request.previousResult
+    rejectionReason,
+    ...(previousResult
       ? [
           "",
           "Your previous answer, exactly as the app received it:",
           "",
-          ...fenced(JSON.stringify(request.previousResult, null, 2), "json"),
+          ...fenced(JSON.stringify(previousResult, null, 2), "json"),
         ]
       : []),
     "",
@@ -556,7 +560,7 @@ function buildReadinessPrompt(request: AssessReadinessRequest): string {
     "  naming one gap the user could fill by editing the idea. Empty when the",
     "  verdict is `ready` and nothing is missing. Name gaps only; do not",
     "  rewrite the idea.",
-    renderRetry(request.rejectionReason),
+    renderRetryWithPreviousResult(request.rejectionReason, request.previousResult),
   ]
     .join("\n")
     .trimEnd();
@@ -723,7 +727,7 @@ function buildScoutPrompt(request: ScoutProjectRequest): string {
     "",
     "When the project has nothing relevant to the idea, say so with empty",
     "lists rather than stretching an unrelated item to fit.",
-    renderRetry(request.rejectionReason),
+    renderRetryWithPreviousResult(request.rejectionReason, request.previousResult),
   ]
     .join("\n")
     .trimEnd();
@@ -895,7 +899,7 @@ function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
     "edit, a test that is not among its ticket's files to change, a proof",
     "by a file the ticket edits that is not a test by its name, and a check",
     "or command that names a path from the repository root after a `cd`.",
-    renderHandoffScoutRetry(request),
+    renderRetryWithPreviousResult(request.rejectionReason, request.previousResult),
   ]
     .join("\n")
     .trimEnd();

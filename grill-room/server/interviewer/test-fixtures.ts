@@ -151,6 +151,7 @@ export function anAssessReadinessRequest(
     context: aContext({ decisions: [] }),
     scoutReport: null,
     rejectionReason: null,
+    previousResult: null,
     ...overrides,
   };
 }
@@ -230,6 +231,7 @@ export function aScoutProjectRequest(
     facts: someProjectServerFacts(),
     previousDecisions: [],
     rejectionReason: null,
+    previousResult: null,
     ...overrides,
   };
 }

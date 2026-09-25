@@ -221,6 +221,76 @@ describe("what the adapter sends for a readiness judgment", () => {
     expect(prompt).toContain("judge whether the idea is ready to grill");
     expect(prompt).not.toContain(loadGrillingSkill().trimEnd());
   });
+
+  it("passes the rejection reason back on a retry", async () => {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: anAssessReadinessResult() })),
+    ]);
+
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).assessReadiness(
+      anAssessReadinessRequest({
+        rejectionReason: "The verdict is ready, but no evidence was returned.",
+      }),
+    );
+
+    const prompt = valueOf(runner.invocations[0].args, "-p") as string;
+    expect(prompt).toContain("The verdict is ready, but no evidence was returned.");
+  });
+
+  it("hands a retry its previous answer and tells it to change only what the reasons name", async () => {
+    const previous = anAssessReadinessResult();
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: anAssessReadinessResult() })),
+    ]);
+
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).assessReadiness(
+      anAssessReadinessRequest({
+        rejectionReason: "The verdict is ready, but no evidence was returned.",
+        previousResult: previous,
+      }),
+    );
+
+    const { args } = runner.invocations[0];
+    const prompt = valueOf(args, "-p") as string;
+    expect(args).not.toContain("--resume");
+    expect(prompt).toContain(
+      [
+        "## Your previous answer was rejected",
+        "",
+        "The verdict is ready, but no evidence was returned.",
+        "",
+        "Your previous answer, exactly as the app received it:",
+        "",
+        "```json",
+        JSON.stringify(previous, null, 2),
+        "```",
+        "",
+        "Correct only what the reasons above name:",
+        "",
+        "- Keep every entry the reasons do not name exactly as it is in your",
+        "  previous answer: it already passed every check.",
+        "- Change only the entries the reasons name.",
+        "- Do not re-read files already read for your previous answer unless a",
+        "  reason concerns them.",
+      ].join("\n"),
+    );
+    expect(prompt.endsWith("  reason concerns them.")).toBe(true);
+    expect(prompt).not.toContain("Do not repeat the rejected structure.");
+  });
+
+  it("sends no retry section on the first attempt", async () => {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: anAssessReadinessResult() })),
+    ]);
+
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).assessReadiness(
+      anAssessReadinessRequest(),
+    );
+
+    const prompt = valueOf(runner.invocations[0].args, "-p") as string;
+    expect(prompt).not.toContain("## Your previous answer was rejected");
+    expect(prompt).not.toContain("Correct only what the reasons above name");
+  });
 });
 
 describe("what the adapter sends when the session has a docs folder", () => {
@@ -568,6 +638,51 @@ describe("what the adapter sends for a project scout", () => {
     expect(valueOf(invocation.args, "-p")).toContain(
       "src/missing.ts:4 does not exist at the commit read.",
     );
+  });
+
+  it("hands a retry its previous answer and tells it to change only what the reasons name", async () => {
+    const previous = aScoutProjectResult();
+    const { invocation } = await scoutInvocation(
+      aScoutProjectRequest({
+        projectRoot: PROJECT_ROOT,
+        rejectionReason: "src/missing.ts:4 does not exist at the commit read.",
+        previousResult: previous,
+      }),
+    );
+    const prompt = valueOf(invocation.args, "-p") as string;
+
+    expect(invocation.args).not.toContain("--resume");
+    expect(prompt).toContain(
+      [
+        "## Your previous answer was rejected",
+        "",
+        "src/missing.ts:4 does not exist at the commit read.",
+        "",
+        "Your previous answer, exactly as the app received it:",
+        "",
+        "```json",
+        JSON.stringify(previous, null, 2),
+        "```",
+        "",
+        "Correct only what the reasons above name:",
+        "",
+        "- Keep every entry the reasons do not name exactly as it is in your",
+        "  previous answer: it already passed every check.",
+        "- Change only the entries the reasons name.",
+        "- Do not re-read files already read for your previous answer unless a",
+        "  reason concerns them.",
+      ].join("\n"),
+    );
+    expect(prompt.endsWith("  reason concerns them.")).toBe(true);
+    expect(prompt).not.toContain("Do not repeat the rejected structure.");
+  });
+
+  it("sends no retry section on the first attempt", async () => {
+    const { invocation } = await scoutInvocation();
+    const prompt = valueOf(invocation.args, "-p") as string;
+
+    expect(prompt).not.toContain("## Your previous answer was rejected");
+    expect(prompt).not.toContain("Correct only what the reasons above name");
   });
 
   it("returns the validated report and reports its one call as new", async () => {
@@ -1021,12 +1136,10 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).not.toContain("Correct only what the reasons above name");
   });
 
-  it("keeps the project scout's retry wording unchanged", async () => {
-    const runner = recordingRunner([
-      ok(anEnvelope({ structured_output: aScoutProjectResult() })),
-    ]);
-    await createClaudeCliInterviewer({ runCli: runner.runCli }).scoutProject(
-      aScoutProjectRequest({ rejectionReason: "A citation is out of range." }),
+  it("keeps the session-conversation kinds' retry wording unchanged, unlike the scouts and the readiness judge", async () => {
+    const runner = recordingRunner([ok(anEnvelope())]);
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).proposeRound(
+      aProposeRoundRequest({ rejectionReason: "A decision is missing a recommendation." }),
     );
     const prompt = valueOf(runner.invocations[0]!.args, "-p") as string;
 

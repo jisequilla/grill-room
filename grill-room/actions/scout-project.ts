@@ -157,11 +157,14 @@ export async function scoutProjectCore(input: {
     failedMessage: "The scout turn failed.",
     record: { turnKind: "scout-project", model: SCOUT_MODEL },
     take: async (recorder) => {
+      // The scout never resumes a conversation, so a retry starts fresh: it
+      // gets the answer it is correcting in the request instead.
+      let previousResult: ScoutProjectResult | null = null;
       const accepted = await askUntilAccepted<ScoutProjectResult>({
         conversationId: null,
         recorder,
-        ask: async ({ rejectionReason, observer }) =>
-          getInterviewer().scoutProject(
+        ask: async ({ rejectionReason, observer }) => {
+          const turn = await getInterviewer().scoutProject(
             {
               kind: "scout-project",
               context: {
@@ -179,9 +182,13 @@ export async function scoutProjectCore(input: {
               facts,
               previousDecisions,
               rejectionReason,
+              previousResult: rejectionReason === null ? null : previousResult,
             },
             observer,
-          ),
+          );
+          previousResult = turn.result;
+          return turn;
+        },
         reasonsToRefuse: (result) =>
           reasonsToRefuseScoutReport(result, {
             projectRoot: project.rootPath,

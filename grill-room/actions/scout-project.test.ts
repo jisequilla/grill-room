@@ -192,15 +192,13 @@ describe("scout-project", () => {
 
   it("refuses a citation to a missing file and asks again", async () => {
     const { session } = await aSessionWithProject();
+    const refused = aScoutProjectResult({
+      currentState: [
+        { status: "gap", summary: "No alerting yet.", citations: ["src/alerts.ts:1"] },
+      ],
+    });
     const interviewer = scriptInterviewer([
-      {
-        kind: "scout-project",
-        result: aScoutProjectResult({
-          currentState: [
-            { status: "gap", summary: "No alerting yet.", citations: ["src/alerts.ts:1"] },
-          ],
-        }),
-      },
+      { kind: "scout-project", result: refused },
       { kind: "scout-project", result: aScoutProjectResult() },
     ]);
 
@@ -208,7 +206,9 @@ describe("scout-project", () => {
 
     const requests = scoutRequests(interviewer.requests);
     expect(requests).toHaveLength(2);
+    expect(requests[0]).toMatchObject({ rejectionReason: null, previousResult: null });
     expect(requests[1]!.rejectionReason).toMatch(/src\/alerts\.ts, which does not exist/);
+    expect(requests[1]!.previousResult).toEqual(refused);
     const { report } = await getScoutReport.run({ sessionId: session.id });
     expect(report!.result).toEqual(aScoutProjectResult());
   });
