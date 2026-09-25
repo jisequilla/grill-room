@@ -286,10 +286,15 @@ describe("find-superseded", () => {
   describe("as the second half of a done proposal: settled decisions a later one replaced", () => {
     it("sends every settled, unreplaced decision with a later one as replaceable, in tree order", async () => {
       const session = await aSession();
-      // Created in this order, which is tree order; settled in another.
-      await aSettledDecision(session.id, "late-first", T2);
+      // Created in this order, which is tree order; settled in another. The
+      // creation times are explicit: two inserts can share a millisecond, and
+      // the id tie-break would then put "a" first.
+      await aSettledDecision(session.id, "late-first", T2, {
+        createdAt: "2026-08-01T00:00:00.000Z",
+      });
       await aSettledDecision(session.id, "a", T1, {
         answerKind: "accepted-recommendation",
+        createdAt: "2026-08-01T00:00:01.000Z",
       });
       await aSettledDecision(session.id, "b", T2, { replacedById: "d-c" });
       await aSettledDecision(session.id, "c", T3);
