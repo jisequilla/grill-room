@@ -93,6 +93,16 @@ export type ProjectTrackerKind = (typeof PROJECT_TRACKER_KINDS)[number];
 export const PROJECT_VISIBILITIES = ["tracked", "ignored"] as const;
 export type ProjectVisibility = (typeof PROJECT_VISIBILITIES)[number];
 
+/**
+ * How a ticket built for this project reaches its main branch. Guessed at
+ * registration from the repository's remotes (any remote gives
+ * `pull-request`, none gives `local-merge`) unless the caller gives one
+ * explicitly; editable afterwards. The handoff renders each recipe's
+ * lifecycle from this flag.
+ */
+export const DELIVERY_RECIPES = ["pull-request", "local-merge"] as const;
+export type DeliveryRecipe = (typeof DELIVERY_RECIPES)[number];
+
 /** The slug pattern a project gets when none is given: the plain session slug. */
 export const DEFAULT_PROJECT_SLUG_PATTERN = "{slug}";
 

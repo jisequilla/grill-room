@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -16,6 +17,11 @@ import suggestProjectDefaults from "./suggest-project-defaults.js";
 import updateProject from "./update-project.js";
 
 const repos = useTempGitRepos();
+
+/** Add a bare remote to a temp repo — for delivery-recipe guessing tests only, never a write the app's own read-only git wrapper allows. */
+function addRemote(root: string, url = "https://example.invalid/repo.git"): void {
+  execFileSync("git", ["-C", root, "remote", "add", "origin", url], { stdio: "ignore" });
+}
 
 describe("project actions", () => {
   useTestDatabase();
@@ -66,6 +72,57 @@ describe("project actions", () => {
     await expect(
       updateProject.run({ id: second.id, root: first.rootPath }),
     ).rejects.toMatchObject({ errorCode: "project-exists" });
+  });
+
+  it("register-project defaults the delivery recipe from the repository's remotes", async () => {
+    const withRemote = repos.create();
+    addRemote(withRemote);
+    const withoutRemote = repos.create();
+
+    const projectWithRemote = await registerProject.run({
+      root: withRemote,
+      verifyCommand: "pnpm test",
+      exportFolder: ".scratch",
+    });
+    const projectWithoutRemote = await registerProject.run({
+      root: withoutRemote,
+      verifyCommand: "pnpm test",
+      exportFolder: ".scratch",
+    });
+
+    expect(projectWithRemote.deliveryRecipe).toBe("pull-request");
+    expect(projectWithoutRemote.deliveryRecipe).toBe("local-merge");
+    expect(projectWithRemote.adversarialReview).toBe(true);
+  });
+
+  it("register-project lets an explicit delivery recipe win over the guess", async () => {
+    const withRemote = repos.create();
+    addRemote(withRemote);
+
+    const project = await registerProject.run({
+      root: withRemote,
+      verifyCommand: "pnpm test",
+      exportFolder: ".scratch",
+      deliveryRecipe: "local-merge",
+    });
+
+    expect(project.deliveryRecipe).toBe("local-merge");
+  });
+
+  it("update-project changes the delivery recipe and the review switch", async () => {
+    const project = await aProject();
+
+    const updated = await updateProject.run({
+      id: project.id,
+      deliveryRecipe: "pull-request",
+      adversarialReview: false,
+    });
+
+    expect(updated).toMatchObject({ deliveryRecipe: "pull-request", adversarialReview: false });
+    expect(await getProject.run({ id: project.id })).toMatchObject({
+      deliveryRecipe: "pull-request",
+      adversarialReview: false,
+    });
   });
 
   it("suggest-project-defaults detects the root, verify command and visibility", async () => {

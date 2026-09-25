@@ -31,6 +31,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { eq } from "@agent-native/core/db/schema";
 
 import type {
+  DeliveryRecipe,
   ProjectTrackerKind,
   ProjectVisibility,
 } from "../shared/session-constants.js";
@@ -73,6 +74,8 @@ export interface HandoffSource {
     trackerKind: ProjectTrackerKind;
     buildRecordLogging: boolean;
     visibility: ProjectVisibility;
+    deliveryRecipe: DeliveryRecipe;
+    adversarialReview: boolean;
     trackerCommandsJson: string | null;
   };
 }
@@ -116,6 +119,8 @@ export function handoffFingerprint(source: HandoffSource): string {
       trackerKind: source.project.trackerKind,
       buildRecordLogging: source.project.buildRecordLogging,
       visibility: source.project.visibility,
+      deliveryRecipe: source.project.deliveryRecipe,
+      adversarialReview: source.project.adversarialReview,
       trackerCommandsJson: source.project.trackerCommandsJson,
     },
   };
@@ -563,6 +568,8 @@ export async function loadHandoffSource(
         trackerKind: project.trackerKind,
         buildRecordLogging: project.buildRecordLogging,
         visibility: project.visibility,
+        deliveryRecipe: project.deliveryRecipe,
+        adversarialReview: project.adversarialReview,
         trackerCommandsJson: project.trackerCommandsJson,
       },
     },

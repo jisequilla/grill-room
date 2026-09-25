@@ -39,6 +39,8 @@ function aSource(overrides: Partial<HandoffSource["project"]> = {}): HandoffSour
       trackerKind: "markdown",
       buildRecordLogging: false,
       visibility: "tracked",
+      deliveryRecipe: "pull-request",
+      adversarialReview: true,
       trackerCommandsJson: null,
       ...overrides,
     },
@@ -240,6 +242,8 @@ describe("handoffFingerprint", () => {
       aSource({ exportFolder: "docs" }),
       aSource({ trackerCommandsJson: "{}" }),
       aSource({ rootPath: "/elsewhere" }),
+      aSource({ deliveryRecipe: "local-merge" }),
+      aSource({ adversarialReview: false }),
     ];
     for (const variant of variants) {
       expect(handoffFingerprint(variant)).not.toBe(base);
