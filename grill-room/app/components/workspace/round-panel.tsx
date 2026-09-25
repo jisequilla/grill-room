@@ -39,8 +39,8 @@ const LOOSE_END_DRAFT_KINDS: readonly string[] = [
 function dotColour(draft: Card["draft"]): string {
   if (!draft) return "bg-muted-foreground/25";
   return LOOSE_END_DRAFT_KINDS.includes(draft.answerKind)
-    ? "bg-orange-500 dark:bg-orange-400"
-    : "bg-emerald-600 dark:bg-emerald-400";
+    ? "bg-owed"
+    : "bg-settled";
 }
 
 export function RoundPanel({

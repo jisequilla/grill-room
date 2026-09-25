@@ -87,7 +87,7 @@ function PreviewRow({ row }: { row: ResolvedBatchRow }) {
         {t("workspace.batchRowAnswer", { answer: row.answer })}
       </p>
       {reopenable ? null : (
-        <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+        <p className="flex items-start gap-1.5 text-xs text-owed">
           <IconAlertTriangle className="mt-px size-3.5 shrink-0" />
           {t("workspace.batchRowNotSettled")}
         </p>

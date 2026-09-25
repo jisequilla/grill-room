@@ -350,14 +350,14 @@ export function ExportSection({
             ) : null}
             {plan.trackerDiagnostic ? (
               <p
-                className="text-xs text-amber-700 dark:text-amber-300"
+                className="text-xs text-owed"
                 data-testid="export-tracker-diagnostic"
               >
                 {t("output.exportTrackerDiagnostic")}: {plan.trackerDiagnostic}
               </p>
             ) : null}
             {plan.ticketsSkippedReason ? (
-              <p className="text-xs text-amber-700 dark:text-amber-300">
+              <p className="text-xs text-owed">
                 {t("output.exportTicketsSkipped")}: {plan.ticketsSkippedReason}
               </p>
             ) : null}
@@ -367,7 +367,7 @@ export function ExportSection({
                 className={
                   plan.groundingState === "current"
                     ? "text-xs text-muted-foreground"
-                    : "text-xs text-amber-700 dark:text-amber-300"
+                    : "text-xs text-owed"
                 }
                 data-testid="export-grounding-state"
                 data-state={plan.groundingState}
@@ -379,7 +379,7 @@ export function ExportSection({
               </p>
               {shownUngroundedBriefs.length > 0 ? (
                 <ul
-                  className="space-y-0.5 text-xs text-amber-700 dark:text-amber-300"
+                  className="space-y-0.5 text-xs text-owed"
                   data-testid="export-ungrounded-briefs"
                 >
                   {shownUngroundedBriefs.map((entry) => (
@@ -398,7 +398,7 @@ export function ExportSection({
 
         {gateKey ? (
           <p
-            className="text-xs text-amber-700 dark:text-amber-300"
+            className="text-xs text-owed"
             data-testid="export-gate-message"
           >
             {t(gateKey)}

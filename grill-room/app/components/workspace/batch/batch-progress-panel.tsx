@@ -45,11 +45,12 @@ export function BatchProgressPanel({ sessionId }: { sessionId: string }) {
 
   return (
     <div
-      className="mb-4 rounded-xl border border-sky-600/30 bg-sky-500/10 px-4 py-3 dark:border-sky-400/25 dark:bg-sky-400/5"
+      className="relative mb-4 overflow-hidden rounded-xl border bg-muted px-4 py-3"
       data-testid="batch-progress"
     >
+      <span aria-hidden className="absolute inset-x-0 top-0 h-0.5 bg-primary" />
       <div className="flex items-center gap-2">
-        <IconStack2 className="size-4 shrink-0 animate-pulse text-sky-700 dark:text-sky-300" />
+        <IconStack2 className="size-4 shrink-0 animate-pulse text-muted-foreground" />
         <span className="text-sm font-medium">
           {t("workspace.batchRunning", {
             completed: progress.completed,
@@ -90,7 +91,7 @@ export function BatchProgressPanel({ sessionId }: { sessionId: string }) {
             key={index}
             className={`h-1.5 flex-1 rounded-full ${
               index < done
-                ? "bg-sky-600 dark:bg-sky-400"
+                ? "bg-settled"
                 : index < progress.completed
                   ? "bg-destructive"
                   : "bg-muted-foreground/25"

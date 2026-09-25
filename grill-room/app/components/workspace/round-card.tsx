@@ -222,23 +222,23 @@ export function RoundCard({
           className={cn(
             "mx-5 mb-4 rounded-lg border px-3.5 py-3",
             leavesOpen
-              ? "border-orange-600/30 bg-orange-500/[0.08] dark:border-orange-400/30 dark:bg-orange-400/[0.07]"
-              : "border-emerald-600/25 bg-emerald-600/[0.07] dark:border-emerald-400/25 dark:bg-emerald-400/[0.07]",
+              ? "border-owed/30 bg-owed/[0.08]"
+              : "border-settled/25 bg-settled/[0.07]",
           )}
         >
           <div className="flex items-start gap-3">
             {leavesOpen ? (
-              <IconAlertCircle className="mt-0.5 size-4 shrink-0 text-orange-700 dark:text-orange-300" />
+              <IconAlertCircle className="mt-0.5 size-4 shrink-0 text-owed" />
             ) : (
-              <IconCheck className="mt-0.5 size-4 shrink-0 text-emerald-700 dark:text-emerald-300" />
+              <IconCheck className="mt-0.5 size-4 shrink-0 text-settled" />
             )}
             <div className="min-w-0 flex-1">
               <p
                 className={cn(
-                  "text-[11px] font-medium tracking-wide uppercase",
+                  "text-xs font-medium tracking-wide uppercase",
                   leavesOpen
-                    ? "text-orange-800 dark:text-orange-300"
-                    : "text-emerald-800 dark:text-emerald-300",
+                    ? "text-owed"
+                    : "text-settled",
                 )}
               >
                 {t(ANSWER_KIND_LABEL_KEY[draft.answerKind])}
@@ -275,7 +275,7 @@ export function RoundCard({
             of them, and reading in the other order buries the mechanism. */}
           <div>
             {card.choices.length > 0 ? (
-              <p className="pb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="pb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {t("workspace.chooseOne")}
               </p>
             ) : null}
@@ -321,11 +321,11 @@ export function RoundCard({
                       {selected ? (
                         <IconCheck className="size-3.5 shrink-0" />
                       ) : null}
-                      <span className="min-w-0 text-[13px] font-medium">
+                      <span className="min-w-0 text-sm font-medium">
                         {choice.label}
                       </span>
                       {recommended ? (
-                        <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-primary uppercase">
+                        <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium tracking-wide text-primary uppercase">
                           {t("workspace.recommended")}
                         </span>
                       ) : null}
@@ -353,7 +353,7 @@ export function RoundCard({
                 size="sm"
                 variant="outline"
                 disabled={busy}
-                className="h-9 rounded-full border border-border bg-transparent px-3.5 text-[13px] font-medium hover:border-foreground/40 hover:bg-accent"
+                className="h-9 rounded-full border border-border bg-transparent px-3.5 text-sm font-medium hover:border-foreground/40 hover:bg-accent"
                 onClick={() => openMove("own-answer")}
               >
                 <IconPencil className="size-3.5" />
@@ -370,7 +370,7 @@ export function RoundCard({
               className="flex items-center gap-3 rounded-lg bg-muted/30 px-3.5 py-2"
               data-testid="recommendation-block"
             >
-              <p className="shrink-0 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="shrink-0 text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {t("workspace.recommended")}
               </p>
               <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
@@ -395,7 +395,7 @@ export function RoundCard({
               data-testid="recommendation-block"
             >
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                   {t("workspace.recommended")}
                 </p>
                 {card.recommendedAnswer ? (
@@ -461,7 +461,7 @@ export function RoundCard({
             // the real controls they are. They carry no icons — the one icon on
             // the card belongs to the answer that is not a steering move.
             <div className="border-t pt-3">
-              <p className="pb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              <p className="pb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {t("workspace.steerHeading")}
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
@@ -472,7 +472,7 @@ export function RoundCard({
                     size="sm"
                     variant="outline"
                     data-testid="steering-move"
-                    className="h-8 border border-border bg-transparent px-2.5 text-[13px] font-medium text-foreground/75 hover:border-foreground/40 hover:bg-accent hover:text-foreground"
+                    className="h-8 border border-border bg-transparent px-2.5 text-sm font-medium text-foreground/75 hover:border-foreground/40 hover:bg-accent hover:text-foreground"
                     disabled={busy}
                     onClick={() =>
                       steer.typed ? openMove(steer.kind) : save(steer.kind)

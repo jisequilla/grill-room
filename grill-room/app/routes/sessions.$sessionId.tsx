@@ -412,7 +412,7 @@ export default function SessionWorkspaceRoute() {
             ) : null}
 
             <section>
-              <h3 className="pb-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              <h3 className="pb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {t(PANEL_HEADING_KEY[session.state as SessionState])}
               </h3>
               {showReadiness ? (
@@ -442,7 +442,7 @@ export default function SessionWorkspaceRoute() {
             </section>
 
             <section>
-              <h3 className="pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+              <h3 className="pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
                 {t("workspace.historyHeading")}
               </h3>
               <RoundHistory
@@ -456,7 +456,7 @@ export default function SessionWorkspaceRoute() {
               where it starts unscrolled, which is the state this page is
               read in: the centre column is what scrolls. */}
           <aside className="flex min-w-0 flex-col lg:sticky lg:top-6 lg:h-[calc(100dvh-15rem)] lg:self-start">
-            <h3 className="pb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            <h3 className="pb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
               {t("workspace.treeHeading")}
             </h3>
             <div className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card/50">

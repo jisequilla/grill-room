@@ -31,9 +31,9 @@ const VERDICT_LABEL_KEY: Record<ReviewVerdict, string> = {
 
 const VERDICT_CLASS: Record<ReviewVerdict, string> = {
   reconfirm:
-    "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-300",
+    "border-settled/25 bg-settled/10 text-settled",
   "re-ask":
-    "border-amber-600/30 bg-amber-500/15 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300",
+    "border-owed/30 bg-owed/15 text-owed",
 };
 
 /** The reconfirm/re-ask tag, shared with the detail sheet and round history so a verdict always reads the same way. */
@@ -43,7 +43,7 @@ export function VerdictTag({ verdict }: { verdict: ReviewVerdict }) {
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center rounded-full border px-1.5 py-px text-[10px] leading-4 font-medium tracking-wide uppercase",
+        "inline-flex shrink-0 items-center rounded-full border px-1.5 py-px text-xs leading-4 font-medium tracking-wide uppercase",
         VERDICT_CLASS[verdict],
       )}
     >

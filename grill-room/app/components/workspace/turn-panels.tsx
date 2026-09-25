@@ -172,7 +172,7 @@ export function TurnFailedPanel({
     <div
       className={
         isRateLimit
-          ? "rounded-xl border border-amber-600/30 bg-amber-500/10 px-6 py-8 dark:border-amber-400/25 dark:bg-amber-400/5"
+          ? "rounded-xl border border-owed/30 bg-owed/10 px-6 py-8"
           : "rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-8"
       }
       data-testid="turn-failed"
@@ -182,7 +182,7 @@ export function TurnFailedPanel({
         <IconAlertTriangle
           className={
             isRateLimit
-              ? "size-6 text-amber-600 dark:text-amber-400"
+              ? "size-6 text-owed"
               : "size-6 text-destructive"
           }
         />
