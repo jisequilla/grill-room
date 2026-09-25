@@ -931,6 +931,21 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("carry their own citation.");
   });
 
+  it("says a fact never claims a field matches a column unless the cited code holds that data", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      "carry their own citation. A fact never says a field matches, holds or",
+    );
+    expect(prompt).toContain("maps to a column or field the spec asks for unless the cited code");
+    expect(prompt).toContain("shows it holds that data. When the spec asks for data the code does");
+    expect(prompt).toContain(
+      "not hold, use that same positive-claim form instead: cite the whole",
+    );
+    expect(prompt).toContain("type and state what it holds, then name the consequence for this");
+    expect(prompt).toContain("ticket.");
+  });
+
   it("limits buildsOnFiles to code this ticket itself reads, calls or imports", async () => {
     const { prompt } = await handoffInvocation();
 
