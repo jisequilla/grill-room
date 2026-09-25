@@ -15,6 +15,7 @@ import {
   type HandoffScoutResult,
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
+import { buildPrompt } from "../server/interviewer/prompt.js";
 import { aHandoffScoutResult } from "../server/interviewer/test-fixtures.js";
 import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
@@ -210,6 +211,8 @@ async function refusedThenAccepted(
   const requests = scoutRequests(interviewer.requests);
   expect(requests).toHaveLength(2);
   expect(requests[0]!.rejectionReason).toBeNull();
+  expect(requests[0]!.previousResult).toBeNull();
+  expect(requests[1]!.previousResult).toEqual(refused);
   expect(grounded.grounding).toMatchObject({
     result: aHandoffScoutResult(),
     current: true,
@@ -369,7 +372,7 @@ describe("ground-briefs", () => {
         }),
       );
       expect(reason).toMatch(
-        /Ticket 2 marks src\/ingest\/broker\.ts as edit, but no such file exists in the project; mark it create/,
+        /Ticket 2 marks src\/ingest\/broker\.ts as edit, but no such file exists in the project and none of its blockers creates it; mark it create/,
       );
     });
 
@@ -699,6 +702,66 @@ describe("ground-briefs", () => {
     expect(grounded.grounding).toMatchObject({ result: aHandoffScoutResult(), current: true });
     const latest = await findLatestTurn({ sessionId: session.id, turnKind: "handoff-scout" });
     expect((await getTurn.run({ turnId: latest!.id })).outcome).toBe("succeeded");
+  });
+
+  it("converges when a retry changes only the refused entry: a test file two tickets created becomes the later one's edit", async () => {
+    // The second real grounding run's split: ticket 1 creates the code and
+    // its test file, and ticket 3, blocked by 1, extends that test file.
+    const { session } = await aSessionWithHandoff({
+      tickets: [{ number: 1 }, { number: 2, blockedBy: [1] }, { number: 3, blockedBy: [1] }],
+    });
+    const testFile = "src/ingest/lag-alert.test.ts";
+    const ticket3 = (change: "create" | "edit"): HandoffScoutResult["tickets"][number] => ({
+      number: 3,
+      filesToChange: [{ path: testFile, change }],
+      buildsOnFiles: [],
+      facts: [],
+      buildsOn: [
+        {
+          blocker: 1,
+          provides: "The lag alert module and its test file.",
+          citation: null,
+          createdPath: "src/ingest/lag-alert.ts",
+          editedPath: null,
+          symbol: null,
+          check: "test -f src/ingest/lag-alert.ts",
+        },
+      ],
+      provedBy: { testPath: testFile, command: "npm test -- lag-alert" },
+    });
+    const refused: HandoffScoutResult = {
+      tickets: [...aHandoffScoutResult().tickets, ticket3("create")],
+    };
+    const accepted: HandoffScoutResult = {
+      tickets: [...aHandoffScoutResult().tickets, ticket3("edit")],
+    };
+    const interviewer = scriptInterviewer([
+      { kind: "handoff-scout", result: refused },
+      { kind: "handoff-scout", result: accepted },
+    ]);
+
+    const grounded = await groundBriefs.run({ sessionId: session.id });
+
+    const requests = scoutRequests(interviewer.requests);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]!.previousResult).toBeNull();
+    expect(requests[1]!.previousResult).toEqual(refused);
+    const reason = `Tickets 1 and 3 both mark ${testFile} as create; only one ticket may create a path. Ticket 1 comes first (an earlier wave of the Blocked-by graph, or the lower number within a wave), so it keeps the create. Ticket 3 is blocked by ticket 1, so mark ${testFile} as edit in ticket 3: a ticket may edit a file one of its blockers creates.`;
+    expect(requests[1]!.rejectionReason).toBe(reason);
+
+    const retryPrompt = buildPrompt(requests[1]!);
+    expect(retryPrompt).toContain(`## Your previous answer was rejected\n\n${reason}`);
+    expect(retryPrompt).toContain(
+      ["```json", JSON.stringify(requests[1]!.previousResult, null, 2), "```"].join("\n"),
+    );
+    expect(retryPrompt).toContain("- Keep every entry the reasons do not name exactly as it is in your");
+    expect(retryPrompt).toContain("- Change only the entries the reasons name.");
+    expect(retryPrompt).toContain("- Do not re-read files already read for your previous answer unless a");
+    expect(retryPrompt).not.toContain("Do not repeat the rejected structure.");
+
+    expect(grounded.grounding).toMatchObject({ result: accepted, current: true });
+    const read = await getBriefGrounding.run({ sessionId: session.id });
+    expect(read.grounding!.result).toEqual(accepted);
   });
 
   it("accepts a dependency on what a blocker adds to a file it edits", async () => {

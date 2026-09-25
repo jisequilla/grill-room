@@ -27,6 +27,7 @@
  * project edit.
  */
 import { createHash, randomUUID } from "node:crypto";
+import path from "node:path";
 
 import { eq } from "@agent-native/core/db/schema";
 
@@ -112,6 +113,62 @@ export interface HandoffGrounding {
   current: boolean;
   /** Null while current. */
   staleReason: HandoffGroundingStaleReason | null;
+}
+
+/** A ticket as the blocker graph needs it. */
+interface BlockedTicket {
+  number: number;
+  blockedBy: readonly number[];
+}
+
+/**
+ * Every ticket that blocks `ticketNumber`, directly or through its blockers'
+ * own blockers: nearest first, then lowest number among equally near. A
+ * cycle ends where it meets a ticket already listed.
+ */
+export function transitiveBlockers(
+  ticketNumber: number,
+  tickets: readonly BlockedTicket[],
+): number[] {
+  const blockersOf = new Map(tickets.map((ticket) => [ticket.number, ticket.blockedBy]));
+  const seen = new Set<number>([ticketNumber]);
+  const ordered: number[] = [];
+  let frontier = [ticketNumber];
+  while (frontier.length > 0) {
+    const next = [...new Set(frontier.flatMap((number) => blockersOf.get(number) ?? []))]
+      .filter((number) => !seen.has(number))
+      .sort((a, b) => a - b);
+    for (const number of next) seen.add(number);
+    ordered.push(...next);
+    frontier = next;
+  }
+  return ordered;
+}
+
+/**
+ * The blocker of `ticketNumber`, direct or transitive, whose grounding lists
+ * `filePath` as a `create`, or null when none does. A ticket may edit such a
+ * file: its blocker has merged, and so created it, before the ticket starts.
+ * The nearest blocker wins, then the lowest number.
+ */
+export function blockerThatCreates(
+  filePath: string,
+  ticketNumber: number,
+  tickets: readonly BlockedTicket[],
+  entries: readonly HandoffTicketGrounding[],
+): number | null {
+  const target = path.posix.normalize(filePath);
+  for (const blocker of transitiveBlockers(ticketNumber, tickets)) {
+    const creates = entries.some(
+      (entry) =>
+        entry.number === blocker &&
+        entry.filesToChange.some(
+          (file) => file.change === "create" && path.posix.normalize(file.path) === target,
+        ),
+    );
+    if (creates) return blocker;
+  }
+  return null;
 }
 
 export interface RenderedHandoff {
@@ -687,15 +744,32 @@ function groundingStaleLine(grounding: HandoffGrounding): string {
     : `_Grounded ${at}; the repository has moved since._`;
 }
 
-function fileBoundariesContent(entry: HandoffTicketGrounding): string {
+/**
+ * The files to create, the files to edit, and the existing files it builds
+ * on. A file to edit that one of the ticket's blockers creates is marked
+ * "(created by ticket NN)", so the builder knows it waits on that file rather
+ * than finding it today.
+ */
+function fileBoundariesContent(
+  source: HandoffSource,
+  entry: HandoffTicketGrounding,
+  grounding: HandoffGrounding,
+): string {
   const creates = entry.filesToChange.filter((file) => file.change === "create");
   const edits = entry.filesToChange.filter((file) => file.change === "edit");
+  const total = source.tickets.length;
+  const editLine = (filePath: string): string => {
+    const creator = blockerThatCreates(filePath, entry.number, source.tickets, grounding.tickets);
+    return creator === null
+      ? `- \`${filePath}\``
+      : `- \`${filePath}\` (created by ticket ${padTicketNumber(creator, total)})`;
+  };
   const groups: string[] = [];
   if (creates.length > 0) {
     groups.push(["Files to create:", "", ...creates.map((file) => `- \`${file.path}\``)].join("\n"));
   }
   if (edits.length > 0) {
-    groups.push(["Files to edit:", "", ...edits.map((file) => `- \`${file.path}\``)].join("\n"));
+    groups.push(["Files to edit:", "", ...edits.map((file) => editLine(file.path))].join("\n"));
   }
   if (entry.buildsOnFiles.length > 0) {
     groups.push(
@@ -719,7 +793,11 @@ function codebaseFactsContent(entry: HandoffTicketGrounding): string {
  * builds on, cited — with the staleness line first when the grounding is
  * stale.
  */
-function fileBoundariesSection(ticket: HandoffTicket, grounding: HandoffGrounding | null): string {
+function fileBoundariesSection(
+  source: HandoffSource,
+  ticket: HandoffTicket,
+  grounding: HandoffGrounding | null,
+): string {
   const entry = groundingEntryFor(grounding, ticket);
   if (!entry) {
     return [
@@ -732,7 +810,7 @@ function fileBoundariesSection(ticket: HandoffTicket, grounding: HandoffGroundin
   }
   const lines = ["## File boundaries", ""];
   if (!grounding!.current) lines.push(groundingStaleLine(grounding!), "");
-  lines.push(fileBoundariesContent(entry));
+  lines.push(fileBoundariesContent(source, entry, grounding!));
   return lines.join("\n");
 }
 
@@ -837,7 +915,7 @@ export function renderBrief(
       "",
       ticket.body,
     ].join("\n"),
-    fileBoundariesSection(ticket, grounding),
+    fileBoundariesSection(source, ticket, grounding),
     codebaseFactsSection(ticket, grounding),
     buildsOnSection(source, ticket, grounding),
     provedBySection(ticket, grounding),

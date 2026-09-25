@@ -899,6 +899,80 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("Ticket 2 is missing from the result.");
   });
 
+  it("hands a retry its previous answer and tells it to change only what the reasons name", async () => {
+    const previous = aHandoffScoutResult();
+    const { prompt, invocation } = await handoffInvocation(
+      aHandoffScoutRequest({
+        projectRoot: PROJECT_ROOT,
+        rejectionReason: "Ticket 2 marks src/ingest/queue.ts as edit, but no such file exists.",
+        previousResult: previous,
+      }),
+    );
+
+    expect(invocation.args).not.toContain("--resume");
+    expect(prompt).toContain(
+      [
+        "## Your previous answer was rejected",
+        "",
+        "Ticket 2 marks src/ingest/queue.ts as edit, but no such file exists.",
+        "",
+        "Your previous answer, exactly as the app received it:",
+        "",
+        "```json",
+        JSON.stringify(previous, null, 2),
+        "```",
+        "",
+        "Correct only what the reasons above name:",
+        "",
+        "- Keep every entry the reasons do not name exactly as it is in your",
+        "  previous answer: it already passed every check.",
+        "- Change only the entries the reasons name.",
+        "- Do not re-read files already read for your previous answer unless a",
+        "  reason concerns them.",
+      ].join("\n"),
+    );
+    expect(prompt.endsWith("  reason concerns them.")).toBe(true);
+    expect(prompt).not.toContain("Do not repeat the rejected structure.");
+  });
+
+  it("sends no retry section on the first attempt", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).not.toContain("## Your previous answer was rejected");
+    expect(prompt).not.toContain("Correct only what the reasons above name");
+  });
+
+  it("keeps the project scout's retry wording unchanged", async () => {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: aScoutProjectResult() })),
+    ]);
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).scoutProject(
+      aScoutProjectRequest({ rejectionReason: "A citation is out of range." }),
+    );
+    const prompt = valueOf(runner.invocations[0]!.args, "-p") as string;
+
+    expect(prompt).toContain("Produce a corrected result. Do not repeat the rejected structure.");
+    expect(prompt).not.toContain("Correct only what the reasons above name");
+  });
+
+  it("lets a ticket edit a file one of its blockers creates, and name it as a createdPath", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("`edit` is a file that exists and that you opened, or a file one of");
+    expect(prompt).toContain("this ticket's blockers marks as `create`, directly or through their");
+    expect(prompt).toContain("ticket starts. Name that dependency as a `createdPath` on the blocker.");
+  });
+
+  it("says only one ticket may create a path, and the later one edits it or creates its own test file", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("must not be in a folder the repository ignores. Only one ticket may");
+    expect(prompt).toContain("mark a path as `create`.");
+    expect(prompt).toContain("the earlier ticket marks it `create` and the later one,");
+    expect(prompt).toContain("which must be blocked by it, marks it `edit`.");
+    expect(prompt).toContain("beside the blocker's: Go, for example, allows several `_test.go` files");
+  });
+
   it("returns the validated grounding and reports its one call as new", async () => {
     const runner = recordingRunner([
       ok(anEnvelope({ structured_output: aHandoffScoutResult() })),

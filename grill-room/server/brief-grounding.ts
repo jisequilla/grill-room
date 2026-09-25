@@ -24,9 +24,11 @@ import { checkIgnored } from "./check-ignore.js";
 import { getDb, schema } from "./db/index.js";
 import { runGit } from "./git.js";
 import {
+  blockerThatCreates,
   getHandoffRow,
   handoffFingerprint,
   loadHandoffSource,
+  transitiveBlockers,
 } from "./handoff.js";
 import {
   handoffScoutResultSchema,
@@ -35,6 +37,7 @@ import {
   type InterviewerModel,
 } from "./interviewer/index.js";
 import { checkCitation } from "./scout-report.js";
+import { computeWaves } from "./tickets.js";
 
 /** A stored brief grounding, as every reader sees it. */
 export interface BriefGrounding {
@@ -244,6 +247,82 @@ function listNumbers(numbers: readonly number[]): string {
   return numbers.length === 0 ? "none" : numbers.join(", ");
 }
 
+/** The tickets of `result` that mark `filePath` as a create. */
+function creatorsOf(result: HandoffScoutResult, filePath: string): number[] {
+  return [
+    ...new Set(
+      result.tickets
+        .filter((ticket) =>
+          ticket.filesToChange.some(
+            (file) => file.change === "create" && samePath(file.path, filePath),
+          ),
+        )
+        .map((ticket) => ticket.number),
+    ),
+  ];
+}
+
+/**
+ * Why an `edit` of a file that is not on disk is refused: none of the
+ * ticket's blockers creates it. When a ticket that does not block it creates
+ * it, the reason says so, since that is the edge the scout cannot add.
+ */
+function missingEditReason(
+  ticketNumber: number,
+  filePath: string,
+  result: HandoffScoutResult,
+): string {
+  const base = `Ticket ${ticketNumber} marks ${filePath} as edit, but no such file exists in the project and none of its blockers creates it; mark it create, name a file that exists, or edit a file one of its blockers (directly or through their own blockers) marks as create.`;
+  const creators = creatorsOf(result, filePath).filter((number) => number !== ticketNumber);
+  if (creators.length === 0) return base;
+  const named = creators.map((number) => `ticket ${number}`).join(" and ");
+  const verb = creators.length === 1 ? "creates" : "create";
+  return `${base} ${named[0]!.toUpperCase()}${named.slice(1)} ${verb} it but does not block ticket ${ticketNumber}, so ticket ${ticketNumber} cannot edit it; create a file of its own instead.`;
+}
+
+/**
+ * Why a path marked `create` by more than one ticket is refused: only one
+ * ticket may create a path. The first creator keeps it: the one in the
+ * earliest wave of the Blocked-by graph, and the lowest number within a wave.
+ * Each later creator is told to mark it `edit`, which the rejection check
+ * accepts only when the first creator blocks it, directly or transitively.
+ */
+function doubleCreateReasons(
+  result: HandoffScoutResult,
+  tickets: readonly GroundedHandoffTicket[],
+): string[] {
+  const computed = computeWaves(tickets);
+  const waveOf = new Map<number, number>();
+  if (computed.ok) {
+    computed.waves.forEach((wave, index) => {
+      for (const number of wave) waveOf.set(number, index + 1);
+    });
+  }
+  const order = (a: number, b: number) =>
+    (waveOf.get(a) ?? 0) - (waveOf.get(b) ?? 0) || a - b;
+
+  const reasons: string[] = [];
+  const reported = new Set<string>();
+  for (const ticket of result.tickets) {
+    for (const file of ticket.filesToChange) {
+      if (file.change !== "create") continue;
+      const key = path.posix.normalize(file.path);
+      if (reported.has(key)) continue;
+      reported.add(key);
+      const [first, ...later] = creatorsOf(result, file.path).sort(order);
+      for (const number of later) {
+        const both = `Tickets ${first} and ${number} both mark ${file.path} as create; only one ticket may create a path. Ticket ${first} comes first (an earlier wave of the Blocked-by graph, or the lower number within a wave), so it keeps the create.`;
+        reasons.push(
+          transitiveBlockers(number, tickets).includes(first!)
+            ? `${both} Ticket ${number} is blocked by ticket ${first}, so mark ${file.path} as edit in ticket ${number}: a ticket may edit a file one of its blockers creates.`
+            : `${both} Ticket ${number} may mark it edit only when it is blocked by ticket ${first}, directly or through its blockers, and it is not; drop it from ticket ${number}'s filesToChange, or have ticket ${number} create a file of its own beside it.`,
+        );
+      }
+    }
+  }
+  return reasons;
+}
+
 /**
  * Why a handoff scout result cannot be stored, written for the scout. Empty
  * when it can:
@@ -258,9 +337,13 @@ function listNumbers(numbers: readonly number[]): string {
  * - every path (a file to change, `createdPath`, `editedPath`, the proving
  *   test) is relative to the root and stays inside it;
  * - no file to change has a `.git` segment;
- * - a file marked `edit` exists;
+ * - a file marked `edit` exists, or is a `create` of one of the ticket's
+ *   blockers, directly or through their own blockers;
  * - a file marked `create` resolves inside the root, does not exist, and is
  *   not ignored by git;
+ * - no path is marked `create` by more than one ticket: the first creator
+ *   (earliest wave, then lowest number) keeps it, and each later one is told
+ *   to mark it `edit`;
  * - a `buildsOn` on a path to be created names a path that blocker lists as
  *   a `create`, and one on a path it edits names a path that blocker lists as
  *   an `edit`;
@@ -430,6 +513,8 @@ export async function reasonsToRefuseHandoffGrounding(
     }
   }
 
+  reasons.push(...doubleCreateReasons(result, input.tickets));
+
   let realRoot: string;
   try {
     realRoot = realpathSync(input.projectRoot);
@@ -468,10 +553,11 @@ export async function reasonsToRefuseHandoffGrounding(
           reasons.push(
             `Ticket ${ticket.number} marks ${file.path} as edit, but it resolves outside the project; edit files inside the project.`,
           );
-        } else if (!isFile) {
-          reasons.push(
-            `Ticket ${ticket.number} marks ${file.path} as edit, but no such file exists in the project; mark it create, or name a file that exists.`,
-          );
+        } else if (
+          !isFile &&
+          blockerThatCreates(file.path, ticket.number, input.tickets, result.tickets) === null
+        ) {
+          reasons.push(missingEditReason(ticket.number, file.path, result));
         }
         continue;
       }

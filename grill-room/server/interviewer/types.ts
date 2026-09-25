@@ -311,6 +311,12 @@ export interface HandoffScoutRequest extends RequestBase {
   specMarkdown: string;
   /** Every ticket of the handoff, in number order. */
   tickets: HandoffScoutTicket[];
+  /**
+   * On a retry, the result the app refused last, as the scout returned it;
+   * null on the first attempt. The scout never resumes a conversation, so a
+   * retry starts fresh and this is how it sees the answer it is correcting.
+   */
+  previousResult: HandoffScoutResult | null;
 }
 
 /** A request that reads a whole project: sonnet, read-only, a conversation of its own. */

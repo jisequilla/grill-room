@@ -530,9 +530,15 @@ with the reasons:
 - every path (a file to change, a `createdPath` or `editedPath`, the proving
   test) is relative to the project root and stays inside it;
 - no file to change sits inside a `.git` folder;
-- a file marked `edit` exists;
+- a file marked `edit` exists, or is a `create` of one of the ticket's
+  blockers, directly or through their own blockers (the blocker lands first,
+  so ticket 3 may extend a test file its blocker ticket 1 creates);
 - a file marked `create` resolves inside the project root (through symlinks),
   does not exist yet, and is not ignored by git (`git check-ignore`);
+- no path is marked `create` by more than one ticket. The first creator keeps
+  it — the ticket in the earliest wave of the Blocked-by graph, then the
+  lowest number — and the reason tells each later one to mark it `edit`,
+  which passes only when the first creator blocks it;
 - a `buildsOn` on a path to be created names a path that blocker lists as a
   `create`, and one on a path it edits names a path that blocker lists as an
   `edit`;
@@ -545,7 +551,11 @@ ticket with more blockers than a grounded ticket can name, is refused before
 any turn is spent.
 
 These rules live in the rejection check (`reasonsToRefuseHandoffGrounding`),
-not the result schema, so breaking one is a refusal the scout retries.
+not the result schema, so breaking one is a refusal the scout retries. The
+scout never resumes a conversation, so each retry starts fresh: the request
+carries the refused result (`previousResult`), and the retry prompt shows it
+and tells the scout to keep every entry the reasons do not name, change only
+what they name, and not re-read files for the entries it keeps.
 `handoffScoutResultSchema` checks only the shape, since a schema failure is
 `malformed-output` and ends the turn. The model is still constrained by a
 stricter contract, `handoffScoutContractSchema`, which `jsonSchemaFor` hands
@@ -569,7 +579,8 @@ fresh at all, versus kept exactly as it is, is not this function's concern;
 fresh:
 
 - **A ticket the grounding covers**, current or stale. For that ticket,
-  **File boundaries** lists the files to create, the files to edit, and the
+  **File boundaries** lists the files to create, the files to edit (one a
+  blocker creates as `` `path` (created by ticket NN) ``), and the
   existing files it builds on, cited; **Codebase facts** lists each cited
   statement. Two new sections appear: **Builds on**, one line per blocker
   naming what this ticket needs from it, where — a citation, "created by
