@@ -238,57 +238,32 @@ function isInsideGitDir(candidate: string): boolean {
     .some((segment) => segment.toLowerCase() === ".git");
 }
 
-const C_ESCAPES: Record<string, number> = {
-  a: 0x07,
-  b: 0x08,
-  t: 0x09,
-  n: 0x0a,
-  v: 0x0b,
-  f: 0x0c,
-  r: 0x0d,
-  '"': 0x22,
-  "\\": 0x5c,
-};
-
-/**
- * One path as git prints it, unquoted. git wraps a path holding a non-ASCII
- * byte, a quote, a backslash or a control character in double quotes, with C
- * escapes and octal bytes (`"dist/\303\251.js"`); any other path is printed
- * as it is.
- *
- * `-z` would print every path raw, but `git check-ignore` accepts `-z` only
- * with `--stdin` ("fatal: -z only makes sense with --stdin"), and the
- * read-only wrapper gives git no stdin.
- */
-export function unquoteGitPath(printed: string): string {
-  if (printed.length < 2 || !printed.startsWith('"') || !printed.endsWith('"')) {
-    return printed;
-  }
-  const body = printed.slice(1, -1);
-  const bytes: number[] = [];
-  for (let index = 0; index < body.length; index += 1) {
-    const char = body[index]!;
-    if (char !== "\\") {
-      bytes.push(...Buffer.from(char, "utf8"));
-      continue;
-    }
-    const octal = /^[0-3][0-7]{2}/.exec(body.slice(index + 1));
-    const next = body[index + 1] ?? "";
-    if (octal) {
-      bytes.push(parseInt(octal[0], 8));
-      index += 3;
-    } else if (next in C_ESCAPES) {
-      bytes.push(C_ESCAPES[next]!);
-      index += 1;
-    } else {
-      bytes.push(0x5c);
-    }
-  }
-  return Buffer.from(bytes).toString("utf8");
-}
-
 function listNumbers(numbers: readonly number[]): string {
   return numbers.length === 0 ? "none" : numbers.join(", ");
+}
+
+/**
+ * Whether one line of `git check-ignore -v -n` output — everything before
+ * its trailing tab and pathname — means the path is genuinely excluded.
+ *
+ * `::` alone is the miss marker: no rule matched. Anything else is
+ * `<source>:<line>:<pattern>`, and the path counts as ignored only when
+ * `pattern` does not start with `!` — a negation re-includes a path an
+ * earlier, broader pattern excluded (`*.log` + `!important.log`), and `-v`
+ * reports that negating rule as the match, not a miss.
+ *
+ * `source` names a file (`.gitignore`, `.git/info/exclude`, ...) and can
+ * itself contain colons, so the split point is found from `line` — always a
+ * run of digits — rather than by counting colons from the left. A field
+ * that doesn't fit this shape at all (a future git version's format
+ * changing under us) is treated as an ordinary, non-negating match rather
+ * than silently letting an unrecognized line make an ignored create look
+ * safe.
+ */
+function excludesPath(field: string): boolean {
+  if (field === "::") return false;
+  const pattern = /^.*?:\d+:(.*)$/.exec(field);
+  return pattern === null || !pattern[1]!.startsWith("!");
 }
 
 /**
@@ -462,22 +437,58 @@ export async function reasonsToRefuseHandoffGrounding(
 
   if (toCheckIgnored.length > 0) {
     const unique = [...new Set(toCheckIgnored.map((entry) => entry.path))];
-    const checked = await runGit(realRoot, ["check-ignore", "--", ...unique]);
-    if (checked.exitCode === 0 || checked.exitCode === 1) {
-      const ignored = new Set(
-        checked.stdout.split("\n").filter(Boolean).map(unquoteGitPath),
+    // A path starting with `:` is git pathspec magic (`:/` is "top", `:(word)`
+    // the long form); an untrusted, model-supplied path can start with it by
+    // chance. `./` in front of every argument makes it start with `.`
+    // instead, which git never reads as magic, and is a no-op for a path
+    // that did not start with `:` to begin with — it still matches the same
+    // ignore rules through the prefix.
+    //
+    // `-v` (verbose) plus `-n` (also show non-matching paths) prints exactly
+    // one line per argument, in the order given: `<source>:<line>:<pattern>`
+    // then a tab then the pathname for a match — including one decided by a
+    // negation (`!pattern`), which does NOT mean ignored, see `excludesPath`
+    // — or `::` then a tab then the pathname for a miss. Matched/not-matched
+    // is read off by POSITION, never by comparing that trailing pathname
+    // against what was sent — git is free to rewrite it (Unicode-normalize
+    // under `core.precomposeUnicode`, re-encode a lone surrogate its own
+    // way, quote-and-escape it) in ways that no longer equal the input
+    // string, so a text comparison can miss an ignored path silently. Line
+    // count is checked against the argument count before any line is
+    // trusted, so a git version that batches or reorders these differently
+    // fails the check rather than mismapping it.
+    const checked = await runGit(realRoot, [
+      "check-ignore",
+      "-v",
+      "-n",
+      "--",
+      ...unique.map((entry) => `./${entry}`),
+    ]);
+    const lines = checked.stdout.split("\n").filter(Boolean);
+    if (checked.exitCode !== 0 && checked.exitCode !== 1) {
+      reasons.push(
+        `The files marked create could not be checked against the project's ignore rules (git check-ignore exited ${checked.exitCode}); plan ordinary paths inside the project.`,
+      );
+    } else if (lines.length !== unique.length) {
+      reasons.push(
+        `The files marked create could not be checked against the project's ignore rules (git check-ignore printed ${lines.length} results for ${unique.length} paths: ${unique.join(", ")}); plan ordinary paths inside the project.`,
+      );
+    } else {
+      const ignoredPaths = new Set(
+        unique.filter((_, index) => {
+          const line = lines[index]!;
+          const tab = line.indexOf("\t");
+          const field = tab === -1 ? line : line.slice(0, tab);
+          return excludesPath(field);
+        }),
       );
       for (const entry of toCheckIgnored) {
-        if (ignored.has(entry.path)) {
+        if (ignoredPaths.has(entry.path)) {
           reasons.push(
             `Ticket ${entry.ticket} marks ${entry.path} as create, but git ignores that path, so the repository would never track it; plan a path git tracks.`,
           );
         }
       }
-    } else {
-      reasons.push(
-        `The files marked create could not be checked against the project's ignore rules (git check-ignore exited ${checked.exitCode}); plan ordinary paths inside the project.`,
-      );
     }
   }
 
