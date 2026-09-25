@@ -41,10 +41,12 @@ function VisibilityBadge({ visibility }: { visibility: ClassifiedFile["visibilit
 
 /**
  * The post-export visibility report: what each written file is (tracked,
- * ignored, or untracked) in the target repository, a plain warning plus the
- * exact remedy commands when agents will not see something, and a separate
- * warning when the project's declared visibility flag disagrees with what
- * was observed. The report itself is built server-side (`server/visibility.ts`)
+ * ignored, untracked, or unchecked — git could not tell) in the target
+ * repository, a plain warning plus the exact remedy commands when agents
+ * will not see something, a separate warning naming each unchecked file's
+ * git error, and a separate warning when the project's declared visibility
+ * flag disagrees with what was observed. The report itself is built
+ * server-side (`server/visibility.ts`)
  * with real paths and commands already filled in, so its warning and remedy
  * text is shown as-is rather than run through translation.
  */

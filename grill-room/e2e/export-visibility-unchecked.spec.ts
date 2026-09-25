@@ -78,13 +78,26 @@ function createSymlinkedExportProjectRepo(): string {
  * grounding is skipped entirely: `export-session` only gates on a current
  * handoff (`app/components/output/export-section.tsx`'s `canExport`), never
  * on grounding, so a plain `generate-handoff` is enough to unblock export.
+ *
+ * The fixture repo is created in `beforeEach` and removed in `afterEach`
+ * (rather than at the end of the test body) so a failed assertion still
+ * leaves nothing behind in `$TMPDIR` — an early `expect` throw would
+ * otherwise skip the cleanup line entirely.
  */
+let repoRoot: string;
+
+test.beforeEach(() => {
+  repoRoot = createSymlinkedExportProjectRepo();
+});
+
+test.afterEach(() => {
+  rmSync(repoRoot, { recursive: true, force: true });
+});
+
 test("reports a file exported through a symlinked folder as \"could not check\", not untracked", async ({
   page,
   request,
 }) => {
-  const repoRoot = createSymlinkedExportProjectRepo();
-
   // ---- Session list -> create a session ---------------------------------
   await page.goto("/");
   await page.getByRole("button", { name: "New session" }).click();
@@ -178,6 +191,4 @@ test("reports a file exported through a symlinked folder as \"could not check\",
   // "git add and commit it" remedy the app cannot actually vouch for. None
   // of that should appear once the file is correctly `unchecked`.
   await expect(exportSection.getByTestId("export-visibility-warning")).toHaveCount(0);
-
-  rmSync(repoRoot, { recursive: true, force: true });
 });

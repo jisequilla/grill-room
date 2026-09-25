@@ -151,9 +151,11 @@ export function buildVisibilityWarnings(options: {
   visibility: ProjectVisibility;
 }): VisibilityWarnings {
   const { root, bundleRelativePath, files, visibility } = options;
+  const trackedFiles = files.filter((file) => file.visibility === "tracked");
   const untrackedFiles = files.filter((file) => file.visibility === "untracked");
   const ignoredFiles = files.filter((file) => file.visibility === "ignored");
   const uncheckedFiles = files.filter((file) => file.visibility === "unchecked");
+  const hasTracked = trackedFiles.length > 0;
   const hasUntracked = untrackedFiles.length > 0;
   const hasIgnored = ignoredFiles.length > 0;
   const hasUnchecked = uncheckedFiles.length > 0;
@@ -193,7 +195,11 @@ export function buildVisibilityWarnings(options: {
     mismatchWarning =
       `This project's visibility flag says "tracked", but the exported files are ignored by this ` +
       `repository. Update the flag in project settings, or fix .gitignore.`;
-  } else if (visibility === "ignored" && !hasIgnored && !hasUnchecked) {
+  } else if (visibility === "ignored" && !hasIgnored && (hasTracked || hasUntracked)) {
+    // A tracked or untracked file directly contradicts the "ignored" flag,
+    // whether or not other files in the same bundle are unchecked. The
+    // warning stays null only when every non-ignored file is unchecked: with
+    // nothing known not-ignored, there is nothing yet to call a mismatch.
     mismatchWarning =
       `This project's visibility flag says "ignored", but none of the exported files are actually ` +
       `ignored by this repository. Update the flag in project settings.`;

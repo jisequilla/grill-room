@@ -308,6 +308,10 @@ describe("buildVisibilityWarnings", () => {
     ["ignored", "ignored" as const, ["tracked"], true],
     ["ignored", "ignored" as const, ["untracked"], true],
     ["ignored", "ignored" as const, ["unchecked"], false],
+    // A tracked file still contradicts the "ignored" flag even when another
+    // file in the same bundle could not be checked at all: the unchecked
+    // file explains nothing about the tracked one.
+    ["ignored", "ignored" as const, ["tracked", "unchecked"], true],
   ] as const)(
     "mismatch for flag %s with file visibilities %s -> %s",
     (_label, flag, visibilities, expectMismatch) => {
