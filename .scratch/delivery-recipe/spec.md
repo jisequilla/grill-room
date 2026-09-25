@@ -67,7 +67,7 @@ The main session merges only approved work, and still re-runs the verification i
 - **Registration** sets the recipe from the repository's remotes, using the read-only git wrapper, when the caller gives none: any remote means `pull-request`, none means `local-merge`. Updating a project can change either setting. Both appear wherever project settings are shown and edited.
 - **The pure handoff renderer** selects the "before delegating" and "delegation lifecycle" sections of HANDOFF.md, and each brief's delivery and report steps, by recipe:
   - **Pull request:** today's text, with the pull request opened as a draft and the rule that a draft is never merged.
-  - **Local merge:** commit on main before delegating; each ticket on its worktree branch; the main session reads the branch diff, re-runs verification, and merges locally after approval; the verdict is recorded on the ticket per the project's tracker.
+  - **Local merge:** set `worktree.baseRef` to `head` in the project's Claude Code settings and keep `main` checked out in the main session, so every worktree starts from the latest local merge (by default Claude Code worktrees branch from the remote's default branch, and from local HEAD only when there is no remote); commit on main before delegating; each ticket on its worktree branch; the main session reads the branch diff, re-runs verification, and merges locally after approval; the verdict is recorded on the ticket per the project's tracker.
 - **"Reviewing a ticket" section.** When the review switch is on, the renderer adds this one fixed section to HANDOFF.md. It covers:
   - the reviewer's inputs;
   - what to try to break;
