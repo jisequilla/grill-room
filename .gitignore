@@ -12,3 +12,4 @@
 
 # Working notes that stay on this machine
 local/
+.ngine-run.json
