@@ -139,4 +139,38 @@ describe("reasonsToRefuseHandoffGrounding's ignored-path check", () => {
       expect.stringContaining("Ticket 1 marks dist/plain.js as create, but git ignores that path"),
     ]);
   });
+
+  describe.each([
+    ["core.quotePath=true", true],
+    ["core.quotePath=false", false],
+  ] as const)("negation rules under %s", (_label, quotePath) => {
+    it("accepts a create a negation re-includes (`keep/*` + `!keep/keep.js`)", async () => {
+      const root = repos.create({ gitignore: "keep/*\n!keep/keep.js\n" });
+      setGitConfig(root, "core.quotePath", String(quotePath));
+
+      const reasons = await refuseSingleCreate(root, "keep/keep.js");
+
+      expect(reasons).toEqual([]);
+    });
+
+    it("accepts a create a negation re-includes (`*.log` + `!important.log`)", async () => {
+      const root = repos.create({ gitignore: "*.log\n!important.log\n" });
+      setGitConfig(root, "core.quotePath", String(quotePath));
+
+      const reasons = await refuseSingleCreate(root, "important.log");
+
+      expect(reasons).toEqual([]);
+    });
+
+    it("still refuses a create whose excluded parent folder a negation cannot re-include (`dist/` + `!dist/keep.js`)", async () => {
+      const root = repos.create({ gitignore: "dist/\n!dist/keep.js\n" });
+      setGitConfig(root, "core.quotePath", String(quotePath));
+
+      const reasons = await refuseSingleCreate(root, "dist/keep.js");
+
+      expect(reasons).toEqual([
+        expect.stringContaining("Ticket 1 marks dist/keep.js as create, but git ignores that path"),
+      ]);
+    });
+  });
 });

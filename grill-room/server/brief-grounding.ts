@@ -243,6 +243,30 @@ function listNumbers(numbers: readonly number[]): string {
 }
 
 /**
+ * Whether one line of `git check-ignore -v -n` output — everything before
+ * its trailing tab and pathname — means the path is genuinely excluded.
+ *
+ * `::` alone is the miss marker: no rule matched. Anything else is
+ * `<source>:<line>:<pattern>`, and the path counts as ignored only when
+ * `pattern` does not start with `!` — a negation re-includes a path an
+ * earlier, broader pattern excluded (`*.log` + `!important.log`), and `-v`
+ * reports that negating rule as the match, not a miss.
+ *
+ * `source` names a file (`.gitignore`, `.git/info/exclude`, ...) and can
+ * itself contain colons, so the split point is found from `line` — always a
+ * run of digits — rather than by counting colons from the left. A field
+ * that doesn't fit this shape at all (a future git version's format
+ * changing under us) is treated as an ordinary, non-negating match rather
+ * than silently letting an unrecognized line make an ignored create look
+ * safe.
+ */
+function excludesPath(field: string): boolean {
+  if (field === "::") return false;
+  const pattern = /^.*?:\d+:(.*)$/.exec(field);
+  return pattern === null || !pattern[1]!.startsWith("!");
+}
+
+/**
  * Why a handoff scout result cannot be stored, written for the scout. Empty
  * when it can:
  *
@@ -422,15 +446,17 @@ export async function reasonsToRefuseHandoffGrounding(
     //
     // `-v` (verbose) plus `-n` (also show non-matching paths) prints exactly
     // one line per argument, in the order given: `<source>:<line>:<pattern>`
-    // then a tab then the pathname for a match, or `::` then a tab then the
-    // pathname for a miss. Matched/not-matched is read off by POSITION, never
-    // by comparing that trailing pathname against what was sent — git is
-    // free to rewrite it (Unicode-normalize under `core.precomposeUnicode`,
-    // re-encode a lone surrogate its own way, quote-and-escape it) in ways
-    // that no longer equal the input string, so a text comparison can miss
-    // an ignored path silently. Line count is checked against the argument
-    // count before any line is trusted, so a git version that batches or
-    // reorders these differently fails the check rather than mismapping it.
+    // then a tab then the pathname for a match — including one decided by a
+    // negation (`!pattern`), which does NOT mean ignored, see `excludesPath`
+    // — or `::` then a tab then the pathname for a miss. Matched/not-matched
+    // is read off by POSITION, never by comparing that trailing pathname
+    // against what was sent — git is free to rewrite it (Unicode-normalize
+    // under `core.precomposeUnicode`, re-encode a lone surrogate its own
+    // way, quote-and-escape it) in ways that no longer equal the input
+    // string, so a text comparison can miss an ignored path silently. Line
+    // count is checked against the argument count before any line is
+    // trusted, so a git version that batches or reorders these differently
+    // fails the check rather than mismapping it.
     const checked = await runGit(realRoot, [
       "check-ignore",
       "-v",
@@ -445,10 +471,17 @@ export async function reasonsToRefuseHandoffGrounding(
       );
     } else if (lines.length !== unique.length) {
       reasons.push(
-        `The files marked create could not be checked against the project's ignore rules (git check-ignore printed ${lines.length} results for ${unique.length} paths); plan ordinary paths inside the project.`,
+        `The files marked create could not be checked against the project's ignore rules (git check-ignore printed ${lines.length} results for ${unique.length} paths: ${unique.join(", ")}); plan ordinary paths inside the project.`,
       );
     } else {
-      const ignoredPaths = new Set(unique.filter((_, index) => !lines[index]!.startsWith("::\t")));
+      const ignoredPaths = new Set(
+        unique.filter((_, index) => {
+          const line = lines[index]!;
+          const tab = line.indexOf("\t");
+          const field = tab === -1 ? line : line.slice(0, tab);
+          return excludesPath(field);
+        }),
+      );
       for (const entry of toCheckIgnored) {
         if (ignoredPaths.has(entry.path)) {
           reasons.push(
