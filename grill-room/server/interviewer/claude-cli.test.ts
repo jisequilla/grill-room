@@ -208,23 +208,34 @@ describe("what the adapter sends for a find-superseded check", () => {
   ].join("\n");
 
   const REPLACEMENT_BODY = [
-    "Decisions to check: shape, storage-location",
+    "Decisions to check, each followed by the decisions that settled after it:",
+    "- shape: storage, storage-location",
+    "- storage: storage-location",
     "",
-    "Return one entry in `replacements` for each decision above whose answer a",
-    "decision that settled later changes, narrows or reverses, so that a builder",
+    "Return one entry in `replacements` for each decision above whose answer one",
+    "of the decisions listed after it changes, narrows or reverses, so that a builder",
     "reading the earlier answer alone would build the wrong thing. Name the earlier",
-    "decision in `replacedKey`, the later one in `byKey`, and say in `reason` what",
+    "decision in `replacedKey`, the later one (from its list) in `byKey`, and say in `reason` what",
     "the later decision changes. A later decision that only adds detail the earlier",
     "one left open is not a replacement. Be conservative: an empty list is the right",
     "answer when nothing was replaced.",
   ].join("\n");
+
+  const LATER_KEYS = {
+    shape: ["storage", "storage-location"],
+    storage: ["storage-location"],
+  };
 
   async function promptFor(looseEndKeys: string[], replaceableKeys: string[]) {
     const runner = recordingRunner([
       ok(anEnvelope({ structured_output: aFindSupersededResult() })),
     ]);
     await createClaudeCliInterviewer({ runCli: runner.runCli }).findSuperseded(
-      aFindSupersededRequest({ looseEndKeys, replaceableKeys }),
+      aFindSupersededRequest({
+        looseEndKeys,
+        replaceableKeys,
+        laterKeys: replaceableKeys.length > 0 ? LATER_KEYS : {},
+      }),
     );
     return valueOf(runner.invocations[0].args, "-p") as string;
   }
@@ -232,7 +243,7 @@ describe("what the adapter sends for a find-superseded check", () => {
   it("sends the loose-end section, then the replacement section, when both lists have keys", async () => {
     const prompt = await promptFor(
       ["storage", "tone"],
-      ["shape", "storage-location"],
+      ["shape", "storage"],
     );
 
     expect(prompt).toContain(
@@ -249,7 +260,7 @@ describe("what the adapter sends for a find-superseded check", () => {
   });
 
   it("sends the replacement section alone, as the task, when there are no loose ends", async () => {
-    const prompt = await promptFor([], ["shape", "storage-location"]);
+    const prompt = await promptFor([], ["shape", "storage"]);
 
     expect(prompt).toContain(
       `## Your task: find settled decisions a later decision replaced\n\n${REPLACEMENT_BODY}`,

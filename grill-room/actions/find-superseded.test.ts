@@ -10,6 +10,7 @@ import {
 import { supersessionRejectionReasons } from "../server/supersession.js";
 import { describeDecisions } from "../server/tree.js";
 import { findLatestTurn } from "../server/turn-records.js";
+import { MAX_TURN_RETRIES } from "../server/turn.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import confirmSession from "./confirm-session.js";
 import createSession from "./create-session.js";
@@ -208,6 +209,7 @@ describe("find-superseded", () => {
         reason: "unknown",
         answer: { kind: "unknown", text: "Not sure yet" },
         supersession: {
+          kind: "answers-loose-end",
           byId: "d-shape",
           byKey: "shape",
           byTitle: "What shape should this take?",
@@ -316,8 +318,77 @@ describe("find-superseded", () => {
         kind: "find-superseded",
         looseEndKeys: [],
         replaceableKeys: ["late-first", "a"],
+        // Each one's possible replacers, in tree order: b counts although it
+        // was itself replaced.
+        laterKeys: { "late-first": ["c"], a: ["late-first", "b", "c"] },
       });
       expect(result.state).toBe("done-proposed");
+    });
+
+    it("counts a later decision that was itself replaced, when it is the only later one", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "shape", T1);
+      await aSettledDecision(session.id, "storage", T2, {
+        replacedById: "d-elsewhere",
+      });
+      const interviewer = scriptInterviewer([DONE_PROPOSAL, replacements()]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests[1]).toMatchObject({
+        kind: "find-superseded",
+        replaceableKeys: ["shape"],
+        laterKeys: { shape: ["storage"] },
+      });
+    });
+
+    it("never offers a kept repo decision, as replaceable or as a replacer", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "stack", T0, {
+        answerKind: "repo-established",
+        introducedBy: "repo",
+        repoSource: "recorded",
+        repoCitation: "AGENTS.md:12",
+        repoStatement: "The app is a React Router app.",
+      });
+      await aSettledDecision(session.id, "shape", T1);
+      await aSettledDecision(session.id, "repo-late", T3, {
+        answerKind: "repo-established",
+        introducedBy: "repo",
+        repoSource: "recorded",
+        repoCitation: "AGENTS.md:14",
+        repoStatement: "Data lives in Postgres.",
+      });
+      await aSettledDecision(session.id, "storage", T2);
+      const interviewer = scriptInterviewer([DONE_PROPOSAL, replacements()]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests[1]).toMatchObject({
+        kind: "find-superseded",
+        replaceableKeys: ["shape"],
+        laterKeys: { shape: ["storage"] },
+      });
+    });
+
+    it("leaves a stale decision out of the replaceable set", async () => {
+      const session = await aSession();
+      // Reopened at T1 and answered again at T3: what hangs off it and settled
+      // before the reopen is stale.
+      await aSettledDecision(session.id, "shape", T3, { reopenedAt: T1 });
+      await aSettledDecision(session.id, "storage", T0, {
+        dependsOnJson: JSON.stringify(["d-shape"]),
+      });
+      await aSettledDecision(session.id, "tone", T2);
+      const interviewer = scriptInterviewer([replacements()]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(interviewer.requests[0]).toMatchObject({
+        kind: "find-superseded",
+        replaceableKeys: ["tone"],
+        laterKeys: { tone: ["shape"] },
+      });
     });
 
     it("counts only a strictly later settlement, and runs no turn when nothing is replaceable", async () => {
@@ -564,7 +635,165 @@ describe("find-superseded", () => {
           { replacedKey: "storage", byKey: "shape" },
           (sessionId) => aSettledDecision(sessionId, "shape", settledAt),
         ),
-      ).toContain('"shape" cannot replace "storage": it did not settle later.');
+      ).toContain(
+        '"shape" cannot replace "storage": it is not one of the decisions listed after it.',
+      );
+    });
+
+    it("rejects a kept repo decision as the replacer", async () => {
+      expect(
+        await rejectionFor(
+          { replacedKey: "storage", byKey: "stack" },
+          (sessionId) =>
+            aSettledDecision(sessionId, "stack", T3, {
+              answerKind: "repo-established",
+              introducedBy: "repo",
+              repoSource: "recorded",
+              repoCitation: "AGENTS.md:12",
+              repoStatement: "Data lives in a synced folder.",
+            }),
+        ),
+      ).toContain(
+        '"stack" cannot replace "storage": only an interview answer can replace one.',
+      );
+    });
+
+    it("rejects a replacer that exists but is still open", async () => {
+      const session = await aSession();
+      await aTreeWithOneReplaceableDecision(session.id);
+      await insertDecision(session.id, {
+        id: "d-tone",
+        key: "tone",
+        questionTitle: "How blunt should it be?",
+      });
+      const interviewer = scriptInterviewer([
+        replacements({ replacedKey: "storage", byKey: "tone" }),
+        replacements({ replacedKey: "storage", byKey: "storage-location" }),
+      ]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining(
+          '"tone" cannot replace "storage": it is not a settled decision of this tree.',
+        ),
+      });
+    });
+
+    it("after the last retry, keeps the valid entries, drops the invalid replacements and says so in the attempt log", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "shape", T3);
+      await insertDecision(session.id, {
+        id: "d-storage-open",
+        key: "storage-open",
+        questionTitle: "Where are backups kept?",
+        answerKind: "unknown",
+        currentAnswer: "Not sure yet",
+      });
+      await aSettledDecision(session.id, "early", T0);
+      await aTreeWithOneReplaceableDecision(session.id);
+      const stillWrong = {
+        kind: "find-superseded" as const,
+        result: {
+          supersessions: [
+            {
+              looseEndKey: "storage-open",
+              answeredByKey: "shape",
+              answer: "On disk",
+              reason: "The shape decision already commits to data on disk.",
+            },
+          ],
+          replacements: [
+            {
+              replacedKey: "storage",
+              byKey: "storage-location",
+              reason: "The later decision moves the data off the local disk.",
+            },
+            { replacedKey: "early", byKey: "early", reason: "Itself." },
+          ],
+        },
+      };
+      const interviewer = scriptInterviewer([
+        DONE_PROPOSAL,
+        ...Array.from({ length: MAX_TURN_RETRIES + 1 }, () => stillWrong),
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests).toHaveLength(MAX_TURN_RETRIES + 2);
+      expect(result.state).toBe("done-proposed");
+      expect(await getSession.run({ id: session.id })).toMatchObject({
+        turnErrorCode: null,
+      });
+      // The valid loose-end supersession and the valid replacement are stored.
+      expect(await readDecision("d-storage-open")).toMatchObject({
+        supersededById: "d-shape",
+      });
+      expect(await readDecision("d-storage")).toMatchObject({
+        supersededById: "d-storage-location",
+      });
+      // The invalid one is dropped, and the last attempt says so.
+      expect(await readDecision("d-early")).toMatchObject({
+        supersededById: null,
+      });
+      const turn = await findLatestTurn({
+        sessionId: session.id,
+        turnKind: "find-superseded",
+      });
+      expect(turn?.outcome).toBe("succeeded");
+      const attempts = turn!.runs[0]!.attempts;
+      expect(attempts).toHaveLength(MAX_TURN_RETRIES + 1);
+      expect(attempts[attempts.length - 1]).toMatchObject({
+        kind: "success",
+        reason:
+          'Kept the valid entries after the last retry. Dropped this replacement: "early" by "early" ("early" cannot replace itself.)',
+      });
+    });
+
+    it("still fails the scan when a loose-end entry stays invalid after the last retry", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "shape", T3);
+      await insertDecision(session.id, {
+        id: "d-storage-open",
+        key: "storage-open",
+        questionTitle: "Where are backups kept?",
+        answerKind: "unknown",
+        currentAnswer: "Not sure yet",
+      });
+      await aTreeWithOneReplaceableDecision(session.id);
+      const stillWrong = {
+        kind: "find-superseded" as const,
+        result: {
+          supersessions: [
+            {
+              looseEndKey: "storage-open",
+              answeredByKey: "invented",
+              answer: "On disk",
+              reason: "Invented.",
+            },
+          ],
+          replacements: [
+            {
+              replacedKey: "storage",
+              byKey: "storage-location",
+              reason: "The later decision moves the data off the local disk.",
+            },
+          ],
+        },
+      };
+      scriptInterviewer([
+        DONE_PROPOSAL,
+        ...Array.from({ length: MAX_TURN_RETRIES + 1 }, () => stillWrong),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(await getSession.run({ id: session.id })).toMatchObject({
+        turnErrorCode: "invalid-supersession",
+      });
+      expect(await readDecision("d-storage")).toMatchObject({
+        supersededById: null,
+      });
     });
 
     it("rejects a decision replaced twice", async () => {
@@ -626,12 +855,10 @@ describe("find-superseded", () => {
         supersessionRejectionReasons({
           askedKeys: [],
           replaceableKeys: ["storage"],
+          laterKeys: { storage: ["storage-location"] },
           settledKeys: ["storage", "storage-location"],
-          settledAtByKey: new Map([
-            ["storage", T1],
-            ["storage-location", T2],
-          ]),
           dispositionedKeys: [],
+          repoEstablishedKeys: [],
           result: parsed,
         }),
       ).toEqual([]);

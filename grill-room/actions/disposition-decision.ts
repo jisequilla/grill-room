@@ -8,6 +8,7 @@ import { getDb, schema } from "../server/db/index.js";
 import { DECISION_DISPOSITION_TARGETS } from "../server/db/schema.js";
 import {
   CLEARED_ANSWER_LINKS,
+  CLEARED_PROPOSAL,
   classifyLooseEnds,
   describeDecisions,
   treeFacts,
@@ -87,9 +88,7 @@ export default defineAction({
         settledAt: now,
         // Set aside is an answer to the same question a supersession proposed
         // one for, and the user's answer wins.
-        supersededById: null,
-        supersessionAnswer: null,
-        supersessionReason: null,
+        ...CLEARED_PROPOSAL,
         ...CLEARED_ANSWER_LINKS,
         updatedAt: now,
       })

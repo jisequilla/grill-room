@@ -83,6 +83,7 @@ export function aFindSupersededRequest(
     context: aContext(),
     looseEndKeys: ["storage"],
     replaceableKeys: [],
+    laterKeys: {},
     rejectionReason: null,
     ...overrides,
   };

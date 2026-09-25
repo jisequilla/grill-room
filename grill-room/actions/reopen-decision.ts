@@ -9,6 +9,7 @@ import { laterTimestamp } from "../server/ordering.js";
 import { returnSessionToInterviewing } from "../server/session-state.js";
 import {
   CLEARED_ANSWER_LINKS,
+  CLEARED_PROPOSAL,
   deriveTreeStates,
   treeFacts,
 } from "../server/tree.js";
@@ -103,6 +104,7 @@ export async function reopenDecisionCore(
       settledAt: null,
       reopenedAt: now,
       ...CLEARED_ANSWER_LINKS,
+      ...CLEARED_PROPOSAL,
       updatedAt: now,
     })
     .where(eq(schema.decisions.id, decisionId));

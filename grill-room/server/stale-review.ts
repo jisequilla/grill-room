@@ -27,6 +27,7 @@ import type { ReviewStaleResult } from "./interviewer/index.js";
 import {
   deriveTreeStates,
   CLEARED_ANSWER_LINKS,
+  CLEARED_PROPOSAL,
   recommendedChoiceRejection,
   transitiveDependencies,
   treeFacts,
@@ -334,6 +335,7 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
           settledAt: null,
           reopenedAt: now,
           ...CLEARED_ANSWER_LINKS,
+          ...CLEARED_PROPOSAL,
           updatedAt: now,
         })
         .where(eq(schema.decisions.id, row.id));

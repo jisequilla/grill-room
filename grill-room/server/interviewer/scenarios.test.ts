@@ -388,6 +388,7 @@ describe("named scenarios for every request kind", () => {
       kind: "find-superseded",
       looseEndKeys: [],
       replaceableKeys: ["storage"],
+      laterKeys: { storage: ["storage-location"] },
     });
     expect(done.state).toBe("done-proposed");
     expect(interviewer.remainingFor(session.id)).toBe(0);

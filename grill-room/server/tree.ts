@@ -318,6 +318,17 @@ export const CLEARED_ANSWER_LINKS = {
   settledById: null,
 } as const;
 
+/**
+ * A decision's own pending supersession proposal. It is a claim about the
+ * answer the decision holds, so a write that changes or clears that answer
+ * drops it in the same update, beside {@link CLEARED_ANSWER_LINKS}.
+ */
+export const CLEARED_PROPOSAL = {
+  supersededById: null,
+  supersessionAnswer: null,
+  supersessionReason: null,
+} as const;
+
 /** A stored decision, exactly as the table holds it. */
 export type DecisionRow = typeof decisions.$inferSelect;
 

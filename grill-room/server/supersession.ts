@@ -86,6 +86,30 @@ export function supersedableLooseEnds(
 /** Answer kinds that answer a question for real, rather than set it aside. */
 const ANSWERED_KINDS: readonly string[] = ["accepted-recommendation", "own-answer"];
 
+/** Rows answered for real and derived settled, in the order given. */
+function answeredRows(rows: readonly DecisionRow[]): DecisionRow[] {
+  const states = deriveTreeStates(treeFacts(rows));
+  return rows.filter(
+    (row) =>
+      states.get(row.id) === "settled" &&
+      row.answerKind != null &&
+      ANSWERED_KINDS.includes(row.answerKind),
+  );
+}
+
+/** The answered rows that settled strictly after `row`, in the order given. */
+function settledAfter(
+  row: DecisionRow,
+  answered: readonly DecisionRow[],
+): DecisionRow[] {
+  return answered.filter(
+    (later) =>
+      later.id !== row.id &&
+      later.settledAt != null &&
+      later.settledAt > (row.settledAt ?? ""),
+  );
+}
+
 /**
  * Rows of the settled decisions this turn would check for replacement, in tree
  * order: answered for real, not already replaced, and followed by at least one
@@ -95,22 +119,27 @@ const ANSWERED_KINDS: readonly string[] = ["accepted-recommendation", "own-answe
 export function replaceableDecisions(
   rows: readonly DecisionRow[],
 ): DecisionRow[] {
-  const states = deriveTreeStates(treeFacts(rows));
-  const answered = rows.filter(
-    (row) =>
-      states.get(row.id) === "settled" &&
-      row.answerKind != null &&
-      ANSWERED_KINDS.includes(row.answerKind),
-  );
+  const answered = answeredRows(rows);
   return answered.filter(
-    (row) =>
-      row.replacedById == null &&
-      answered.some(
-        (later) =>
-          later.id !== row.id &&
-          later.settledAt != null &&
-          later.settledAt > (row.settledAt ?? ""),
-      ),
+    (row) => row.replacedById == null && settledAfter(row, answered).length > 0,
+  );
+}
+
+/**
+ * For each replaceable decision, by key, the keys of the decisions answered for
+ * real that settled strictly after it, in tree order: the only decisions that
+ * may replace it. Decisions answered in the same round share `settledAt`, so
+ * they never replace each other.
+ */
+export function laterKeysOf(
+  rows: readonly DecisionRow[],
+): Record<string, string[]> {
+  const answered = answeredRows(rows);
+  return Object.fromEntries(
+    replaceableDecisions(rows).map((row) => [
+      portKey(row),
+      settledAfter(row, answered).map(portKey),
+    ]),
   );
 }
 
@@ -122,22 +151,16 @@ function hasAnythingToCheck(rows: readonly DecisionRow[]): boolean {
   );
 }
 
-/**
- * Why a result cannot be stored, written for the interviewer: it is sent back
- * verbatim. Empty when every supersession names a loose end that was asked
- * about and a decision that really is settled, every replacement names a
- * decision that was asked about and one that settled later, and nothing
- * appears twice.
- */
-export function supersessionRejectionReasons(input: {
+/** What a result is checked against: the request, and the tree it was asked about. */
+export interface SupersessionCheck {
   /** The loose-end keys the request listed. */
   askedKeys: readonly string[];
   /** The replaceable keys the request listed. */
   replaceableKeys: readonly string[];
+  /** The request's `laterKeys`: each replaceable key's possible replacers. */
+  laterKeys: Readonly<Record<string, readonly string[]>>;
   /** The keys of every decision currently derived settled. */
   settledKeys: readonly string[];
-  /** When each settled decision settled, by key. */
-  settledAtByKey: ReadonlyMap<string, string | null>;
   /**
    * The keys of every settled decision whose answer kind is `dispositioned`:
    * set aside as out of scope or as a named open question, not answered. Such
@@ -145,15 +168,22 @@ export function supersessionRejectionReasons(input: {
    * answers nothing, so it cannot supersede a loose end.
    */
   dispositionedKeys: readonly string[];
-  result: FindSupersededResult;
-}): string[] {
+  /** The keys of every kept repo decision: settled, but not an interview answer. */
+  repoEstablishedKeys: readonly string[];
+}
+
+/** Why the result's loose-end supersessions cannot be stored. */
+function looseEndRejectionReasons(
+  check: SupersessionCheck,
+  result: FindSupersededResult,
+): string[] {
   const reasons: string[] = [];
-  const asked = new Set(input.askedKeys);
-  const settled = new Set(input.settledKeys);
-  const dispositioned = new Set(input.dispositionedKeys);
+  const asked = new Set(check.askedKeys);
+  const settled = new Set(check.settledKeys);
+  const dispositioned = new Set(check.dispositionedKeys);
   const seen = new Set<string>();
 
-  for (const entry of input.result.supersessions) {
+  for (const entry of result.supersessions) {
     if (seen.has(entry.looseEndKey)) {
       reasons.push(
         `Loose end "${entry.looseEndKey}" was superseded twice. Give at most one superseding decision per loose end.`,
@@ -178,16 +208,32 @@ export function supersessionRejectionReasons(input: {
     }
   }
 
-  const replaceable = new Set(input.replaceableKeys);
-  const seenReplaced = new Set<string>();
+  return reasons;
+}
 
-  for (const entry of input.result.replacements) {
-    if (seenReplaced.has(entry.replacedKey)) {
+/**
+ * Why each of the result's replacements cannot be stored, one list per entry
+ * in the result's order: empty for an entry that can be. A second entry for
+ * the same decision is the one refused.
+ */
+function replacementRejectionReasons(
+  check: SupersessionCheck,
+  result: FindSupersededResult,
+): string[][] {
+  const replaceable = new Set(check.replaceableKeys);
+  const settled = new Set(check.settledKeys);
+  const dispositioned = new Set(check.dispositionedKeys);
+  const repoEstablished = new Set(check.repoEstablishedKeys);
+  const seen = new Set<string>();
+
+  return result.replacements.map((entry) => {
+    const reasons: string[] = [];
+    if (seen.has(entry.replacedKey)) {
       reasons.push(
         `Decision "${entry.replacedKey}" was replaced twice. Give at most one replacing decision per decision.`,
       );
     }
-    seenReplaced.add(entry.replacedKey);
+    seen.add(entry.replacedKey);
 
     if (!replaceable.has(entry.replacedKey)) {
       reasons.push(
@@ -195,8 +241,13 @@ export function supersessionRejectionReasons(input: {
       );
     }
 
+    const later = check.laterKeys[entry.replacedKey] ?? [];
     if (entry.byKey === entry.replacedKey) {
       reasons.push(`"${entry.byKey}" cannot replace itself.`);
+    } else if (repoEstablished.has(entry.byKey)) {
+      reasons.push(
+        `"${entry.byKey}" cannot replace "${entry.replacedKey}": only an interview answer can replace one.`,
+      );
     } else if (dispositioned.has(entry.byKey)) {
       reasons.push(
         `"${entry.byKey}" cannot replace "${entry.replacedKey}": it was set aside (dispositioned), not answered.`,
@@ -205,18 +256,53 @@ export function supersessionRejectionReasons(input: {
       reasons.push(
         `"${entry.byKey}" cannot replace "${entry.replacedKey}": it is not a settled decision of this tree.`,
       );
-    } else {
-      const byAt = input.settledAtByKey.get(entry.byKey) ?? null;
-      const replacedAt = input.settledAtByKey.get(entry.replacedKey) ?? "";
-      if (byAt == null || byAt <= replacedAt) {
-        reasons.push(
-          `"${entry.byKey}" cannot replace "${entry.replacedKey}": it did not settle later.`,
-        );
-      }
+    } else if (!later.includes(entry.byKey)) {
+      reasons.push(
+        `"${entry.byKey}" cannot replace "${entry.replacedKey}": it is not one of the decisions listed after it.`,
+      );
     }
-  }
+    return reasons;
+  });
+}
 
-  return reasons;
+/**
+ * Why a result cannot be stored, written for the interviewer: it is sent back
+ * verbatim. Empty when every supersession names a loose end that was asked
+ * about and a decision that really is settled, every replacement names a
+ * decision that was asked about and one listed after it, and nothing appears
+ * twice.
+ */
+export function supersessionRejectionReasons(
+  input: SupersessionCheck & { result: FindSupersededResult },
+): string[] {
+  return [
+    ...looseEndRejectionReasons(input, input.result),
+    ...replacementRejectionReasons(input, input.result).flat(),
+  ];
+}
+
+/**
+ * The result with its invalid replacements dropped, and a line for the attempt
+ * log naming each dropped entry and why; null when nothing was dropped.
+ */
+function keepValidReplacements(
+  check: SupersessionCheck,
+  result: FindSupersededResult,
+): { result: FindSupersededResult; dropped: string | null } {
+  const reasons = replacementRejectionReasons(check, result);
+  const kept = result.replacements.filter((_, index) => reasons[index]!.length === 0);
+  const dropped = result.replacements.flatMap((entry, index) =>
+    reasons[index]!.length === 0
+      ? []
+      : [`"${entry.replacedKey}" by "${entry.byKey}" (${reasons[index]!.join(" ")})`],
+  );
+  return {
+    result: { ...result, replacements: kept },
+    dropped:
+      dropped.length === 0
+        ? null
+        : `Kept the valid entries after the last retry. Dropped ${dropped.length === 1 ? "this replacement" : "these replacements"}: ${dropped.join("; ")}`,
+  };
 }
 
 /**
@@ -250,23 +336,31 @@ async function scan(
 
   const askedKeys = looseEnds.map(portKey);
   const replaceableKeys = replaceable.map(portKey);
+  const laterKeys = laterKeysOf(rows);
   const states = deriveTreeStates(treeFacts(rows));
   const settledRows = rows.filter((row) => states.get(row.id) === "settled");
-  const settledKeys = settledRows.map(portKey);
-  const settledAtByKey = new Map(
-    settledRows.map((row) => [portKey(row), row.settledAt] as const),
-  );
-  const dispositionedKeys = settledRows
-    .filter((row) => row.answerKind === "dispositioned")
-    .map(portKey);
+  const check: SupersessionCheck = {
+    askedKeys,
+    replaceableKeys,
+    laterKeys,
+    settledKeys: settledRows.map(portKey),
+    dispositionedKeys: settledRows
+      .filter((row) => row.answerKind === "dispositioned")
+      .map(portKey),
+    repoEstablishedKeys: settledRows
+      .filter((row) => row.answerKind === "repo-established")
+      .map(portKey),
+  };
 
   const interviewer = getInterviewer();
+  let attemptsAsked = 0;
 
-  const turn = await askUntilAccepted<FindSupersededResult>({
+  const accepted = await askUntilAccepted<FindSupersededResult>({
     conversationId,
     recorder,
-    ask: async (attempt) =>
-      interviewer.findSuperseded(
+    ask: async (attempt) => {
+      attemptsAsked += 1;
+      return interviewer.findSuperseded(
         {
           kind: "find-superseded",
           context: {
@@ -282,25 +376,33 @@ async function scan(
           },
           looseEndKeys: askedKeys,
           replaceableKeys,
+          laterKeys,
           rejectionReason: attempt.rejectionReason,
         },
         attempt.observer,
-      ),
-    reasonsToRefuse: (result) =>
-      supersessionRejectionReasons({
-        askedKeys,
-        replaceableKeys,
-        settledKeys,
-        settledAtByKey,
-        dispositionedKeys,
-        result,
-      }),
+      );
+    },
+    reasonsToRefuse: (result) => {
+      const reasons = supersessionRejectionReasons({ ...check, result });
+      // On the last attempt, invalid replacements alone no longer fail the
+      // scan: the valid entries are kept and the invalid ones dropped below.
+      // Invalid loose-end entries still do.
+      const lastAttempt = attemptsAsked > MAX_TURN_RETRIES;
+      if (lastAttempt && looseEndRejectionReasons(check, result).length === 0) {
+        return [];
+      }
+      return reasons;
+    },
     exhausted: (lastReason) =>
       new TurnRejected(
         "invalid-supersession",
         `The interviewer proposed supersessions the tree does not support ${MAX_TURN_RETRIES + 1} times. Last reason: ${lastReason}`,
       ),
   });
+
+  const kept = keepValidReplacements(check, accepted.result);
+  if (kept.dropped) await recorder?.noted(kept.dropped);
+  const turn = { ...accepted, result: kept.result };
 
   const idByKey = new Map(rows.map((row) => [portKey(row), row.id] as const));
   const now = new Date().toISOString();

@@ -6,6 +6,7 @@ import {
   scriptInterviewer,
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
+import { describeDecisions } from "../server/tree.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import acceptSupersession from "./accept-supersession.js";
 import answerDecision from "./answer-decision.js";
@@ -246,6 +247,38 @@ describe("accept-supersession: the lasting links", () => {
       supersededById: null,
     });
     expect(view).toMatchObject({ settledBy: { id: "d-shape" } });
+  });
+
+  it("reads both links with the other decision's key and title when it is among the rows described", async () => {
+    const session = await aPendingReplacement();
+    await acceptSupersession.run({ decisionId: "d-storage" });
+    await insertDecision(session.id, {
+      id: "d-backup",
+      key: "backup",
+      questionTitle: "Is it backed up?",
+      answerKind: "own-answer",
+      currentAnswer: "The sync is the backup",
+      settledAt: "2026-09-01T00:00:03.000Z",
+      settledById: "d-location",
+    });
+
+    const rows = await getDb()
+      .select()
+      .from(schema.decisions)
+      .where(eq(schema.decisions.sessionId, session.id));
+    const views = describeDecisions(rows);
+
+    expect(views.find((view) => view.id === "d-storage")?.replacedBy).toEqual({
+      id: "d-location",
+      key: "storage-location",
+      title: "Which disk does the data live on?",
+      reason: REPLACED_REASON,
+    });
+    expect(views.find((view) => view.id === "d-backup")?.settledBy).toEqual({
+      id: "d-location",
+      key: "storage-location",
+      title: "Which disk does the data live on?",
+    });
   });
 
   it("dismissing clears only the proposal, leaving any lasting link", async () => {
@@ -558,6 +591,109 @@ describe("the lasting links, when the answer changes", () => {
       currentAnswer: "On disk",
       ...LINKS,
     });
+  });
+
+  /** A pending proposal on the row, pointing at `byId`. */
+  async function setProposal(decisionId: string, byId: string) {
+    await getDb()
+      .update(schema.decisions)
+      .set({ supersededById: byId, supersessionReason: "A later decision changed it." })
+      .where(eq(schema.decisions.id, decisionId));
+  }
+
+  const NO_PROPOSAL = {
+    supersededById: null,
+    supersessionAnswer: null,
+    supersessionReason: null,
+  };
+
+  it("reopen-decision clears the reopened decision's own pending proposal, so it can no longer be accepted", async () => {
+    const session = await aChainWithLinks();
+    await insertDecision(session.id, {
+      id: "d-other",
+      key: "other",
+      questionTitle: "Something settled later",
+      answerKind: "own-answer",
+      currentAnswer: "Later",
+      settledAt: "2026-09-01T00:00:03.000Z",
+    });
+    await setProposal("d-storage", "d-other");
+
+    await reopenDecision.run({ decisionId: "d-storage" });
+
+    expect(await readDecision("d-storage")).toMatchObject(NO_PROPOSAL);
+    await expect(
+      acceptSupersession.run({ decisionId: "d-storage" }),
+    ).rejects.toThrow(/has no supersession to accept/);
+  });
+
+  it("a stale review that re-asks clears the decision's own pending proposal", async () => {
+    const session = await aChainWithLinks();
+    await insertDecision(session.id, {
+      id: "d-other",
+      key: "other",
+      questionTitle: "Something settled later",
+      answerKind: "own-answer",
+      currentAnswer: "Later",
+      settledAt: "2026-09-01T00:00:03.000Z",
+    });
+    await setProposal("d-storage", "d-other");
+
+    await reopenShapeAndReview(session.id, "re-ask");
+
+    expect(await readDecision("d-storage")).toMatchObject({
+      answerKind: null,
+      ...NO_PROPOSAL,
+    });
+  });
+
+  it("request-next-round clears the own pending proposal of a deferred decision it asks again", async () => {
+    const session = await aLooseEndWithLinks("deferred");
+    await setProposal("d-storage", "d-shape");
+    scriptInterviewer([nothingMore]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect(await readDecision("d-storage")).toMatchObject(NO_PROPOSAL);
+  });
+
+  it("submit-round clears the own pending proposal of every decision it answers", async () => {
+    const session = await aSession();
+    scriptInterviewer([
+      {
+        kind: "propose-round",
+        result: {
+          proposedDecisions: [
+            {
+              key: "shape",
+              title: "What shape should this take?",
+              body: "",
+              choices: [],
+              recommendedChoice: null,
+              recommendedAnswer: "A workspace",
+              dependsOn: [],
+              ask: true,
+            },
+          ],
+          pushBackResponses: [],
+          userDecisionPlacements: [],
+          done: null,
+        },
+      },
+      nothingMore,
+    ]);
+    const opened = await requestNextRound.run({ sessionId: session.id });
+    const card = opened.round!.decisions[0]!;
+    await setProposal(card.id, card.id);
+    await saveDraftAnswer.run({
+      decisionId: card.id,
+      answerKind: "own-answer",
+      answer: "A workspace",
+    });
+
+    await submitRound.run({ id: opened.round!.id });
+
+    expect(await readDecision(card.id)).toMatchObject(NO_PROPOSAL);
   });
 
   it("reopening a decision clears Superseded by on what it replaced, and keeps Settled by on what it settled", async () => {

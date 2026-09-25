@@ -189,6 +189,11 @@ export interface FindSupersededRequest extends RequestBase {
    * that settled later. Empty when there is nothing to check.
    */
   replaceableKeys: string[];
+  /**
+   * For each replaceable key, the keys of the decisions answered for real that
+   * settled strictly after it, in tree order: the only ones that may replace it.
+   */
+  laterKeys: Record<string, string[]>;
 }
 
 export interface SynthesizeSpecRequest extends RequestBase {

@@ -3,7 +3,11 @@ import { eq, inArray } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { CLEARED_ANSWER_LINKS, isSettlingAnswerKind } from "../server/tree.js";
+import {
+  CLEARED_ANSWER_LINKS,
+  CLEARED_PROPOSAL,
+  isSettlingAnswerKind,
+} from "../server/tree.js";
 import requestNextRound from "./request-next-round.js";
 
 export default defineAction({
@@ -77,6 +81,7 @@ export default defineAction({
           answerKind: placement.draftAnswerKind,
           settledAt: settles ? now : null,
           ...CLEARED_ANSWER_LINKS,
+          ...CLEARED_PROPOSAL,
           updatedAt: now,
         })
         .where(eq(schema.decisions.id, placement.decisionId));
