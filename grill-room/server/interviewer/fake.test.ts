@@ -244,7 +244,7 @@ describe("the scripted fake interviewer", () => {
     const [first, second] = aHandoffScoutResult().tickets;
     const interviewer = createFakeInterviewer([
       schemaInvalidTurn("handoff-scout", {
-        tickets: [first, { ...second, filesToChange: [] }],
+        tickets: [first, { ...second, filesToChange: [{ path: "src/a.ts", change: "delete" }] }],
       }),
     ]);
 

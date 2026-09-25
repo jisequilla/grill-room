@@ -737,7 +737,7 @@ function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
     "Return `tickets`: exactly one entry for every ticket above, by its",
     `\`number\`, and no other (at most ${MAX_HANDOFF_SCOUT_TICKETS}). Each entry has:`,
     "",
-    `- \`filesToChange\`: at least one and at most ${MAX_HANDOFF_SCOUT_FILES_TO_CHANGE} files the ticket may`,
+    `- \`filesToChange\`: empty for a ticket that changes no files, otherwise at most ${MAX_HANDOFF_SCOUT_FILES_TO_CHANGE} files the ticket may`,
     "  touch, each a `path` relative to the project root and a `change`.",
     "  `edit` is a file that exists and that you opened. `create` is a new",
     "  file: it must not exist yet, it must sit inside the project, and it",
