@@ -134,6 +134,9 @@ export default defineAction({
       failedMessage: "The handoff scout turn failed.",
       record: { turnKind: "handoff-scout", model: SCOUT_MODEL },
       take: async (recorder) => {
+        // The scout never resumes a conversation, so a retry starts fresh:
+        // it gets the answer it is correcting in the request instead.
+        let previousResult: HandoffScoutResult | null = null;
         const accepted = await askUntilAccepted<CheckedGrounding>({
           conversationId: null,
           recorder,
@@ -160,9 +163,11 @@ export default defineAction({
                 specMarkdown: spec?.markdown ?? "",
                 tickets: requestTickets,
                 rejectionReason,
+                previousResult: rejectionReason === null ? null : previousResult,
               },
               observer,
             );
+            previousResult = turn.result;
             const reasons = await reasonsToRefuseHandoffGrounding(turn.result, {
               projectRoot: project.rootPath,
               tickets: requestTickets,

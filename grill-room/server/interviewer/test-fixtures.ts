@@ -303,6 +303,7 @@ export function aHandoffScoutRequest(
       },
     ],
     rejectionReason: null,
+    previousResult: null,
     ...overrides,
   };
 }

@@ -570,6 +570,52 @@ describe("grounded briefs", () => {
     );
   });
 
+  it("marks a file to edit that a blocker creates with the ticket that creates it, and only for a blocker", () => {
+    const createsTest = {
+      ...TICKET_1_GROUNDING,
+      filesToChange: [
+        ...TICKET_1_GROUNDING.filesToChange,
+        { path: "server/projects.test.ts", change: "create" as const },
+      ],
+    };
+    const editsTest = (number: number) => ({
+      ...TICKET_2_GROUNDING,
+      number,
+      filesToChange: [
+        { path: "server/export-bundle.ts", change: "edit" as const },
+        { path: "server/projects.test.ts", change: "edit" as const },
+      ],
+    });
+    const grounding: HandoffGrounding = {
+      ...CURRENT_GROUNDING,
+      tickets: [createsTest, editsTest(2), editsTest(3)],
+    };
+
+    const blocked = renderBrief(aSource(), ticketByNumber(2), { grounding });
+    const unblocked = renderBrief(aSource(), ticketByNumber(3), { grounding });
+
+    expect(section(blocked, "## File boundaries")).toBe(
+      [
+        "## File boundaries",
+        "",
+        "Files to edit:",
+        "",
+        "- `server/export-bundle.ts`",
+        "- `server/projects.test.ts` (created by ticket 01)",
+      ].join("\n"),
+    );
+    expect(section(unblocked, "## File boundaries")).toBe(
+      [
+        "## File boundaries",
+        "",
+        "Files to edit:",
+        "",
+        "- `server/export-bundle.ts`",
+        "- `server/projects.test.ts`",
+      ].join("\n"),
+    );
+  });
+
   it("fills a ticket with no blockers: cited facts, an existing file it builds on, and no Builds on section, Proved by directly before Rules", () => {
     const brief = renderBrief(aSource(), ticketByNumber(1), { grounding: CURRENT_GROUNDING });
 

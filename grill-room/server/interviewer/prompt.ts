@@ -184,6 +184,50 @@ function renderRetry(rejectionReason: string | null): string {
   ].join("\n");
 }
 
+/**
+ * `text` in a code block whose fence is one backtick longer than the longest
+ * run of backticks inside it (at least three), so no string in the text, such
+ * as a command quoting ``` itself, can close the block early.
+ */
+function fenced(text: string, language: string): string[] {
+  const longestRun = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  return [`${fence}${language}`, text, fence];
+}
+
+/**
+ * The handoff scout's retry. Its grounding is large and mostly right when it
+ * is refused, and the scout starts each attempt fresh, so it gets its
+ * previous answer back and is told to correct only what the reasons name:
+ * rewriting everything re-reads the project for minutes and breaks entries
+ * that had already passed.
+ */
+function renderHandoffScoutRetry(request: HandoffScoutRequest): string {
+  if (!request.rejectionReason) return "";
+  return [
+    "",
+    "## Your previous answer was rejected",
+    "",
+    request.rejectionReason,
+    ...(request.previousResult
+      ? [
+          "",
+          "Your previous answer, exactly as the app received it:",
+          "",
+          ...fenced(JSON.stringify(request.previousResult, null, 2), "json"),
+        ]
+      : []),
+    "",
+    "Correct only what the reasons above name:",
+    "",
+    "- Keep every entry the reasons do not name exactly as it is in your",
+    "  previous answer: it already passed every check.",
+    "- Change only the entries the reasons name.",
+    "- Do not re-read files already read for your previous answer unless a",
+    "  reason concerns them.",
+  ].join("\n");
+}
+
 function renderTask(
   request: Exclude<
     InterviewerRequest,
@@ -739,9 +783,25 @@ function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
     "",
     `- \`filesToChange\`: empty for a ticket that changes no files, otherwise at most ${MAX_HANDOFF_SCOUT_FILES_TO_CHANGE} files the ticket may`,
     "  touch, each a `path` relative to the project root and a `change`.",
-    "  `edit` is a file that exists and that you opened. `create` is a new",
+    "  `edit` is a file that exists and that you opened, or a file one of",
+    "  this ticket's blockers marks as `create`, directly or through their",
+    "  own blockers: the blocker lands first, so the file is there when this",
+    "  ticket starts. `buildsOn` stays one entry per ticket in the Blocked by",
+    "  line, whatever this ticket edits: when a direct blocker creates the",
+    "  file and the file is what this ticket needs from it, that blocker's",
+    "  single entry may give it as `createdPath`; never add a second entry",
+    "  for the same blocker. A blocker further up the chain, one not in the",
+    "  Blocked by line, gets no `buildsOn` entry at all.",
+    "  `create` is a new",
     "  file: it must not exist yet, it must sit inside the project, and it",
-    "  must not be in a folder the repository ignores.",
+    "  must not be in a folder the repository ignores. Only one ticket may",
+    "  mark a path as `create`. When two tickets write the",
+    "  same new file, such as a test file that one ticket adds and a later",
+    "  one extends, the earlier ticket marks it `create` and the later one,",
+    "  which must be blocked by it, marks it `edit`. Where the language",
+    "  allows it, the later ticket may instead create a test file of its own",
+    "  beside the blocker's: Go, for example, allows several `_test.go` files",
+    "  in one package.",
     `- \`buildsOnFiles\`: at most ${MAX_HANDOFF_SCOUT_BUILDS_ON_FILES} citations of existing code the ticket`,
     "  builds on without changing it: the helpers, types and tables it uses.",
     "  Only code this ticket itself reads, calls or imports: leave out code",
@@ -800,7 +860,7 @@ function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
     "already exists, or one the repository ignores rejects the whole report.",
     "So does a dependency that names a path its blocker does not create or",
     "edit, and a test that is not among its ticket's files to change.",
-    renderRetry(request.rejectionReason),
+    renderHandoffScoutRetry(request),
   ]
     .join("\n")
     .trimEnd();
