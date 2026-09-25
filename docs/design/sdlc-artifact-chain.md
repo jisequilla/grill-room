@@ -56,9 +56,9 @@ Grilling without the repo is sound for intent and stories and unsound for design
 
 | Stage | Artifact | Gate | Today |
 |---|---|---|---|
-| Intent | `intent.md`: the idea in the user's words, the readiness verdict, a summary of the scout report | Starting the interview | Readiness verdict, stored only in the database |
+| Intent | `intent.md`: the idea in the user's words, the readiness verdict, a summary of the scout report | Starting the interview | Exported, rendered from the stored idea, readiness and scout report |
 | Grounding | Scout report at a HEAD commit: current state (built, partial, gap) and proposed repo decisions, every item cited | Operator reviews the report during readiness | None |
-| Grilling | The decision tree, seeded with the confirmed repo decisions; `decisions.md` records each decision's origin and citation | Done gate and confirmation | Tree exists, carries no origin or citation, never exported |
+| Grilling | The decision tree, seeded with the confirmed repo decisions; `decisions.md` records each decision's origin and citation | Done gate and confirmation | Exported as `decisions.md`; the next scout reads it as recorded decisions, and a Supersedes entry retires the source it quotes |
 | Spec | `spec.md`, listing every repo decision the interview reopened | Confirmation | Spec exists; overturned decisions are invisible |
 | Plan | Tickets and briefs with File boundaries, Codebase facts and acceptance evidence (suite and scenario) filled and cited | Export | Tickets, waves, HANDOFF.md and briefs; the code slots are left for a human |
 | Delivery | Handoff workflow rendered from the project's delivery mode, plus the project's own cited rules | Export | This repository's workflow, pasted |
@@ -84,7 +84,7 @@ Grilling without the repo is sound for intent and stories and unsound for design
 
 **Delivery is a project setting.** It is either pull request or local merge, defaulting from `git remote -v` and editable like the tracker. `HANDOFF.md` renders from a fixed template per mode. The handoff scout only adds the project's own rules, cited from its `CLAUDE.md` or `.claude/rules/`. No model writes the git workflow.
 
-**After export the repo owns the artifact.** Grill Room owns an artifact until it is exported. Each exported file records its origin: session id, export revision, scout commit. The export manifest stores a hash of every file it writes. A re-export flags any file whose hash no longer matches, as edited in the repo, and will not overwrite it without per-file confirmation. Today `server/export-bundle.ts` overwrites every planned file. Nothing is read back into the database; a departure from the plan comes back through the build record.
+**After export the repo owns the artifact.** Grill Room owns an artifact until it is exported. Provenance lives in the export manifest, not in the files: session id, export revision, the scout's commit, HEAD at export, and a hash of every file it writes. The exported files carry no headers, so a re-export does not churn them and git stays the history. A re-export treats any file whose hash no longer matches, or that the manifest never listed, as edited in the repo, and keeps it unless the operator ticks it to overwrite or remove. Nothing is read back into the database; a departure from the plan comes back through the build record.
 
 **Turn visibility comes first.** Issue #11's turn record is where every scout run is recorded: turn kind is an open list covering every request kind, including both scouts, and each turn records the model it ran on. Building it before the scout gives the scout's cost on a real repo a measured baseline instead of a guess.
 
