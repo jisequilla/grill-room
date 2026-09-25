@@ -262,6 +262,96 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
     expect(reasons).toEqual([]);
   });
 
+  it("accepts the buildsOn shapes the scout prompt describes for an edit of a blocker's create", async () => {
+    // As buildHandoffScoutPrompt tells the scout: one buildsOn entry per
+    // ticket in the Blocked by line, never a second one for the same blocker,
+    // and none for a blocker further up the chain.
+    const root = repos.create({ files: { "README.md": "# Marathon\n" } });
+    const server = "backend/server/server.go";
+    const serverTest = "backend/server/server_test.go";
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      {
+        tickets: [
+          aTicket(1, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
+          // Direct blocker whose single entry already names another file it creates.
+          aTicket(3, { [EXPORT_TEST]: "edit" }, EXPORT_TEST, [{ blocker: 1, createdPath: EXPORT }]),
+          // Direct blocker whose single entry is the file this ticket edits.
+          aTicket(4, { [server]: "create", [serverTest]: "create", [EXPORT_TEST]: "edit" }, serverTest, [
+            { blocker: 1, createdPath: EXPORT_TEST },
+          ]),
+          // Ticket 1 is further up the chain: only ticket 4, its direct blocker, has an entry.
+          aTicket(5, { [EXPORT_TEST]: "edit" }, EXPORT_TEST, [{ blocker: 4, createdPath: server }]),
+        ],
+      },
+      {
+        projectRoot: root,
+        tickets: [
+          { number: 1, blockedBy: [] },
+          { number: 3, blockedBy: [1] },
+          { number: 4, blockedBy: [1] },
+          { number: 5, blockedBy: [4] },
+        ],
+      },
+    );
+
+    expect(reasons).toEqual([]);
+  });
+
+  it("collides two creates that differ only in case, Unicode form or a trailing slash", async () => {
+    const root = repos.create({ files: { "README.md": "# Marathon\n" } });
+    const upper = "backend/export/Export_test.go";
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      {
+        tickets: [
+          aTicket(1, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
+          aTicket(3, { [upper]: "create" }, upper, [{ blocker: 1, createdPath: EXPORT }]),
+          // Precomposed "é" with a trailing slash, against a decomposed, upper-case "E" + U+0301.
+          aTicket(4, { "docs/café/": "create" }, "docs/café/", [
+            { blocker: 1, createdPath: EXPORT },
+          ]),
+          aTicket(5, { "docs/CAFÉ": "create" }, "docs/CAFÉ", [
+            { blocker: 1, createdPath: EXPORT },
+          ]),
+        ],
+      },
+      {
+        projectRoot: root,
+        tickets: [
+          { number: 1, blockedBy: [] },
+          { number: 3, blockedBy: [1] },
+          { number: 4, blockedBy: [1] },
+          { number: 5, blockedBy: [1] },
+        ],
+      },
+    );
+
+    const doubles = reasons.filter((reason) => reason.includes("only one ticket may create a path"));
+    expect(doubles).toEqual([
+      `Tickets 1 and 3 both mark ${EXPORT_TEST} (as ${upper} in ticket 3, the same path on a case-insensitive file system) as create; only one ticket may create a path. Ticket 1 comes first (an earlier wave of the Blocked-by graph, or the lower number within a wave), so it keeps the create. Ticket 3 is blocked by ticket 1, so mark ${EXPORT_TEST} as edit in ticket 3: a ticket may edit a file one of its blockers creates.`,
+      "Tickets 4 and 5 both mark docs/café/ (as docs/CAFÉ in ticket 5, the same path on a case-insensitive file system) as create; only one ticket may create a path. Ticket 4 comes first (an earlier wave of the Blocked-by graph, or the lower number within a wave), so it keeps the create. Ticket 5 may mark it edit only when it is blocked by ticket 4, directly or through its blockers, and it is not; drop it from ticket 5's filesToChange, or have ticket 5 create a file of its own beside it.",
+    ]);
+  });
+
+  it("leaves a creator the handoff does not have to the missing-ticket reason", async () => {
+    const root = repos.create({ files: { "README.md": "# Marathon\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      {
+        tickets: [
+          aTicket(1, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
+          aTicket(9, { [EXPORT_TEST]: "create" }, EXPORT_TEST),
+        ],
+      },
+      { projectRoot: root, tickets: [{ number: 1, blockedBy: [] }] },
+    );
+
+    expect(reasons).toEqual([
+      "Ticket 9 is not a ticket of this handoff; report only tickets 1.",
+    ]);
+  });
+
   it("refuses an edit of a path a ticket that does not block it creates, and says so", async () => {
     const root = repos.create({ files: { "README.md": "# Marathon\n" } });
 

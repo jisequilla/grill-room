@@ -284,13 +284,20 @@ function missingEditReason(
  * Why a path marked `create` by more than one ticket is refused: only one
  * ticket may create a path. The first creator keeps it: the one in the
  * earliest wave of the Blocked-by graph, and the lowest number within a wave.
- * Each later creator is told to mark it `edit`, which the rejection check
- * accepts only when the first creator blocks it, directly or transitively.
+ * A later creator that the first one blocks, directly or transitively, is
+ * told to mark it `edit`; one it does not block is told to drop the file or
+ * create a file of its own beside it, since it may not edit it.
+ *
+ * Paths collide as a case-insensitive file system would see them: compared
+ * NFC-normalised, case-folded, with trailing slashes stripped, so
+ * `Export_test.go` and `export_test.go` are one path. Tickets the handoff
+ * does not have are left to the missing-ticket reasons.
  */
 function doubleCreateReasons(
   result: HandoffScoutResult,
   tickets: readonly GroundedHandoffTicket[],
 ): string[] {
+  const inHandoff = new Set(tickets.map((ticket) => ticket.number));
   const computed = computeWaves(tickets);
   const waveOf = new Map<number, number>();
   if (computed.ok) {
@@ -299,28 +306,48 @@ function doubleCreateReasons(
     });
   }
   const order = (a: number, b: number) =>
-    (waveOf.get(a) ?? 0) - (waveOf.get(b) ?? 0) || a - b;
+    (waveOf.get(a) ?? 1) - (waveOf.get(b) ?? 1) || a - b;
 
-  const reasons: string[] = [];
-  const reported = new Set<string>();
+  /** Per colliding path: each creating ticket, with the spelling it used. */
+  const creators = new Map<string, { spellings: Map<number, string> }>();
   for (const ticket of result.tickets) {
+    if (!inHandoff.has(ticket.number)) continue;
     for (const file of ticket.filesToChange) {
       if (file.change !== "create") continue;
-      const key = path.posix.normalize(file.path);
-      if (reported.has(key)) continue;
-      reported.add(key);
-      const [first, ...later] = creatorsOf(result, file.path).sort(order);
-      for (const number of later) {
-        const both = `Tickets ${first} and ${number} both mark ${file.path} as create; only one ticket may create a path. Ticket ${first} comes first (an earlier wave of the Blocked-by graph, or the lower number within a wave), so it keeps the create.`;
-        reasons.push(
-          transitiveBlockers(number, tickets).includes(first!)
-            ? `${both} Ticket ${number} is blocked by ticket ${first}, so mark ${file.path} as edit in ticket ${number}: a ticket may edit a file one of its blockers creates.`
-            : `${both} Ticket ${number} may mark it edit only when it is blocked by ticket ${first}, directly or through its blockers, and it is not; drop it from ticket ${number}'s filesToChange, or have ticket ${number} create a file of its own beside it.`,
-        );
-      }
+      const key = collisionKey(file.path);
+      const entry = creators.get(key) ?? { spellings: new Map<number, string>() };
+      if (!entry.spellings.has(ticket.number)) entry.spellings.set(ticket.number, file.path);
+      creators.set(key, entry);
+    }
+  }
+
+  const reasons: string[] = [];
+  for (const file of creators.values()) {
+    const [first, ...later] = [...file.spellings.keys()].sort(order);
+    const kept = file.spellings.get(first!)!;
+    for (const number of later) {
+      const spelling = file.spellings.get(number)!;
+      const named =
+        spelling === kept
+          ? kept
+          : `${kept} (as ${spelling} in ticket ${number}, the same path on a case-insensitive file system)`;
+      const both = `Tickets ${first} and ${number} both mark ${named} as create; only one ticket may create a path. Ticket ${first} comes first (an earlier wave of the Blocked-by graph, or the lower number within a wave), so it keeps the create.`;
+      reasons.push(
+        transitiveBlockers(number, tickets).includes(first!)
+          ? `${both} Ticket ${number} is blocked by ticket ${first}, so mark ${kept} as edit in ticket ${number}: a ticket may edit a file one of its blockers creates.`
+          : `${both} Ticket ${number} may mark it edit only when it is blocked by ticket ${first}, directly or through its blockers, and it is not; drop it from ticket ${number}'s filesToChange, or have ticket ${number} create a file of its own beside it.`,
+      );
     }
   }
   return reasons;
+}
+
+/** A path as a case-insensitive, normalising file system such as APFS compares it. */
+function collisionKey(filePath: string): string {
+  return path.posix
+    .normalize(filePath.normalize("NFC"))
+    .toLowerCase()
+    .replace(/\/+$/, "");
 }
 
 /**
@@ -341,9 +368,11 @@ function doubleCreateReasons(
  *   blockers, directly or through their own blockers;
  * - a file marked `create` resolves inside the root, does not exist, and is
  *   not ignored by git;
- * - no path is marked `create` by more than one ticket: the first creator
- *   (earliest wave, then lowest number) keeps it, and each later one is told
- *   to mark it `edit`;
+ * - no path is marked `create` by more than one ticket (compared as a
+ *   case-insensitive file system would): the first creator (earliest wave,
+ *   then lowest number) keeps it; a later one the first creator blocks is
+ *   told to mark it `edit`, and any other later one to drop it or create a
+ *   file of its own beside it;
  * - a `buildsOn` on a path to be created names a path that blocker lists as
  *   a `create`, and one on a path it edits names a path that blocker lists as
  *   an `edit`;

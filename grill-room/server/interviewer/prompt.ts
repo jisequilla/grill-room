@@ -185,6 +185,17 @@ function renderRetry(rejectionReason: string | null): string {
 }
 
 /**
+ * `text` in a code block whose fence is one backtick longer than the longest
+ * run of backticks inside it (at least three), so no string in the text, such
+ * as a command quoting ``` itself, can close the block early.
+ */
+function fenced(text: string, language: string): string[] {
+  const longestRun = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  return [`${fence}${language}`, text, fence];
+}
+
+/**
  * The handoff scout's retry. Its grounding is large and mostly right when it
  * is refused, and the scout starts each attempt fresh, so it gets its
  * previous answer back and is told to correct only what the reasons name:
@@ -203,9 +214,7 @@ function renderHandoffScoutRetry(request: HandoffScoutRequest): string {
           "",
           "Your previous answer, exactly as the app received it:",
           "",
-          "```json",
-          JSON.stringify(request.previousResult, null, 2),
-          "```",
+          ...fenced(JSON.stringify(request.previousResult, null, 2), "json"),
         ]
       : []),
     "",
@@ -777,7 +786,12 @@ function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
     "  `edit` is a file that exists and that you opened, or a file one of",
     "  this ticket's blockers marks as `create`, directly or through their",
     "  own blockers: the blocker lands first, so the file is there when this",
-    "  ticket starts. Name that dependency as a `createdPath` on the blocker.",
+    "  ticket starts. `buildsOn` stays one entry per ticket in the Blocked by",
+    "  line, whatever this ticket edits: when a direct blocker creates the",
+    "  file and the file is what this ticket needs from it, that blocker's",
+    "  single entry may give it as `createdPath`; never add a second entry",
+    "  for the same blocker. A blocker further up the chain, one not in the",
+    "  Blocked by line, gets no `buildsOn` entry at all.",
     "  `create` is a new",
     "  file: it must not exist yet, it must sit inside the project, and it",
     "  must not be in a folder the repository ignores. Only one ticket may",

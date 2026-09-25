@@ -535,10 +535,13 @@ with the reasons:
   so ticket 3 may extend a test file its blocker ticket 1 creates);
 - a file marked `create` resolves inside the project root (through symlinks),
   does not exist yet, and is not ignored by git (`git check-ignore`);
-- no path is marked `create` by more than one ticket. The first creator keeps
-  it — the ticket in the earliest wave of the Blocked-by graph, then the
-  lowest number — and the reason tells each later one to mark it `edit`,
-  which passes only when the first creator blocks it;
+- no path is marked `create` by more than one ticket, with paths compared as
+  a case-insensitive file system would (NFC, case-folded, no trailing
+  slash). The first creator keeps it — the ticket in the earliest wave of
+  the Blocked-by graph, then the lowest number. A later creator that the
+  first one blocks, directly or transitively, is told to mark it `edit`;
+  any other later creator is told to drop it or create a file of its own
+  beside it;
 - a `buildsOn` on a path to be created names a path that blocker lists as a
   `create`, and one on a path it edits names a path that blocker lists as an
   `edit`;

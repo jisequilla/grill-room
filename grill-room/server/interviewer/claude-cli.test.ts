@@ -955,12 +955,40 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).not.toContain("Correct only what the reasons above name");
   });
 
-  it("lets a ticket edit a file one of its blockers creates, and name it as a createdPath", async () => {
+  it("lets a ticket edit a file one of its blockers creates, keeping one buildsOn entry per direct blocker", async () => {
     const { prompt } = await handoffInvocation();
 
-    expect(prompt).toContain("`edit` is a file that exists and that you opened, or a file one of");
-    expect(prompt).toContain("this ticket's blockers marks as `create`, directly or through their");
-    expect(prompt).toContain("ticket starts. Name that dependency as a `createdPath` on the blocker.");
+    expect(prompt).toContain(
+      [
+        "  `edit` is a file that exists and that you opened, or a file one of",
+        "  this ticket's blockers marks as `create`, directly or through their",
+        "  own blockers: the blocker lands first, so the file is there when this",
+        "  ticket starts. `buildsOn` stays one entry per ticket in the Blocked by",
+        "  line, whatever this ticket edits: when a direct blocker creates the",
+        "  file and the file is what this ticket needs from it, that blocker's",
+        "  single entry may give it as `createdPath`; never add a second entry",
+        "  for the same blocker. A blocker further up the chain, one not in the",
+        "  Blocked by line, gets no `buildsOn` entry at all.",
+      ].join("\n"),
+    );
+    expect(prompt).not.toContain("Name that dependency as a `createdPath` on the blocker.");
+  });
+
+  it("fences the previous answer so a string holding a code fence cannot close it early", async () => {
+    const previous = aHandoffScoutResult();
+    previous.tickets[0]!.provedBy.command = "printf '```\\n' && npm test -- lag-alert";
+    const { prompt } = await handoffInvocation(
+      aHandoffScoutRequest({
+        rejectionReason: "Ticket 2 is missing from the result.",
+        previousResult: previous,
+      }),
+    );
+
+    const json = JSON.stringify(previous, null, 2);
+    expect(json).toContain("```");
+    expect(prompt).toContain(["````json", json, "````"].join("\n"));
+    const afterOpening = prompt.slice(prompt.indexOf("````json") + "````json".length);
+    expect(afterOpening.indexOf("\n````\n")).toBe(afterOpening.indexOf(json) + json.length);
   });
 
   it("says only one ticket may create a path, and the later one edits it or creates its own test file", async () => {
