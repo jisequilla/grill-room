@@ -7,12 +7,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  DELIVERY_RECIPE_LABEL_KEY,
   TRACKER_KIND_LABEL_KEY,
   VISIBILITY_LABEL_KEY,
   type Project,
 } from "@/lib/projects";
 
-import type { ProjectTrackerKind, ProjectVisibility } from "@shared/session-constants";
+import type {
+  DeliveryRecipe,
+  ProjectTrackerKind,
+  ProjectVisibility,
+} from "@shared/session-constants";
 
 import { ProjectFormDialog } from "./project-form-dialog";
 
@@ -75,6 +80,17 @@ export function ProjectsSection() {
                     <Badge variant="outline">
                       {t(VISIBILITY_LABEL_KEY[project.visibility as ProjectVisibility])}
                     </Badge>
+                    <Badge variant="outline" data-testid="project-recipe-badge">
+                      {t(DELIVERY_RECIPE_LABEL_KEY[project.deliveryRecipe as DeliveryRecipe])}
+                    </Badge>
+                    {project.adversarialReview ? null : (
+                      <span
+                        className="text-xs text-muted-foreground"
+                        data-testid="project-review-off-marker"
+                      >
+                        {t("projects.reviewOffMarker")}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <Button

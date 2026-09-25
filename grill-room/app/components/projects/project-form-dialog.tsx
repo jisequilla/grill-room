@@ -40,9 +40,16 @@ import {
   DEFAULT_PROJECT_SLUG_PATTERN,
   PROJECT_TRACKER_KINDS,
   PROJECT_VISIBILITIES,
+  type DeliveryRecipe,
   type ProjectTrackerKind,
   type ProjectVisibility,
 } from "@shared/session-constants";
+
+import {
+  ProjectDeliverySettings,
+  seedDeliverySettings,
+  withDeliverySettings,
+} from "./project-delivery-settings";
 
 interface ProjectFormDialogProps {
   open: boolean;
@@ -66,6 +73,8 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
   const [trackerKind, setTrackerKind] = useState<ProjectTrackerKind>("markdown");
   const [buildRecordLogging, setBuildRecordLogging] = useState(false);
   const [visibility, setVisibility] = useState<ProjectVisibility>("tracked");
+  const [deliveryRecipe, setDeliveryRecipe] = useState<DeliveryRecipe>("pull-request");
+  const [adversarialReview, setAdversarialReview] = useState(true);
   const [visibilitySeeded, setVisibilitySeeded] = useState(false);
   const [exportFolderSuggested, setExportFolderSuggested] = useState(false);
   const [slugPatternSuggested, setSlugPatternSuggested] = useState(false);
@@ -96,6 +105,9 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
     setBuildRecordLogging(project?.buildRecordLogging ?? false);
     setVisibility((project?.visibility as ProjectVisibility) ?? "tracked");
     setVisibilitySeeded(false);
+    const seeded = seedDeliverySettings(project);
+    setDeliveryRecipe(seeded.deliveryRecipe);
+    setAdversarialReview(seeded.adversarialReview);
     setTrackerDiagnostic(project?.trackerDiagnostic ?? null);
     setErrors({});
     verifyTouched.current = project !== null;
@@ -200,8 +212,14 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
       buildRecordLogging,
       visibility,
     };
-    if (project) update.mutate({ id: project.id, ...fields });
-    else register.mutate(fields);
+    if (project) {
+      update.mutate({
+        id: project.id,
+        ...withDeliverySettings(fields, { deliveryRecipe, adversarialReview }),
+      });
+    } else {
+      register.mutate(fields);
+    }
   }
 
   function hint(field: ProjectField, fallback: string | null, id: string) {
@@ -408,6 +426,15 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                 {t("projects.trackerRefresh")}
               </Button>
             </div>
+          ) : null}
+
+          {project ? (
+            <ProjectDeliverySettings
+              deliveryRecipe={deliveryRecipe}
+              onDeliveryRecipeChange={setDeliveryRecipe}
+              adversarialReview={adversarialReview}
+              onAdversarialReviewChange={setAdversarialReview}
+            />
           ) : null}
 
           <div className="flex items-start justify-between gap-4 rounded-lg border px-3.5 py-3">
