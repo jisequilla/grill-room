@@ -546,7 +546,22 @@ with the reasons:
   `create`, and one on a path it edits names a path that blocker lists as an
   `edit`;
 - a ticket that changes files lists its proving test (`provedBy.testPath`)
-  among them, as a `create` or an `edit`.
+  among them, as a `create` or an `edit`. `testPath` may be null instead,
+  for a ticket whose kind of change the spec keeps untested: its
+  `provedBy.command` alone (a build, or a grep over its own files) proves
+  it, and neither test-path rule applies;
+- a proving test the ticket marks `edit` is a test by its name
+  (`isTestFileByName`: a source-code extension, and `_test.*`, `_spec.*`,
+  `.test.*`, `.spec.*`, `test_*`, or a `__tests__/`, `test/`, `tests/`,
+  `Test/`, `Tests/`, `*.Tests/` or `spec/` folder), not the spec,
+  configuration or generated file the ticket changes; a proving test the
+  ticket creates is always accepted;
+- a `buildsOn` check or a `provedBy.command` that starts `cd <dir> &&` (or
+  `cd <dir>;`) names no later word beginning with `<dir>/`, since after the
+  `cd` paths are relative to `<dir>` — unless the project really has a
+  `<dir>/<dir>` (Django's `mysite/mysite/`). `<dir>` is compared without a
+  leading `./` or trailing slash; a word that holds `<dir>/` only further in
+  is not a match, and words after a second `cd` are not looked at.
 
 A ticket may list no files to change, as a spike does; its proving test may
 then live anywhere. A handoff with more tickets than one turn can ground, or a
@@ -591,7 +606,8 @@ fresh:
   created yet, or "ticket NN adds `<symbol>` to `<path>`" for one on what
   that blocker adds to a file it edits — and the check to run first; and
   **Proved by**, the test path to add or extend and the command that proves
-  the ticket. With **stale**
+  the ticket (the command alone, with no test line, when the test path is
+  null). With **stale**
   grounding this content sits under one line saying it was grounded at commit
   `<short sha>` for an earlier version of the handoff — tickets or project
   settings, since a setting alone (the delivery recipe, the review switch,

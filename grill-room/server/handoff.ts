@@ -860,17 +860,19 @@ function buildsOnSection(
 
 /**
  * A new "Proved by" section: the test to add or extend, and the command that
- * proves the ticket. Absent entirely when the ticket has no grounding entry.
+ * proves the ticket. A ticket with no test path, one the spec keeps untested,
+ * shows the command alone. Absent entirely when the ticket has no grounding
+ * entry.
  */
 function provedBySection(ticket: HandoffTicket, grounding: HandoffGrounding | null): string | null {
   const entry = groundingEntryFor(grounding, ticket);
   if (!entry) return null;
+  const { testPath, command } = entry.provedBy;
   return [
     "## Proved by",
     "",
-    `Test: \`${entry.provedBy.testPath}\``,
-    "",
-    codeBlock(entry.provedBy.command),
+    ...(testPath === null ? [] : [`Test: \`${testPath}\``, ""]),
+    codeBlock(command),
   ].join("\n");
 }
 

@@ -342,6 +342,122 @@ function doubleCreateReasons(
   return reasons;
 }
 
+/**
+ * How a file is recognised as a test by its name alone, the common naming of
+ * the languages the app grounds. A path is a test when its extension is a
+ * source-code one ({@link SOURCE_FILE_EXTENSION}) and it matches one of:
+ *
+ * - `_test.*` or `_spec.*` at the end of the name: Go's `_test.go`, Python's
+ *   `*_test.py`, Elixir's `_test.exs`, RSpec's `_spec.rb`;
+ * - `.test.*` or `.spec.*`: JavaScript and TypeScript;
+ * - a name starting `test_`: Python's `test_*.py`;
+ * - a folder named `__tests__`, `test`, `tests`, `Test`, `Tests` or `spec`,
+ *   or ending `.Tests` (.NET's `MyApp.Tests/`), anywhere in the path.
+ *
+ * Matched against the path relative to the project root, with `/`
+ * separators. Requiring a source extension keeps configuration out:
+ * `docker-compose.test.yml` and `src/test/resources/application.yml` are not
+ * tests. The proof check uses it to tell a test a ticket extends from a file
+ * it changes. It does not try to recognise generated files, or tests inline
+ * in a source file such as Rust's.
+ */
+export const TEST_FILE_PATTERNS: readonly RegExp[] = [
+  /_(?:test|spec)\.[^/]+$/,
+  /\.(?:test|spec)\.[^/]+$/,
+  /(?:^|\/)test_[^/]+$/,
+  /(?:^|\/)(?:__tests__|[Tt]ests?|spec)\//,
+  /(?:^|\/)[^/]+\.Tests\//,
+];
+
+/** The source-code extensions a test file by {@link TEST_FILE_PATTERNS} must end in. */
+export const SOURCE_FILE_EXTENSION =
+  /\.(?:go|[cm]?[jt]sx?|py|rb|exs?|rs|java|kts?|scala|groovy|swift|cs|fs|vb|php|c|cc|cpp|cxx|h|hpp|m|mm|dart|clj|lua|sh|vue|svelte)$/;
+
+/** Whether a path is a test file by {@link TEST_FILE_PATTERNS} and {@link SOURCE_FILE_EXTENSION}. */
+export function isTestFileByName(filePath: string): boolean {
+  const normalized = path.posix.normalize(filePath.replace(/\\/g, "/"));
+  return (
+    SOURCE_FILE_EXTENSION.test(normalized) &&
+    TEST_FILE_PATTERNS.some((pattern) => pattern.test(normalized))
+  );
+}
+
+/**
+ * Why a ticket's proof is refused because its `testPath` is a file the same
+ * ticket marks `edit` and that is not a test by name: the file the ticket
+ * changes cannot prove the change. A test path the ticket creates is always
+ * accepted, as is an edited test file, and a null `testPath` (a ticket the
+ * spec keeps untested, proved by its command alone) is not checked.
+ */
+function editedProofReason(ticket: HandoffScoutResult["tickets"][number]): string | null {
+  const { testPath } = ticket.provedBy;
+  if (testPath === null) return null;
+  const edited = ticket.filesToChange.some(
+    (file) => file.change === "edit" && samePath(file.path, testPath),
+  );
+  if (!edited || isTestFileByName(testPath)) return null;
+  return `Ticket ${ticket.number} is proved by ${testPath}, a file it edits that is not a test by its name (a source file named *_test.*, *_spec.*, *.test.*, *.spec.* or test_*, or one under a __tests__/, test/, tests/, Tests/, *.Tests/ or spec/ folder), so it would pass before the change as well as after. The proof must be a test, or a command that fails on the current commit (a build, or a grep for what the ticket adds), with a test path the ticket creates or edits; when the spec rules out tests for this kind of change, set testPath to null and give that command alone.`;
+}
+
+/**
+ * The directory a command starts by changing into, normalised (no leading
+ * `./`, no trailing `/`), and the rest of the command after `cd <dir> &&` or
+ * `cd <dir>;`. Null when it does not start that way, or changes into the
+ * root itself, an absolute path or a parent folder.
+ */
+function leadingCd(command: string): { dir: string; rest: string } | null {
+  const match = /^\s*cd\s+(["']?)([^\s"';&|]+)\1\s*(?:&&|;)(.*)$/s.exec(command);
+  if (!match) return null;
+  let dir = match[2]!;
+  while (dir.startsWith("./")) dir = dir.slice(2);
+  dir = dir.replace(/\/+$/, "");
+  if (dir === "" || dir === "." || dir.startsWith("/") || dir.startsWith("~") || dir.split("/").includes("..")) {
+    return null;
+  }
+  return { dir, rest: match[3]! };
+}
+
+/**
+ * The first word of `command` that names a path from the repository root
+ * although the command has changed into a folder first: it starts with
+ * `cd <dir> &&` (or `;`), a later word begins with `<dir>/`, which then
+ * resolves to `<dir>/<dir>/…`, and `<projectRoot>/<dir>/<dir>` does not
+ * exist. A project that really nests a folder of the same name, such as
+ * Django's `mysite/mysite/`, is left alone. Quotes and a `./` in front of the
+ * word are ignored; a word that merely contains `<dir>/` further in, such as
+ * `b/<dir>/x`, is not a match. Words after a second `cd` are not looked at,
+ * since that one moves the directory again. Null when there is none.
+ */
+function pathIgnoringCd(
+  command: string,
+  projectRoot: string,
+): { dir: string; word: string } | null {
+  const cd = leadingCd(command);
+  if (!cd) return null;
+  if (exists(path.join(projectRoot, cd.dir, cd.dir))) return null;
+  const prefix = `${cd.dir}/`;
+  for (const segment of cd.rest.split(/&&|\|\||;|\|/)) {
+    const words = segment.trim().split(/\s+/).filter((word) => word !== "");
+    if (words[0] === "cd") break;
+    for (const raw of words) {
+      let word = raw.replace(/^["'(]+/, "").replace(/["')]+$/, "");
+      while (word.startsWith("./")) word = word.slice(2);
+      if (word.startsWith(prefix)) return { dir: cd.dir, word };
+    }
+  }
+  return null;
+}
+
+/** The refusal reason for a command whose path ignores its own `cd`, or null. */
+function cdReason(command: string, runs: string, projectRoot: string): string | null {
+  const found = pathIgnoringCd(command, projectRoot);
+  if (!found) return null;
+  const { dir, word } = found;
+  const relative = word.slice(dir.length + 1);
+  const suggestion = relative === "" ? ". (the folder the cd moved into)" : relative;
+  return `${runs} runs \`cd ${dir}\` and then names ${word}; after \`cd ${dir}\`, paths are relative to ${dir}, so it would look for ${dir}/${word}. Write it as ${suggestion}, or run the command from the repository root without the cd.`;
+}
+
 /** A path as a case-insensitive, normalising file system such as APFS compares it. */
 function collisionKey(filePath: string): string {
   return path.posix
@@ -376,7 +492,16 @@ function collisionKey(filePath: string): string {
  * - a `buildsOn` on a path to be created names a path that blocker lists as
  *   a `create`, and one on a path it edits names a path that blocker lists as
  *   an `edit`;
- * - a ticket that changes files lists its proving test among them.
+ * - a ticket that changes files lists its proving test among them, unless
+ *   its `testPath` is null (the spec rules out tests for its kind of change,
+ *   and the command alone proves it);
+ * - a proving test the ticket marks `edit` is a test by its name
+ *   ({@link isTestFileByName}), not the file the ticket changes; one it
+ *   creates is always accepted;
+ * - a `buildsOn` check or a `provedBy` command that starts `cd <dir> &&` (or
+ *   `cd <dir>;`) names no later path beginning with `<dir>/` while the
+ *   project has no `<dir>/<dir>`, since after the `cd` paths are relative to
+ *   `<dir>`.
  *
  * These are the rules the result schema leaves to the app: breaking one is a
  * refusal the scout retries, where a schema failure would end the turn.
@@ -437,7 +562,9 @@ export async function reasonsToRefuseHandoffGrounding(
         ...(entry.createdPath === null ? [] : [{ field: "createdPath", path: entry.createdPath }]),
         ...(entry.editedPath === null ? [] : [{ field: "editedPath", path: entry.editedPath }]),
       ]),
-      { field: "provedBy.testPath", path: ticket.provedBy.testPath },
+      ...(ticket.provedBy.testPath === null
+        ? []
+        : [{ field: "provedBy.testPath", path: ticket.provedBy.testPath }]),
     ];
     for (const { field, path: named } of paths) {
       if (!staysInsideRepo(named)) {
@@ -448,9 +575,11 @@ export async function reasonsToRefuseHandoffGrounding(
     }
 
     // A ticket that changes no files, such as a spike, has no files to prove
-    // itself inside, so its test may live anywhere.
+    // itself inside, so its test may live anywhere. A null test path is a
+    // ticket proved by its command alone, so there is no file to place.
     const { testPath } = ticket.provedBy;
     if (
+      testPath !== null &&
       ticket.filesToChange.length > 0 &&
       !ticket.filesToChange.some((file) => samePath(file.path, testPath))
     ) {
@@ -458,6 +587,16 @@ export async function reasonsToRefuseHandoffGrounding(
         `Ticket ${ticket.number} is proved by ${testPath}, which is not one of its filesToChange; list the test file as a create or an edit, so the ticket may write it.`,
       );
     }
+
+    const editedProof = editedProofReason(ticket);
+    if (editedProof) reasons.push(editedProof);
+
+    const proofCd = cdReason(
+      ticket.provedBy.command,
+      `Ticket ${ticket.number}'s provedBy.command`,
+      input.projectRoot,
+    );
+    if (proofCd) reasons.push(proofCd);
   }
 
   const plannedOf = (change: "create" | "edit") => {
@@ -498,6 +637,12 @@ export async function reasonsToRefuseHandoffGrounding(
         continue;
       }
       const on = `Ticket ${ticket.number}'s buildsOn on ticket ${entry.blocker}`;
+      const checkCd = cdReason(
+        entry.check,
+        `Ticket ${ticket.number}'s buildsOn check on ticket ${entry.blocker}`,
+        input.projectRoot,
+      );
+      if (checkCd) reasons.push(checkCd);
       const forms = [entry.citation, entry.createdPath, entry.editedPath].filter(
         (value) => value !== null,
       ).length;

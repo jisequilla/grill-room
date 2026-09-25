@@ -651,6 +651,25 @@ describe("grounded briefs", () => {
     expect(brief).not.toContain("## Builds on");
   });
 
+  it("shows the command alone, with no Test line, for a ticket whose testPath is null", () => {
+    const grounding: HandoffGrounding = {
+      ...CURRENT_GROUNDING,
+      tickets: [
+        {
+          ...TICKET_1_GROUNDING,
+          provedBy: { testPath: null, command: "cd backend && go build ./..." },
+        },
+      ],
+    };
+    const brief = renderBrief(aSource(), ticketByNumber(1), { grounding });
+
+    expect(section(brief, "## Proved by")).toBe(
+      ["## Proved by", "", "```bash", "cd backend && go build ./...", "```"].join("\n"),
+    );
+    expect(brief).not.toContain("Test: ");
+    expect(brief.indexOf("## Proved by")).toBeLessThan(brief.indexOf("## Rules"));
+  });
+
   it("renders stale grounding under one line naming an earlier version of the handoff", () => {
     const stale: HandoffGrounding = { ...CURRENT_GROUNDING, current: false, staleReason: "handoff-changed" };
     const brief = renderBrief(aSource(), ticketByNumber(1), { grounding: stale });

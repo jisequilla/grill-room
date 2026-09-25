@@ -381,6 +381,42 @@ describe("the handoff scout schema", () => {
     expect(setFields).toEqual([["citation"], ["createdPath"], ["editedPath", "symbol"]]);
   });
 
+  it("lets provedBy.testPath be null, never empty, while command stays required text", () => {
+    const untested = { ...aGroundedTicket, provedBy: { testPath: null, command: "go build ./..." } };
+
+    expect(accepts(withTicket(untested))).toBe(true);
+    expect(contractAccepts(withTicket(untested))).toBe(true);
+    expect(accepts(withTicket({ ...aGroundedTicket, provedBy: { testPath: null, command: null } }))).toBe(false);
+    expect(accepts(withTicket({ ...aGroundedTicket, provedBy: { testPath: null } }))).toBe(false);
+    expect(accepts(withTicket({ ...aGroundedTicket, provedBy: { command: "go build ./..." } }))).toBe(false);
+    // A grounding stored before testPath could be null still reads.
+    expect(accepts(aHandoffScoutResult())).toBe(true);
+  });
+
+  it("hands the command line a required, nullable testPath and a required command", () => {
+    const schema = jsonSchemaFor("handoff-scout") as {
+      properties: {
+        tickets: {
+          items: {
+            properties: {
+              provedBy: {
+                required: string[];
+                properties: Record<string, unknown>;
+              };
+            };
+          };
+        };
+      };
+    };
+    const provedBy = schema.properties.tickets.items.properties.provedBy;
+
+    expect(provedBy.required).toEqual(["testPath", "command"]);
+    expect(provedBy.properties.testPath).toEqual({
+      anyOf: [{ type: "string", minLength: 1 }, { type: "null" }],
+    });
+    expect(provedBy.properties.command).toEqual({ type: "string", minLength: 1 });
+  });
+
   it("leaves the project scout's citation rules in its schema", () => {
     const outside = {
       ...aScoutProjectResult(),
