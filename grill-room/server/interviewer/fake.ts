@@ -801,8 +801,9 @@ export function scoutProjectTurns(): ScriptedTurn[] {
 /**
  * A grounding of a two-ticket handoff: ticket 1 adds an ingest-lag alert
  * beside the metrics it reads, and ticket 2, blocked by 1, wires that alert
- * into the queue. Ticket 2 depends on a file ticket 1 creates, so the result
- * exercises both halves of a dependency. Cites the same fixture paths as
+ * into the metrics module and proves it with a test of its own. Ticket 2
+ * depends on a file ticket 1 creates, so the result exercises both halves of
+ * a dependency. Cites the same fixture paths as
  * {@link scoutProjectTurns}. What `handoff-scout` schedules, for a session's
  * one `handoff-scout` request.
  */
@@ -833,7 +834,10 @@ export function handoffScoutTurns(): ScriptedTurn[] {
           },
           {
             number: 2,
-            filesToChange: [{ path: "src/ingest/metrics.ts", change: "edit" }],
+            filesToChange: [
+              { path: "src/ingest/metrics.ts", change: "edit" },
+              { path: "src/ingest/metrics.test.ts", change: "create" },
+            ],
             buildsOnFiles: ["docs/adr/0003-queue.md:5-9"],
             facts: [
               {
@@ -851,8 +855,8 @@ export function handoffScoutTurns(): ScriptedTurn[] {
               },
             ],
             provedBy: {
-              testPath: "src/ingest/lag-alert.test.ts",
-              command: "npm test -- lag-alert",
+              testPath: "src/ingest/metrics.test.ts",
+              command: "npm test -- metrics",
             },
           },
         ],

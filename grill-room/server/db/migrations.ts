@@ -474,4 +474,23 @@ ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS scout_report_id TEXT`,
     name: "sessions-last-export-folder-column",
     sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS last_export_folder TEXT`,
   },
+  {
+    version: 61,
+    name: "brief-groundings-table",
+    sql: `CREATE TABLE IF NOT EXISTS gr_brief_groundings (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES gr_sessions(id) ON DELETE CASCADE,
+      result_json TEXT NOT NULL,
+      commit_read TEXT,
+      handoff_fingerprint TEXT NOT NULL,
+      model TEXT NOT NULL,
+      ran_at TEXT NOT NULL,
+      turn_id TEXT REFERENCES gr_turns(id) ON DELETE SET NULL
+    )`,
+  },
+  {
+    version: 62,
+    name: "brief-groundings-session-index",
+    sql: `CREATE UNIQUE INDEX IF NOT EXISTS gr_idx_brief_groundings_session ON gr_brief_groundings(session_id)`,
+  },
 ];

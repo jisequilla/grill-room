@@ -101,6 +101,8 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `generate-handoff` | Generate or regenerate a session's handoff from deterministic templates (no model call): `HANDOFF.md` plus one brief per ticket. Refuses with `no-project`, `project-not-found`, `spec-missing`, `no-tickets` or `ticket-cycle`, and with `handoff-edited` when the stored handoff carries UI edits unless `overwriteEdits` is true. See "Handoff" below. |
 | `get-handoff` | A session's handoff (HANDOFF.md, briefs by ticket number, timestamps) or null, with `stale` (its inputs changed since generation), `exportStale` (edited or regenerated after the last export that included it), `canGenerate`, and `cannotGenerateReason`. |
 | `update-handoff` | Edit a generated handoff: replace HANDOFF.md's `markdown` and/or `briefs` by `ticketNumber`. Marks it edited, so regenerating needs `overwriteEdits`. Refuses with `handoff-missing` or `brief-not-found`. |
+| `ground-briefs` | Ground a session's handoff briefs in its project's code: one handoff scout turn (turn kind `handoff-scout`, always on sonnet, read-only over the project root, a conversation of its own) covering every ticket at once, reporting per ticket the files to create or edit, the existing files it builds on, cited codebase facts, what it needs from each blocker with the check that proves it, and the test and command that prove it. The result is checked against the handoff and the working tree before it is stored, replacing any earlier grounding. Refused with `no-project`, `not-a-repo`, `handoff-missing`, `handoff-stale`, `turn-working`, `too-many-tickets` or `too-many-blockers` (the last two before any turn is spent); a grounding refused three times fails the turn with `invalid-brief-grounding`. See "Grounding the briefs" below. |
+| `get-brief-grounding` | A session's brief grounding or null: the scout's result per ticket, the commit and handoff fingerprint it was made for, the model, when it ran, its turn record, `current`, and `staleReason` (`handoff-changed` or `head-moved`, null while current). |
 | `set-build-record` | Create or edit a ticket's build record — model, whether the first attempt passed, whether it was escalated, what the prompt was missing, and free notes — identifying the ticket by `ticketId` or by `sessionId` + `ticketNumber`. Optionally updates the ticket's `status` in the same call. See "Logging a build from an agent" below. |
 | `get-build-record` | One ticket's build record, or null when none has been logged yet. |
 | `get-build-summary` | A session's build records summarized: ticket and recorded counts, first-attempt pass rate, escalations, a per-model breakdown, and every ticket with its build record or null — one call for the whole build records table. |
@@ -472,6 +474,38 @@ refusal always requires, rather than discarding them. The individual actions
 (write the spec, break into tickets, generate the handoff, export) remain the
 primary, always-visible controls; regenerating the handoff alone stays
 available from the Handoff block regardless.
+
+### Grounding the briefs
+
+`ground-briefs` fills in what a brief's slots leave to the orchestrator. It
+runs a handoff scout over the project at its current commit, through the turn
+lock and turn records like every other turn, and stores the accepted result in
+`gr_brief_groundings`, one row per session, with the commit it read, the
+handoff fingerprint it was made for, the model, when it ran and its turn. It
+never edits the handoff itself.
+
+Every result is checked before it is accepted, and one that fails is sent back
+with the reasons:
+
+- every citation (`buildsOnFiles`, `facts`, a citation-form `buildsOn`) points
+  at real lines of the project, by the same check the project scout uses;
+- every ticket of the handoff appears exactly once, and no other;
+- every `buildsOn` names a real blocker of its ticket;
+- a file marked `edit` exists;
+- a file marked `create` resolves inside the project root (through symlinks),
+  does not exist yet, and is not ignored by git (`git check-ignore`);
+- a `buildsOn` on a path to be created names a path that blocker lists as a
+  `create`.
+
+A ticket may list no files to change, as a spike does. A handoff with more
+tickets than one turn can ground, or a ticket with more blockers than a
+grounded ticket can name, is refused before any turn is spent.
+
+The grounding is **current** only while the handoff's fingerprint over today's
+inputs is the one it was made for and the project's `HEAD` is the commit it
+read; `get-brief-grounding` reports `handoff-changed` or `head-moved`
+otherwise. Regenerating the handoff does not make an old grounding current
+again: ground the briefs again instead.
 
 ### Logging a build from an agent
 

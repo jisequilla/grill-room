@@ -319,7 +319,10 @@ const handoffBuildsOn = z
 const groundedTicket = z.strictObject({
   /** The ticket's number, as the request listed it. */
   number: z.number().int().positive(),
-  /** The files the ticket may create or edit. */
+  /**
+   * The files the ticket may create or edit. Empty for a ticket that changes
+   * no files, such as a spike run against a real project.
+   */
   filesToChange: z
     .array(
       z.strictObject({
@@ -327,7 +330,6 @@ const groundedTicket = z.strictObject({
         change: z.enum(["create", "edit"]),
       }),
     )
-    .min(1)
     .max(MAX_HANDOFF_SCOUT_FILES_TO_CHANGE),
   /** The existing code the ticket builds on, cited. */
   buildsOnFiles: z.array(citation).max(MAX_HANDOFF_SCOUT_BUILDS_ON_FILES),

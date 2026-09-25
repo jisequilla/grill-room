@@ -225,8 +225,8 @@ describe("the handoff scout schema", () => {
     }
   });
 
-  it("rejects a ticket with no file to change", () => {
-    expect(accepts(withTicket({ ...aGroundedTicket, filesToChange: [] }))).toBe(false);
+  it("accepts a ticket that changes no files", () => {
+    expect(accepts(withTicket({ ...aGroundedTicket, filesToChange: [] }))).toBe(true);
   });
 
   it("rejects a change that is neither create nor edit", () => {
@@ -341,7 +341,7 @@ describe("the handoff scout schema", () => {
     const ticket = schema.properties.tickets.items.properties;
 
     expect(schema.properties.tickets.maxItems).toBe(MAX_HANDOFF_SCOUT_TICKETS);
-    expect(ticket.filesToChange!.minItems).toBe(1);
+    expect(ticket.filesToChange!.minItems).toBeUndefined();
     expect(ticket.filesToChange!.maxItems).toBe(MAX_HANDOFF_SCOUT_FILES_TO_CHANGE);
     expect(ticket.buildsOnFiles!.maxItems).toBe(MAX_HANDOFF_SCOUT_BUILDS_ON_FILES);
     expect(ticket.facts!.maxItems).toBe(MAX_HANDOFF_SCOUT_FACTS);

@@ -602,3 +602,37 @@ export const scoutReports = table(
     ),
   }),
 );
+
+/**
+ * A session's brief grounding: the handoff scout's accepted result, tied to
+ * the HEAD commit it read and the handoff fingerprint it was made for. A
+ * re-run replaces the session's row; one grounding per session. Staleness is
+ * never stored: see `server/brief-grounding.ts`.
+ */
+export const briefGroundings = table(
+  "gr_brief_groundings",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    /** The accepted `HandoffScoutResult`, as JSON. */
+    resultJson: text("result_json").notNull(),
+    /** The HEAD commit read, or null for a repository with no commits yet. */
+    commitRead: text("commit_read"),
+    /** The handoff fingerprint the grounding was made for. */
+    handoffFingerprint: text("handoff_fingerprint").notNull(),
+    /** The model the scout ran on. */
+    model: text("model").notNull(),
+    ranAt: text("ran_at").notNull(),
+    /** The turn that produced it. */
+    turnId: text("turn_id").references(() => turns.id, {
+      onDelete: "set null",
+    }),
+  },
+  (briefGroundingsTable) => ({
+    sessionIdx: uniqueIndex("gr_idx_brief_groundings_session").on(
+      briefGroundingsTable.sessionId,
+    ),
+  }),
+);
