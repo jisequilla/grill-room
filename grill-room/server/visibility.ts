@@ -1,8 +1,8 @@
 /**
  * Post-export visibility: classifies the files an export bundle wrote (or
- * would write) as tracked, ignored, or untracked in the target repository,
- * and turns that into the plain-language warnings and remedy commands an
- * operator needs.
+ * would write) as tracked, ignored, untracked, or unchecked in the target
+ * repository, and turns that into the plain-language warnings and remedy
+ * commands an operator needs.
  *
  * Grill Room never stages or commits in a target repo. Every remedy below is
  * a command for the OPERATOR to run by hand — the app only ever reads.
@@ -19,6 +19,11 @@
  *   `.gitignore` rule.
  * - `untracked` — neither of the above: a worktree agent starting from
  *   `origin/main` will not see it, and it is not on the ignore list either.
+ * - `unchecked` — not tracked, and `git check-ignore` could not tell whether
+ *   it is ignored (a non-0/1 exit, or a line count that doesn't match the
+ *   argument count — see {@link checkIgnored}). This is a fact the app does
+ *   not know: it is neither told to `git add` it, as an `untracked` file
+ *   would be, nor told it cannot be committed, as an `ignored` file would be.
  *
  * Both checks work on a path regardless of whether a file currently sits on
  * disk at it (git matches against its index and ignore rules, not the
@@ -31,7 +36,8 @@
  *
  * {@link buildVisibilityWarnings} turns a classification into what the UI
  * shows: a plain warning once anything is ignored or untracked, the exact
- * manual command to fix each case, and a separate warning when the project's
+ * manual command to fix each case, a separate warning when git could not
+ * check some files at all, and a separate warning when the project's
  * declared `visibility` flag disagrees with what was just observed.
  */
 import path from "node:path";
@@ -40,7 +46,7 @@ import type { ProjectVisibility } from "../shared/session-constants.js";
 import { checkIgnored } from "./check-ignore.js";
 import { runGit } from "./git.js";
 
-export type FileVisibility = "tracked" | "ignored" | "untracked";
+export type FileVisibility = "tracked" | "ignored" | "untracked" | "unchecked";
 
 export interface ClassifiedFile {
   /** Absolute path, as written (or planned to be written) by the export. */
@@ -53,12 +59,15 @@ export interface ClassifiedFile {
 export interface VisibilityWarnings {
   hasUntracked: boolean;
   hasIgnored: boolean;
+  hasUnchecked: boolean;
   /** Plain warning that worktree agents will not see the affected files, or null when nothing is ignored or untracked. */
   warning: string | null;
   /** The commands to add, commit, and push the untracked files, or null when none are untracked. */
   untrackedRemedy: string | null;
   /** Why the ignored files cannot simply be committed, plus a command to see the rule that ignores each one, or null when none are ignored. */
   ignoredRemedy: string | null;
+  /** Plain warning that git could not tell whether these files are ignored, plus a command to see git's error for each one, or null when nothing is unchecked. */
+  uncheckedWarning: string | null;
   /** Names both the project's visibility flag and what was observed, or null when they agree. */
   mismatchWarning: string | null;
 }
@@ -73,8 +82,8 @@ function toRepoRelative(root: string, absolutePath: string): string {
 
 /**
  * Classify each of `absolutePaths` (every one inside `root`) as tracked,
- * ignored, or untracked. See the module doc comment for the rules and the
- * call budget.
+ * ignored, untracked, or unchecked. See the module doc comment for the
+ * rules and the call budget.
  */
 export async function classifyVisibility(
   root: string,
@@ -100,15 +109,19 @@ export async function classifyVisibility(
   // than by comparing git's echoed pathname against what was sent.
   const remaining = relativePaths.filter((relative) => !tracked.has(relative));
   const ignored = new Set<string>();
+  const unchecked = new Set<string>();
   if (remaining.length > 0) {
     const checked = await checkIgnored(root, remaining);
-    // A non-0/1 exit or a line count that doesn't match the argument count
-    // is a git error; treat it as "none known ignored" rather than fail a
-    // whole report over one bad path.
     if (checked.status === "ok") {
       for (const [relative, isIgnored] of checked.ignored) {
         if (isIgnored) ignored.add(relative);
       }
+    } else {
+      // A non-0/1 exit or a line count that doesn't match the argument
+      // count is a git error: whether any of these paths are ignored is a
+      // fact the app does not know, so every path this call was asked about
+      // is `unchecked` rather than silently reported as `untracked`.
+      for (const relative of remaining) unchecked.add(relative);
     }
   }
 
@@ -118,7 +131,9 @@ export async function classifyVisibility(
       ? "tracked"
       : ignored.has(relativePath)
         ? "ignored"
-        : "untracked";
+        : unchecked.has(relativePath)
+          ? "unchecked"
+          : "untracked";
     return { path: absolutePath, relativePath, visibility };
   });
 }
@@ -136,10 +151,14 @@ export function buildVisibilityWarnings(options: {
   visibility: ProjectVisibility;
 }): VisibilityWarnings {
   const { root, bundleRelativePath, files, visibility } = options;
+  const trackedFiles = files.filter((file) => file.visibility === "tracked");
   const untrackedFiles = files.filter((file) => file.visibility === "untracked");
   const ignoredFiles = files.filter((file) => file.visibility === "ignored");
+  const uncheckedFiles = files.filter((file) => file.visibility === "unchecked");
+  const hasTracked = trackedFiles.length > 0;
   const hasUntracked = untrackedFiles.length > 0;
   const hasIgnored = ignoredFiles.length > 0;
+  const hasUnchecked = uncheckedFiles.length > 0;
 
   const warning =
     hasUntracked || hasIgnored
@@ -163,18 +182,39 @@ export function buildVisibilityWarnings(options: {
       ].join("\n")
     : null;
 
+  const uncheckedWarning = hasUnchecked
+    ? [
+        "git could not tell whether these files are ignored by this repository. Run each command below " +
+          "to see git's error.",
+        ...uncheckedFiles.map((file) => `git -C ${root} check-ignore -v ${file.relativePath}`),
+      ].join("\n")
+    : null;
+
   let mismatchWarning: string | null = null;
   if (visibility === "tracked" && hasIgnored) {
     mismatchWarning =
       `This project's visibility flag says "tracked", but the exported files are ignored by this ` +
       `repository. Update the flag in project settings, or fix .gitignore.`;
-  } else if (visibility === "ignored" && !hasIgnored) {
+  } else if (visibility === "ignored" && !hasIgnored && (hasTracked || hasUntracked)) {
+    // A tracked or untracked file directly contradicts the "ignored" flag,
+    // whether or not other files in the same bundle are unchecked. The
+    // warning stays null only when every non-ignored file is unchecked: with
+    // nothing known not-ignored, there is nothing yet to call a mismatch.
     mismatchWarning =
       `This project's visibility flag says "ignored", but none of the exported files are actually ` +
       `ignored by this repository. Update the flag in project settings.`;
   }
 
-  return { hasUntracked, hasIgnored, warning, untrackedRemedy, ignoredRemedy, mismatchWarning };
+  return {
+    hasUntracked,
+    hasIgnored,
+    hasUnchecked,
+    warning,
+    untrackedRemedy,
+    ignoredRemedy,
+    uncheckedWarning,
+    mismatchWarning,
+  };
 }
 
 /**
