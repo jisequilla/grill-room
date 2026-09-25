@@ -238,65 +238,6 @@ function isInsideGitDir(candidate: string): boolean {
     .some((segment) => segment.toLowerCase() === ".git");
 }
 
-const C_ESCAPES: Record<string, number> = {
-  a: 0x07,
-  b: 0x08,
-  t: 0x09,
-  n: 0x0a,
-  v: 0x0b,
-  f: 0x0c,
-  r: 0x0d,
-  '"': 0x22,
-  "\\": 0x5c,
-};
-
-/**
- * One path as git prints it, unquoted. git wraps a path holding a non-ASCII
- * byte, a quote, a backslash or a control character in double quotes, with C
- * escapes and octal bytes (`"dist/\303\251.js"`); any other path is printed
- * as it is. With `core.quotePath=false`, a non-ASCII byte alone no longer
- * triggers quoting, but a quote, backslash or control character still does,
- * with every other character — including a multi-byte one like an emoji —
- * printed raw inside the quotes rather than octal-escaped.
- *
- * Walked one Unicode code point at a time (`Array.from`, not `body[index]`):
- * a UTF-16 index would split a surrogate pair in two, and encoding each half
- * on its own garbles it, since neither half is valid UTF-8 by itself. The
- * escape sequences this loop looks ahead for (`\t`, `\NNN`, ...) are always
- * plain ASCII, so they are unaffected — each is one element of the code-point
- * array too.
- *
- * `-z` would print every path raw, but `git check-ignore` accepts `-z` only
- * with `--stdin` ("fatal: -z only makes sense with --stdin"), and the
- * read-only wrapper gives git no stdin.
- */
-export function unquoteGitPath(printed: string): string {
-  if (printed.length < 2 || !printed.startsWith('"') || !printed.endsWith('"')) {
-    return printed;
-  }
-  const chars = Array.from(printed.slice(1, -1));
-  const bytes: number[] = [];
-  for (let index = 0; index < chars.length; index += 1) {
-    const char = chars[index]!;
-    if (char !== "\\") {
-      bytes.push(...Buffer.from(char, "utf8"));
-      continue;
-    }
-    const octal = /^[0-3][0-7]{2}/.exec(chars.slice(index + 1, index + 4).join(""));
-    const next = chars[index + 1] ?? "";
-    if (octal) {
-      bytes.push(parseInt(octal[0], 8));
-      index += 3;
-    } else if (next in C_ESCAPES) {
-      bytes.push(C_ESCAPES[next]!);
-      index += 1;
-    } else {
-      bytes.push(0x5c);
-    }
-  }
-  return Buffer.from(bytes).toString("utf8");
-}
-
 function listNumbers(numbers: readonly number[]): string {
   return numbers.length === 0 ? "none" : numbers.join(", ");
 }
@@ -473,38 +414,48 @@ export async function reasonsToRefuseHandoffGrounding(
   if (toCheckIgnored.length > 0) {
     const unique = [...new Set(toCheckIgnored.map((entry) => entry.path))];
     // A path starting with `:` is git pathspec magic (`:/` is "top", `:(word)`
-    // is the long form); an untrusted, model-supplied path can start with it
-    // by chance. `check-ignore` refuses `--literal-pathspecs` outright ("git
-    // check-ignore" section of `git.ts`'s `RunGitOptions`), so the magic is
-    // neutralized here instead: `./` in front of a pathspec makes it start
-    // with `.` rather than `:`, which git never treats as magic, and is a
-    // no-op for every path that did not start with `:` to begin with — an
-    // ordinary path still matches the same ignore rules through it. Stripped
-    // back off below, since `check-ignore` echoes the argument it matched.
+    // the long form); an untrusted, model-supplied path can start with it by
+    // chance. `./` in front of every argument makes it start with `.`
+    // instead, which git never reads as magic, and is a no-op for a path
+    // that did not start with `:` to begin with — it still matches the same
+    // ignore rules through the prefix.
+    //
+    // `-v` (verbose) plus `-n` (also show non-matching paths) prints exactly
+    // one line per argument, in the order given: `<source>:<line>:<pattern>`
+    // then a tab then the pathname for a match, or `::` then a tab then the
+    // pathname for a miss. Matched/not-matched is read off by POSITION, never
+    // by comparing that trailing pathname against what was sent — git is
+    // free to rewrite it (Unicode-normalize under `core.precomposeUnicode`,
+    // re-encode a lone surrogate its own way, quote-and-escape it) in ways
+    // that no longer equal the input string, so a text comparison can miss
+    // an ignored path silently. Line count is checked against the argument
+    // count before any line is trusted, so a git version that batches or
+    // reorders these differently fails the check rather than mismapping it.
     const checked = await runGit(realRoot, [
       "check-ignore",
+      "-v",
+      "-n",
       "--",
       ...unique.map((entry) => `./${entry}`),
     ]);
-    if (checked.exitCode === 0 || checked.exitCode === 1) {
-      const ignored = new Set(
-        checked.stdout
-          .split("\n")
-          .filter(Boolean)
-          .map(unquoteGitPath)
-          .map((entry) => (entry.startsWith("./") ? entry.slice(2) : entry)),
+    const lines = checked.stdout.split("\n").filter(Boolean);
+    if (checked.exitCode !== 0 && checked.exitCode !== 1) {
+      reasons.push(
+        `The files marked create could not be checked against the project's ignore rules (git check-ignore exited ${checked.exitCode}); plan ordinary paths inside the project.`,
       );
+    } else if (lines.length !== unique.length) {
+      reasons.push(
+        `The files marked create could not be checked against the project's ignore rules (git check-ignore printed ${lines.length} results for ${unique.length} paths); plan ordinary paths inside the project.`,
+      );
+    } else {
+      const ignoredPaths = new Set(unique.filter((_, index) => !lines[index]!.startsWith("::\t")));
       for (const entry of toCheckIgnored) {
-        if (ignored.has(entry.path)) {
+        if (ignoredPaths.has(entry.path)) {
           reasons.push(
             `Ticket ${entry.ticket} marks ${entry.path} as create, but git ignores that path, so the repository would never track it; plan a path git tracks.`,
           );
         }
       }
-    } else {
-      reasons.push(
-        `The files marked create could not be checked against the project's ignore rules (git check-ignore exited ${checked.exitCode}); plan ordinary paths inside the project.`,
-      );
     }
   }
 

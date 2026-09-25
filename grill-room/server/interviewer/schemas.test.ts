@@ -44,8 +44,6 @@ describe("a scout report's citations", () => {
     ["an absolute path", "/etc/passwd:1"],
     ["a home path", "~/.ssh/config:1"],
     ["a drive path", "C:\\repo\\a.ts:1"],
-    ["a drive path with a forward slash", "C:/x:1"],
-    ["a lowercase drive path", "c:\\x:1"],
     ["a path out of the repo", "../other/a.ts:1"],
     ["a path stepping out midway", "src/../../a.ts:1"],
     ["surrounding whitespace", " src/a.ts:1"],

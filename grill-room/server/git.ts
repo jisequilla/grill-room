@@ -57,25 +57,6 @@ export interface GitResult {
   stderr: string;
 }
 
-export interface RunGitOptions {
-  /**
-   * Force every pathspec argument of this call to be read literally: no
-   * glob, no `:/` ("top") magic, no `:(word)` long-form magic — see
-   * `GIT_LITERAL_PATHSPECS` in gitglossary(7). Pass this for a call whose
-   * path arguments come from the user or the model, so a path that happens
-   * to start with `:` (pathspec magic's trigger character) is matched as
-   * the literal path it names rather than reinterpreted.
-   *
-   * `check-ignore` refuses this outright ("pathspec magic not supported by
-   * this command: 'literal'"), for every argument, whether or not it starts
-   * with `:` — verified against git 2.55. Requesting it for `check-ignore`
-   * is refused here rather than silently breaking every call; neutralize a
-   * leading `:` for that subcommand by prefixing the argument with `./`
-   * instead (see `brief-grounding.ts`'s ignored-path check).
-   */
-  literalPathspecs?: boolean;
-}
-
 /** git is not installed, or not on the server's PATH. */
 export class GitUnavailableError extends Error {
   constructor() {
@@ -96,14 +77,9 @@ function childEnv(): NodeJS.ProcessEnv {
 /**
  * Run one read-only git subcommand against `repo`. Resolves with the exit code
  * whatever it is — several subcommands answer through it, `check-ignore`
- * among them — and rejects only when git cannot be run at all, or when
- * `literalPathspecs` is requested for a subcommand that refuses it.
+ * among them — and rejects only when git cannot be run at all.
  */
-export function runGit(
-  repo: string,
-  args: string[],
-  options: RunGitOptions = {},
-): Promise<GitResult> {
+export function runGit(repo: string, args: string[]): Promise<GitResult> {
   const subcommand = args[0];
   if (!subcommand || !READ_ONLY_SUBCOMMANDS.has(subcommand)) {
     return Promise.reject(
@@ -120,19 +96,10 @@ export function runGit(
       new Error(`Refusing to run git log ${args.slice(1).join(" ")}: "--output" writes to a file.`),
     );
   }
-  if (options.literalPathspecs && subcommand === "check-ignore") {
-    return Promise.reject(
-      new Error(
-        "check-ignore refuses literal pathspec magic (GIT_LITERAL_PATHSPECS); neutralize a leading \":\" another way instead of passing literalPathspecs for it.",
-      ),
-    );
-  }
 
   return new Promise((resolve, reject) => {
-    const env = childEnv();
-    if (options.literalPathspecs) env.GIT_LITERAL_PATHSPECS = "1";
     const child = spawn("git", ["-C", repo, ...args], {
-      env,
+      env: childEnv(),
       stdio: ["ignore", "pipe", "pipe"],
       timeout: GIT_TIMEOUT_MS,
     });
