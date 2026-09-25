@@ -455,6 +455,11 @@ understanding confirmed" and the primary action to **Open the output**.
   {project}** is the primary action.
 - The last export shows as `Exported 2 h ago · 9 files · HEAD 0c00712`.
 
+### Turn attempt log and batch progress
+
+- Attempt kinds: `tree-rule-refusal` and `rate-limit` are Ochre, `schema-invalid` and `error` are Crimson, and each kind's label, not its colour, tells `schema-invalid` apart from `error`.
+- A running batch is a neutral `muted` panel with the 2px Ember working hairline at its top edge, the same treatment as a running interviewer turn, and no fill colour. Each processed segment of its track takes its own outcome: Tempered when answered and settled, Ochre when answered as a loose end, Smoke when skipped, Crimson when failed.
+
 ### State stamp (`Badge` restyled)
 
 - 12px mono uppercase on a 4px-radius tint with a leading shape glyph (see

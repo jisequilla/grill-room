@@ -9,13 +9,13 @@ type ClassifiedFile = VisibilityReport["files"][number];
 /** A file's git standing, on a canvas that is otherwise neutral: tracked is calm, unchecked is a neutral unknown, the other two want attention. */
 const CLASS_BY_VISIBILITY: Record<ClassifiedFile["visibility"], string> = {
   tracked:
-    "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-300",
+    "border-settled/25 bg-settled/10 text-settled",
   ignored:
-    "border-amber-600/30 bg-amber-500/15 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300",
+    "border-unplaced/30 bg-unplaced/15 text-unplaced",
   untracked:
-    "border-orange-600/30 bg-orange-500/15 text-orange-700 dark:border-orange-400/30 dark:bg-orange-400/10 dark:text-orange-300",
+    "border-owed/30 bg-owed/15 text-owed",
   unchecked:
-    "border-slate-600/30 bg-slate-500/15 text-slate-700 dark:border-slate-400/30 dark:bg-slate-400/10 dark:text-slate-300",
+    "border-dashed border-unplaced/50 bg-transparent text-unplaced",
 };
 
 const VISIBILITY_LABEL_KEY: Record<ClassifiedFile["visibility"], string> = {
@@ -30,7 +30,7 @@ function VisibilityBadge({ visibility }: { visibility: ClassifiedFile["visibilit
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center rounded-full border px-1.5 py-px text-[10px] leading-4 font-medium tracking-wide uppercase",
+        "inline-flex shrink-0 items-center rounded-full border px-1.5 py-px text-xs leading-4 font-medium tracking-wide uppercase",
         CLASS_BY_VISIBILITY[visibility],
       )}
     >

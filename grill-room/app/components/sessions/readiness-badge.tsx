@@ -30,8 +30,8 @@ export function ReadinessBadge({
       className={cn(
         "shrink-0 gap-1",
         ready
-          ? "border-emerald-600/40 text-emerald-700 dark:border-emerald-400/30 dark:text-emerald-400"
-          : "border-amber-600/40 text-amber-700 dark:border-amber-400/30 dark:text-amber-400",
+          ? "border-settled/40 text-settled"
+          : "border-owed/40 text-owed",
         className,
       )}
     >

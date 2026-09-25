@@ -33,7 +33,7 @@ function Section({
 }) {
   return (
     <div className="flex flex-col gap-1" data-testid={testId}>
-      <dt className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+      <dt className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         {label}
       </dt>
       <dd className="text-sm">{children}</dd>
@@ -119,7 +119,7 @@ export function ReadinessPanel({
             )}
             {result.objectiveIsProcess ? (
               <p
-                className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400"
+                className="mt-1.5 flex items-start gap-1.5 text-xs text-owed"
                 data-testid="readiness-process-warning"
               >
                 <IconAlertTriangle className="mt-0.5 size-3.5 shrink-0" />
@@ -289,7 +289,7 @@ function ScoutCurrentState({ items }: { items: readonly ScoutCurrentStateItem[] 
         if (group.length === 0) return null;
         return (
           <div key={status} data-testid="scout-current-state-group" data-status={status}>
-            <p className="pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            <p className="pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
               {t(STATE_STATUS_LABEL_KEY[status])}
             </p>
             <ul className="flex list-disc flex-col gap-1 pl-5">
@@ -337,7 +337,7 @@ function ScoutDecisionRow({
     >
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-medium">{proposal.title}</p>
-        <span className="shrink-0 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+        <span className="shrink-0 text-xs font-medium tracking-wide text-muted-foreground uppercase">
           {t(SOURCE_LABEL_KEY[proposal.source])}
         </span>
       </div>
@@ -433,7 +433,7 @@ export function ScoutReportPanel({
             <Badge
               variant="outline"
               data-testid="scout-stale-badge"
-              className="shrink-0 gap-1 border-amber-600/40 text-amber-700 dark:border-amber-400/30 dark:text-amber-400"
+              className="shrink-0 gap-1 border-owed/40 text-owed"
             >
               <IconAlertTriangle className="size-3" />
               {t("workspace.scoutStale")}

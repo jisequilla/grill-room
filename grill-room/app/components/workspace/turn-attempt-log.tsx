@@ -41,26 +41,27 @@ const KIND_LABEL_KEY: Record<AttemptKind, string> = {
 };
 
 /**
- * A rate limit gets its own colour, distinct from both a tree-rule refusal and
- * a plain interviewer error: it is the shared subscription running out, not a
- * defect, and the log must never read like one.
+ * A rate limit and a tree-rule refusal are owed, not destructive: the first is
+ * the shared subscription running out, not a defect, and the log must never
+ * read like one. A schema-invalid answer and a plain error share destructive;
+ * their label, not their colour, tells them apart.
  */
 const KIND_CLASS: Record<AttemptKind, string> = {
   "tree-rule-refusal":
-    "border-amber-600/30 bg-amber-500/15 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300",
+    "border-owed/30 bg-owed/15 text-owed",
   "schema-invalid":
-    "border-violet-600/25 bg-violet-600/10 text-violet-700 dark:border-violet-400/25 dark:bg-violet-400/10 dark:text-violet-300",
+    "border-destructive/30 bg-destructive/10 text-destructive",
   "resume-fallback": "border-border bg-muted text-muted-foreground",
   "rate-limit":
-    "border-orange-600/30 bg-orange-500/15 text-orange-700 dark:border-orange-400/30 dark:bg-orange-400/10 dark:text-orange-300",
+    "border-owed/30 bg-owed/15 text-owed",
   error: "border-destructive/30 bg-destructive/10 text-destructive",
   success:
-    "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-300",
+    "border-settled/25 bg-settled/10 text-settled",
 };
 
 /** The pill every kind tag shares, `KindTag`'s own and the interrupted placeholder's alike. */
 const TAG_BASE_CLASS =
-  "inline-flex shrink-0 items-center rounded-full border px-1.5 py-px text-[10px] leading-4 font-medium tracking-wide uppercase";
+  "inline-flex shrink-0 items-center rounded-full border px-1.5 py-px text-xs leading-4 font-medium tracking-wide uppercase";
 
 function KindTag({ kind }: { kind: AttemptKind }) {
   const t = useT();
@@ -161,7 +162,7 @@ export function AttemptRow({
       <div className="flex min-w-0 flex-col gap-0.5">
         <div className="flex flex-wrap items-center gap-1.5">
           {running ? (
-            <span className="inline-flex items-center gap-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+            <span className="inline-flex items-center gap-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
               <Spinner className="size-3" />
               {t("workspace.attemptRunning")}
             </span>
@@ -219,7 +220,7 @@ function RunSection({
           data-testid="manual-retry-separator"
         >
           <div className="h-px flex-1 bg-border" />
-          <span className="flex items-center gap-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+          <span className="flex items-center gap-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
             <IconRefresh className="size-3" />
             {t("workspace.attemptManualRetry")}
           </span>
