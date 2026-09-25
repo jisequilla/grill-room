@@ -8,7 +8,7 @@ Suggested model: sonnet
 
 Throwaway prototypes of two or three alternative design tree layouts (for example node graph, columns by state) behind a switch on the workspace, for the user to react to. Not production quality; the indented outline stays the default.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 

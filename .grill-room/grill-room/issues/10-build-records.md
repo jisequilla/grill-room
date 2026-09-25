@@ -1,20 +1,20 @@
-# 02 Schema and session actions
+# 10 Build records
 
 Status: ready-for-agent
-Blocked by: 01
+Blocked by: 08
 Suggested model: sonnet
 
 ## What to build
 
-Define the full domain schema from the spec's Domain model section (session, decision, decision history, round, spec, ticket, build record, global settings) using the framework's schema helpers, additive migrations only. Implement session actions: create (title, idea, model defaulting to the global setting, answering mode), list (title, state, last activity), get, delete, set answering mode, and get/set the global default model.
+Implement build records per the spec: one per ticket, holding model, first attempt passed, escalated, what the prompt was missing, and notes. Actions to set/edit a record and to summarize records across a session (first-attempt pass rate, escalations). The set action must be callable over HTTP and the framework's action CLI so an orchestrating agent can log results without a browser; document the exact invocation in the app's AGENTS.md.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 
-- User stories 1-8, 10, 11 are satisfied at the action level.
-- Deleting a session removes its decisions, rounds, spec, tickets and build records.
-- Action tests cover each action against the in-memory database.
+- User stories 76-80 are satisfied at the action level.
+- Action tests cover create, edit, and summary.
+- The documented CLI invocation is shown to work against a running dev server (paste the command and output in your report).
 - `pnpm test` and `pnpm typecheck` both exit 0 from `grill-room/`.
 
 ## Boundaries

@@ -8,7 +8,7 @@ Suggested model: sonnet
 
 Implement spec synthesis and ticket breakdown actions through the port, available only for confirmed sessions. The spec request instructs the interviewer to use the upstream to-spec template sections and rules verbatim (source: repo-root .claude/skills/to-spec/SKILL.md, template part only; no repository exploration, no seams check). Out-of-scope dispositions feed Out of Scope; open-question dispositions feed Further Notes. Tickets are validated: blocked-by links reference existing tickets and are acyclic. Both can be regenerated; a currency marker shows whether they match the tree.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 

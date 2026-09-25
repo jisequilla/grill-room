@@ -8,7 +8,7 @@ Suggested model: sonnet
 
 Add Playwright and one smoke test against the running app with the fake interviewer enabled by configuration: create a session, answer and submit a round, see the tree update, confirm done, see the spec. Add a test:e2e script.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 

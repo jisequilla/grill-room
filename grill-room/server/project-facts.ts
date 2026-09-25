@@ -4,8 +4,8 @@
  * the existing read-only git helper (`server/git.ts`) and plain file checks.
  * No model ever derives them.
  *
- * See `.scratch/project-scout/spec.md` ("Server facts") and
- * `.scratch/project-scout/issues/01-server-facts.md`.
+ * See `.grill-room/project-scout/spec.md` ("Server facts") and
+ * `.grill-room/project-scout/issues/01-server-facts.md`.
  */
 import { statSync } from "node:fs";
 import path from "node:path";

@@ -1,6 +1,6 @@
 # Spike: a real decisions.md round trip
 
-Bead gr-qs7.5, ticket `.scratch/decisions-export/issues/05-real-round-trip.md`. One run with the real interviewer and scout against a temp clone of the marathon tracker. It checks that an exported, committed `decisions.md` is read back by the next scout.
+Bead gr-qs7.5, ticket `.grill-room/decisions-export/issues/05-real-round-trip.md`. One run with the real interviewer and scout against a temp clone of the marathon tracker. It checks that an exported, committed `decisions.md` is read back by the next scout.
 
 ## Verdicts
 

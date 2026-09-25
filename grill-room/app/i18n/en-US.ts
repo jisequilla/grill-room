@@ -41,7 +41,7 @@ const messages = {
     verifyCommandPlaceholder: "pnpm test",
     verifyCommandSuggested: "Suggested from the repository's build files.",
     exportFolderLabel: "Export folder",
-    exportFolderPlaceholder: ".scratch",
+    exportFolderPlaceholder: ".grill-room",
     exportFolderHint:
       "Relative to the repository root. It does not need to exist yet.",
     exportFolderSuggested: "Suggested from the repository's declared tracker.",

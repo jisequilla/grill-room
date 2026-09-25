@@ -8,7 +8,7 @@ Suggested model: sonnet
 
 Implement the export action per the spec: into the session's target folder, write a feature folder named from the session slug containing the spec as one file and one numbered file per ticket with Status and Blocked-by lines, matching the layout described in repo-root docs/agents/issue-tracker.md. Report the files written; refuse missing or unwritable targets with a clear error; require explicit confirmation before overwriting existing files. Setting the target folder is a session action.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 

@@ -13,7 +13,7 @@ import { answerOwnText, chooseScenario } from "./support";
  * The whole app, walked at a watchable pace against the `demo` scenario: one
  * real interview, recorded once against this repository with
  * `GRILL_ROOM_RECORD_TURNS` (see
- * `.scratch/regression-scenarios/issues/05-recorded-demo.md`) and replayed
+ * `.grill-room/regression-scenarios/issues/05-recorded-demo.md`) and replayed
  * here through the fake interviewer. `just demo` runs only this file, with
  * Playwright video on, and compresses the result to `docs/media/demo.webm`.
  *

@@ -11,7 +11,7 @@ export const DEMO_SCENARIO = "demo";
 /**
  * The recorded demo session, committed as a fixture: one real interview,
  * grilled against this repository with `GRILL_ROOM_RECORD_TURNS` (see
- * `.scratch/regression-scenarios/issues/05-recorded-demo.md`), reviewed and
+ * `.grill-room/regression-scenarios/issues/05-recorded-demo.md`), reviewed and
  * checked in. `e2e/demo.spec.ts` replays it. Resolved relative to this file
  * rather than the process cwd, so it is found the same way whichever
  * directory the server is started from.

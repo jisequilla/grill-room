@@ -41,7 +41,7 @@ The peer's minimum pre-read for an interviewer on that repo: `CLAUDE.md`, `docs/
 
 ## What issue #11 confirmed
 
-A second user ran Grill Room on Grill Room (Opus, docs folder `.scratch/grill-room/`) and proposed making every model turn visible: a turn record with runs and attempts, 8 tickets. They flagged the one assumption themselves: the interviewer read the spec, not the code. Checked against the code, the retry model held (3 attempts, only tree-rule refusals retry, `rate-limited` and `malformed-output` stop the turn, the resume fallback hidden inside the adapter). The spec's gaps came from what docs mode could see:
+A second user ran Grill Room on Grill Room (Opus, docs folder `.grill-room/grill-room/`) and proposed making every model turn visible: a turn record with runs and attempts, 8 tickets. They flagged the one assumption themselves: the interviewer read the spec, not the code. Checked against the code, the retry model held (3 attempts, only tree-rule refusals retry, `rate-limited` and `malformed-output` stop the turn, the resume fallback hidden inside the adapter). The spec's gaps came from what docs mode could see:
 
 - It named four turn kinds; six callers run through `askUntilAccepted`. `assess-readiness` and the supersession check lived outside the docs folder.
 - It introduced a turn record without relating it to the turn state the session row already holds (`turnStatus`, `turnErrorCode`, `turnStartedAt`).

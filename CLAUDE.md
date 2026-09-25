@@ -44,7 +44,7 @@ The main session verifies each subagent's result itself (run the tests, read the
 
 ## Build Flow
 
-1. `/to-spec` publishes to local markdown: `.scratch/<feature>/spec.md`, tickets at `.scratch/<feature>/issues/NN-slug.md`.
+1. `/to-spec` publishes to local markdown: `.grill-room/<feature>/spec.md`, tickets at `.grill-room/<feature>/issues/NN-slug.md`.
 2. Each ticket becomes a bead (`bd`). Claim a bead before delegating it; close it only after the main session has verified the work. Recover state with `bd ready` and `git log`, never from recollection.
 3. Tickets that do not block each other may run in parallel, each subagent in its own git worktree (`isolation: "worktree"`). Each ticket reaches `main` through a pull request the main session reviews, verifies and merges; `.claude/rules/worktrees.md` holds the lifecycle. Run at most three at a time. The app under test, the subagents and the main session all draw on one Claude subscription pool, and a rate-limited failure is indistinguishable from a spec failure in the log. Six concurrent builders in the A/B hit no recorded rate limit, but the main session's attention to relays is the tighter limit. Delegations use the templates in `.claude/templates/delegation/`, and a pre-flight read clears each ticket before launch.
 4. Spikes report to `docs/spikes/`.
@@ -56,13 +56,13 @@ Each bead's close comment records the model used, whether the first attempt pass
 
 ## The App
 
-`grill-room/` is the app under construction: a local, single-user grilling UI on agent-native (`chat` template). It has its own `AGENTS.md` (symlinked as `CLAUDE.md`) and `DEVELOPING.md` with the framework's commands and conventions; read those before working inside it. The spec in `.scratch/` is the source of truth for what it should do.
+`grill-room/` is the app under construction: a local, single-user grilling UI on agent-native (`chat` template). It has its own `AGENTS.md` (symlinked as `CLAUDE.md`) and `DEVELOPING.md` with the framework's commands and conventions; read those before working inside it. The spec in `.grill-room/` is the source of truth for what it should do.
 
 ## Agent skills
 
 ### Issue tracker
 
-Issues and specs live as local markdown under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Issues and specs live as local markdown under `.grill-room/<feature>/`. See `docs/agents/issue-tracker.md`. Re-running `/setup-matt-pocock-skills` regenerates `docs/agents/issue-tracker.md` with `tickets_dir: .scratch`, so set it back to `.grill-room` afterwards.
 
 ### Domain docs
 

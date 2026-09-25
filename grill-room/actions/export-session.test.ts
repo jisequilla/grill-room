@@ -935,7 +935,7 @@ describe("preview-export and export-session", () => {
   describe("provenance manifest and the edited-file guard", () => {
     const EDITED = "# Grill Room\n\nEdited in the repo by hand.\n";
 
-    /** A ready session with a current handoff, already exported once to `.scratch/grill-room`. */
+    /** A ready session with a current handoff, already exported once to `.grill-room/grill-room`. */
     async function anExportedSession() {
       const ready = await aReadySession();
       await generateHandoff.run({ sessionId: ready.session.id });
