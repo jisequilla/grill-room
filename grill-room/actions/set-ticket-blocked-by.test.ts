@@ -154,7 +154,7 @@ describe("set-ticket-blocked-by export", () => {
     const project = await registerProject.run({
       root,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
     const session = await aSession(project.id);
     await insertTicket(session.id, { number: 1, slug: "build-the-workspace" });

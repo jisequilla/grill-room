@@ -50,7 +50,7 @@ function aSource(overrides: Partial<HandoffSource["project"]> = {}): HandoffSour
     waves: [[1, 3], [2]],
     project: {
       rootPath: ROOT,
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
       verifyCommand: "just verify",
       trackerKind: "markdown",
       buildRecordLogging: false,
@@ -403,6 +403,18 @@ describe("handoffFingerprint", () => {
     );
   });
 
+  it("hashes a project's working export folder exactly as it did before that field was renamed", () => {
+    // Pinned by running the pre-rename `handoffFingerprint` (gr-0hy.1) over
+    // this same `aSource()` fixture, when its project field was still the
+    // export-folder field under its old name. The fingerprint's own
+    // canonical key stays that same literal key so this must still match: an
+    // existing session's stored handoff must not go stale just because the
+    // field that feeds it was renamed.
+    expect(handoffFingerprint(aSource())).toBe(
+      "7cb3834b6357f33c1d8fd7a276ceb2266946f3cf08139ebab86bf924b1125261",
+    );
+  });
+
   it("changes with a blocker, a ticket field, the spec, or a project field the templates use", () => {
     const base = handoffFingerprint(aSource());
     const variants: HandoffSource[] = [
@@ -416,7 +428,7 @@ describe("handoffFingerprint", () => {
       aSource({ trackerKind: "beads" }),
       aSource({ buildRecordLogging: true }),
       aSource({ visibility: "ignored" }),
-      aSource({ exportFolder: "docs" }),
+      aSource({ workingExportFolder: "docs" }),
       aSource({ trackerCommandsJson: "{}" }),
       aSource({ rootPath: "/elsewhere" }),
       aSource({ deliveryRecipe: "local-merge" }),

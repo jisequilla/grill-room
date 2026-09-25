@@ -7,7 +7,7 @@ import type {
 /** One registered project, as `list-projects` returns it. */
 export type Project = AgentNativeActionRegistry["list-projects"]["result"][number];
 
-export type ProjectField = "root" | "verifyCommand" | "exportFolder" | "slugPattern";
+export type ProjectField = "root" | "verifyCommand" | "workingExportFolder" | "slugPattern";
 
 /**
  * Every code the project registry refuses with, mapped to the field it belongs
@@ -26,16 +26,16 @@ export const PROJECT_ERROR: Record<string, { field: ProjectField; key: string }>
     key: "projects.verifyCommandRequired",
   },
   "export-folder-required": {
-    field: "exportFolder",
-    key: "projects.exportFolderRequired",
+    field: "workingExportFolder",
+    key: "projects.workingExportFolderRequired",
   },
   "export-folder-outside-root": {
-    field: "exportFolder",
-    key: "projects.exportFolderOutsideRoot",
+    field: "workingExportFolder",
+    key: "projects.workingExportFolderOutsideRoot",
   },
   "export-folder-is-root": {
-    field: "exportFolder",
-    key: "projects.exportFolderIsRoot",
+    field: "workingExportFolder",
+    key: "projects.workingExportFolderIsRoot",
   },
   "invalid-slug-pattern": {
     field: "slugPattern",

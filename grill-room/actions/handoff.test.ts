@@ -99,7 +99,7 @@ async function aReadySession(
   const project = await registerProject.run({
     root,
     verifyCommand: "pnpm test",
-    exportFolder: ".scratch",
+    workingExportFolder: ".scratch",
     visibility: options.visibility ?? "tracked",
     trackerKind: options.trackerKind,
   });
@@ -132,7 +132,7 @@ describe("handoff generation", () => {
 
   it("reports no handoff and why generation is refused before there are tickets", async () => {
     const root = repos.create();
-    const project = await registerProject.run({ root, verifyCommand: "pnpm test", exportFolder: ".scratch" });
+    const project = await registerProject.run({ root, verifyCommand: "pnpm test", workingExportFolder: ".scratch" });
     const noProject = await createSession.run({ title: "A", idea: "An idea." });
     const noSpec = await createSession.run({ title: "B", idea: "An idea.", projectId: project.id });
 

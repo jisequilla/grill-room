@@ -42,13 +42,13 @@ const SPEC_MARKDOWN = [
 ].join("\n");
 
 async function aProject(
-  options: { exportFolder?: string; slugPattern?: string; files?: Record<string, string> } = {},
+  options: { workingExportFolder?: string; slugPattern?: string; files?: Record<string, string> } = {},
 ) {
   const root = repos.create({ files: options.files });
   const project = await registerProject.run({
     root,
     verifyCommand: "pnpm test",
-    exportFolder: options.exportFolder ?? ".scratch",
+    workingExportFolder: options.workingExportFolder ?? ".scratch",
     slugPattern: options.slugPattern,
   });
   return { root, project };
@@ -114,7 +114,7 @@ async function insertTicket(
 async function aReadySession(
   options: {
     title?: string;
-    exportFolder?: string;
+    workingExportFolder?: string;
     slugPattern?: string;
     files?: Record<string, string>;
   } = {},
@@ -259,7 +259,7 @@ describe("preview-export and export-session", () => {
   });
 
   it("previews without side effects, and writes exactly the files the preview listed", async () => {
-    const { root, session } = await aReadySession({ exportFolder: "docs/features" });
+    const { root, session } = await aReadySession({ workingExportFolder: "docs/features" });
     await generateHandoff.run({ sessionId: session.id });
 
     const preview = await previewExport.run({ sessionId: session.id });
@@ -267,7 +267,7 @@ describe("preview-export and export-session", () => {
 
     expect(preview).toMatchObject({
       projectRoot: root,
-      exportFolder: "docs/features",
+      workingExportFolder: "docs/features",
       proposedSlug: "grill-room",
       slug: "grill-room",
       folderName: "grill-room",
@@ -299,7 +299,7 @@ describe("preview-export and export-session", () => {
   });
 
   it("creates missing folders and lays the bundle out as spec.md plus issues/NN-slug.md", async () => {
-    const { root, session, spec } = await aReadySession({ exportFolder: "a/b/c" });
+    const { root, session, spec } = await aReadySession({ workingExportFolder: "a/b/c" });
     await generateHandoff.run({ sessionId: session.id });
 
     await exportSession.run({ sessionId: session.id, slug: "grill-room" });
@@ -623,7 +623,7 @@ describe("preview-export and export-session", () => {
 
   it("refuses a symlinked export folder that points outside the project root, writing nothing", async () => {
     const outside = repos.plainFolder();
-    const { root, session } = await aReadySession({ exportFolder: "exports" });
+    const { root, session } = await aReadySession({ workingExportFolder: "exports" });
     await fs.symlink(outside, path.join(root, "exports"));
 
     await expect(previewExport.run({ sessionId: session.id })).rejects.toMatchObject({
@@ -653,7 +653,7 @@ describe("preview-export and export-session", () => {
 
   it("refuses a dangling symlink on the way to the bundle", async () => {
     const outside = repos.plainFolder();
-    const { root, session } = await aReadySession({ exportFolder: "exports" });
+    const { root, session } = await aReadySession({ workingExportFolder: "exports" });
     await fs.symlink(path.join(outside, "not-yet"), path.join(root, "exports"));
 
     await expect(
@@ -664,7 +664,7 @@ describe("preview-export and export-session", () => {
   });
 
   it("accepts a symlinked export folder that stays inside the project root", async () => {
-    const { root, session } = await aReadySession({ exportFolder: "exports" });
+    const { root, session } = await aReadySession({ workingExportFolder: "exports" });
     await generateHandoff.run({ sessionId: session.id });
     await fs.mkdir(path.join(root, "real-exports"));
     await fs.symlink(path.join(root, "real-exports"), path.join(root, "exports"));
@@ -753,7 +753,7 @@ describe("preview-export and export-session", () => {
       const project = await registerProject.run({
         root,
         verifyCommand: "pnpm test",
-        exportFolder: ".scratch",
+        workingExportFolder: ".scratch",
         visibility: "tracked",
       });
       const session = await aSession("Grill Room", project.id);
@@ -906,7 +906,7 @@ describe("preview-export and export-session", () => {
     });
 
     it("stores the bundle folder on the session after a successful export, relative to the root", async () => {
-      const { session } = await aReadySession({ exportFolder: "docs/features" });
+      const { session } = await aReadySession({ workingExportFolder: "docs/features" });
       expect(await storedFolder(session.id)).toBeNull();
       await generateHandoff.run({ sessionId: session.id });
 

@@ -20,7 +20,7 @@ export default defineAction({
       projectId: plan.project.id,
       projectName: plan.project.name,
       projectRoot: plan.project.rootPath,
-      exportFolder: plan.project.exportFolder,
+      workingExportFolder: plan.project.workingExportFolder,
       slugPattern: plan.project.slugPattern,
       proposedSlug: plan.proposedSlug,
       slug: plan.slug,
