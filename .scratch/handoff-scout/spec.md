@@ -68,7 +68,7 @@ Export never waits for grounding. It says whether the briefs are grounded and cu
   - `buildsOnFiles`: citations;
   - `facts`: a statement and a citation;
   - `buildsOn`: one per blocker, with the blocker's number, what it provides, a citation or a path to be created by that blocker, and a check command or test;
-  - `provedBy`: the test path to add or extend, and the command.
+  - `provedBy`: the command that proves the ticket, and the test path to add or extend. The test path is null when the spec rules out tests for the ticket's kind of change; the command then proves it on its own.
 - **The rejection check** reuses the project scout's citation check for every citation, then adds:
   - Every ticket appears exactly once.
   - Every `buildsOn` entry names a real blocker of that ticket.
