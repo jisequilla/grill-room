@@ -800,12 +800,16 @@ export function scoutProjectTurns(): ScriptedTurn[] {
 
 /**
  * A grounding of a two-ticket handoff: ticket 1 adds an ingest-lag alert
- * beside the metrics it reads, and ticket 2, blocked by 1, wires that alert
- * into the metrics module and proves it with a test of its own. Ticket 2
- * depends on a file ticket 1 creates, so the result exercises both halves of
- * a dependency. Cites the same fixture paths as
- * {@link scoutProjectTurns}. What `handoff-scout` schedules, for a session's
- * one `handoff-scout` request.
+ * module beside the metrics it reads and edits `metrics.ts` to export the
+ * threshold the alert fires on, and ticket 2, blocked by 1, wires that
+ * threshold into the metrics module and proves it with a test of its own.
+ * Ticket 2's one `buildsOn` entry uses the `editedPath` + `symbol` form — what
+ * ticket 1 adds to a file it edits, rather than a file it creates — so the
+ * "adds `<symbol>` to `<editedPath>`" line in `## Builds on`
+ * (`server/handoff.ts`'s `buildsOnSection`) has a scripted scenario that
+ * renders it; `e2e/smoke.spec.ts` asserts on it. Cites the same fixture paths
+ * as {@link scoutProjectTurns}. What `handoff-scout` schedules, for a
+ * session's one `handoff-scout` request.
  */
 export function handoffScoutTurns(): ScriptedTurn[] {
   return [
@@ -818,6 +822,7 @@ export function handoffScoutTurns(): ScriptedTurn[] {
             filesToChange: [
               { path: "src/ingest/lag-alert.ts", change: "create" },
               { path: "src/ingest/lag-alert.test.ts", change: "create" },
+              { path: "src/ingest/metrics.ts", change: "edit" },
             ],
             buildsOnFiles: ["src/ingest/metrics.ts:12-30"],
             facts: [
@@ -848,12 +853,12 @@ export function handoffScoutTurns(): ScriptedTurn[] {
             buildsOn: [
               {
                 blocker: 1,
-                provides: "The lag alert module.",
+                provides: "The lag alert threshold metrics.ts now exports.",
                 citation: null,
-                createdPath: "src/ingest/lag-alert.ts",
-                editedPath: null,
-                symbol: null,
-                check: "test -f src/ingest/lag-alert.ts",
+                createdPath: null,
+                editedPath: "src/ingest/metrics.ts",
+                symbol: "LAG_ALERT_THRESHOLD_MS",
+                check: "grep -n LAG_ALERT_THRESHOLD_MS src/ingest/metrics.ts",
               },
             ],
             provedBy: {

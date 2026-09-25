@@ -31,6 +31,7 @@ import {
   transitiveBlockers,
 } from "./handoff.js";
 import {
+  CITATION_PATTERN,
   handoffScoutResultSchema,
   staysInsideRepo,
   type HandoffScoutResult,
@@ -458,6 +459,43 @@ function cdReason(command: string, runs: string, projectRoot: string): string | 
   return `${runs} runs \`cd ${dir}\` and then names ${word}; after \`cd ${dir}\`, paths are relative to ${dir}, so it would look for ${dir}/${word}. Write it as ${suggestion}, or run the command from the repository root without the cd.`;
 }
 
+/**
+ * Why a `buildsOn` citation fails the same pattern and inside-repo rules the
+ * project scout's `citation` schema enforces (`CITATION_PATTERN` and
+ * `staysInsideRepo`), written for the scout. Null when it passes: it is
+ * `path:line` or `path:start-end`, the path is relative to the project root
+ * and stays inside it, and a range does not run backwards.
+ *
+ * `handoffBuildsOn`'s `citation` field is plain text (unlike the project
+ * scout's `citation` schema), so nothing upstream of this check enforces the
+ * pattern; a citation that fails it can still reach `checkCitation` and,
+ * since that check resolves `..` before comparing, pass if the resolved path
+ * happens to exist. This check runs first and catches it on shape alone.
+ */
+function buildsOnCitationSyntaxReason(
+  ticketNumber: number,
+  blocker: number,
+  citation: string,
+): string | null {
+  const on = `Ticket ${ticketNumber}'s buildsOn on ticket ${blocker} cites "${citation}"`;
+  if (!CITATION_PATTERN.test(citation)) {
+    return `${on}, which is not \`path:line\` or \`path:start-end\`; cite a path relative to the project root and a line or line range.`;
+  }
+  const separator = citation.lastIndexOf(":");
+  const citedPath = citation.slice(0, separator);
+  if (!staysInsideRepo(citedPath)) {
+    return `${on}, whose path is not relative to the project root or steps outside it; cite a path with no leading /, ~ or drive letter and no .. segment.`;
+  }
+  const [start, end] = citation
+    .slice(separator + 1)
+    .split("-")
+    .map(Number);
+  if (end !== undefined && start! > end) {
+    return `${on}, whose line range ends before it starts; cite a range from its first line to its last.`;
+  }
+  return null;
+}
+
 /** A path as a case-insensitive, normalising file system such as APFS compares it. */
 function collisionKey(filePath: string): string {
   return path.posix
@@ -657,6 +695,14 @@ export async function reasonsToRefuseHandoffGrounding(
           `${on} sets more than one of citation, createdPath and editedPath; set exactly one, and leave the others null.`,
         );
         continue;
+      }
+      if (entry.citation !== null) {
+        const syntaxReason = buildsOnCitationSyntaxReason(
+          ticket.number,
+          entry.blocker,
+          entry.citation,
+        );
+        if (syntaxReason) reasons.push(syntaxReason);
       }
       if (entry.editedPath !== null && entry.symbol === null) {
         reasons.push(

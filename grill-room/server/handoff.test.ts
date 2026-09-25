@@ -575,6 +575,72 @@ describe("grounded briefs", () => {
     );
   });
 
+  it("escapes a single backtick inside a Builds-on citation by widening the inline-code fence", () => {
+    const grounding: HandoffGrounding = {
+      ...CURRENT_GROUNDING,
+      tickets: [
+        TICKET_1_GROUNDING,
+        {
+          ...TICKET_2_GROUNDING,
+          buildsOn: [
+            {
+              blocker: 1,
+              provides: "the project registry",
+              citation: "server/git.ts:10 (calls `runGit`)",
+              createdPath: null,
+              editedPath: null,
+              symbol: null,
+              check: "test -f server/projects.ts",
+            },
+          ],
+        },
+      ],
+    };
+
+    const brief = renderBrief(aSource(), ticketByNumber(2), { grounding });
+
+    expect(section(brief, "## Builds on")).toBe(
+      [
+        "## Builds on",
+        "",
+        "- Ticket 01: the project registry — ``server/git.ts:10 (calls `runGit`)`` — check: `test -f server/projects.ts`",
+      ].join("\n"),
+    );
+  });
+
+  it("escapes a double backtick inside a Builds-on citation with a triple-backtick fence", () => {
+    const grounding: HandoffGrounding = {
+      ...CURRENT_GROUNDING,
+      tickets: [
+        TICKET_1_GROUNDING,
+        {
+          ...TICKET_2_GROUNDING,
+          buildsOn: [
+            {
+              blocker: 1,
+              provides: "the project registry",
+              citation: "server/git.ts:10 (the ``raw`` diff)",
+              createdPath: null,
+              editedPath: null,
+              symbol: null,
+              check: "test -f server/projects.ts",
+            },
+          ],
+        },
+      ],
+    };
+
+    const brief = renderBrief(aSource(), ticketByNumber(2), { grounding });
+
+    expect(section(brief, "## Builds on")).toBe(
+      [
+        "## Builds on",
+        "",
+        "- Ticket 01: the project registry — ```server/git.ts:10 (the ``raw`` diff)``` — check: `test -f server/projects.ts`",
+      ].join("\n"),
+    );
+  });
+
   it("marks a file to edit that a blocker creates with the ticket that creates it, and only for a blocker", () => {
     const createsTest = {
       ...TICKET_1_GROUNDING,
