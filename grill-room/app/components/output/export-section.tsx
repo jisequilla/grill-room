@@ -40,6 +40,27 @@ const EXPORT_GATE_KEY: Record<string, string> = {
   "handoff-stale": "output.exportHandoffStale",
 };
 
+/** `preview-export`'s `groundingState`, mapped to its message. */
+const EXPORT_GROUNDING_STATE_KEY: Record<string, string> = {
+  absent: "output.exportGroundingAbsent",
+  current: "output.exportGroundingCurrent",
+  stale: "output.exportGroundingStale",
+};
+
+/** `preview-export`'s `groundingStaleReason`, mapped to its message. */
+const EXPORT_GROUNDING_STALE_REASON_KEY: Record<string, string> = {
+  "head-moved": "output.exportGroundingStaleHeadMoved",
+  "handoff-changed": "output.exportGroundingStaleHandoffChanged",
+};
+
+/** `preview-export`'s `ungroundedBriefs[].reason`, mapped to its message. */
+const UNGROUNDED_BRIEF_REASON_KEY: Record<string, string> = {
+  edited: "output.exportUngroundedReasonEdited",
+  "no-grounding": "output.exportUngroundedReasonNoGrounding",
+  "not-covered": "output.exportUngroundedReasonNotCovered",
+  kept: "output.exportUngroundedReasonKept",
+};
+
 /** How long the slug must sit still before the preview is refreshed. */
 const SLUG_DEBOUNCE_MS = 250;
 
@@ -319,6 +340,34 @@ export function ExportSection({
                 {t("output.exportTicketsSkipped")}: {plan.ticketsSkippedReason}
               </p>
             ) : null}
+
+            <div className="space-y-1">
+              <p
+                className="text-xs text-muted-foreground"
+                data-testid="export-grounding-state"
+                data-state={plan.groundingState}
+              >
+                {t("output.exportGroundingHeading")}: {t(EXPORT_GROUNDING_STATE_KEY[plan.groundingState])}
+                {plan.groundingStaleReason
+                  ? ` — ${t(EXPORT_GROUNDING_STALE_REASON_KEY[plan.groundingStaleReason])}`
+                  : ""}
+              </p>
+              {plan.ungroundedBriefs.length > 0 ? (
+                <ul
+                  className="space-y-0.5 text-xs text-muted-foreground"
+                  data-testid="export-ungrounded-briefs"
+                >
+                  {plan.ungroundedBriefs.map((entry) => (
+                    <li key={entry.ticket} data-testid={`export-ungrounded-brief-${entry.ticket}`}>
+                      {t("output.exportUngroundedBrief", {
+                        ticket: entry.ticket,
+                        reason: t(UNGROUNDED_BRIEF_REASON_KEY[entry.reason]),
+                      })}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           </div>
         ) : null}
 

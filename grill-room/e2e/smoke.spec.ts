@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
-import { registerProject, setSessionProject } from "./support";
+import { chooseScenario, registerProject, setSessionProject } from "./support";
 
 /** Variables that would point git at the repository running the tests instead. */
 const INHERITED_REPO_VARIABLES = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"];
@@ -32,19 +32,44 @@ function git(repo: string, args: string[]): void {
   );
 }
 
+function numberedLines(count: number): string {
+  return Array.from({ length: count }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
+}
+
 /**
  * A throwaway git repository the export step registers as a project, so the
  * bundle it writes (including `decisions.md`) has somewhere real to land.
- * Nothing about its content matters — the export step only needs a project
- * whose root is a real git repository (`register-project` resolves the root
- * with a read-only `git rev-parse`), and its visibility report reads the
- * bundle's files against the repo with `git ls-files`/`git check-ignore`,
- * both of which work on a freshly committed empty tree.
+ * Most of its content does not matter — the export step only needs a
+ * project whose root is a real git repository (`register-project` resolves
+ * the root with a read-only `git rev-parse`), and its visibility report
+ * reads the bundle's files against the repo with `git ls-files`/`git
+ * check-ignore`, both of which work on a freshly committed tree.
+ *
+ * Two files are not incidental, though: the `handoff-scout` scenario
+ * (`server/interviewer/fake.ts`'s `handoffScoutTurns()`) grounds this
+ * session's two-ticket handoff by citing `src/ingest/metrics.ts:12-30` and
+ * `docs/adr/0003-queue.md:5-9`, and editing the first. The app checks the
+ * scout's citations against a real working tree, so this fixture has to
+ * hold both files at least that long, the same way
+ * `e2e/project-scout.spec.ts`'s `createFixtureRepo` does for the
+ * `scout-project` scenario it grounds against.
  */
 function createExportProjectRepo(): string {
   const root = mkdtempSync(path.join(os.tmpdir(), "grill-room-e2e-smoke-project-"));
   git(root, ["init", "-q"]);
-  git(root, ["commit", "-q", "--allow-empty", "-m", "fixture"]);
+
+  const files: Record<string, string> = {
+    "src/ingest/metrics.ts": numberedLines(30),
+    "docs/adr/0003-queue.md": numberedLines(9),
+  };
+  for (const [relative, contents] of Object.entries(files)) {
+    const file = path.join(root, relative);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, contents);
+  }
+
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "fixture"]);
   return root;
 }
 
@@ -74,8 +99,18 @@ function createExportProjectRepo(): string {
  *   5. break-into-tickets -> two tickets, the second blocked by the first.
  *
  * This test drives exactly one session, consuming those five turns in order.
- * After the fifth turn, it generates the handoff and exports the session —
- * both deterministic, template-rendered steps that call no interviewer turn
+ * After the fifth turn, it generates the handoff — a deterministic,
+ * template-rendered step that calls no interviewer turn — then grounds the
+ * briefs. Grounding is a sixth, one-off interviewer request (`handoff-scout`)
+ * the canned interview's five fixed turns were never written to carry, so
+ * this test switches the session onto the `handoff-scout` scenario
+ * (`use-fake-scenario`, the same way `e2e/project-scout.spec.ts` chooses its
+ * own) right before grounding, once the canned interview's own five turns are
+ * already spent and nothing is left on its queue to lose. That is less
+ * invasive than teaching the shared default scenario a sixth turn every other
+ * test using it would then also carry.
+ *
+ * It then exports the session — also template-rendered, no interviewer turn
  * — and checks that the export wrote `decisions.md` with an entry for each
  * of the two decisions this session settled (`server/export.ts`'s
  * `renderDecisionsFile`; see `.scratch/decisions-export/spec.md`) and that
@@ -282,6 +317,26 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
     handoffSection.getByTestId("handoff-document-view"),
   ).toBeVisible({ timeout: 15_000 });
 
+  // ---- Ground the briefs: switch to the handoff-scout scenario first ----
+  // The canned interview's five turns are already spent (round 1, done,
+  // find-superseded, synthesize-spec, break-into-tickets), so replacing the
+  // session's now-empty queue with `handoffScoutTurns()` loses nothing — see
+  // this test's doc comment above.
+  await chooseScenario(request, sessionId, "handoff-scout");
+
+  const groundSection = page.getByTestId("output-ground-briefs-section");
+  await expect(groundSection.getByTestId("grounding-state")).toHaveAttribute(
+    "data-state",
+    "absent",
+  );
+
+  await groundSection.getByTestId("ground-briefs").click();
+  await expect(groundSection.getByTestId("grounding-state")).toHaveAttribute(
+    "data-state",
+    "current",
+    { timeout: 15_000 },
+  );
+
   // ---- Export: decisions.md is in the preview, before anything is written
   // Both decisions this session settled — the accepted recommendation and
   // the loose end answered in its own words above — qualify as entries
@@ -291,6 +346,11 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
   await expect(previewFiles.getByText(/decisions\.md$/)).toBeVisible({
     timeout: 15_000,
   });
+
+  // ---- The preview reports the grounding as current, from the same plan --
+  await expect(
+    exportSection.getByTestId("export-grounding-state"),
+  ).toHaveAttribute("data-state", "current", { timeout: 15_000 });
 
   // ---- Export for real: decisions.md is written, with at least one entry
   const exportButton = exportSection.getByTestId("export-action");
@@ -313,6 +373,23 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
   const decisionsFileContent = readFileSync(decisionsFilePath, "utf-8");
   expect(decisionsFileContent).toContain("## Decisions");
   expect(decisionsFileContent).toMatch(/<a id="/);
+
+  // ---- Ticket 2's exported brief carries the grounded sections -----------
+  // Ticket 2 ("Store the data on disk") is blocked by ticket 1, and
+  // `handoffScoutTurns()` gives it a real `buildsOn` entry, so its brief is
+  // the one guaranteed to render both new sections (ticket 1's `buildsOn` is
+  // empty, so `## Builds on` never appears there — see `server/handoff.ts`'s
+  // `buildsOnSection`).
+  const writtenBriefFile = exportSection
+    .getByTestId("export-written-files")
+    .getByText(/briefs\/02-store-on-disk\.md$/);
+  const briefFilePath = (await writtenBriefFile.textContent())?.trim();
+  if (!briefFilePath) {
+    throw new Error("Could not read the exported ticket 2 brief's path off the export result.");
+  }
+  const briefFileContent = readFileSync(briefFilePath, "utf-8");
+  expect(briefFileContent).toContain("## Builds on");
+  expect(briefFileContent).toContain("## Proved by");
 
   // ---- intent.md is planned and written alongside the rest of the bundle -
   // (`.scratch/export-ownership/spec.md`, "intent.md is always planned").

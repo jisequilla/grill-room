@@ -664,6 +664,27 @@ const messages = {
     handoffBundleHint:
       "{{token}} is replaced at export with the bundle's path: relative to the repository root when the project's export folder is tracked, absolute when it is ignored.",
 
+    groundBriefsHeading: "Ground the briefs",
+    groundBriefsHint:
+      "Runs a read-only scout over the project's code to fill each brief's File boundaries and Codebase facts, and add Builds on and Proved by. Costs one turn; export never waits for it.",
+    groundBriefs: "Ground the briefs",
+    groundingBriefs: "Grounding…",
+    groundBriefsFailed: "Could not ground the briefs.",
+    groundBriefsTurnWorking: "Wait for the running turn to finish first.",
+    groundBriefsNeedsProject: "Choose the project this session exports into first.",
+    groundBriefsNeedsHandoff: "Generate the handoff first.",
+    groundBriefsHandoffStale: "The handoff is stale. Regenerate it first.",
+    groundBriefsTooManyTickets:
+      "This handoff has more than {{max}} tickets; one grounding turn cannot cover them all.",
+    groundBriefsTooManyBlockers:
+      "A ticket here has more than {{max}} blockers; one grounding turn cannot cover them all.",
+    groundingAbsent: "Not grounded",
+    groundingCurrent: "Grounded at {{sha}}",
+    groundingStaleHeadMoved: "Out of date — grounded at {{sha}}, but the repository has moved since",
+    groundingStaleHandoffChanged:
+      "Out of date — grounded at {{sha}} for an earlier version of the handoff",
+    groundingNoCommit: "no commits yet",
+
     generateAll: "Generate everything",
     generatingAll: "Generating…",
     generateAllHint:
@@ -709,6 +730,18 @@ const messages = {
     exportOverwriteAnyway: "Overwrite anyway",
     exportRemoveAnyway: "Remove anyway",
     exportTicketsSkipped: "Tickets were not exported",
+
+    exportGroundingHeading: "Brief grounding",
+    exportGroundingAbsent: "not grounded",
+    exportGroundingCurrent: "current",
+    exportGroundingStale: "stale",
+    exportGroundingStaleHeadMoved: "the repository has moved since grounding",
+    exportGroundingStaleHandoffChanged: "the tickets or project changed since grounding",
+    exportUngroundedBrief: "Ticket {{ticket}}: {{reason}}",
+    exportUngroundedReasonEdited: "hand-edited, kept as written",
+    exportUngroundedReasonNoGrounding: "not grounded",
+    exportUngroundedReasonNotCovered: "not covered by the grounding",
+    exportUngroundedReasonKept: "edited on disk since the last export, kept",
 
     visibilityHeading: "File visibility",
     visibilityTracked: "Tracked",

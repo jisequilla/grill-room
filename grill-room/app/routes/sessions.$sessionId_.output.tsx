@@ -8,6 +8,7 @@ import { useParams } from "react-router";
 import { BuildRecordsSection } from "@/components/output/build-records-section";
 import { ExportSection } from "@/components/output/export-section";
 import { GenerateAllAction } from "@/components/output/generate-all-action";
+import { GroundBriefsControl } from "@/components/output/ground-briefs-control";
 import { HandoffSection } from "@/components/output/handoff-section";
 import { NotConfirmedNotice } from "@/components/output/not-confirmed-notice";
 import { SessionProjectSection } from "@/components/output/session-project-section";
@@ -154,6 +155,13 @@ export default function SessionOutputRoute() {
       <Separator />
 
       <HandoffSection sessionId={id} />
+
+      <GroundBriefsControl
+        sessionId={id}
+        projectId={session.projectId}
+        working={working}
+        activeTurn={activeTurn ?? null}
+      />
 
       <Separator />
 
