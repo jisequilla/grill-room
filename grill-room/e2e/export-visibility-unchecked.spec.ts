@@ -161,18 +161,48 @@ test("reports a file exported through a symlinked folder as \"could not check\",
   await expect(page.getByTestId("ticket-row-1")).toBeVisible();
 
   const handoffSection = page.getByTestId("output-handoff-section");
+  const exportSection = page.getByTestId("output-export-section");
+
+  // `export-session` gates only on a current handoff
+  // (`app/components/output/export-section.tsx`'s `canExport`), so
+  // `export-action` enables the moment `preview-export` reports
+  // `exportBlocked: false` — the refetch `generate-handoff`'s success
+  // triggers directly: `useActionMutation`'s own `onSuccess`
+  // (`@agent-native/core`'s `dist/client/use-action.js`) calls
+  // `queryClient.invalidateQueries({ queryKey: ["action"] })` on every
+  // successful mutation, which refetches the active `preview-export`
+  // query. Registered before the click, the same way
+  // `project-settings.spec.ts` waits on `update-project`'s response instead
+  // of a UI side effect: under load, that refetch can lag well past the
+  // point `handoff-document-view` renders, which is what made this test
+  // flake against `export-action`'s own wait when the full suite ran
+  // concurrently — `spec.md` is already in the very first, pre-handoff
+  // preview (see `preview-export`'s always-planned files), so waiting on
+  // the preview file list alone never actually pins the post-handoff
+  // refetch either. Given its own timeout so a slow `preview-export` fails
+  // here, with a clear cause, instead of at the test's 120 s ceiling.
+  const exportUnblocked = page.waitForResponse(
+    async (response) => {
+      if (!response.url().includes("/_agent-native/actions/preview-export")) return false;
+      if (!response.ok()) return false;
+      const body = await response.json().catch(() => null);
+      return body?.exportBlocked === false;
+    },
+    { timeout: 30_000 },
+  );
+
   await handoffSection.getByTestId("generate-handoff").click();
   await expect(handoffSection.getByTestId("handoff-document-view")).toBeVisible({
     timeout: 15_000,
   });
+  await exportUnblocked;
 
   // ---- Export into the symlinked folder ----------------------------------
-  const exportSection = page.getByTestId("output-export-section");
   const previewFiles = exportSection.getByTestId("export-preview-files");
   await expect(previewFiles.getByText(/spec\.md$/)).toBeVisible({ timeout: 15_000 });
 
   const exportButton = exportSection.getByTestId("export-action");
-  await expect(exportButton).toBeEnabled({ timeout: 15_000 });
+  await expect(exportButton).toBeEnabled({ timeout: 30_000 });
   await exportButton.click();
 
   // ---- The report says "could not check", never the old "untracked" lie -
