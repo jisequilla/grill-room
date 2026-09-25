@@ -533,6 +533,64 @@ function bundleAccess(source: HandoffSource, fileStem: string): string {
   return `The bundle is ignored by git, so it is NOT in your worktree. Read it by absolute path from the main checkout: the spec at ${specPath} and your ticket at ${ticketPath}. Never write to it.`;
 }
 
+function briefStepZero(source: HandoffSource, fileStem: string): string {
+  const base = source.project.deliveryRecipe === "pull-request" ? "`origin/main`" : "local `main`";
+  return [
+    "## Step 0: confirm your base",
+    "",
+    `Your worktree was created from ${base}. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.`,
+    "",
+    bundleAccess(source, fileStem),
+  ].join("\n");
+}
+
+/**
+ * The brief's delivery section, selected by the project's delivery recipe:
+ * a draft pull request that the builder never marks ready, or, for a
+ * repository with no remote, a plain commit-and-report-your-branch step
+ * with no push, `gh`, pull request or `origin` anywhere.
+ */
+function briefDeliverySection(source: HandoffSource, prTitle: string): string {
+  if (source.project.deliveryRecipe === "pull-request") {
+    return [
+      "## Delivery",
+      "",
+      "When verification passes, run `gh auth status`. If the active account is not the one this repository expects, do not switch it: stop after committing and report \"push pending: gh account\" with your commit hash.",
+      "",
+      `Otherwise run \`git push -u origin HEAD\`, then \`gh pr create --draft\` against \`main\`, titled ${prTitle}, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. Never merge, and never mark it ready — that is the main session's call.`,
+    ].join("\n");
+  }
+  return [
+    "## Delivery",
+    "",
+    "There is no remote for this repository, so nothing leaves your worktree: commit your work on your worktree branch, then report its name. The main session reads the branch diff, verifies it, and merges it in locally.",
+  ].join("\n");
+}
+
+/**
+ * The brief's closing report, ending with the reviewer note only when the
+ * project's adversarial review switch is on: with it off, the section says
+ * nothing about a reviewer.
+ */
+function briefReportSection(source: HandoffSource): string {
+  const verify = source.project.verifyCommand;
+  const isPr = source.project.deliveryRecipe === "pull-request";
+  const lines = ["## Report, then stop", "", "Report:", "", "- worktree path and branch;"];
+  if (isPr) {
+    lines.push("- the PR URL, or \"push pending: gh account\" with your commit hash;");
+  }
+  lines.push(
+    "- commits and files changed;",
+    `- the exact output of \`${verify}\`;`,
+    "- anything ambiguous, and anything this brief was missing.",
+  );
+  if (source.project.adversarialReview) {
+    lines.push("", "A separate reviewer reviews the work before any merge.");
+  }
+  lines.push("", "Then stop. Do no further work of any kind.");
+  return lines.join("\n");
+}
+
 export function renderBrief(source: HandoffSource, ticket: HandoffTicket): string {
   const total = source.tickets.length;
   const { label, fileStem } = ticketNames(ticket, total);
@@ -546,7 +604,7 @@ export function renderBrief(source: HandoffSource, ticket: HandoffTicket): strin
   return `${[
     `# Brief ${label}: ${ticket.title}`,
     `You are implementing ticket ${label} of "${source.session.title}". You work only inside the git worktree you were started in.`,
-    ["## Step 0: confirm your base", "", "Your worktree was created from `origin/main`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.", "", bundleAccess(source, fileStem)].join("\n"),
+    briefStepZero(source, fileStem),
     [
       "## The ticket",
       "",
@@ -574,30 +632,12 @@ export function renderBrief(source: HandoffSource, ticket: HandoffTicket): strin
       "## Rules",
       "",
       "- Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.",
-      "- Run git only inside your worktree. Never run git against another checkout, never commit on or push to `main`, and never merge anything.",
+      "- Run git only inside your worktree. Never run git against another checkout, never commit directly on `main`, and never merge anything.",
       "- Commit on your worktree branch as you go.",
     ].join("\n"),
     ["## Verify", "", "From the repository root in your worktree, this must exit 0:", "", codeBlock(verify)].join("\n"),
-    [
-      "## Pull request",
-      "",
-      "When verification passes, run `gh auth status`. If the active account is not the one this repository expects, do not switch it: stop after committing and report \"push pending: gh account\" with your commit hash.",
-      "",
-      `Otherwise run \`git push -u origin HEAD\`, then \`gh pr create\` against \`main\`, titled ${prTitle}, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. Never merge.`,
-    ].join("\n"),
-    [
-      "## Report, then stop",
-      "",
-      "Report:",
-      "",
-      "- worktree path and branch;",
-      "- the PR URL, or \"push pending: gh account\" with your commit hash;",
-      "- commits and files changed;",
-      `- the exact output of \`${verify}\`;`,
-      "- anything ambiguous, and anything this brief was missing.",
-      "",
-      "Then stop. Do no further work of any kind.",
-    ].join("\n"),
+    briefDeliverySection(source, prTitle),
+    briefReportSection(source),
   ].join("\n\n")}\n`;
 }
 

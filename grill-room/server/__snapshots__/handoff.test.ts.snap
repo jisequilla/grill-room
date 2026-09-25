@@ -260,7 +260,7 @@ _Slot for the orchestrating session: verified facts about the code this ticket t
 ## Rules
 
 - Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.
-- Run git only inside your worktree. Never run git against another checkout, never commit on or push to \`main\`, and never merge anything.
+- Run git only inside your worktree. Never run git against another checkout, never commit directly on \`main\`, and never merge anything.
 - Commit on your worktree branch as you go.
 
 ## Verify
@@ -271,11 +271,11 @@ From the repository root in your worktree, this must exit 0:
 just verify
 \`\`\`
 
-## Pull request
+## Delivery
 
 When verification passes, run \`gh auth status\`. If the active account is not the one this repository expects, do not switch it: stop after committing and report "push pending: gh account" with your commit hash.
 
-Otherwise run \`git push -u origin HEAD\`, then \`gh pr create\` against \`main\`, titled \`02: Export the bundle\`, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. Never merge.
+Otherwise run \`git push -u origin HEAD\`, then \`gh pr create --draft\` against \`main\`, titled \`02: Export the bundle\`, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. Never merge, and never mark it ready — that is the main session's call.
 
 ## Report, then stop
 
@@ -286,6 +286,266 @@ Report:
 - commits and files changed;
 - the exact output of \`just verify\`;
 - anything ambiguous, and anything this brief was missing.
+
+A separate reviewer reviews the work before any merge.
+
+Then stop. Do no further work of any kind.
+"
+`;
+
+exports[`briefs > delivery recipe and the review gate > renders the local-merge recipe with review off: commit and report the branch, no reviewer mention, never a push/gh/PR/origin 1`] = `
+"# Brief 02: Export the bundle
+
+You are implementing ticket 02 of "Export anywhere". You work only inside the git worktree you were started in.
+
+## Step 0: confirm your base
+
+Your worktree was created from local \`main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
+
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+
+## The ticket
+
+Blocked by: 01 (merged before this brief was delegated)
+
+### 02 Export the bundle
+
+Write the bundle.
+
+## File boundaries
+
+<!-- slot: file-boundaries -->
+
+_Slot for the orchestrating session: the files and folders this ticket may create or edit, and the existing files it builds on._
+
+## Codebase facts
+
+<!-- slot: codebase-facts -->
+
+_Slot for the orchestrating session: verified facts about the code this ticket touches._
+
+## Rules
+
+- Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.
+- Run git only inside your worktree. Never run git against another checkout, never commit directly on \`main\`, and never merge anything.
+- Commit on your worktree branch as you go.
+
+## Verify
+
+From the repository root in your worktree, this must exit 0:
+
+\`\`\`bash
+just verify
+\`\`\`
+
+## Delivery
+
+There is no remote for this repository, so nothing leaves your worktree: commit your work on your worktree branch, then report its name. The main session reads the branch diff, verifies it, and merges it in locally.
+
+## Report, then stop
+
+Report:
+
+- worktree path and branch;
+- commits and files changed;
+- the exact output of \`just verify\`;
+- anything ambiguous, and anything this brief was missing.
+
+Then stop. Do no further work of any kind.
+"
+`;
+
+exports[`briefs > delivery recipe and the review gate > renders the local-merge recipe with review on: commit and report the branch, reviewer noted before stop, never a push/gh/PR/origin 1`] = `
+"# Brief 02: Export the bundle
+
+You are implementing ticket 02 of "Export anywhere". You work only inside the git worktree you were started in.
+
+## Step 0: confirm your base
+
+Your worktree was created from local \`main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
+
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+
+## The ticket
+
+Blocked by: 01 (merged before this brief was delegated)
+
+### 02 Export the bundle
+
+Write the bundle.
+
+## File boundaries
+
+<!-- slot: file-boundaries -->
+
+_Slot for the orchestrating session: the files and folders this ticket may create or edit, and the existing files it builds on._
+
+## Codebase facts
+
+<!-- slot: codebase-facts -->
+
+_Slot for the orchestrating session: verified facts about the code this ticket touches._
+
+## Rules
+
+- Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.
+- Run git only inside your worktree. Never run git against another checkout, never commit directly on \`main\`, and never merge anything.
+- Commit on your worktree branch as you go.
+
+## Verify
+
+From the repository root in your worktree, this must exit 0:
+
+\`\`\`bash
+just verify
+\`\`\`
+
+## Delivery
+
+There is no remote for this repository, so nothing leaves your worktree: commit your work on your worktree branch, then report its name. The main session reads the branch diff, verifies it, and merges it in locally.
+
+## Report, then stop
+
+Report:
+
+- worktree path and branch;
+- commits and files changed;
+- the exact output of \`just verify\`;
+- anything ambiguous, and anything this brief was missing.
+
+A separate reviewer reviews the work before any merge.
+
+Then stop. Do no further work of any kind.
+"
+`;
+
+exports[`briefs > delivery recipe and the review gate > renders the pull-request recipe with review off: draft PR, never mark it ready, no reviewer mention 1`] = `
+"# Brief 02: Export the bundle
+
+You are implementing ticket 02 of "Export anywhere". You work only inside the git worktree you were started in.
+
+## Step 0: confirm your base
+
+Your worktree was created from \`origin/main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
+
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+
+## The ticket
+
+Blocked by: 01 (merged before this brief was delegated)
+
+### 02 Export the bundle
+
+Write the bundle.
+
+## File boundaries
+
+<!-- slot: file-boundaries -->
+
+_Slot for the orchestrating session: the files and folders this ticket may create or edit, and the existing files it builds on._
+
+## Codebase facts
+
+<!-- slot: codebase-facts -->
+
+_Slot for the orchestrating session: verified facts about the code this ticket touches._
+
+## Rules
+
+- Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.
+- Run git only inside your worktree. Never run git against another checkout, never commit directly on \`main\`, and never merge anything.
+- Commit on your worktree branch as you go.
+
+## Verify
+
+From the repository root in your worktree, this must exit 0:
+
+\`\`\`bash
+just verify
+\`\`\`
+
+## Delivery
+
+When verification passes, run \`gh auth status\`. If the active account is not the one this repository expects, do not switch it: stop after committing and report "push pending: gh account" with your commit hash.
+
+Otherwise run \`git push -u origin HEAD\`, then \`gh pr create --draft\` against \`main\`, titled \`02: Export the bundle\`, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. Never merge, and never mark it ready — that is the main session's call.
+
+## Report, then stop
+
+Report:
+
+- worktree path and branch;
+- the PR URL, or "push pending: gh account" with your commit hash;
+- commits and files changed;
+- the exact output of \`just verify\`;
+- anything ambiguous, and anything this brief was missing.
+
+Then stop. Do no further work of any kind.
+"
+`;
+
+exports[`briefs > delivery recipe and the review gate > renders the pull-request recipe with review on: draft PR, never mark it ready, reviewer noted before stop 1`] = `
+"# Brief 02: Export the bundle
+
+You are implementing ticket 02 of "Export anywhere". You work only inside the git worktree you were started in.
+
+## Step 0: confirm your base
+
+Your worktree was created from \`origin/main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
+
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+
+## The ticket
+
+Blocked by: 01 (merged before this brief was delegated)
+
+### 02 Export the bundle
+
+Write the bundle.
+
+## File boundaries
+
+<!-- slot: file-boundaries -->
+
+_Slot for the orchestrating session: the files and folders this ticket may create or edit, and the existing files it builds on._
+
+## Codebase facts
+
+<!-- slot: codebase-facts -->
+
+_Slot for the orchestrating session: verified facts about the code this ticket touches._
+
+## Rules
+
+- Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.
+- Run git only inside your worktree. Never run git against another checkout, never commit directly on \`main\`, and never merge anything.
+- Commit on your worktree branch as you go.
+
+## Verify
+
+From the repository root in your worktree, this must exit 0:
+
+\`\`\`bash
+just verify
+\`\`\`
+
+## Delivery
+
+When verification passes, run \`gh auth status\`. If the active account is not the one this repository expects, do not switch it: stop after committing and report "push pending: gh account" with your commit hash.
+
+Otherwise run \`git push -u origin HEAD\`, then \`gh pr create --draft\` against \`main\`, titled \`02: Export the bundle\`, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. Never merge, and never mark it ready — that is the main session's call.
+
+## Report, then stop
+
+Report:
+
+- worktree path and branch;
+- the PR URL, or "push pending: gh account" with your commit hash;
+- commits and files changed;
+- the exact output of \`just verify\`;
+- anything ambiguous, and anything this brief was missing.
+
+A separate reviewer reviews the work before any merge.
 
 Then stop. Do no further work of any kind.
 "

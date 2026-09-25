@@ -241,10 +241,11 @@ describe("briefs", () => {
     expect(brief).toContain("Blocked by: 01");
     expect(brief).toContain("```bash\njust verify\n```");
     expect(brief).toContain("Create and edit files only within the file boundaries above");
-    expect(brief).toContain("never commit on or push to `main`, and never merge anything");
-    expect(brief).toContain("`git push -u origin HEAD`, then `gh pr create` against `main`");
+    expect(brief).toContain("never commit directly on `main`, and never merge anything");
+    expect(brief).toContain("`git push -u origin HEAD`, then `gh pr create --draft` against `main`");
     expect(brief).toContain("push pending: gh account");
     expect(brief).toContain("## Report, then stop");
+    expect(brief).toContain("A separate reviewer reviews the work before any merge.");
     expect(brief).toContain("Then stop. Do no further work of any kind.");
 
     for (const [heading, slot] of [
@@ -271,6 +272,58 @@ describe("briefs", () => {
   it("says a ticket with no blockers is blocked by none", () => {
     const brief = renderHandoff(aSource()).briefs[0]!.markdown;
     expect(brief).toContain("Blocked by: none");
+  });
+
+  describe("delivery recipe and the review gate", () => {
+    it("renders the pull-request recipe with review on: draft PR, never mark it ready, reviewer noted before stop", () => {
+      const brief = renderHandoff(aSource({ deliveryRecipe: "pull-request", adversarialReview: true })).briefs[1]!
+        .markdown;
+      expect(brief).toMatchSnapshot();
+      expect(brief).toContain("Your worktree was created from `origin/main`.");
+      expect(brief).toContain("## Delivery");
+      expect(brief).toContain("`git push -u origin HEAD`, then `gh pr create --draft` against `main`");
+      expect(brief).toContain("Never merge, and never mark it ready — that is the main session's call.");
+      expect(brief).toContain("- the PR URL, or \"push pending: gh account\" with your commit hash;");
+      expect(brief).toContain("A separate reviewer reviews the work before any merge.");
+    });
+
+    it("renders the pull-request recipe with review off: draft PR, never mark it ready, no reviewer mention", () => {
+      const brief = renderHandoff(aSource({ deliveryRecipe: "pull-request", adversarialReview: false })).briefs[1]!
+        .markdown;
+      expect(brief).toMatchSnapshot();
+      expect(brief).toContain("`git push -u origin HEAD`, then `gh pr create --draft` against `main`");
+      expect(brief).toContain("Never merge, and never mark it ready — that is the main session's call.");
+      expect(brief).not.toContain("reviewer");
+    });
+
+    it("renders the local-merge recipe with review on: commit and report the branch, reviewer noted before stop, never a push/gh/PR/origin", () => {
+      const brief = renderHandoff(aSource({ deliveryRecipe: "local-merge", adversarialReview: true })).briefs[1]!
+        .markdown;
+      expect(brief).toMatchSnapshot();
+      expect(brief).toContain("Your worktree was created from local `main`.");
+      expect(brief).toContain("## Delivery");
+      expect(brief).toContain(
+        "There is no remote for this repository, so nothing leaves your worktree: commit your work on your worktree branch, then report its name.",
+      );
+      expect(brief).toContain("A separate reviewer reviews the work before any merge.");
+      expect(brief).not.toContain("- the PR URL, or \"push pending: gh account\" with your commit hash;");
+      for (const banned of ["push", "gh ", "`gh", "pull request", "origin"]) {
+        expect(brief.toLowerCase()).not.toContain(banned.toLowerCase());
+      }
+    });
+
+    it("renders the local-merge recipe with review off: commit and report the branch, no reviewer mention, never a push/gh/PR/origin", () => {
+      const brief = renderHandoff(aSource({ deliveryRecipe: "local-merge", adversarialReview: false })).briefs[1]!
+        .markdown;
+      expect(brief).toMatchSnapshot();
+      expect(brief).toContain(
+        "There is no remote for this repository, so nothing leaves your worktree: commit your work on your worktree branch, then report its name.",
+      );
+      expect(brief).not.toContain("reviewer");
+      for (const banned of ["push", "gh ", "`gh", "pull request", "origin"]) {
+        expect(brief.toLowerCase()).not.toContain(banned.toLowerCase());
+      }
+    });
   });
 });
 
