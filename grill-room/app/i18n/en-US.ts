@@ -42,10 +42,12 @@ const messages = {
     verifyCommandSuggested: "Suggested from the repository's build files.",
     exportFolderLabel: "Export folder",
     exportFolderPlaceholder: ".scratch",
-    exportFolderHint: "Relative to the repository root. It does not need to exist yet.",
+    exportFolderHint:
+      "Relative to the repository root. It does not need to exist yet.",
     exportFolderSuggested: "Suggested from the repository's declared tracker.",
     slugPatternLabel: "Slug pattern",
-    slugPatternHint: "The name of each session's folder. {slug} is the session slug.",
+    slugPatternHint:
+      "The name of each session's folder. {slug} is the session slug.",
     slugPatternSuggested: "Suggested from the repository's declared tracker.",
     trackerKindLabel: "Tracker",
     trackerKindBeads: "Beads",
@@ -57,7 +59,8 @@ const messages = {
     trackerRefreshed: "Refreshed from the declared tracker.",
     trackerRefreshFailed: "Could not refresh from the declared tracker.",
     buildRecordLoggingLabel: "Log build records",
-    buildRecordLoggingHint: "Handoffs instruct logging a build record per ticket.",
+    buildRecordLoggingHint:
+      "Handoffs instruct logging a build record per ticket.",
     visibilityLabel: "Export folder visibility",
     visibilityTracked: "Tracked by git",
     visibilityIgnored: "Ignored by git",
@@ -77,12 +80,14 @@ const messages = {
     gitUnavailable: "git is not available on this machine.",
     projectExists: "This repository is already registered.",
     exportFolderOutsideRoot: "The export folder must be inside the repository.",
-    exportFolderIsRoot: "The export folder must be a folder inside the repository, not its root.",
+    exportFolderIsRoot:
+      "The export folder must be a folder inside the repository, not its root.",
     invalidSlugPattern: "The slug pattern names one folder: no / or ..",
     selectLabel: "Project",
     selectOptionalLabel: "Project (optional)",
     selectNone: "No project",
-    selectHint: "The repository this session exports into. You can choose it later.",
+    selectHint:
+      "The repository this session exports into. You can choose it later.",
     sessionProjectSaveFailed: "Could not set the session's project.",
   },
   chat: {
@@ -232,7 +237,8 @@ const messages = {
     scoutFactsDecisionsFolder: "Decisions folder",
     scoutFactsRulesFolder: "Rules folder",
     scoutCurrentStateLabel: "Current state",
-    scoutCurrentStateEmpty: "The scout found nothing already built for this idea.",
+    scoutCurrentStateEmpty:
+      "The scout found nothing already built for this idea.",
     scoutStateBuilt: "Built",
     scoutStatePartial: "Partial",
     scoutStateGap: "Gap",
@@ -443,8 +449,7 @@ const messages = {
     batchSummarySkipped: "Skipped",
     batchSummaryFailedAt: "Stopped at item {{position}}: {{title}}",
     batchSummaryAdded_one: "1 decision added, awaiting placement.",
-    batchSummaryAdded_other:
-      "{{count}} decisions added, awaiting placement.",
+    batchSummaryAdded_other: "{{count}} decisions added, awaiting placement.",
 
     answeringMode: "Answering mode",
 
@@ -571,7 +576,8 @@ const messages = {
     regenerateTickets: "Regenerate tickets",
     regeneratingTickets: "Regenerating…",
     regenerateTicketsTitle: "Regenerate tickets?",
-    regenerateTicketsDescription: "This replaces the session's current tickets.",
+    regenerateTicketsDescription:
+      "This replaces the session's current tickets.",
     regenerateTicketsBuildRecordsWarning_one:
       "1 ticket carries a build record that this would delete.",
     regenerateTicketsBuildRecordsWarning_other:
@@ -663,7 +669,8 @@ const messages = {
       "Choose the project this session exports into above. Export writes into that repository.",
     exportProjectLabel: "Project",
     exportSlugLabel: "Slug",
-    exportSlugHint: "Names the export folder through the project's pattern: {{pattern}}",
+    exportSlugHint:
+      "Names the export folder through the project's pattern: {{pattern}}",
     exportSlugRequired: "Enter a slug with at least one letter or digit.",
     exportPreviewHeading: "Export will write",
     exportPreviewReplaceHeading: "Export will replace",
@@ -675,7 +682,8 @@ const messages = {
     exportFailed: "Could not export.",
     exportNoProject: "Choose a project before exporting.",
     exportProjectNotFound: "This session's project is no longer registered.",
-    exportProjectRootMissing: "The project's repository folder no longer exists.",
+    exportProjectRootMissing:
+      "The project's repository folder no longer exists.",
     exportSpecMissing: "This session has no spec yet.",
     exportSpecNotCurrent:
       "The spec is out of date. Regenerate it before exporting.",
@@ -689,6 +697,9 @@ const messages = {
     exportSuccessHeading: "Exported",
     exportedFilesHeading: "Files written",
     exportRemovedFilesHeading: "Files removed",
+    exportKeptFilesHeading: "Kept (edited in the repo)",
+    exportOverwriteAnyway: "Overwrite anyway",
+    exportRemoveAnyway: "Remove anyway",
     exportTicketsSkipped: "Tickets were not exported",
 
     visibilityHeading: "File visibility",

@@ -16,6 +16,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { actionErrorCode } from "@/lib/decisions";
+
+import { ExportFileList } from "./export-file-list";
 import { ExportVisibilityReport } from "./export-visibility-report";
 
 /** Every code `preview-export` and `export-session` refuse with, mapped to its message. */
@@ -43,7 +45,8 @@ const SLUG_DEBOUNCE_MS = 250;
 
 type ExportResult = AgentNativeActionRegistry["export-session"]["result"];
 type PreviewResult = AgentNativeActionRegistry["preview-export"]["result"];
-type VisibilityResult = AgentNativeActionRegistry["get-export-visibility"]["result"];
+type VisibilityResult =
+  AgentNativeActionRegistry["get-export-visibility"]["result"];
 
 function useDebounced<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -54,9 +57,18 @@ function useDebounced<T>(value: T, delayMs: number): T {
   return debounced;
 }
 
-function PathList({ paths, testId }: { paths: readonly string[]; testId: string }) {
+function PathList({
+  paths,
+  testId,
+}: {
+  paths: readonly string[];
+  testId: string;
+}) {
   return (
-    <ul className="space-y-0.5 font-mono text-xs break-all text-muted-foreground" data-testid={testId}>
+    <ul
+      className="space-y-0.5 font-mono text-xs break-all text-muted-foreground"
+      data-testid={testId}
+    >
       {paths.map((file) => (
         <li key={file}>{file}</li>
       ))}
@@ -82,8 +94,13 @@ export function ExportSection({
   const [slugDraft, setSlugDraft] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<ExportResult | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  /** Bundle-relative paths of edited files ticked "overwrite/remove anyway". */
+  const [overridePaths, setOverridePaths] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   /** A fresher visibility report from "Recheck visibility"; cleared whenever a new export lands. */
-  const [visibilityOverride, setVisibilityOverride] = useState<VisibilityResult | null>(null);
+  const [visibilityOverride, setVisibilityOverride] =
+    useState<VisibilityResult | null>(null);
   const [recheckingVisibility, setRecheckingVisibility] = useState(false);
 
   const debouncedSlug = useDebounced(slugDraft, SLUG_DEBOUNCE_MS);
@@ -108,13 +125,16 @@ export function ExportSection({
       setLastResult(result);
       setVisibilityOverride(null);
       setExportError(null);
+      setOverridePaths(new Set());
     },
     onError: (error: unknown) => {
       setLastResult(null);
       setVisibilityOverride(null);
       const code = actionErrorCode(error) ?? "";
       const key = EXPORT_ERROR_KEY[code];
-      setExportError(key ? t(key) : (actionErrorMessage(error) ?? t("output.exportFailed")));
+      setExportError(
+        key ? t(key) : (actionErrorMessage(error) ?? t("output.exportFailed")),
+      );
       if (code === "handoff-missing" || code === "handoff-stale") {
         // A stale tab: the button read as enabled from data fetched before the
         // handoff changed elsewhere. Refresh so the gate here catches up.
@@ -141,9 +161,16 @@ export function ExportSection({
 
   if (projectId === null) {
     return (
-      <section id="output-export-section" className="space-y-3" data-testid="output-export-section">
+      <section
+        id="output-export-section"
+        className="space-y-3"
+        data-testid="output-export-section"
+      >
         <h2 className="text-sm font-medium">{t("output.exportHeading")}</h2>
-        <p className="text-sm text-muted-foreground" data-testid="export-needs-project">
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid="export-needs-project"
+        >
           {t("output.exportNeedsProject")}
         </p>
       </section>
@@ -169,22 +196,43 @@ export function ExportSection({
     !preview.isFetching &&
     !exportSession.isPending;
 
-  const gateKey = plan?.exportBlockedReason ? EXPORT_GATE_KEY[plan.exportBlockedReason] : undefined;
+  const gateKey = plan?.exportBlockedReason
+    ? EXPORT_GATE_KEY[plan.exportBlockedReason]
+    : undefined;
 
   function runExport() {
     if (!canExport || !plan) return;
     setExportError(null);
-    exportSession.mutate({ sessionId, slug: plan.slug });
+    exportSession.mutate({
+      sessionId,
+      slug: plan.slug,
+      overridePaths: [...overridePaths],
+    });
+  }
+
+  function toggleOverride(relativePath: string, override: boolean) {
+    setOverridePaths((current) => {
+      const next = new Set(current);
+      if (override) next.add(relativePath);
+      else next.delete(relativePath);
+      return next;
+    });
   }
 
   return (
-    <section id="output-export-section" className="space-y-3" data-testid="output-export-section">
+    <section
+      id="output-export-section"
+      className="space-y-3"
+      data-testid="output-export-section"
+    >
       <h2 className="text-sm font-medium">{t("output.exportHeading")}</h2>
 
       <div className="space-y-4 rounded-xl border bg-card px-5 py-4">
         {plan ? (
           <p className="text-sm" data-testid="export-project">
-            <span className="text-muted-foreground">{t("output.exportProjectLabel")}: </span>
+            <span className="text-muted-foreground">
+              {t("output.exportProjectLabel")}:{" "}
+            </span>
             <span className="font-medium">{plan.projectName}</span>
             <span className="font-mono text-xs text-muted-foreground">
               {" "}
@@ -201,15 +249,20 @@ export function ExportSection({
             onChange={(event) => {
               setSlugDraft(event.target.value);
               setLastResult(null);
+              setOverridePaths(new Set());
             }}
-            aria-invalid={slugBlank || previewErrorKey === "output.exportInvalidSlug"}
+            aria-invalid={
+              slugBlank || previewErrorKey === "output.exportInvalidSlug"
+            }
             aria-describedby="export-slug-hint"
             data-testid="export-slug-input"
           />
           <p id="export-slug-hint" className="text-xs text-muted-foreground">
             {slugBlank
               ? t("output.exportSlugRequired")
-              : t("output.exportSlugHint", { pattern: plan?.slugPattern ?? "{slug}" })}
+              : t("output.exportSlugHint", {
+                  pattern: plan?.slugPattern ?? "{slug}",
+                })}
           </p>
         </div>
 
@@ -219,22 +272,45 @@ export function ExportSection({
           </Alert>
         ) : null}
 
-        {!plan && !previewError && !slugBlank ? <Skeleton className="h-16 w-full" /> : null}
+        {!plan && !previewError && !slugBlank ? (
+          <Skeleton className="h-16 w-full" />
+        ) : null}
 
         {plan ? (
           <div className="space-y-2" aria-busy={preview.isFetching || settling}>
             <p className="text-xs font-medium">
-              {t(plan.bundleExists ? "output.exportPreviewReplaceHeading" : "output.exportPreviewHeading")}
+              {t(
+                plan.bundleExists
+                  ? "output.exportPreviewReplaceHeading"
+                  : "output.exportPreviewHeading",
+              )}
             </p>
-            <PathList paths={plan.files} testId="export-preview-files" />
-            {plan.removals.length > 0 ? (
+            <ExportFileList
+              files={plan.plannedWrites}
+              overridePaths={overridePaths}
+              onToggleOverride={toggleOverride}
+              overrideLabelKey="output.exportOverwriteAnyway"
+              testId="export-preview-files"
+            />
+            {plan.plannedRemovals.length > 0 ? (
               <>
-                <p className="text-xs font-medium">{t("output.exportPreviewRemovalsHeading")}</p>
-                <PathList paths={plan.removals} testId="export-preview-removals" />
+                <p className="text-xs font-medium">
+                  {t("output.exportPreviewRemovalsHeading")}
+                </p>
+                <ExportFileList
+                  files={plan.plannedRemovals}
+                  overridePaths={overridePaths}
+                  onToggleOverride={toggleOverride}
+                  overrideLabelKey="output.exportRemoveAnyway"
+                  testId="export-preview-removals"
+                />
               </>
             ) : null}
             {plan.trackerDiagnostic ? (
-              <p className="text-xs text-amber-700 dark:text-amber-300" data-testid="export-tracker-diagnostic">
+              <p
+                className="text-xs text-amber-700 dark:text-amber-300"
+                data-testid="export-tracker-diagnostic"
+              >
                 {t("output.exportTrackerDiagnostic")}: {plan.trackerDiagnostic}
               </p>
             ) : null}
@@ -247,18 +323,30 @@ export function ExportSection({
         ) : null}
 
         {gateKey ? (
-          <p className="text-xs text-amber-700 dark:text-amber-300" data-testid="export-gate-message">
+          <p
+            className="text-xs text-amber-700 dark:text-amber-300"
+            data-testid="export-gate-message"
+          >
             {t(gateKey)}
           </p>
         ) : null}
 
-        <Button type="button" disabled={!canExport} onClick={runExport} data-testid="export-action">
+        <Button
+          type="button"
+          disabled={!canExport}
+          onClick={runExport}
+          data-testid="export-action"
+        >
           {exportSession.isPending ? (
             <Spinner className="size-4" />
           ) : (
             <IconFolderOpen className="size-4" />
           )}
-          {t(exportSession.isPending ? "output.exporting" : "output.exportAction")}
+          {t(
+            exportSession.isPending
+              ? "output.exporting"
+              : "output.exportAction",
+          )}
         </Button>
 
         {exportError ? (
@@ -271,17 +359,40 @@ export function ExportSection({
           <Alert data-testid="export-result">
             <AlertTitle>{t("output.exportSuccessHeading")}</AlertTitle>
             <AlertDescription className="space-y-2">
-              <p className="text-xs font-medium">{t("output.exportedFilesHeading")}</p>
-              <PathList paths={lastResult.written} testId="export-written-files" />
+              <p className="text-xs font-medium">
+                {t("output.exportedFilesHeading")}
+              </p>
+              <PathList
+                paths={lastResult.written}
+                testId="export-written-files"
+              />
               {lastResult.removed.length > 0 ? (
                 <>
-                  <p className="text-xs font-medium">{t("output.exportRemovedFilesHeading")}</p>
-                  <PathList paths={lastResult.removed} testId="export-removed-files" />
+                  <p className="text-xs font-medium">
+                    {t("output.exportRemovedFilesHeading")}
+                  </p>
+                  <PathList
+                    paths={lastResult.removed}
+                    testId="export-removed-files"
+                  />
+                </>
+              ) : null}
+              {lastResult.kept.length > 0 ? (
+                <>
+                  <p className="text-xs font-medium">
+                    {t("output.exportKeptFilesHeading")}
+                  </p>
+                  <PathList
+                    paths={lastResult.kept}
+                    testId="export-kept-files"
+                  />
                 </>
               ) : null}
 
               <div className="space-y-2 border-t pt-2">
-                <ExportVisibilityReport report={visibilityOverride ?? lastResult.visibility} />
+                <ExportVisibilityReport
+                  report={visibilityOverride ?? lastResult.visibility}
+                />
                 <Button
                   type="button"
                   variant="outline"
