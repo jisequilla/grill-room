@@ -30,7 +30,7 @@ function staysInsideRepo(path: string): boolean {
     path.trim() === path &&
     !path.startsWith("/") &&
     !path.startsWith("~") &&
-    !/^[A-Za-z]:?[\\/]/.test(path) &&
+    !/^[A-Za-z]:[\\/]/.test(path) &&
     !path.split(/[\\/]/).includes("..")
   );
 }

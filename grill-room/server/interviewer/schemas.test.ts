@@ -26,6 +26,8 @@ describe("a scout report's citations", () => {
     "CLAUDE.md:1",
     "a folder/with spaces.md:3-3",
     ".claude/rules/worktrees.md:10",
+    "a/index.ts:1",
+    "ab/x.ts:1",
   ])("accepts %s", (value) => {
     expect(citation.safeParse(value).success).toBe(true);
   });
@@ -42,6 +44,8 @@ describe("a scout report's citations", () => {
     ["an absolute path", "/etc/passwd:1"],
     ["a home path", "~/.ssh/config:1"],
     ["a drive path", "C:\\repo\\a.ts:1"],
+    ["a drive path with a forward slash", "C:/x:1"],
+    ["a lowercase drive path", "c:\\x:1"],
     ["a path out of the repo", "../other/a.ts:1"],
     ["a path stepping out midway", "src/../../a.ts:1"],
     ["surrounding whitespace", " src/a.ts:1"],
@@ -173,18 +177,23 @@ function accepts(result: unknown): boolean {
 }
 
 describe("a grounded ticket's paths", () => {
-  it.each(["src/ingest/lag-alert.ts", "e2e/scenario.spec.ts", ".claude/rules/x.md"])(
-    "accepts %s",
-    (value) => {
-      expect(repoPath.safeParse(value).success).toBe(true);
-    },
-  );
+  it.each([
+    "src/ingest/lag-alert.ts",
+    "e2e/scenario.spec.ts",
+    ".claude/rules/x.md",
+    "a/index.ts",
+    "ab/x.ts",
+  ])("accepts %s", (value) => {
+    expect(repoPath.safeParse(value).success).toBe(true);
+  });
 
   it.each([
     ["an empty path", ""],
     ["an absolute path", "/etc/passwd"],
     ["a home path", "~/.ssh/config"],
     ["a drive path", "C:\\repo\\a.ts"],
+    ["a drive path with a forward slash", "C:/x"],
+    ["a lowercase drive path", "c:\\x"],
     ["a path out of the repo", "../other/a.ts"],
     ["a path stepping out midway", "src/../../a.ts"],
     ["surrounding whitespace", " src/a.ts"],

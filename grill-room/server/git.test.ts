@@ -56,3 +56,28 @@ describe("runGit's read-only guard", () => {
     );
   });
 });
+
+describe("runGit's literalPathspecs option", () => {
+  it("makes ls-files read a glob pathspec literally instead of expanding it", async () => {
+    const root = repos.create({
+      files: { "docs/decisions.md": "# docs\n", "decisions.md": "# root\n" },
+    });
+
+    const glob = await runGit(root, ["ls-files", "--", "**/decisions.md"]);
+    expect(glob.stdout.trim().split("\n").sort()).toEqual(["docs/decisions.md"]);
+
+    const literal = await runGit(root, ["ls-files", "--", "**/decisions.md"], {
+      literalPathspecs: true,
+    });
+    // Literally, no file is named `**/decisions.md`.
+    expect(literal.stdout.trim()).toBe("");
+  });
+
+  it("refuses literalPathspecs for check-ignore rather than silently breaking every call", async () => {
+    const root = repos.create({ gitignore: "dist/\n" });
+
+    await expect(
+      runGit(root, ["check-ignore", "--", "dist/a.js"], { literalPathspecs: true }),
+    ).rejects.toThrow(/check-ignore refuses literal pathspec magic/);
+  });
+});

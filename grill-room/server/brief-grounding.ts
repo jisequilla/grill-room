@@ -254,7 +254,17 @@ const C_ESCAPES: Record<string, number> = {
  * One path as git prints it, unquoted. git wraps a path holding a non-ASCII
  * byte, a quote, a backslash or a control character in double quotes, with C
  * escapes and octal bytes (`"dist/\303\251.js"`); any other path is printed
- * as it is.
+ * as it is. With `core.quotePath=false`, a non-ASCII byte alone no longer
+ * triggers quoting, but a quote, backslash or control character still does,
+ * with every other character — including a multi-byte one like an emoji —
+ * printed raw inside the quotes rather than octal-escaped.
+ *
+ * Walked one Unicode code point at a time (`Array.from`, not `body[index]`):
+ * a UTF-16 index would split a surrogate pair in two, and encoding each half
+ * on its own garbles it, since neither half is valid UTF-8 by itself. The
+ * escape sequences this loop looks ahead for (`\t`, `\NNN`, ...) are always
+ * plain ASCII, so they are unaffected — each is one element of the code-point
+ * array too.
  *
  * `-z` would print every path raw, but `git check-ignore` accepts `-z` only
  * with `--stdin` ("fatal: -z only makes sense with --stdin"), and the
@@ -264,16 +274,16 @@ export function unquoteGitPath(printed: string): string {
   if (printed.length < 2 || !printed.startsWith('"') || !printed.endsWith('"')) {
     return printed;
   }
-  const body = printed.slice(1, -1);
+  const chars = Array.from(printed.slice(1, -1));
   const bytes: number[] = [];
-  for (let index = 0; index < body.length; index += 1) {
-    const char = body[index]!;
+  for (let index = 0; index < chars.length; index += 1) {
+    const char = chars[index]!;
     if (char !== "\\") {
       bytes.push(...Buffer.from(char, "utf8"));
       continue;
     }
-    const octal = /^[0-3][0-7]{2}/.exec(body.slice(index + 1));
-    const next = body[index + 1] ?? "";
+    const octal = /^[0-3][0-7]{2}/.exec(chars.slice(index + 1, index + 4).join(""));
+    const next = chars[index + 1] ?? "";
     if (octal) {
       bytes.push(parseInt(octal[0], 8));
       index += 3;
@@ -462,10 +472,27 @@ export async function reasonsToRefuseHandoffGrounding(
 
   if (toCheckIgnored.length > 0) {
     const unique = [...new Set(toCheckIgnored.map((entry) => entry.path))];
-    const checked = await runGit(realRoot, ["check-ignore", "--", ...unique]);
+    // A path starting with `:` is git pathspec magic (`:/` is "top", `:(word)`
+    // is the long form); an untrusted, model-supplied path can start with it
+    // by chance. `check-ignore` refuses `--literal-pathspecs` outright ("git
+    // check-ignore" section of `git.ts`'s `RunGitOptions`), so the magic is
+    // neutralized here instead: `./` in front of a pathspec makes it start
+    // with `.` rather than `:`, which git never treats as magic, and is a
+    // no-op for every path that did not start with `:` to begin with — an
+    // ordinary path still matches the same ignore rules through it. Stripped
+    // back off below, since `check-ignore` echoes the argument it matched.
+    const checked = await runGit(realRoot, [
+      "check-ignore",
+      "--",
+      ...unique.map((entry) => `./${entry}`),
+    ]);
     if (checked.exitCode === 0 || checked.exitCode === 1) {
       const ignored = new Set(
-        checked.stdout.split("\n").filter(Boolean).map(unquoteGitPath),
+        checked.stdout
+          .split("\n")
+          .filter(Boolean)
+          .map(unquoteGitPath)
+          .map((entry) => (entry.startsWith("./") ? entry.slice(2) : entry)),
       );
       for (const entry of toCheckIgnored) {
         if (ignored.has(entry.path)) {
