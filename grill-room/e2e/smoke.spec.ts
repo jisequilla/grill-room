@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -78,7 +78,13 @@ function createExportProjectRepo(): string {
  * both deterministic, template-rendered steps that call no interviewer turn
  * — and checks that the export wrote `decisions.md` with an entry for each
  * of the two decisions this session settled (`server/export.ts`'s
- * `renderDecisionsFile`; see `.scratch/decisions-export/spec.md`).
+ * `renderDecisionsFile`; see `.scratch/decisions-export/spec.md`) and that
+ * `intent.md` was written too. It then hand-edits the exported `spec.md` on
+ * disk and walks the edited-file guard through the browser: the reopened
+ * preview flags `spec.md` as edited with its "Overwrite anyway" checkbox
+ * unticked, a re-export keeps the edit and lists `spec.md` as kept, and
+ * ticking the checkbox and re-exporting overwrites it
+ * (`.scratch/export-ownership/spec.md`, "The guard").
  *
  * Other spec files in this suite (`e2e/*.spec.ts`) run against the same
  * `webServer` alongside it: each creates its own session and chooses its own
@@ -307,6 +313,69 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
   const decisionsFileContent = readFileSync(decisionsFilePath, "utf-8");
   expect(decisionsFileContent).toContain("## Decisions");
   expect(decisionsFileContent).toMatch(/<a id="/);
+
+  // ---- intent.md is planned and written alongside the rest of the bundle -
+  // (`.scratch/export-ownership/spec.md`, "intent.md is always planned").
+  await expect(
+    exportSection.getByTestId("export-written-files").getByText(/intent\.md$/),
+  ).toBeVisible();
+
+  // ---- Edit the exported spec.md on disk, outside the app ----------------
+  // The guard (`.scratch/export-ownership/spec.md`, "The guard") is meant to
+  // catch exactly this: a file re-exported after someone hand-edited it in
+  // the repo.
+  const writtenSpecFile = exportSection
+    .getByTestId("export-written-files")
+    .getByText(/spec\.md$/);
+  const specFilePath = (await writtenSpecFile.textContent())?.trim();
+  if (!specFilePath) {
+    throw new Error("Could not read the exported spec.md path off the export result.");
+  }
+  const originalSpecContent = readFileSync(specFilePath, "utf-8");
+  const editMarker = "<!-- e2e hand edit, must survive a kept re-export -->";
+  const editedSpecContent = `${originalSpecContent}\n${editMarker}\n`;
+  writeFileSync(specFilePath, editedSpecContent, "utf-8");
+
+  // ---- Reopen the preview: the edit is picked up from disk on reload -----
+  await page.reload();
+
+  const specPreviewItem = previewFiles
+    .getByTestId("export-preview-files-item")
+    .filter({ hasText: "spec.md" });
+  await expect(specPreviewItem).toHaveAttribute("data-edited", "true", {
+    timeout: 15_000,
+  });
+
+  const specOverrideCheckbox = specPreviewItem.getByTestId(
+    "export-preview-files-override",
+  );
+  await expect(specOverrideCheckbox).toBeVisible();
+  await expect(specOverrideCheckbox).not.toBeChecked();
+
+  // ---- Re-export without overriding: the edited spec.md is kept ----------
+  await expect(exportButton).toBeEnabled({ timeout: 15_000 });
+  await exportButton.click();
+
+  const keptSpecFile = exportSection
+    .getByTestId("export-kept-files")
+    .getByText(/spec\.md$/);
+  await expect(keptSpecFile).toBeVisible({ timeout: 15_000 });
+
+  expect(readFileSync(specFilePath, "utf-8")).toBe(editedSpecContent);
+
+  // ---- Tick "Overwrite anyway" and re-export: spec.md is overwritten -----
+  await specOverrideCheckbox.click();
+  await expect(specOverrideCheckbox).toBeChecked();
+
+  await expect(exportButton).toBeEnabled({ timeout: 15_000 });
+  await exportButton.click();
+
+  const writtenSpecFileAgain = exportSection
+    .getByTestId("export-written-files")
+    .getByText(/spec\.md$/);
+  await expect(writtenSpecFileAgain).toBeVisible({ timeout: 15_000 });
+
+  expect(readFileSync(specFilePath, "utf-8")).not.toContain(editMarker);
 
   rmSync(repoRoot, { recursive: true, force: true });
 });
