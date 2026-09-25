@@ -513,6 +513,101 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
   });
 });
 
+/**
+ * One ticket blocked by ticket 1, its single `buildsOn` entry a citation form
+ * naming `citation` verbatim (no other validation applied), proved by
+ * `README.md`.
+ */
+function aCitationBuildsOnTicket(citation: string): ScoutTicket {
+  return {
+    number: 2,
+    filesToChange: [],
+    buildsOnFiles: [],
+    facts: [],
+    buildsOn: [
+      {
+        blocker: 1,
+        provides: "What ticket 1 already wrote.",
+        citation,
+        createdPath: null,
+        editedPath: null,
+        symbol: null,
+        check: "true",
+      },
+    ],
+    provedBy: { testPath: null, command: "true" },
+  };
+}
+
+describe("reasonsToRefuseHandoffGrounding's buildsOn citation syntax check", () => {
+  /** Ticket 1, unblocked, planning no files, proved by its command alone. */
+  function blockerTicket(): ScoutTicket {
+    return aTicket(1, {}, null, [], "true");
+  }
+
+  const TICKETS: GroundedHandoffTicket[] = [
+    { number: 1, blockedBy: [] },
+    { number: 2, blockedBy: [1] },
+  ];
+
+  it("refuses a buildsOn citation with a `..` segment, even when the path it resolves to exists", async () => {
+    // src/x/../a.ts resolves to src/a.ts, which exists — so checkCitation's
+    // own resolve-then-compare check would accept it; the syntax check must
+    // catch the `..` on shape alone, before that happens.
+    const root = repos.create({ files: { "src/a.ts": "export const a = 1;\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { tickets: [blockerTicket(), aCitationBuildsOnTicket("src/x/../a.ts:1")] },
+      { projectRoot: root, tickets: TICKETS },
+    );
+
+    expect(reasons).toEqual([
+      `Ticket 2's buildsOn on ticket 1 cites "src/x/../a.ts:1", whose path is not relative to the project root or steps outside it; cite a path with no leading /, ~ or drive letter and no .. segment.`,
+    ]);
+  });
+
+  it("refuses an absolute buildsOn citation", async () => {
+    const root = repos.create({ files: { "README.md": "# Marathon\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { tickets: [blockerTicket(), aCitationBuildsOnTicket("/abs/a.ts:1")] },
+      { projectRoot: root, tickets: TICKETS },
+    );
+
+    expect(reasons).toEqual(
+      expect.arrayContaining([
+        `Ticket 2's buildsOn on ticket 1 cites "/abs/a.ts:1", whose path is not relative to the project root or steps outside it; cite a path with no leading /, ~ or drive letter and no .. segment.`,
+      ]),
+    );
+  });
+
+  it("refuses a buildsOn citation whose line range runs backwards", async () => {
+    const root = repos.create({ files: { "README.md": "# Marathon\nSecond line\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { tickets: [blockerTicket(), aCitationBuildsOnTicket("README.md:2-1")] },
+      { projectRoot: root, tickets: TICKETS },
+    );
+
+    expect(reasons).toEqual(
+      expect.arrayContaining([
+        `Ticket 2's buildsOn on ticket 1 cites "README.md:2-1", whose line range ends before it starts; cite a range from its first line to its last.`,
+      ]),
+    );
+  });
+
+  it("accepts a valid buildsOn citation", async () => {
+    const root = repos.create({ files: { "README.md": "# Marathon\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { tickets: [blockerTicket(), aCitationBuildsOnTicket("README.md:1")] },
+      { projectRoot: root, tickets: TICKETS },
+    );
+
+    expect(reasons).toEqual([]);
+  });
+});
+
 describe("reasonsToRefuseHandoffGrounding on a check or command whose path ignores its own cd", () => {
   /** The third run's tickets 3 and 4: 3 creates the export and its test, 4 extends the test. */
   async function refuseTicket4(

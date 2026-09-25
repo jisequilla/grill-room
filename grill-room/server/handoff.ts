@@ -274,6 +274,22 @@ function codeBlock(text: string, language = "bash"): string {
   return ["```" + language, text, "```"].join("\n");
 }
 
+/**
+ * Wraps `value` as CommonMark inline code, safe for a value that itself
+ * contains backticks: the fence is one backtick longer than the longest run
+ * of backticks inside `value`, and a value that starts or ends with a
+ * backtick is padded with a single space on that side, per the CommonMark
+ * rule for inline code spans. A value with no backticks gets the usual
+ * single-backtick fence.
+ */
+function inlineCode(value: string): string {
+  const runs = value.match(/`+/g) ?? [];
+  const longestRun = runs.reduce((max, run) => Math.max(max, run.length), 0);
+  const fence = "`".repeat(longestRun + 1);
+  const padded = value.startsWith("`") || value.endsWith("`") ? ` ${value} ` : value;
+  return `${fence}${padded}${fence}`;
+}
+
 function pathsNote(source: HandoffSource): string {
   const { project } = source;
   if (project.visibility === "tracked") {
@@ -850,11 +866,11 @@ function buildsOnSection(
     const label = padTicketNumber(dependency.blocker, total);
     const where =
       dependency.citation !== null
-        ? `\`${dependency.citation}\``
+        ? inlineCode(dependency.citation)
         : dependency.createdPath !== null
-          ? `created by ticket ${label} at \`${dependency.createdPath}\``
-          : `ticket ${label} adds \`${dependency.symbol}\` to \`${dependency.editedPath}\``;
-    return `- Ticket ${label}: ${dependency.provides} — ${where} — check: \`${dependency.check}\``;
+          ? `created by ticket ${label} at ${inlineCode(dependency.createdPath)}`
+          : `ticket ${label} adds ${inlineCode(dependency.symbol!)} to ${inlineCode(dependency.editedPath!)}`;
+    return `- Ticket ${label}: ${dependency.provides} — ${where} — check: ${inlineCode(dependency.check)}`;
   });
   return ["## Builds on", "", ...lines].join("\n");
 }
