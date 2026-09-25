@@ -30,7 +30,7 @@ function RepoBadge({ repo }: { repo: RepoOrigin }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-sky-600/30 bg-sky-600/10 px-1.5 py-px text-[10px] leading-4 font-medium tracking-wide text-sky-700 uppercase dark:border-sky-400/25 dark:bg-sky-400/10 dark:text-sky-300"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-repo/30 bg-repo/10 px-1.5 py-px text-xs leading-4 font-medium tracking-wide text-repo uppercase"
           data-testid="repo-marker"
           data-source={repo.source}
           data-citation={repo.citation}
@@ -83,7 +83,7 @@ function DecisionRow({
         ) : null}
         <span
           className={cn(
-            "min-w-0 flex-1 text-[13px] leading-5",
+            "min-w-0 flex-1 text-sm leading-5",
             withdrawn && "text-muted-foreground/70 line-through",
             decision.state === "stale" && "font-medium",
           )}
@@ -92,14 +92,14 @@ function DecisionRow({
           {otherParents.length > 0 ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="ml-1.5 inline-block cursor-default rounded bg-muted px-1 font-mono text-[10px] whitespace-nowrap text-muted-foreground">
+                <span className="ml-1.5 inline-block cursor-default rounded bg-muted px-1 font-mono text-xs whitespace-nowrap text-muted-foreground">
                   {t("workspace.moreDependencies", {
                     count: otherParents.length,
                   })}
                 </span>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p className="text-[11px] font-medium">
+                <p className="text-xs font-medium">
                   {t("workspace.alsoDependsOn")}
                 </p>
                 <ul className="mt-0.5 list-disc pl-4 text-xs">
@@ -160,7 +160,7 @@ export function DesignTree({
 
       {unplaced.length > 0 ? (
         <div>
-          <p className="px-1.5 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          <p className="px-1.5 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
             {t("workspace.unplacedGroup")}
           </p>
           <ul className="space-y-px">

@@ -38,7 +38,7 @@ function Summary({
     <section className="rounded-xl border bg-card px-5 py-4">
       <div className="flex items-center gap-2 pb-2.5 text-muted-foreground">
         {icon}
-        <h3 className="text-[11px] font-medium tracking-wide uppercase">
+        <h3 className="text-xs font-medium tracking-wide uppercase">
           {title}
         </h3>
       </div>
@@ -151,7 +151,7 @@ export function DoneProposedPanel({
 
       <section className="space-y-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+          <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
             {t("workspace.looseEndsHeading")}
           </h3>
           {showCheckButton ? (
@@ -224,7 +224,7 @@ export function ConfirmedPanel({
     <div className="space-y-5" data-testid="confirmed-panel">
       <Summary
         icon={
-          <IconCircleCheck className="size-4 text-emerald-700 dark:text-emerald-300" />
+          <IconCircleCheck className="size-4 text-settled" />
         }
         title={t("workspace.confirmedTitle")}
         summary={doneSummary}

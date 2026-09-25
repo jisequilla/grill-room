@@ -506,4 +506,9 @@ ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS adversarial_review BOOLEAN NOT 
 ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS replaced_reason TEXT;
 ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS settled_by_id TEXT`,
   },
+  {
+    version: 65,
+    name: "projects-rename-export-folder",
+    sql: `ALTER TABLE gr_projects RENAME COLUMN export_folder TO working_export_folder`,
+  },
 ];

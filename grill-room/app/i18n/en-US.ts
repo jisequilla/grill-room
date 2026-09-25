@@ -40,11 +40,11 @@ const messages = {
     verifyCommandLabel: "Verify command",
     verifyCommandPlaceholder: "pnpm test",
     verifyCommandSuggested: "Suggested from the repository's build files.",
-    exportFolderLabel: "Export folder",
-    exportFolderPlaceholder: ".grill-room",
-    exportFolderHint:
+    workingExportFolderLabel: "Export folder",
+    workingExportFolderPlaceholder: ".grill-room",
+    workingExportFolderHint:
       "Relative to the repository root. It does not need to exist yet.",
-    exportFolderSuggested: "Suggested from the repository's declared tracker.",
+    workingExportFolderSuggested: "Suggested from the repository's declared tracker.",
     slugPatternLabel: "Slug pattern",
     slugPatternHint:
       "The name of each session's folder. {slug} is the session slug.",
@@ -80,15 +80,15 @@ const messages = {
     saveFailed: "Could not save the project.",
     rootRequired: "Enter a folder inside the repository.",
     verifyCommandRequired: "Enter the command that verifies a change.",
-    exportFolderRequired: "Enter the folder exports land in.",
+    workingExportFolderRequired: "Enter the folder exports land in.",
     folderNotAbsolute: "The folder must be an absolute path.",
     folderNotFound: "That folder does not exist.",
     folderNotDirectory: "That path is not a directory.",
     notAGitRepo: "That folder is not inside a git repository.",
     gitUnavailable: "git is not available on this machine.",
     projectExists: "This repository is already registered.",
-    exportFolderOutsideRoot: "The export folder must be inside the repository.",
-    exportFolderIsRoot:
+    workingExportFolderOutsideRoot: "The export folder must be inside the repository.",
+    workingExportFolderIsRoot:
       "The export folder must be a folder inside the repository, not its root.",
     invalidSlugPattern: "The slug pattern names one folder: no / or ..",
     selectLabel: "Project",

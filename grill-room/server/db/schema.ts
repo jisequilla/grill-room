@@ -80,7 +80,7 @@ export const projects = table("gr_projects", {
   rootPath: text("root_path").notNull().unique(),
   verifyCommand: text("verify_command").notNull(),
   /** Where exports land, relative to `rootPath`. */
-  exportFolder: text("export_folder").notNull(),
+  workingExportFolder: text("working_export_folder").notNull(),
   slugPattern: text("slug_pattern")
     .notNull()
     .default(DEFAULT_PROJECT_SLUG_PATTERN),

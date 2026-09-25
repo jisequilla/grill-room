@@ -34,7 +34,7 @@ function Section({
 }) {
   return (
     <section className="space-y-1.5">
-      <h4 className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+      <h4 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         {title}
       </h4>
       {children}
@@ -80,7 +80,7 @@ export function DecisionDetailSheet({
             <DecisionStateBadge state={decision.state} />
             {loose ? <LooseEndBadge /> : null}
             {decision.introducedBy === "user" ? (
-              <span className="text-[10px] tracking-wide text-muted-foreground uppercase">
+              <span className="text-xs tracking-wide text-muted-foreground uppercase">
                 {t("workspace.addDecision")}
               </span>
             ) : null}
@@ -99,7 +99,7 @@ export function DecisionDetailSheet({
           <Section title={t("workspace.currentAnswer")}>
             {decision.answer ? (
               <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
-                <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                   {t(ANSWER_KIND_LABEL_KEY[decision.answer.kind])}
                 </p>
                 {decision.answer.text ? (
@@ -158,7 +158,7 @@ export function DecisionDetailSheet({
                       </p>
                     ) : null}
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                         {entry.kind
                           ? t(ANSWER_KIND_LABEL_KEY[entry.kind])
                           : t("workspace.noAnswerRecorded")}

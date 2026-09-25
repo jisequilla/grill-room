@@ -32,7 +32,7 @@ export function TreeFooter({
       <span
         className={cn(
           looseEnds > 0
-            ? "font-medium text-orange-700 dark:text-orange-300"
+            ? "font-medium text-owed"
             : "text-muted-foreground",
         )}
       >

@@ -107,7 +107,7 @@ function SummaryStat({
 }) {
   return (
     <div className="rounded-xl border bg-card/50 px-3.5 py-3">
-      <p className="text-[11px] tracking-wide text-muted-foreground uppercase">
+      <p className="text-xs tracking-wide text-muted-foreground uppercase">
         {label}
       </p>
       <p className="mt-0.5 text-lg font-semibold tabular-nums">{value}</p>

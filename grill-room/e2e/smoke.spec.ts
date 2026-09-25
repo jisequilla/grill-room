@@ -177,7 +177,7 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
   const project = await registerProject(request, {
     root: repoRoot,
     verifyCommand: "true",
-    exportFolder: ".scratch",
+    workingExportFolder: ".scratch",
   });
   await setSessionProject(request, sessionId, project.id);
 

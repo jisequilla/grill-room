@@ -1,5 +1,6 @@
-/* Self-hosted via @fontsource-variable/inter — no render-blocking Google Fonts request */
-@import "@fontsource-variable/inter";
+/* Self-hosted via Fontsource — no render-blocking Google Fonts request */
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource-variable/jetbrains-mono";
 
 @import "tailwindcss";
 @import "@agent-native/core/styles/agent-native.css";
@@ -8,35 +9,59 @@
 
 @source "./**/*.{ts,tsx}";
 
+/* The decision-state colours, registered the way @agent-native/core maps its
+   own theme, so `text-settled`, `bg-owed/10` and `border-repo/30` resolve
+   `hsl(var(--x))` at use time and follow `.dark`. */
+@theme inline {
+  --color-settled: hsl(var(--settled));
+  --color-owed: hsl(var(--owed));
+  --color-repo: hsl(var(--repo));
+  --color-frontier: hsl(var(--frontier));
+  --color-unplaced: hsl(var(--unplaced));
+}
+
+/* IBM Plex Sans for reading and controls, JetBrains Mono for labels, ids,
+   paths and counts (DESIGN.md "Type"). */
+@theme {
+  --font-sans: "IBM Plex Sans Variable", "IBM Plex Sans", ui-sans-serif,
+    system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+}
+
 :root {
-  --background: 0 0% 100%;
-  --foreground: 0 0% 10%;
-  --card: 0 0% 100%;
-  --card-foreground: 0 0% 10%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 0 0% 10%;
-  --primary: 0 0% 15%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 0 0% 95%;
-  --secondary-foreground: 0 0% 15%;
-  --muted: 0 0% 95%;
-  --muted-foreground: 0 0% 45%;
-  --accent: 0 0% 95%;
-  --accent-foreground: 0 0% 15%;
-  --destructive: 0 91% 71%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 90%;
-  --input: 0 0% 90%;
-  --ring: 0 0% 40%;
+  --background: 36 24% 95.9%;
+  --foreground: 24 10% 10%;
+  --card: 40 43% 98.6%;
+  --card-foreground: 24 10% 10%;
+  --popover: 40 43% 98.6%;
+  --popover-foreground: 24 10% 10%;
+  --primary: 14 83% 41.6%;
+  --primary-foreground: 22 100% 97.8%;
+  --secondary: 34 18% 92.4%;
+  --secondary-foreground: 24 10% 10%;
+  --muted: 34 18% 92.4%;
+  --muted-foreground: 28 8% 39%;
+  --accent: 35 18% 87.1%;
+  --accent-foreground: 24 10% 10%;
+  --destructive: 4 76% 40%;
+  --destructive-foreground: 22 100% 97.8%;
+  --border: 33 16% 86.5%;
+  --input: 30 8% 54.5%;
+  --ring: 14 83% 41.6%;
+  --settled: 149 48% 32.4%;
+  --owed: 40 100% 28%;
+  --repo: 206 38% 36.1%;
+  --frontier: 14 84% 38%;
+  --unplaced: var(--muted-foreground);
   --radius: 0.5rem;
-  --sidebar-background: 0 0% 98%;
-  --sidebar-foreground: 0 0% 45%;
-  --sidebar-primary: 0 0% 15%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 0 0% 95%;
-  --sidebar-accent-foreground: 0 0% 15%;
-  --sidebar-border: 0 0% 90%;
-  --sidebar-ring: 0 0% 40%;
+  --sidebar-background: 34 18% 92.4%;
+  --sidebar-foreground: 30 8% 34.1%;
+  --sidebar-primary: 14 83% 41.6%;
+  --sidebar-primary-foreground: 22 100% 97.8%;
+  --sidebar-accent: 35 18% 87.1%;
+  --sidebar-accent-foreground: 24 10% 10%;
+  --sidebar-border: 33 16% 86.5%;
+  --sidebar-ring: 14 83% 41.6%;
   --chat-sidebar-width: 17.25rem;
   --chat-sidebar-content-inset: 0.5rem;
   --chat-sidebar-row-padding: 0.75rem;
@@ -211,41 +236,45 @@
 }
 
 .dark {
-  --background: 0 0% 9.4%;
-  --foreground: 0 0% 90%;
-  --card: 0 0% 16.47%;
-  --card-foreground: 0 0% 90%;
-  --popover: 0 0% 15%;
+  --background: 30 11% 7.5%;
+  --foreground: 33 22% 90.4%;
+  --card: 30 12% 10.2%;
+  --card-foreground: 33 22% 90.4%;
+  --popover: 30 12% 10.2%;
   --popover-foreground: 0 0% 90%;
-  --primary: 0 0% 75%;
-  --primary-foreground: 0 0% 10%;
-  --secondary: 0 0% 18%;
+  --primary: 16 88% 58.4%;
+  --primary-foreground: 19 58% 6.5%;
+  --secondary: 30 12% 13.3%;
   --secondary-foreground: 0 0% 90%;
-  --muted: 0 0% 16%;
-  --muted-foreground: 0 0% 60%;
-  --accent: 0 0% 18%;
-  --accent-foreground: 0 0% 90%;
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 24%;
-  --input: 0 0% 24%;
-  --ring: 0 0% 60%;
+  --muted: 30 12% 13.3%;
+  --muted-foreground: 30 9% 60.4%;
+  --accent: 30 12% 16%;
+  --accent-foreground: 33 22% 90.4%;
+  --destructive: 0 84% 68.8%;
+  --destructive-foreground: 19 58% 6.5%;
+  --border: 33 12% 18.6%;
+  --input: 30 9% 39.6%;
+  --ring: 16 88% 58.4%;
+  --settled: 147 43% 56.1%;
+  --owed: 40 73% 55.5%;
+  --repo: 207 42% 66.7%;
+  --frontier: 17 88% 66.5%;
+  --unplaced: var(--muted-foreground);
   --radius: 0.5rem;
-  --sidebar-background: 0 0% 13.33%;
-  --sidebar-foreground: 0 0% 60%;
-  --sidebar-primary: 0 0% 75%;
-  --sidebar-primary-foreground: 0 0% 10%;
-  --sidebar-accent: 0 0% 16%;
-  --sidebar-accent-foreground: 0 0% 90%;
-  --sidebar-border: 0 0% 20%;
-  --sidebar-ring: 0 0% 60%;
+  --sidebar-background: 30 14% 5.5%;
+  --sidebar-foreground: 30 9% 60.4%;
+  --sidebar-primary: 16 88% 58.4%;
+  --sidebar-primary-foreground: 19 58% 6.5%;
+  --sidebar-accent: 30 13% 12.2%;
+  --sidebar-accent-foreground: 33 22% 90.4%;
+  --sidebar-border: 33 12% 18.6%;
+  --sidebar-ring: 16 88% 58.4%;
 }
 
 @layer base {
   body {
     @apply bg-background text-foreground;
-    font-family: "Inter Variable", "Inter", sans-serif;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    font-family: var(--font-sans);
   }
 }
 
