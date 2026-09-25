@@ -251,15 +251,34 @@ export const decisions = table(
     pendingAsk: boolean("pending_ask").notNull().default(false),
     /**
      * The settled decision the interviewer believes already answers this loose
-     * end. A *proposal*, not an answer: the decision stays exactly as open as it
-     * was until the user accepts, and accepting, answering, dispositioning, or
-     * reopening the superseding decision clears all three columns.
+     * end, or, on a settled decision, the later one it believes replaced it. A
+     * *proposal*, not an answer: the decision stays exactly as it was until the
+     * user accepts, and accepting, answering, dispositioning, or reopening the
+     * superseding decision clears all three columns.
      */
     supersededById: text("superseded_by_id"),
-    /** The answer the supersession proposes recording, in this decision's own terms. */
+    /**
+     * The answer the supersession proposes recording, in this decision's own
+     * terms. Null for a replacement, which changes no answer.
+     */
     supersessionAnswer: text("supersession_answer"),
     /** Which settled decision answers it and why, kept as the history entry's reason. */
     supersessionReason: text("supersession_reason"),
+    /**
+     * The settled decision that replaced this one, once the user accepted the
+     * replacement. The answer stays as it was; this is the lasting link that
+     * marks it out of date. Cleared when this decision's own answer changes,
+     * or when the replacing decision is reopened.
+     */
+    replacedById: text("replaced_by_id"),
+    /** The interviewer's reason for the replacement, kept on acceptance. */
+    replacedReason: text("replaced_reason"),
+    /**
+     * For a loose end settled by accepting a supersession, the decision whose
+     * answer settled it. Kept when that decision is reopened: it records where
+     * the answer came from. Cleared when this decision's own answer changes.
+     */
+    settledById: text("settled_by_id"),
     /**
      * A repo decision's origin, set when the user keeps it from the scout
      * report and never changed afterwards: whether the project wrote it down

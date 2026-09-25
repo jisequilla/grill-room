@@ -182,6 +182,13 @@ export interface FindSupersededRequest extends RequestBase {
    * interviewer's to resolve by another route.
    */
   looseEndKeys: string[];
+  /**
+   * The settled decisions to check for replacement, by key, in tree order:
+   * answered for real (an accepted recommendation or the user's own answer),
+   * not already replaced, and followed by at least one other such decision
+   * that settled later. Empty when there is nothing to check.
+   */
+  replaceableKeys: string[];
 }
 
 export interface SynthesizeSpecRequest extends RequestBase {

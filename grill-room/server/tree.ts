@@ -329,11 +329,38 @@ export interface DecisionChoice {
  * session — which is why neither is what the UI keys off.
  */
 export interface DecisionSupersession {
+  /**
+   * What accepting it does: a loose end takes the later decision's answer, and
+   * a settled decision keeps its answer and is marked replaced.
+   */
+  kind: "answers-loose-end" | "replaces-settled";
   byId: string;
   byKey: string | null;
   byTitle: string | null;
   answer: string;
   reason: string;
+}
+
+/**
+ * The settled decision that replaced this one, accepted by the user. `key` and
+ * `title` are null when it is not among the rows being described.
+ */
+export interface DecisionReplacedBy {
+  id: string;
+  key: string | null;
+  title: string | null;
+  reason: string;
+}
+
+/**
+ * The decision whose answer settled this former loose end, when the user
+ * accepted a supersession. `key` and `title` are null when it is not among the
+ * rows being described.
+ */
+export interface DecisionSettledBy {
+  id: string;
+  key: string | null;
+  title: string | null;
 }
 
 /**
@@ -384,6 +411,10 @@ export interface DecisionView {
    * a loose end: nothing about its answer changes until the user accepts.
    */
   supersession: DecisionSupersession | null;
+  /** The settled decision that replaced this one, once the user accepted it. */
+  replacedBy: DecisionReplacedBy | null;
+  /** The decision whose answer settled this former loose end. */
+  settledBy: DecisionSettledBy | null;
   dispositionTarget: DecisionRow["dispositionTarget"];
   settledAt: string | null;
   reopenedAt: string | null;
@@ -459,6 +490,8 @@ export function describeDecisions(
     const supersededBy = row.supersededById
       ? byId.get(row.supersededById)
       : undefined;
+    const replacedBy = row.replacedById ? byId.get(row.replacedById) : undefined;
+    const settledBy = row.settledById ? byId.get(row.settledById) : undefined;
     return {
     id: row.id,
     key: row.key,
@@ -480,11 +513,29 @@ export function describeDecisions(
       : null,
     supersession: row.supersededById
       ? {
+          kind: isSettlingAnswerKind(row.answerKind)
+            ? ("replaces-settled" as const)
+            : ("answers-loose-end" as const),
           byId: row.supersededById,
           byKey: supersededBy?.key ?? null,
           byTitle: supersededBy?.questionTitle ?? null,
           answer: row.supersessionAnswer ?? "",
           reason: row.supersessionReason ?? "",
+        }
+      : null,
+    replacedBy: row.replacedById
+      ? {
+          id: row.replacedById,
+          key: replacedBy?.key ?? null,
+          title: replacedBy?.questionTitle ?? null,
+          reason: row.replacedReason ?? "",
+        }
+      : null,
+    settledBy: row.settledById
+      ? {
+          id: row.settledById,
+          key: settledBy?.key ?? null,
+          title: settledBy?.questionTitle ?? null,
         }
       : null,
     dispositionTarget: row.dispositionTarget,

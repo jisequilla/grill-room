@@ -103,6 +103,22 @@ function supersessions(
         reason: "The shape decision already commits to data on disk.",
         ...entry,
       })),
+      replacements: [],
+    },
+  };
+}
+
+function replacements(
+  ...entries: { replacedKey: string; byKey: string; reason?: string }[]
+) {
+  return {
+    kind: "find-superseded" as const,
+    result: {
+      supersessions: [],
+      replacements: entries.map((entry) => ({
+        reason: "The later decision moves the data off the local disk.",
+        ...entry,
+      })),
     },
   };
 }

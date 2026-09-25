@@ -23,6 +23,8 @@ function decision(
     state,
     answer: null,
     supersession: null,
+    replacedBy: null,
+    settledBy: null,
     dispositionTarget: null,
     settledAt: null,
     reopenedAt: null,

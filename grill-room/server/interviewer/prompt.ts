@@ -317,8 +317,8 @@ function renderTask(
         "what still holds is the point of this step.",
       ].join("\n");
 
-    case "find-superseded":
-      return [
+    case "find-superseded": {
+      const looseEndSection = [
         "## Your task: find the loose ends a later decision already answered",
         "",
         "Every decision below marked with a loose-end answer was left open by the",
@@ -339,7 +339,27 @@ function renderTask(
         "decision must answer the whole of the question the loose end asks, not",
         "merely touch on it. Never invent an answer no settled decision carries —",
         "the user will see it as something they already decided.",
-      ].join("\n");
+      ];
+      const replacementSection = [
+        request.looseEndKeys.length > 0
+          ? "## Also: settled decisions a later decision replaced"
+          : "## Your task: find settled decisions a later decision replaced",
+        "",
+        `Decisions to check: ${request.replaceableKeys.join(", ")}`,
+        "",
+        "Return one entry in `replacements` for each decision above whose answer a",
+        "decision that settled later changes, narrows or reverses, so that a builder",
+        "reading the earlier answer alone would build the wrong thing. Name the earlier",
+        "decision in `replacedKey`, the later one in `byKey`, and say in `reason` what",
+        "the later decision changes. A later decision that only adds detail the earlier",
+        "one left open is not a replacement. Be conservative: an empty list is the right",
+        "answer when nothing was replaced.",
+      ];
+      const sections: string[][] = [];
+      if (request.looseEndKeys.length > 0) sections.push(looseEndSection);
+      if (request.replaceableKeys.length > 0) sections.push(replacementSection);
+      return sections.map((lines) => lines.join("\n")).join("\n\n");
+    }
 
     case "synthesize-spec": {
       const outOfScope =

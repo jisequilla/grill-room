@@ -33,6 +33,8 @@ function decision(key: string, overrides: Partial<DecisionView> = {}): DecisionV
     state: "settled",
     answer: { text: `Answer of ${key}`, kind: "accepted-recommendation" },
     supersession: null,
+    replacedBy: null,
+    settledBy: null,
     dispositionTarget: null,
     settledAt: "2026-09-01T00:00:00.000Z",
     reopenedAt: null,
