@@ -120,7 +120,7 @@ test("reports a file exported through a symlinked folder as \"could not check\",
   const project = await registerProject(request, {
     root: repoRoot,
     verifyCommand: "true",
-    exportFolder: ".scratch",
+    workingExportFolder: ".scratch",
   });
   await setSessionProject(request, sessionId, project.id);
 

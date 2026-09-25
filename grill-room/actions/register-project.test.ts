@@ -28,7 +28,7 @@ describe("project actions", () => {
 
   async function aProject(options: Parameters<typeof repos.create>[0] = {}) {
     const root = repos.create(options);
-    return registerProject.run({ root, verifyCommand: "pnpm test", exportFolder: ".scratch" });
+    return registerProject.run({ root, verifyCommand: "pnpm test", workingExportFolder: ".scratch" });
   }
 
   it("register-project refuses with the registry's error code", async () => {
@@ -36,12 +36,12 @@ describe("project actions", () => {
       registerProject.run({
         root: repos.plainFolder(),
         verifyCommand: "pnpm test",
-        exportFolder: ".scratch",
+        workingExportFolder: ".scratch",
       }),
     ).rejects.toMatchObject({ errorCode: "not-a-git-repo" });
 
     await expect(
-      registerProject.run({ root: repos.create(), verifyCommand: " ", exportFolder: ".scratch" }),
+      registerProject.run({ root: repos.create(), verifyCommand: " ", workingExportFolder: ".scratch" }),
     ).rejects.toMatchObject({ errorCode: "verify-command-required" });
   });
 
@@ -51,7 +51,7 @@ describe("project actions", () => {
     const project = await registerProject.run({
       root: path.join(root, "app"),
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
 
     expect(project.rootPath).toBe(root);
@@ -82,12 +82,12 @@ describe("project actions", () => {
     const projectWithRemote = await registerProject.run({
       root: withRemote,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
     const projectWithoutRemote = await registerProject.run({
       root: withoutRemote,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
 
     expect(projectWithRemote.deliveryRecipe).toBe("pull-request");
@@ -102,7 +102,7 @@ describe("project actions", () => {
     const project = await registerProject.run({
       root: withRemote,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
       deliveryRecipe: "local-merge",
     });
 
@@ -135,13 +135,13 @@ describe("project actions", () => {
     });
 
     expect(
-      await suggestProjectDefaults.run({ folder: root, exportFolder: ".scratch" }),
+      await suggestProjectDefaults.run({ folder: root, workingExportFolder: ".scratch" }),
     ).toEqual({
       root,
       name: path.basename(root),
       verifyCommand: "pnpm test",
       visibility: "ignored",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
       trackerExportFolder: null,
       trackerSlugPattern: null,
     });
@@ -189,7 +189,7 @@ describe("a project's declared tracker", () => {
 
     const project = await registerProject.run({ root, verifyCommand: "pnpm test" });
 
-    expect(project.exportFolder).toBe(".scratch/tickets");
+    expect(project.workingExportFolder).toBe(".scratch/tickets");
     expect(project.slugPattern).toBe("{seq}-{slug}");
     expect(project.trackerDiagnostic).toBeNull();
     expect(JSON.parse(project.trackerCommandsJson!)).toEqual({
@@ -201,18 +201,18 @@ describe("a project's declared tracker", () => {
     const noFile = await registerProject.run({
       root: repos.create(),
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
     expect(noFile.trackerCommandsJson).toBeNull();
     expect(noFile.trackerDiagnostic).toBeNull();
-    expect(noFile.exportFolder).toBe(".scratch");
+    expect(noFile.workingExportFolder).toBe(".scratch");
 
     const prose = await registerProject.run({
       root: repos.create({
         files: { [TRACKER_PATH]: "# Issue tracker\n\nJust prose, no front matter.\n" },
       }),
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
     expect(prose.trackerCommandsJson).toBeNull();
     expect(prose.trackerDiagnostic).toBeNull();
@@ -224,11 +224,11 @@ describe("a project's declared tracker", () => {
     const project = await registerProject.run({
       root,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch/mine",
+      workingExportFolder: ".scratch/mine",
       slugPattern: "{slug}",
     });
 
-    expect(project.exportFolder).toBe(".scratch/mine");
+    expect(project.workingExportFolder).toBe(".scratch/mine");
     expect(project.slugPattern).toBe("{slug}");
     // The commands are stored from the tracker read regardless.
     expect(JSON.parse(project.trackerCommandsJson!)).toEqual({
@@ -246,10 +246,10 @@ describe("a project's declared tracker", () => {
     const project = await registerProject.run({
       root,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
 
-    expect(project.exportFolder).toBe(".scratch");
+    expect(project.workingExportFolder).toBe(".scratch");
     expect(project.slugPattern).toBe("{slug}");
     expect(project.trackerCommandsJson).toBeNull();
     expect(project.trackerDiagnostic).toMatch(/tickets_dir/);
@@ -263,11 +263,11 @@ describe("a project's declared tracker", () => {
     const project = await registerProject.run({
       root,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
 
     expect(project.trackerDiagnostic).toMatch(/tickets_dir/);
-    expect(project.exportFolder).toBe(".scratch");
+    expect(project.workingExportFolder).toBe(".scratch");
   });
 
   it("refuses a blank export folder when there is no valid tracker to fall back on", async () => {
@@ -279,7 +279,7 @@ describe("a project's declared tracker", () => {
   it("is not re-read by an ordinary update; refresh-project-tracker re-reads it", async () => {
     const root = repos.create({ files: { [TRACKER_PATH]: validTrackerBlock() } });
     const project = await registerProject.run({ root, verifyCommand: "pnpm test" });
-    expect(project.exportFolder).toBe(".scratch/tickets");
+    expect(project.workingExportFolder).toBe(".scratch/tickets");
 
     writeFileSync(
       path.join(root, TRACKER_PATH),
@@ -290,19 +290,19 @@ describe("a project's declared tracker", () => {
     );
 
     const updated = await updateProject.run({ id: project.id, name: "Renamed" });
-    expect(updated.exportFolder).toBe(".scratch/tickets");
+    expect(updated.workingExportFolder).toBe(".scratch/tickets");
     expect(JSON.parse(updated.trackerCommandsJson!)).toEqual({
       claim: "bd update {id} --claim",
     });
 
     const refreshed = await refreshProjectTracker.run({ id: project.id });
-    expect(refreshed.exportFolder).toBe(".scratch/renamed");
+    expect(refreshed.workingExportFolder).toBe(".scratch/renamed");
     expect(JSON.parse(refreshed.trackerCommandsJson!)).toEqual({
       claim: "bd update {id} --claim",
       close: "bd close {id}",
     });
 
-    expect((await getProject.run({ id: project.id })).exportFolder).toBe(".scratch/renamed");
+    expect((await getProject.run({ id: project.id })).workingExportFolder).toBe(".scratch/renamed");
   });
 
   it("surfaces the diagnostic on the project record", async () => {
@@ -313,7 +313,7 @@ describe("a project's declared tracker", () => {
     const project = await registerProject.run({
       root,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
 
     expect((await getProject.run({ id: project.id })).trackerDiagnostic).toMatch(/ticket_format/);
@@ -330,7 +330,7 @@ describe("a session's project", () => {
     return registerProject.run({
       root: repos.create(),
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
   }
 

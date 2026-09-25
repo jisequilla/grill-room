@@ -11,7 +11,7 @@ import {
 
 export default defineAction({
   description:
-    "Register a project sessions export into. The root is resolved to its git top-level and a folder outside any git repository is refused. Root and verify command are required; a blank export folder or slug pattern falls back to the repository's declared tracker block when it has a valid one, otherwise to the fixed layout. The visibility flag is seeded from git check-ignore on the export folder unless given. The delivery recipe is guessed from the repository's remotes (any remote gives \"pull-request\", none gives \"local-merge\") unless given.",
+    "Register a project sessions export into. The root is resolved to its git top-level and a folder outside any git repository is refused. Root and verify command are required; a blank working export folder or slug pattern falls back to the repository's declared tracker block when it has a valid one, otherwise to the fixed layout. The visibility flag is seeded from git check-ignore on the working export folder unless given. The delivery recipe is guessed from the repository's remotes (any remote gives \"pull-request\", none gives \"local-merge\") unless given.",
   schema: z.object({
     root: z
       .string()
@@ -21,7 +21,7 @@ export default defineAction({
       .string()
       .min(1)
       .describe("The command that verifies a change in this repository, e.g. 'pnpm test'"),
-    exportFolder: z
+    workingExportFolder: z
       .string()
       .optional()
       .describe(
@@ -46,7 +46,7 @@ export default defineAction({
     visibility: z
       .enum(PROJECT_VISIBILITIES)
       .optional()
-      .describe('Whether the export folder is "tracked" or "ignored" by git; seeded from git check-ignore when omitted'),
+      .describe('Whether the working export folder is "tracked" or "ignored" by git; seeded from git check-ignore when omitted'),
     deliveryRecipe: z
       .enum(DELIVERY_RECIPES)
       .optional()

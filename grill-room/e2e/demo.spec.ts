@@ -76,7 +76,7 @@ test("demo: the whole app, from idea to export", async ({ page, request }) => {
         root: repoDir,
         verifyCommand: "pnpm test",
         name: "Demo repo",
-        exportFolder: ".scratch",
+        workingExportFolder: ".scratch",
       },
     },
   );

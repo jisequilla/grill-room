@@ -248,7 +248,7 @@ export interface ExportBundlePlan {
     id: string;
     name: string;
     rootPath: string;
-    exportFolder: string;
+    workingExportFolder: string;
     slugPattern: string;
     visibility: ProjectVisibility;
   };
@@ -588,7 +588,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     });
   }
 
-  const exportDir = path.resolve(project.rootPath, project.exportFolder);
+  const exportDir = path.resolve(project.rootPath, project.workingExportFolder);
   const existingNames = await directoryNames(exportDir);
   const date = formatLocalDate(input.now ?? new Date());
   const folderName =
@@ -843,7 +843,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       id: project.id,
       name: project.name,
       rootPath: project.rootPath,
-      exportFolder: project.exportFolder,
+      workingExportFolder: project.workingExportFolder,
       slugPattern: project.slugPattern,
       visibility: project.visibility,
     },

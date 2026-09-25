@@ -79,7 +79,7 @@ export interface ProjectInput {
   name?: string | null;
   verifyCommand?: string | null;
   /** Relative to the root, or an absolute path inside it. */
-  exportFolder?: string | null;
+  workingExportFolder?: string | null;
   /** Defaults to {@link DEFAULT_PROJECT_SLUG_PATTERN}. */
   slugPattern?: string | null;
   /** `beads` or `markdown`; defaults to `markdown`. */
@@ -169,9 +169,9 @@ export async function resolveGitRoot(
  */
 export function normalizeExportFolder(
   root: string,
-  exportFolder: string,
-): { exportFolder: string } | Refused {
-  const trimmed = exportFolder.trim();
+  workingExportFolder: string,
+): { workingExportFolder: string } | Refused {
+  const trimmed = workingExportFolder.trim();
   const absolute = path.isAbsolute(trimmed)
     ? path.resolve(trimmed)
     : path.resolve(root, trimmed);
@@ -186,10 +186,10 @@ export function normalizeExportFolder(
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     return refuse(
       "export-folder-outside-root",
-      `The export folder must be inside the project root: ${exportFolder}`,
+      `The export folder must be inside the project root: ${workingExportFolder}`,
     );
   }
-  return { exportFolder: relative.split(path.sep).join("/") };
+  return { workingExportFolder: relative.split(path.sep).join("/") };
 }
 
 /**
@@ -200,9 +200,9 @@ export function normalizeExportFolder(
  */
 export async function seedVisibility(
   root: string,
-  exportFolder: string,
+  workingExportFolder: string,
 ): Promise<ProjectVisibility> {
-  const result = await runGit(root, ["check-ignore", "-q", "--", `${exportFolder}/`]);
+  const result = await runGit(root, ["check-ignore", "-q", "--", `${workingExportFolder}/`]);
   return result.exitCode === 0 ? "ignored" : "tracked";
 }
 
@@ -319,10 +319,10 @@ export interface ProjectFolderInspection {
   /** The root folder's name, the default project name. */
   name: string;
   verifyCommand: string | null;
-  /** Seeded visibility for `exportFolder`, or null when no export folder was given. */
+  /** Seeded visibility for `workingExportFolder`, or null when no export folder was given. */
   visibility: ProjectVisibility | null;
   /** The export folder normalised against the root, or null when none was given. */
-  exportFolder: string | null;
+  workingExportFolder: string | null;
   /** From a valid declared tracker's `tickets_dir`; pre-fills a blank export folder. */
   trackerExportFolder: string | null;
   /** From a valid declared tracker's `ticket_format`; pre-fills a blank slug pattern. */
@@ -339,7 +339,7 @@ export interface ProjectFolderInspection {
  */
 export async function inspectProjectFolder(
   folder: string,
-  exportFolder?: string | null,
+  workingExportFolder?: string | null,
 ): Promise<ProjectFolderInspection | Refused> {
   const resolved = await resolveGitRoot(folder);
   if ("refusal" in resolved) return resolved;
@@ -347,10 +347,10 @@ export async function inspectProjectFolder(
 
   let normalizedExport: string | null = null;
   let visibility: ProjectVisibility | null = null;
-  if (!blank(exportFolder)) {
-    const normalized = normalizeExportFolder(root, exportFolder as string);
+  if (!blank(workingExportFolder)) {
+    const normalized = normalizeExportFolder(root, workingExportFolder as string);
     if ("refusal" in normalized) return normalized;
-    normalizedExport = normalized.exportFolder;
+    normalizedExport = normalized.workingExportFolder;
     visibility = await seedVisibility(root, normalizedExport);
   }
 
@@ -361,7 +361,7 @@ export async function inspectProjectFolder(
     name: path.basename(root),
     verifyCommand: suggestVerifyCommand(root),
     visibility,
-    exportFolder: normalizedExport,
+    workingExportFolder: normalizedExport,
     trackerExportFolder: tracker.kind === "valid" ? tracker.tracker.ticketsDir : null,
     trackerSlugPattern: tracker.kind === "valid" ? tracker.tracker.ticketFormat : null,
   };
@@ -499,14 +499,16 @@ async function validate(
 
   // Explicit input always wins; a valid tracker only fills a field the
   // caller left blank.
-  const exportFolderInput = blank(input.exportFolder) ? trackerExportFolder : input.exportFolder;
-  if (blank(exportFolderInput)) {
+  const workingExportFolderInput = blank(input.workingExportFolder)
+    ? trackerExportFolder
+    : input.workingExportFolder;
+  if (blank(workingExportFolderInput)) {
     return refuse("export-folder-required", "A project needs an export folder.");
   }
 
-  const normalized = normalizeExportFolder(root, exportFolderInput as string);
+  const normalized = normalizeExportFolder(root, workingExportFolderInput as string);
   if ("refusal" in normalized) return normalized;
-  const { exportFolder } = normalized;
+  const { workingExportFolder } = normalized;
 
   const slugPatternInput = blank(input.slugPattern) ? trackerSlugPattern : input.slugPattern;
   const slugPattern = blank(slugPatternInput)
@@ -522,7 +524,7 @@ async function validate(
 
   let visibility: ProjectVisibility;
   if (blank(input.visibility)) {
-    visibility = await seedVisibility(root, exportFolder);
+    visibility = await seedVisibility(root, workingExportFolder);
   } else {
     const checked = checkVisibility((input.visibility as string).trim());
     if (typeof checked !== "string") return checked;
@@ -554,7 +556,7 @@ async function validate(
       name: blank(input.name) ? path.basename(root) : (input.name as string).trim(),
       rootPath: root,
       verifyCommand: (input.verifyCommand as string).trim(),
-      exportFolder,
+      workingExportFolder,
       slugPattern,
       trackerKind,
       buildRecordLogging: input.buildRecordLogging ?? false,
@@ -607,7 +609,7 @@ export async function updateProject(
     root: patch.root ?? existing.rootPath,
     name: patch.name ?? existing.name,
     verifyCommand: patch.verifyCommand ?? existing.verifyCommand,
-    exportFolder: patch.exportFolder ?? existing.exportFolder,
+    workingExportFolder: patch.workingExportFolder ?? existing.workingExportFolder,
     slugPattern: patch.slugPattern ?? existing.slugPattern,
     trackerKind: patch.trackerKind ?? existing.trackerKind,
     buildRecordLogging: patch.buildRecordLogging ?? existing.buildRecordLogging,
@@ -650,7 +652,7 @@ export async function refreshProjectTracker(
 
   if (tracker.kind === "valid") {
     const normalized = normalizeExportFolder(existing.rootPath, tracker.tracker.ticketsDir);
-    if (!("refusal" in normalized)) patch.exportFolder = normalized.exportFolder;
+    if (!("refusal" in normalized)) patch.workingExportFolder = normalized.workingExportFolder;
 
     const slugRefusal = checkSlugPattern(tracker.tracker.ticketFormat);
     if (!slugRefusal) patch.slugPattern = tracker.tracker.ticketFormat;

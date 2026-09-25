@@ -108,7 +108,7 @@ async function aScoutedSession() {
   const project = await registerProject.run({
     root,
     verifyCommand: "pnpm test",
-    exportFolder: ".scratch",
+    workingExportFolder: ".scratch",
   });
   const session = await createSession.run({
     title: "Ingest lag alerts",

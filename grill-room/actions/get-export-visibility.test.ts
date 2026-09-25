@@ -29,7 +29,7 @@ async function aProject(options: { files?: Record<string, string> } = {}) {
   const project = await registerProject.run({
     root,
     verifyCommand: "pnpm test",
-    exportFolder: ".scratch",
+    workingExportFolder: ".scratch",
   });
   return { root, project };
 }

@@ -78,7 +78,7 @@ async function aSessionWithProject(
   const project = await registerProject.run({
     root,
     verifyCommand: "pnpm test",
-    exportFolder: ".scratch",
+    workingExportFolder: ".scratch",
   });
   const session = await createSession.run({
     title: "Ingest lag alerts",
@@ -275,7 +275,7 @@ describe("scout-project", () => {
     const project = await registerProject.run({
       root,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
     const session = await createSession.run({
       title: "Flat errors for the plan endpoints",
@@ -365,7 +365,7 @@ describe("scout-project", () => {
     const project = await registerProject.run({
       root,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
     const session = await createSession.run({
       title: "Something else entirely",
@@ -657,7 +657,7 @@ describe("scout-project", () => {
     const project = await registerProject.run({
       root,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
     const session = await createSession.run({
       title: "Ingest lag alerts",
@@ -826,7 +826,7 @@ describe("scout-project", () => {
       const project = await registerProject.run({
         root,
         verifyCommand: "pnpm test",
-        exportFolder: ".scratch",
+        workingExportFolder: ".scratch",
       });
 
       const exportedSession = await createSession.run({

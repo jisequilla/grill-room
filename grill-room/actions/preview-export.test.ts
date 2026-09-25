@@ -101,7 +101,7 @@ async function aSessionWithHandoff() {
   const project = await registerProject.run({
     root,
     verifyCommand: "pnpm test",
-    exportFolder: ".scratch",
+    workingExportFolder: ".scratch",
   });
   const session = await createSession.run({
     title: "Grill Room",
