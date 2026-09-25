@@ -8,16 +8,20 @@ Bead gr-5e7.14. A second run with the real interviewer and the real handoff scou
 |---|-------|-----------|----------|
 | 1a | Every edit target exists | **Pass**: 7 of 7 | **Fail**: 5 of 6. Ticket 3 edits `backend/export/export_test.go`, a file ticket 1 creates. This is what the app refused |
 | 1b | Every create target is new, inside the repo and not ignored | **Pass**: 2 of 2 | **Pass**: 5 of 5 |
-| 1c | Nothing important missing from File boundaries | **Fail**: 3 gaps | **Fail**: 2 gaps. Tickets 1 and 3 have no legal way to share a test file. Ticket 2 breaks the backend build until ticket 4 lands, and `server.go` is outside its boundaries. The first run's handler-test gap and proof-outside-boundaries gap are gone |
+| 1c | Nothing important missing from File boundaries | **Fail**: 3 gaps | **Fail**: 2 gaps. Ticket 3 has no test file of its own, only an edit of ticket 1's. Ticket 2 breaks the backend build until ticket 4 lands, and `server.go` is outside its boundaries. The first run's handler-test gap and proof-outside-boundaries gap are gone |
 | 2 | Codebase facts true at the cited line | **Pass, with caveats**: 22 facts, 19 true, 3 partly | **Pass, with caveats**: 21 facts, 18 true, 3 partly, 0 false |
-| 3 | Builds on names what the blocker produces; the check fails before and passes after | **Partial**: 1 of 3 sound | **Partial**: all 4 edges use the right form, and all 4 checks fail today. None is sure to pass once the blocker lands: each greps a name the blocker's ticket never fixes |
+| 3 | Builds on names what the blocker produces; the check fails before and passes after | **Partial**: 1 of 3 sound | **Partial**: all 4 edges use the right form, and all 4 checks fail today. None is sure to pass once the blocker lands: each greps a name the blocker's ticket never fixes. This run applies a stricter criterion than the first run's "the check is runnable": the check must fail before the blocker and pass after it, which is the rule PR #61 put in the prompt |
 | 4 | Proved by: a test in the ticket's own files, and a command that runs this ticket's test | **Partial**: 1 of 4 sound | **Improved, partial**: 3 of 5 sound, 1 partial (ticket 5 needs the Go backend running), 1 invalid (ticket 3's test is its blocker's create) |
 | 5 | HANDOFF.md says grounded only if every brief was | **Pass** (positive case) | **Pass** (negative case): nothing was grounded, and HANDOFF.md keeps the fill-the-slots wording |
 | 6 | Cost | 1 turn, 2 runs, 2 attempts, 0 refusals, 276 s. Run 1 died on a schema refine | 1 turn, 2 runs, **6 attempts, 6 refusals, 0 malformed-output**, 1734.7 s. **Both runs spent their three attempts and ended `invalid-brief-grounding`; nothing was stored** |
 
 What PR #61 set out to fix is fixed. The CLI accepted the contract with its `anyOf`, and no attempt broke a `buildsOn` form. Every rule violation came back as a refusal that retried, and none became `malformed-output`. The prompt changes show up in the content. Dependencies now use `editedPath` + `symbol` instead of nearby lines, and every check fails today. Tickets 4 and 5 get new test files of their own. Commands are narrowed to the ticket's package or spec file. The planned-distance contradiction is spelled out as a consequence.
 
-The run still failed, and it failed harder than the first one. This time the ticket split put the export function (ticket 1) and its tests (ticket 3) in separate tickets. No grounding can then pass the app's rules. Ticket 1 must list its proving test among its own files. Ticket 3 cannot `edit` a file that does not exist yet, and it cannot `create` a file ticket 1 also creates. The scout went back and forth between the two refusals for six attempts and 29 minutes of model time. The export went out with no grounding at all.
+The run still failed, this time because the retries never reached a shape the app accepts. The ticket split put the export function (ticket 1) and its tests (ticket 3) in separate tickets. The scout's natural shape was for ticket 3 to `edit` the `export_test.go` that ticket 1 creates. The app refuses that shape, because an `edit` must exist today, and it offers no way to say "edits a file its blocker creates". Legal shapes did exist:
+- ticket 3 creates a test file of its own in the same package, such as `backend/export/export_cases_test.go`, and depends on ticket 1's `createdPath`;
+- both tickets create `export_test.go`, which the app would accept because it never compares creates across tickets. That is a gap of its own.
+
+The scout never tried either. It alternated between two refused shapes for six attempts and 29 minutes of model time, and the export went out with no grounding at all.
 
 ## Setup
 
@@ -79,21 +83,23 @@ The acceptance lines that the checks below measure against:
 | 2 | yes | 2 | `tree-rule-refusal` | 163.7 s | "Ticket 1 is proved by backend/export/export_test.go, which is not one of its filesToChange; …", and the same for ticket 4 |
 | 2 | yes | 3 | `tree-rule-refusal` | 159.6 s | "Citation \"backend/export/export.go:1-1\" cites backend/export/export.go, which does not exist in the project.", plus the proof-test reason for tickets 1, 2 and 4 |
 
-Each run ended the action with HTTP 400 and `invalid-brief-grounding`: "The handoff scout returned a grounding the app could not accept 3 times." `get-brief-grounding` returned `grounding: null`.
+Each run ended the action with HTTP 400 and `invalid-brief-grounding`: "The handoff scout returned a grounding the app could not accept 3 times. Last reason: …" `get-brief-grounding` returned `grounding: null`.
 
 The loop, attempt by attempt:
 - **Attempts 1 and 3 of run 1, and attempt 1 of run 2.** Ticket 1 creates `export_test.go` and is proved by it. Ticket 3 `edit`s it. This was the only reason each of those attempts was refused. The other rules all passed on those three attempts.
-- **The attempts in between.** Each tried the one move the refusal left open. Ticket 3 created the file, which forced ticket 1 to name a proof outside its own files. At the same time the scout dropped the new test files of tickets 4 and 5 from their boundaries.
+- **The attempts in between.** Each followed the refusal's advice, "mark it create", but moved the file instead of adding one. Ticket 3 created `export_test.go`, and ticket 1 dropped it from its own files while still naming it as its proof. Nothing forced that drop: ticket 1 could have kept its create, or ticket 3 could have created a second `_test.go` in the package. At the same time the scout dropped the new test files of tickets 4 and 5 from their boundaries.
 - **The last attempt.** It borrowed ticket 3's test for tickets 1, 2 and 4, and invented a citation of the not-yet-existing `export.go:1-1`.
 
-Brief 03's `provides` in run 1 attempt 3 says what the scout wanted to express: "the export_test.go file it creates for this ticket to extend". No rule accepts that.
+Brief 03's `provides` in run 1 attempt 3 says what the scout wanted to express: "the export_test.go file it creates for this ticket to extend". The app has no form for that shape. Two shapes that pass every rule were available, and no attempt tried them:
+- **Ticket 3 creates its own test file.** Ticket 1 creates `export.go` and `export_test.go` and is proved by `export_test.go`. Ticket 3 creates `backend/export/export_cases_test.go`, is proved by it with `cd backend && go test ./export/...`, and depends on ticket 1 through `createdPath` `backend/export/export.go`. Go allows any number of `_test.go` files per package, and a separate file meets all of ticket 3's criteria.
+- **Both tickets create `export_test.go`.** `reasonsToRefuseHandoffGrounding` checks a `create` only against the filesystem: it must be inside the root, must not exist and must not be ignored. It never compares creates across tickets, so this passes too, although the second builder would then collide with the first.
 
 ## gr-5e7.13 item 4: the contract and the refusals
 
 - **The CLI accepted `--json-schema` with the whole-object `anyOf`.** `jsonSchemaFor("handoff-scout")` gives each `buildsOn` item as an `anyOf` of three strict objects (I printed it with `tsx`). The first is `citation` with the citation pattern and the other three fields `null`. The second is `createdPath`. The third is `editedPath` plus `symbol`. No attempt failed at the CLI, and every attempt returned structured output.
 - **The contract held.** Across all 6 raw outputs I checked every `buildsOn` entry, 4 per attempt and 24 in all. None violated its form: exactly one location field is set, and `symbol` is set exactly with `editedPath`.
 - **Every violation arrived as a refusal that retried, never as `malformed-output`.** All six attempts are `tree-rule-refusal`, and the reasons are the app's own, quoted in the table above. The first run's terminal failure mode, a zod refine thrown as `malformed-output`, did not occur.
-- **What this does not show.** The retry budget is three attempts per run. A rule pair that no answer can satisfy spends all three, and the turn ends anyway. Here that happened twice.
+- **What this does not show.** Retrying is not converging. The retry budget is three attempts per run, and a scout that keeps alternating between refused shapes spends all three and ends the turn anyway, although a legal shape exists. Here that happened twice.
 
 ## Export
 
@@ -307,7 +313,7 @@ Every check was done by reading the clone at `52b6bf2`, with commands run read-o
 - `git check-ignore -v` prints nothing and exits 1 for all five.
 
 **1c. Nothing important missing: Fail (2 gaps).**
-- **Tickets 1 and 3 cannot share `export_test.go`.** Ticket 3 is "write the repo's first `_test.go`" for ticket 1's function. Ticket 1 must also prove itself with a test in its own files. The rules offer no shape for "ticket 3 extends the test file ticket 1 creates", and no other shape keeps both tickets honest. The ticket split causes it, and the app's rules turn it into a dead end (see new problem 1).
+- **Ticket 3 has no test file of its own.** Ticket 3 is "write the repo's first `_test.go`" for ticket 1's function, and ticket 1 must also prove itself with a test in its own files. The scout gave ticket 3 an `edit` of ticket 1's `export_test.go`, which does not exist yet. The boundary a builder could actually use is a second test file in the same package, created by ticket 3, such as `backend/export/export_cases_test.go`. The rules accept that shape, but the scout never proposed it (new problem 1). The app also has no way to express the shape the scout wanted, an edit of a file the blocker creates (new problem 2).
 - **Ticket 2 breaks the backend build, and the fix is outside its boundaries.**
   - I regenerated with ticket 2's change in the scratch copy. `StrictServerInterface` gains a method, and `go build ./...` then fails: `./main.go:50:40: cannot use srv (variable of type *server.Server) as api.StrictServerInterface value … (missing method GetApiPlanExportCsv)`.
   - `make test-go` (`go test ./...`) fails the same way on the root package, so the project's verify command stays red from ticket 2 until ticket 4 lands.
@@ -369,7 +375,7 @@ Compared with the first run:
 |--------|-----------|---------|---------|
 | 01 | `backend/export/export_test.go` (create) | `cd backend && go test ./export/...` | **Pass.** The test is in its own files, the command is narrowed to the package, and today it fails with `setup failed` (no package). The catch: ticket 3 exists to write this same file (see 1c) |
 | 02 | `backend/generated/api/api.gen_test.go` (create) | `cd backend && oapi-codegen -config oapi-codegen.yaml ../api/openapi.yaml && go test ./generated/api/...` | **Pass, with a caveat.** A real test file, and the build-then-test chain the new prompt asks for. `oapi-codegen` is on this machine (`~/go/bin`). But the chain builds only the generated package, so it passes while `go build ./...` is broken (1c). Chaining `go build ./...` would have exposed the missing stub |
-| 03 | `backend/export/export_test.go` (edit) | `cd backend && go test ./export/...` | **Fail.** The right package, but the file is its blocker's create, which is why the app refused the attempt |
+| 03 | `backend/export/export_test.go` (edit) | `cd backend && go test ./export/...` | **Fail.** The right package, but the file is its blocker's create, which is why the app refused the attempt. A test file created by ticket 3 in the same package would have passed |
 | 04 | `backend/server/server_test.go` (create) | `cd backend && go test ./server/...` | **Pass.** The first run's ticket 3 proved itself with another ticket's test. This is a handler test in its own files, narrowed to the package. Today the command reports `[no test files]` |
 | 05 | `frontend/e2e/progress.spec.ts` (create) | `cd frontend && npx playwright test e2e/progress.spec.ts` | **Partial.** The file is in its own files and the command is narrowed to it. As in the first run, `webServer` starts only `npm run dev`, so a download test also needs the Go backend on `:8080`, and nothing in the brief starts it |
 
@@ -400,14 +406,14 @@ Each brief has the plain slot placeholders. This is the case the first run did n
 1. **A schema refine ends the turn instead of retrying. Fixed.**
    - All six contract-level problems came back as `tree-rule-refusal` and were retried. None became `malformed-output`.
    - The contract (`handoffScoutContractSchema`) carries the three forms as an `anyOf`, the CLI accepted it, and no output broke it.
-   - A new problem sits beside it: a pair of rules that no answer can satisfy still ends the turn, once the three attempts are spent (new problem 1).
+   - A new problem sits beside it: retries that do not converge still end the turn once the three attempts are spent, even when a legal shape exists (new problem 1).
 2. **No form for a symbol the blocker adds to a file it edits. Fixed.**
    - Both edges of that kind use `editedPath` + `symbol` on the blocker's `edit` file: 04 ← 02 on `api.gen.go`, and 05 ← 04 on `server.go`.
    - No entry cites nearby existing lines.
-   - One weakness: in run 2, `symbol` was sometimes prose, not a name, for example "a StrictServerInterface method (and response object/type) for the export.csv operation" (new problem 5).
+   - One weakness: in run 2, `symbol` was sometimes prose, not a name, for example "a StrictServerInterface method (and response object/type) for the export.csv operation" (new problem 6).
 3. **Builds-on checks that pass before the blocker exists. Fixed for "fails before".**
    - All four checks fail today.
-   - "Passes after" is new problem 3: each grep names something the blocker's ticket does not fix.
+   - "Passes after" is new problem 4: each grep names something the blocker's ticket does not fix.
 4. **The proving test sits outside the brief's boundaries. Fixed.**
    - The server check refused it three times: run 1 attempt 2, and run 2 attempts 2 and 3.
    - Every attempt it let through lists the test among its own files.
@@ -418,7 +424,7 @@ Each brief has the plain slot placeholders. This is the case the first run did n
 6. **No new test file for behavioural criteria. Fixed.** It created `server_test.go` for the handler, `progress.spec.ts` for the button, and `api.gen_test.go` for codegen.
 7. **Seams the facts reveal but the brief does not flag. Improved.**
    - The planned-distance contradiction is now a positive claim, with its consequence named, across three citations.
-   - One seam was missed, and its cost is concrete: ticket 2 regenerates an interface that `Server` then fails to satisfy, so the build stays broken until ticket 4. The scout had both halves as facts, in tickets 2 and 4, and drew no consequence (new problem 4).
+   - One seam was missed, and its cost is concrete: ticket 2 regenerates an interface that `Server` then fails to satisfy, so the build stays broken until ticket 4. The scout had both halves as facts, in tickets 2 and 4, and drew no consequence (new problem 5).
    - Nobody flagged that the symbol name depends on an operationId ticket 2 does not set.
 8. **Loose citations for broad statements. Improved in kind, unchanged in count.**
    - The ProgressView fact the first run faulted is now scoped to the header, which its range shows.
@@ -429,22 +435,26 @@ Each brief has the plain slot placeholders. This is the case the first run did n
 
 ## New problems, with suggested fixes
 
-1. **No legal shape for a ticket that writes to a file its blocker creates.** This ended both runs.
-   - It happens whenever tickets split code and its tests: ticket 1 creates `export_test.go`, and ticket 3 extends it.
-   - `edit` requires the file to exist today, and `create` would duplicate the blocker's create.
-   - The proof-test rule then forbids the way out: ticket 1 cannot name ticket 3's file as its proof.
-   - The refusal says "mark it create, or name a file that exists", which sends the scout into the other rule. The scout went back and forth between the two for six attempts.
+1. **Retries do not converge.** This ended both runs.
+   - Legal shapes existed (see the turn record). Ticket 3 could create its own `_test.go` in the package and depend on ticket 1's `createdPath`, or both tickets could create `export_test.go`.
+   - The scout alternated between two refused shapes instead:
+     - ticket 3 edits a file that does not exist yet;
+     - ticket 3 creates it and ticket 1 drops it, while ticket 1 still names it as its proof.
+   - It never tried a test file of ticket 3's own.
+   - Every retry got the whole prompt again with the reasons attached. The scout re-explored the code (130–341 s per retry) and changed entries that had already passed. By the last attempt it had invented a citation (`backend/export/export.go:1-1`) and moved proofs onto other tickets' tests.
 
-   *Fix (server check):* accept an `edit` of a path that one of the ticket's blockers (directly or transitively) lists as a `create`, the same way `createdPath` is matched. Word the refusal to offer that. *Fix (prompt):* say that a ticket may edit a file its blocker creates, and that it names that dependency as a `createdPath` on the blocker. *Upstream (ticketing prompt):* do not split a pure function from its unit tests into separate tickets when the tests are the function's only proof.
-2. **Retries do not converge, and the budget runs out on one structural issue.** Every retry got the whole prompt again with one reason attached. The scout re-explored (130–341 s) and changed entries that had already passed. By the last attempt it had invented a citation (`backend/export/export.go:1-1`) and moved proofs onto other tickets' tests.
-   *Fix (prompt):* the retry text says to change only the entries the reasons name and keep every other entry as it was. *Fix (server):* when two consecutive refusals name the same entry with reasons that exclude each other, stop early. Report both reasons to the operator, instead of spending the last attempt.
-3. **Dependency checks grep names the blocker's ticket does not fix.** `func BuildRows` and `GetPlanExportCsv` are guesses. Without an `operationId`, oapi-codegen generates `GetApiPlanExportCsv`, and the check would never pass.
+   *Fix (prompt):* the retry text says to change only the entries the reasons name and to keep every other entry as it was. The main prompt says that a ticket which only adds tests creates its own test file beside its blocker's, for example a second `_test.go` in the same Go package, instead of editing the blocker's file. *Fix (retry mechanics):* when two refusals in a row name the same entry with reasons that exclude each other, the next retry names both reasons together and points at the shape that satisfies both. If that fails too, stop early and report both reasons to the operator instead of spending the last attempt. *Upstream (ticketing prompt):* avoid splitting a pure function from its only unit tests into separate tickets.
+2. **The app cannot express "edits a file its blocker creates".** This was the scout's first choice every time, and it is how a builder would naturally extend a blocker's test file. An `edit` must exist today, so the app refuses it, and its refusal ("mark it create, or name a file that exists") offers no dependency-aware option. A separate create of the ticket's own was always available, so this form is a convenience, not a requirement.
+   *Fix (server check, optional):* accept an `edit` of a path that one of the ticket's blockers (directly or transitively) lists as a `create`, matched the same way `createdPath` is. Word the refusal to offer that, or to offer a new file of the ticket's own. *Fix (prompt):* describe whichever shape the app accepts.
+3. **Two tickets may both create the same path.** `reasonsToRefuseHandoffGrounding` checks a `create` only against the filesystem: inside the root, not existing, not ignored. It never compares creates across tickets. A grounding where tickets 1 and 3 both create `backend/export/export_test.go` would have been accepted, and the second builder would find the file already there and collide with the first.
+   *Fix (server check):* refuse a path that more than one ticket marks as `create`. The reason tells the later ticket to edit it (once problem 2's form exists) or to create a file of its own.
+4. **Dependency checks grep names the blocker's ticket does not fix.** `func BuildRows` and `GetPlanExportCsv` are guesses. Without an `operationId`, oapi-codegen generates `GetApiPlanExportCsv`, and the check would never pass.
    *Fix (prompt):* "grep for something the blocker's ticket text fixes: a path, a route string, a name it states. When the check needs a name the ticket does not state, say so in `provides`, since the builder of the blocker must then use that name." Run 2 attempt 1's `grep 'export.csv'` is the model to follow.
-4. **A codegen ticket whose proof skips the module build.** Ticket 2's command builds only `./generated/api/...`, so the check passes while `go build ./...` and `make test-go` fail on `main.go`. The fix belongs in `server.go`, which is outside ticket 2's boundaries.
+5. **A codegen ticket whose proof skips the module build.** Ticket 2's command builds only `./generated/api/...`, so the check passes while `go build ./...` and `make test-go` fail on `main.go`. The fix belongs in `server.go`, which is outside ticket 2's boundaries.
    *Fix (prompt):* "a ticket proved by a build builds the whole module or project, not only the package it regenerates. When that build fails without a file outside the ticket's boundaries, add that file, and say why in a fact." This would have pulled a placeholder into ticket 2's boundaries, as the first run's split did.
-5. **`symbol` accepts prose.** Run 2 attempts gave `symbol` values like "handler method for GET /api/plan/export.csv", which the brief renders in backticks as though it were a name.
-   *Fix (schema):* give `symbol` a pattern in the contract, an identifier or a dotted/qualified name with no spaces. A refine is not the tool, since it would be dropped. Alternatively, move descriptive text to `provides` in the prompt.
+6. **`symbol` accepts prose.** Run 2 attempts gave `symbol` values like "handler method for GET /api/plan/export.csv", which the brief renders in backticks as though it were a name.
+   *Fix (schema):* give `symbol` a pattern in the contract: an identifier, or a dotted or qualified name with no spaces. A refine is the wrong tool, since the contract would drop it. Alternatively, have the prompt move descriptive text to `provides`.
 
 ## Follow-ups to file as beads
 
-Problem 1 is an app change with a server-side part, it ended both runs, and it is worth its own bead first. Problem 2's server half (stop early on reasons that exclude each other) is a second. Problems 3 and 4 and the retry wording from problem 2 are prompt changes that can share one bead. Problem 5 is a small schema change.
+Problem 1 ended both runs, and its fix is mostly prompt: the retry wording and the own-test-file hint. Together with the retry-mechanics change, it is the first bead. Problem 3 is a small server check that closes a real collision, and it is the second. Problems 4 and 5 are prompt changes that can share a bead with problem 1's wording, or follow it. Problem 2 is optional: it would let the scout's natural shape pass, but no split needs it. Problem 6 is a small schema change.
