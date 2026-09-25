@@ -85,7 +85,10 @@ function aSettledDecision(
   sessionId: string,
   key: string,
   settledAt: string,
-  overrides: Partial<typeof schema.decisions.$inferInsert> = {},
+  overrides: Omit<
+    Partial<typeof schema.decisions.$inferInsert>,
+    "id" | "key" | "questionTitle"
+  > = {},
 ) {
   return insertDecision(sessionId, {
     id: `d-${key}`,
