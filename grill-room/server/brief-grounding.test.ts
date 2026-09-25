@@ -4,7 +4,11 @@ import { describe, expect, it } from "vitest";
 
 import { useTempGitRepos } from "../test/git-repos.js";
 import { aHandoffScoutResult } from "./interviewer/test-fixtures.js";
-import { reasonsToRefuseHandoffGrounding, type GroundedHandoffTicket } from "./brief-grounding.js";
+import {
+  isTestFileByName,
+  reasonsToRefuseHandoffGrounding,
+  type GroundedHandoffTicket,
+} from "./brief-grounding.js";
 
 const repos = useTempGitRepos();
 
@@ -183,28 +187,33 @@ describe("reasonsToRefuseHandoffGrounding's ignored-path check", () => {
 
 type ScoutTicket = ReturnType<typeof aHandoffScoutResult>["tickets"][number];
 
-/** One ticket's grounding: `files` as `path: change`, proved by `testPath`, one `createdPath` buildsOn per blocker. */
+/**
+ * One ticket's grounding: `files` as `path: change`, proved by `testPath`
+ * (run by `command`), one `createdPath` buildsOn per blocker, each checked by
+ * its `check` or, by default, `test -f <createdPath>`.
+ */
 function aTicket(
   number: number,
   files: Record<string, "create" | "edit">,
   testPath: string,
-  buildsOn: { blocker: number; createdPath: string }[] = [],
+  buildsOn: { blocker: number; createdPath: string; check?: string }[] = [],
+  command = "cd backend && go test ./export/...",
 ): ScoutTicket {
   return {
     number,
     filesToChange: Object.entries(files).map(([path, change]) => ({ path, change })),
     buildsOnFiles: [],
     facts: [],
-    buildsOn: buildsOn.map(({ blocker, createdPath }) => ({
+    buildsOn: buildsOn.map(({ blocker, createdPath, check }) => ({
       blocker,
       provides: `What ticket ${blocker} creates.`,
       citation: null,
       createdPath,
       editedPath: null,
       symbol: null,
-      check: `test -f ${createdPath}`,
+      check: check ?? `test -f ${createdPath}`,
     })),
-    provedBy: { testPath, command: "cd backend && go test ./export/..." },
+    provedBy: { testPath, command },
   };
 }
 
@@ -275,13 +284,30 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
         tickets: [
           aTicket(1, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
           // Direct blocker whose single entry already names another file it creates.
-          aTicket(3, { [EXPORT_TEST]: "edit" }, EXPORT_TEST, [{ blocker: 1, createdPath: EXPORT }]),
+          // Its check and its proof follow the cd rule: after `cd backend`,
+          // paths are relative to backend; the build covers the whole module.
+          aTicket(
+            3,
+            { [EXPORT_TEST]: "edit" },
+            EXPORT_TEST,
+            [
+              {
+                blocker: 1,
+                createdPath: EXPORT,
+                check: "cd backend && grep -n 'func ' export/export.go",
+              },
+            ],
+            "cd backend && go build ./... && go test ./export/...",
+          ),
           // Direct blocker whose single entry is the file this ticket edits.
           aTicket(4, { [server]: "create", [serverTest]: "create", [EXPORT_TEST]: "edit" }, serverTest, [
             { blocker: 1, createdPath: EXPORT_TEST },
           ]),
           // Ticket 1 is further up the chain: only ticket 4, its direct blocker, has an entry.
-          aTicket(5, { [EXPORT_TEST]: "edit" }, EXPORT_TEST, [{ blocker: 4, createdPath: server }]),
+          // Its check does not cd, so it names the path from the repository root.
+          aTicket(5, { [EXPORT_TEST]: "edit" }, EXPORT_TEST, [
+            { blocker: 4, createdPath: server, check: `grep -n 'func ' ${server}` },
+          ]),
         ],
       },
       {
@@ -379,8 +405,11 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
   it("offers editing a blocker's create when an edit target is missing and no ticket creates it", async () => {
     const root = repos.create({ files: { "README.md": "# Marathon\n" } });
     const result = aBareResult();
-    result.tickets[0]!.filesToChange = [{ path: "src/missing.ts", change: "edit" }];
-    result.tickets[0]!.provedBy.testPath = "src/missing.ts";
+    result.tickets[0]!.filesToChange = [
+      { path: "src/missing.ts", change: "edit" },
+      { path: "src/missing.test.ts", change: "create" },
+    ];
+    result.tickets[0]!.provedBy.testPath = "src/missing.test.ts";
 
     const reasons = await reasonsToRefuseHandoffGrounding(result, {
       projectRoot: root,
@@ -443,5 +472,159 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
     expect(reasons).toEqual([
       `Tickets 3 and 2 both mark ${shared} as create; only one ticket may create a path. Ticket 3 comes first (an earlier wave of the Blocked-by graph, or the lower number within a wave), so it keeps the create. Ticket 2 may mark it edit only when it is blocked by ticket 3, directly or through its blockers, and it is not; drop it from ticket 2's filesToChange, or have ticket 2 create a file of its own beside it.`,
     ]);
+  });
+});
+
+describe("reasonsToRefuseHandoffGrounding on a check or command whose path ignores its own cd", () => {
+  /** The third run's tickets 3 and 4: 3 creates the export and its test, 4 extends the test. */
+  async function refuseTicket4(
+    check: string,
+    command = "cd backend && go test ./export/... -v",
+  ): Promise<string[]> {
+    const root = repos.create({ files: { "README.md": "# Marathon\n" } });
+    return reasonsToRefuseHandoffGrounding(
+      {
+        tickets: [
+          aTicket(3, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
+          aTicket(
+            4,
+            { [EXPORT_TEST]: "edit" },
+            EXPORT_TEST,
+            [{ blocker: 3, createdPath: EXPORT_TEST, check }],
+            command,
+          ),
+        ],
+      },
+      {
+        projectRoot: root,
+        tickets: [
+          { number: 3, blockedBy: [] },
+          { number: 4, blockedBy: [3] },
+        ],
+      },
+    );
+  }
+
+  it("refuses the third run's check, naming the ticket, the blocker and the path", async () => {
+    const reasons = await refuseTicket4(
+      "cd backend && go test ./export/... && grep -n 'func Test' backend/export/export_test.go",
+    );
+
+    expect(reasons).toEqual([
+      "Ticket 4's buildsOn check on ticket 3 runs `cd backend` and then names backend/export/export_test.go; after `cd backend`, paths are relative to backend, so it would look for backend/backend/export/export_test.go. Write it as export/export_test.go, or run the command from the repository root without the cd.",
+    ]);
+  });
+
+  it.each([
+    ["a leading ./ and a trailing slash on the folder", "cd ./backend/ && grep -n x backend/export/export.go"],
+    ["a ; instead of &&", "cd backend; grep -n x backend/export/export.go"],
+    ["a quoted path", "cd backend && grep -n x 'backend/export/export.go'"],
+    ["a ./ in front of the path", "cd backend && grep -n x ./backend/export/export.go"],
+  ])("refuses it with %s", async (_label, check) => {
+    const reasons = await refuseTicket4(check);
+
+    expect(reasons).toEqual([
+      expect.stringContaining(
+        "Ticket 4's buildsOn check on ticket 3 runs `cd backend` and then names backend/export/export.go; after `cd backend`, paths are relative to backend",
+      ),
+    ]);
+  });
+
+  it.each([
+    ["a cd whose paths are relative to it", "cd backend && go test ./export/..."],
+    ["a root path with no cd", "grep -n x backend/export/export.go"],
+    ["a word that holds the folder only mid-word", "cd a && ls b/a/x"],
+    [
+      "a root path after a second cd back to the root",
+      "cd backend && go vet ./export/... && cd .. && grep -n x backend/export/export.go",
+    ],
+  ])("accepts %s", async (_label, check) => {
+    expect(await refuseTicket4(check)).toEqual([]);
+  });
+
+  it("applies the same rule to provedBy.command", async () => {
+    const reasons = await refuseTicket4(
+      "test -f backend/export/export_test.go",
+      "cd backend && go test ./export/... && grep -n 'func Test' backend/export/export_test.go",
+    );
+
+    expect(reasons).toEqual([
+      "Ticket 4's provedBy.command runs `cd backend` and then names backend/export/export_test.go; after `cd backend`, paths are relative to backend, so it would look for backend/backend/export/export_test.go. Write it as export/export_test.go, or run the command from the repository root without the cd.",
+    ]);
+  });
+});
+
+describe("reasonsToRefuseHandoffGrounding on what counts as a proof", () => {
+  it("refuses the third run's ticket 1: proved by the openapi.yaml it edits, with a parse that passes today", async () => {
+    const root = repos.create({ files: { "api/openapi.yaml": "openapi: 3.0.3\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      {
+        tickets: [
+          aTicket(
+            1,
+            { "api/openapi.yaml": "edit" },
+            "api/openapi.yaml",
+            [],
+            "cd frontend && npx openapi-typescript ../api/openapi.yaml -o /dev/null",
+          ),
+        ],
+      },
+      { projectRoot: root, tickets: aSingleTicket() },
+    );
+
+    expect(reasons).toEqual([
+      "Ticket 1 is proved by api/openapi.yaml, a file it edits that is not a test by its name (_test.go, .test.*, .spec.*, test_*.py, *_test.py, or a file under a __tests__/, tests/ or test/ folder), so it would pass before the change as well as after. The proof must be a test, or a command that fails on the current commit (a build, or a grep for what the ticket adds), with a test path the ticket creates or edits.",
+    ]);
+  });
+
+  it.each([
+    ["a _test.go it creates", { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST],
+    ["a foo.spec.ts it edits", { "src/foo.ts": "edit", "src/foo.spec.ts": "edit" }, "src/foo.spec.ts"],
+    ["a file under tests/ it edits", { "app/export.py": "edit", "tests/helpers.py": "edit" }, "tests/helpers.py"],
+    ["a non-test file it creates", { "backend/export/check.go": "create" }, "backend/export/check.go"],
+  ] as const)("accepts %s", async (_label, files, testPath) => {
+    const root = repos.create({
+      files: {
+        "src/foo.ts": "export const foo = 1;\n",
+        "src/foo.spec.ts": "import { foo } from './foo';\n",
+        "app/export.py": "def export(): pass\n",
+        "tests/helpers.py": "def helper(): pass\n",
+      },
+    });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { tickets: [aTicket(1, { ...files }, testPath)] },
+      { projectRoot: root, tickets: aSingleTicket() },
+    );
+
+    expect(reasons).toEqual([]);
+  });
+});
+
+describe("isTestFileByName", () => {
+  it.each([
+    "backend/export/export_test.go",
+    "src/a.test.ts",
+    "src/a.test.tsx",
+    "web/a.spec.js",
+    "pkg/test_export.py",
+    "pkg/export_test.py",
+    "src/__tests__/a.ts",
+    "tests/helpers.py",
+    "src/test/java/ExportIT.java",
+  ])("counts %s as a test", (candidate) => {
+    expect(isTestFileByName(candidate)).toBe(true);
+  });
+
+  it.each([
+    "api/openapi.yaml",
+    "backend/generated/api/api.gen.go",
+    "frontend/src/api/schema.d.ts",
+    "src/latest/a.ts",
+    "src/contest.ts",
+    "pkg/attest_export.py",
+  ])("does not count %s as a test", (candidate) => {
+    expect(isTestFileByName(candidate)).toBe(false);
   });
 });

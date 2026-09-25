@@ -546,7 +546,17 @@ with the reasons:
   `create`, and one on a path it edits names a path that blocker lists as an
   `edit`;
 - a ticket that changes files lists its proving test (`provedBy.testPath`)
-  among them, as a `create` or an `edit`.
+  among them, as a `create` or an `edit`;
+- a proving test the ticket marks `edit` is a test by its name
+  (`TEST_FILE_PATTERNS`: `_test.go`, `.test.*`, `.spec.*`, `test_*.py`,
+  `*_test.py`, or a file under a `__tests__/`, `tests/` or `test/` folder),
+  not the spec, configuration or generated file the ticket changes; a
+  proving test the ticket creates is always accepted;
+- a `buildsOn` check or a `provedBy.command` that starts `cd <dir> &&` (or
+  `cd <dir>;`) names no later word beginning with `<dir>/`, since after the
+  `cd` paths are relative to `<dir>`. `<dir>` is compared without a leading
+  `./` or trailing slash; a word that holds `<dir>/` only further in is not a
+  match, and words after a second `cd` are not looked at.
 
 A ticket may list no files to change, as a spike does; its proving test may
 then live anywhere. A handoff with more tickets than one turn can ground, or a

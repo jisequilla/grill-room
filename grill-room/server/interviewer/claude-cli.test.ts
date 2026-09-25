@@ -18,6 +18,7 @@ import { jsonSchemaFor } from "./schemas.js";
 import { SCOUT_MODEL } from "./types.js";
 import type { ModelCallEnd, ModelCallObserver } from "./types.js";
 import {
+  aContext,
   anAssessReadinessRequest,
   anAssessReadinessResult,
   aFindSupersededRequest,
@@ -824,6 +825,67 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("always exercises the test it names.");
   });
 
+  it("says checks and commands run from the repository root, and paths after a cd are relative to it", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  Every `check`, and every `provedBy.command`, runs from the repository",
+        "  root. After a `cd`, paths are relative to the new directory: after",
+        "  `cd backend`, write `export/export.go`, never `backend/export/export.go`.",
+        "  Otherwise do not `cd`: name paths from the repository root.",
+      ].join("\n"),
+    );
+  });
+
+  it("says the proof must fail on the current commit, and a file the ticket edits is no proof unless it is a test", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  The proof must fail on the current commit, before this ticket's",
+        "  change, and pass after it. A file the ticket edits is never its own",
+        "  proof unless it is a test: a spec, a configuration file or a generated",
+        "  file parses and builds today, so it proves nothing about the change.",
+        "  Prove such a change with a test, or with a command that fails today: a",
+        "  build, or a grep for what the ticket adds.",
+      ].join("\n"),
+    );
+  });
+
+  it("says a ticket whose kind of change the spec keeps untested is proved by a build or a command, and a fact says so", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  When the spec rules out tests for this ticket's kind of change, do not",
+        "  add one: prove it with a build or a command over the files it owns, and",
+        "  say in a fact that the spec excludes tests.",
+      ].join("\n"),
+    );
+  });
+
+  it("says a ticket proved by a build builds the whole module, adding any file outside its own the build needs", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  A ticket proved by a build builds the whole module or app, not only",
+        "  the package it changes: `go build ./...`, not `go build ./export/...`.",
+        "  When that build needs a change outside the ticket's files, such as a",
+        "  stub for a method a regenerated interface gains, add that file to",
+        "  `filesToChange` and say why in a fact.",
+      ].join("\n"),
+    );
+  });
+
+  it("warns that a proof by an edited non-test file, or a path that ignores its cd, rejects the report", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("a proof\nby a file the ticket edits that is not a test by its name, and a check");
+    expect(prompt).toContain("or command that names a path from the repository root after a `cd`.");
+  });
+
   it("asks a fact to cite the whole declaration and state a positive consequence, not a claim of absence", async () => {
     const { prompt } = await handoffInvocation();
 
@@ -1073,6 +1135,35 @@ describe("what the adapter sends for a handoff scout", () => {
         aHandoffScoutRequest(),
       ),
     ).rejects.toMatchObject({ code: "malformed-output" });
+  });
+});
+
+describe("what the adapter sends to break a spec into tickets", () => {
+  it("keeps a contract change with its regeneration and build fix, and code with its tests, in one ticket", async () => {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: { tickets: [] } })),
+    ]);
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).breakIntoTickets({
+      kind: "break-into-tickets",
+      context: aContext(),
+      specMarkdown: "## Problem Statement\n\nExport the training log.",
+      rejectionReason: null,
+    });
+    const prompt = valueOf(runner.invocations[0]!.args, "-p") as string;
+
+    expect(prompt).toContain("## Your task: break the spec into tickets");
+    expect(prompt).toContain(
+      [
+        "Each ticket must leave the build green on its own, since its builder",
+        "verifies it alone. So keep together in one ticket:",
+        "",
+        "- a spec or contract change, its regeneration, and whatever keeps the",
+        "  build green after it, such as a stub handler for a method the",
+        "  regenerated interface gains;",
+        "- a unit of code and its tests: the ticket that builds the code writes",
+        "  its tests, rather than leaving them to a tests-only ticket.",
+      ].join("\n"),
+    );
   });
 });
 
