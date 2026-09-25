@@ -285,11 +285,12 @@ describe("ground-briefs", () => {
     expect(await getDb().select().from(schema.briefGroundings)).toHaveLength(1);
   });
 
-  it("accepts a ticket that changes no files", async () => {
+  it("accepts a ticket that changes no files, and so lists no proving test", async () => {
     const { session } = await aSessionWithHandoff();
     const spike = withTicket(1, (ticket) => {
       ticket.filesToChange = [];
     });
+    expect(spike.tickets[0]!.provedBy.testPath).toBe("src/ingest/lag-alert.test.ts");
     spike.tickets[1]!.buildsOn[0] = {
       ...spike.tickets[1]!.buildsOn[0]!,
       citation: "src/ingest/metrics.ts:1",
@@ -488,6 +489,8 @@ describe("ground-briefs", () => {
               provides: "The queue wiring.",
               citation: "src/ingest/queue.ts:1",
               createdPath: null,
+              editedPath: null,
+              symbol: null,
               check: "test -f src/ingest/queue.ts",
             },
           ];
@@ -528,6 +531,194 @@ describe("ground-briefs", () => {
         /Ticket 2's buildsOn on ticket 1 depends on src\/ingest\/alert-rules\.ts, which ticket 1 does not list as a create/,
       );
     });
+
+    it("a dependency with neither a citation nor a path", async () => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(2, (ticket) => {
+          ticket.buildsOn[0] = { ...ticket.buildsOn[0]!, citation: null, createdPath: null };
+        }),
+      );
+      expect(reason).toMatch(
+        /Ticket 2's buildsOn on ticket 1 says neither where it lives nor where ticket 1 puts it; set exactly one of citation/,
+      );
+    });
+
+    it("a dependency with both a citation and a path", async () => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(2, (ticket) => {
+          ticket.buildsOn[0] = { ...ticket.buildsOn[0]!, citation: "src/ingest/metrics.ts:1" };
+        }),
+      );
+      expect(reason).toMatch(
+        /Ticket 2's buildsOn on ticket 1 sets more than one of citation, createdPath and editedPath/,
+      );
+    });
+
+    it("a dependency on a file its blocker does not edit", async () => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(2, (ticket) => {
+          ticket.buildsOn[0] = {
+            ...ticket.buildsOn[0]!,
+            createdPath: null,
+            editedPath: "src/ingest/queue.ts",
+            symbol: "lagThreshold",
+            check: "grep -n lagThreshold src/ingest/queue.ts",
+          };
+        }),
+      );
+      expect(reason).toMatch(
+        /Ticket 2's buildsOn on ticket 1 says ticket 1 adds to src\/ingest\/queue\.ts, which ticket 1 does not list as an edit in its filesToChange/,
+      );
+    });
+
+    it("a dependency on an edited file with no symbol, or a symbol with no edited file", async () => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(session.id, {
+        tickets: [
+          aHandoffScoutResult().tickets[0]!,
+          {
+            ...aHandoffScoutResult().tickets[1]!,
+            buildsOn: [
+              {
+                ...aHandoffScoutResult().tickets[1]!.buildsOn[0]!,
+                createdPath: null,
+                editedPath: "src/ingest/metrics.ts",
+                symbol: null,
+              },
+            ],
+          },
+        ],
+      });
+      expect(reason).toMatch(
+        /Ticket 2's buildsOn on ticket 1 names src\/ingest\/metrics\.ts but no symbol/,
+      );
+
+      const { session: other } = await aSessionWithHandoff();
+      const otherReason = await refusedThenAccepted(
+        other.id,
+        withTicket(2, (ticket) => {
+          ticket.buildsOn[0] = { ...ticket.buildsOn[0]!, symbol: "lagAlert" };
+        }),
+      );
+      expect(otherReason).toMatch(
+        /Ticket 2's buildsOn on ticket 1 names the symbol lagAlert without an editedPath/,
+      );
+    });
+
+    it("a proving test outside the ticket's files to change", async () => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(2, (ticket) => {
+          ticket.provedBy = { ...ticket.provedBy, testPath: "src/ingest/metrics.test.ts" };
+        }),
+      );
+      expect(reason).toMatch(
+        /Ticket 2 is proved by src\/ingest\/metrics\.test\.ts, which is not one of its filesToChange; list the test file as a create or an edit/,
+      );
+    });
+
+    it("a path that is not relative to the project root", async () => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(1, (ticket) => {
+          ticket.filesToChange.push({ path: "~/notes.ts", change: "create" });
+          ticket.provedBy = { ...ticket.provedBy, testPath: "../elsewhere.test.ts" };
+        }),
+      );
+      expect(reason).toContain(
+        `Ticket 1's filesToChange "~/notes.ts" is not a path relative to the project root that stays inside it`,
+      );
+      expect(reason).toContain(
+        `Ticket 1's provedBy.testPath "../elsewhere.test.ts" is not a path relative to the project root that stays inside it`,
+      );
+    });
+
+    // The path-shape refusal is the only guard for these: the per-file checks
+    // skip a path that fails it.
+    it.each([
+      ["a create that steps out of the repo", "../escape.ts", "create"],
+      ["an edit of an absolute path", "/etc/hosts", "edit"],
+      ["an edit that steps out of the repo midway", "src/../../etc/passwd", "edit"],
+    ] as const)("%s", async (_label, escaping, change) => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(1, (ticket) => {
+          ticket.filesToChange.push({ path: escaping, change });
+        }),
+      );
+      expect(reason).toContain(
+        `Ticket 1's filesToChange "${escaping}" is not a path relative to the project root that stays inside it`,
+      );
+    });
+  });
+
+  it("retries a result that breaks a rule the schema once ended the turn on", async () => {
+    // Run 1 of the real grounding run: a dependency on code the blocker adds
+    // to a file it edits fit neither form, so the model left both null. The
+    // schema's refine threw malformed-output and the turn ended.
+    const { session } = await aSessionWithHandoff();
+    const [first, second] = aHandoffScoutResult().tickets;
+    const brokenRule = {
+      tickets: [
+        first,
+        {
+          ...second,
+          buildsOn: [
+            {
+              blocker: 1,
+              provides: "The lag alert module.",
+              citation: null,
+              createdPath: null,
+              check: "test -f src/ingest/lag-alert.ts",
+            },
+          ],
+        },
+      ],
+    };
+    const interviewer = scriptInterviewer([
+      { kind: "handoff-scout", invalidResult: brokenRule },
+      { kind: "handoff-scout", result: aHandoffScoutResult() },
+    ]);
+
+    const grounded = await groundBriefs.run({ sessionId: session.id });
+
+    const requests = scoutRequests(interviewer.requests);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.rejectionReason).toMatch(
+      /Ticket 2's buildsOn on ticket 1 says neither where it lives nor where ticket 1 puts it/,
+    );
+    expect(grounded.grounding).toMatchObject({ result: aHandoffScoutResult(), current: true });
+    const latest = await findLatestTurn({ sessionId: session.id, turnKind: "handoff-scout" });
+    expect((await getTurn.run({ turnId: latest!.id })).outcome).toBe("succeeded");
+  });
+
+  it("accepts a dependency on what a blocker adds to a file it edits", async () => {
+    const { session } = await aSessionWithHandoff();
+    const edited = withTicket(2, (ticket) => {
+      ticket.buildsOn[0] = {
+        blocker: 1,
+        provides: "The lag threshold the alert reads.",
+        citation: null,
+        createdPath: null,
+        editedPath: "src/ingest/metrics.ts",
+        symbol: "LAG_ALERT_THRESHOLD",
+        check: "grep -n LAG_ALERT_THRESHOLD src/ingest/metrics.ts",
+      };
+    });
+    scriptInterviewer([{ kind: "handoff-scout", result: edited }]);
+
+    const grounded = await groundBriefs.run({ sessionId: session.id });
+
+    expect(grounded.grounding).toMatchObject({ result: edited, current: true });
   });
 
   it("fails the turn once every attempt is refused, storing nothing", async () => {

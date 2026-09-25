@@ -317,6 +317,7 @@ export function aHandoffScoutResult(
         number: 1,
         filesToChange: [
           { path: "src/ingest/lag-alert.ts", change: "create" },
+          { path: "src/ingest/lag-alert.test.ts", change: "create" },
           { path: "src/ingest/metrics.ts", change: "edit" },
         ],
         buildsOnFiles: ["src/ingest/metrics.ts:12-30"],
@@ -334,7 +335,10 @@ export function aHandoffScoutResult(
       },
       {
         number: 2,
-        filesToChange: [{ path: "src/ingest/queue.ts", change: "edit" }],
+        filesToChange: [
+          { path: "src/ingest/queue.ts", change: "edit" },
+          { path: "src/ingest/queue.test.ts", change: "create" },
+        ],
         buildsOnFiles: ["docs/adr/0003-queue.md:5-9"],
         facts: [],
         buildsOn: [
@@ -343,6 +347,8 @@ export function aHandoffScoutResult(
             provides: "The lag alert module.",
             citation: null,
             createdPath: "src/ingest/lag-alert.ts",
+            editedPath: null,
+            symbol: null,
             check: "test -f src/ingest/lag-alert.ts",
           },
         ],

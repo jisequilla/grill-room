@@ -759,6 +759,33 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("`check` is the command or test that");
   });
 
+  it("offers three forms for a dependency, including what a blocker adds to a file it edits", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("Say where it is in exactly one of");
+    expect(prompt).toContain("It already exists in the code: give its `citation`.");
+    expect(prompt).toContain("give the path in `createdPath`, which must be");
+    expect(prompt).toContain("one of that blocker's `create` files.");
+    expect(prompt).toContain("`editedPath`, which must be one of that blocker's `edit` files, and");
+    expect(prompt).toContain("name what it adds in `symbol`: a function, a route, a table, a field.");
+  });
+
+  it("says a dependency's check must fail until the blocker lands", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("The `check` must fail until the blocker lands and pass once it has");
+    expect(prompt).toContain("A build or");
+    expect(prompt).toContain("a command that already passes on today's code proves nothing.");
+  });
+
+  it("says the proving test is one of the ticket's own files, unless it changes none", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("The test file is one of this ticket's");
+    expect(prompt).toContain("own `filesToChange`, as a `create` or an `edit`");
+    expect(prompt).toContain("Only a ticket that changes no files may name");
+  });
+
   it("passes the rejection reason back on a retry", async () => {
     const { prompt } = await handoffInvocation(
       aHandoffScoutRequest({
@@ -790,16 +817,47 @@ describe("what the adapter sends for a handoff scout", () => {
     });
   });
 
-  it("rejects a grounding whose path to create leaves the project", async () => {
+  it("hands a grounding that breaks a rule beyond its shape to the app, which refuses and retries it", async () => {
+    const [first, second] = aHandoffScoutResult().tickets;
+    const brokenRules = {
+      tickets: [
+        { ...first, filesToChange: [{ path: "../elsewhere.ts", change: "create" }] },
+        {
+          ...second,
+          buildsOn: [
+            {
+              blocker: 1,
+              provides: "The lag alert module.",
+              citation: null,
+              createdPath: null,
+              check: "test -f src/ingest/lag-alert.ts",
+            },
+          ],
+        },
+      ],
+    };
+    const runner = recordingRunner([ok(anEnvelope({ structured_output: brokenRules }))]);
+
+    const turn = await createClaudeCliInterviewer({ runCli: runner.runCli }).scoutHandoff(
+      aHandoffScoutRequest(),
+    );
+
+    expect(turn.result.tickets[0]!.filesToChange[0]!.path).toBe("../elsewhere.ts");
+    expect(turn.result.tickets[1]!.buildsOn[0]).toMatchObject({
+      citation: null,
+      createdPath: null,
+      editedPath: null,
+      symbol: null,
+    });
+  });
+
+  it("still rejects a grounding that does not match the shape", async () => {
     const [first, second] = aHandoffScoutResult().tickets;
     const runner = recordingRunner([
       ok(
         anEnvelope({
           structured_output: {
-            tickets: [
-              { ...first, filesToChange: [{ path: "../elsewhere.ts", change: "create" }] },
-              second,
-            ],
+            tickets: [{ ...first, filesToChange: [{ path: "a.ts", change: "delete" }] }, second],
           },
         }),
       ),

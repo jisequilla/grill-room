@@ -851,6 +851,8 @@ export function handoffScoutTurns(): ScriptedTurn[] {
                 provides: "The lag alert module.",
                 citation: null,
                 createdPath: "src/ingest/lag-alert.ts",
+                editedPath: null,
+                symbol: null,
                 check: "test -f src/ingest/lag-alert.ts",
               },
             ],
