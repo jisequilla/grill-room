@@ -897,11 +897,18 @@ describe("what the adapter sends for a handoff scout", () => {
   it("says testPath names the test to add or extend, or is null when the spec rules out tests, before assuming a test file exists", async () => {
     const { prompt } = await handoffInvocation();
 
-    expect(prompt).toContain("or null when the spec rules out");
-    expect(prompt).toContain("tests for this ticket's kind of change (see below).");
+    expect(prompt).toContain(
+      [
+        "- `provedBy`: the `testPath` of the test file to add or extend,",
+        "  relative to the project root, or null when the spec rules out",
+        "  tests for this ticket's kind of change (see below). `command`",
+        "  is the shell command that proves the ticket.",
+      ].join("\n"),
+    );
     expect(prompt.indexOf("or null when the spec rules out")).toBeLessThan(
       prompt.indexOf("The test file is one of this ticket's"),
     );
+    expect(prompt).not.toContain("runs it, in the form the project already runs its tests.");
   });
 
   it("says the proving test is one of the ticket's own files, unless it changes none", async () => {
@@ -930,25 +937,31 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("command that runs every test is not a proof on its own.");
   });
 
-  it("limits the new-test rule to a ticket that changes files, so a no-files ticket keeps naming a test outside its list", async () => {
+  it("limits the new-test rule to a ticket that changes files, when the spec does not rule out tests, so a no-files ticket or a spec-excluded change does not require adding one", async () => {
     const { prompt } = await handoffInvocation();
 
     expect(prompt).toContain(
-      "For a ticket that changes files, when no existing test covers its",
+      [
+        "  For a ticket that changes files, when the spec does not rule",
+        "  out tests for this kind of change and no existing test covers",
+        "  its acceptance criteria, add one: list it as a `create` in",
+        "  `filesToChange` and name it here as `testPath`. When",
+      ].join("\n"),
     );
-    expect(prompt).toContain("acceptance criteria, add one: list it as a `create` in");
-    expect(prompt).toContain("`filesToChange` and name it here as `testPath`.");
   });
 
-  it("says a build-only ticket's command chains the build with the command that runs the named test", async () => {
+  it("says a build-only ticket's command chains the build with the command that runs the named test, only once testPath is set", async () => {
     const { prompt } = await handoffInvocation();
 
     expect(prompt).toContain(
-      "by a build — codegen, configuration — gives `command` as the build",
+      [
+        "  `testPath` is set, a ticket proved only by a build — codegen,",
+        "  configuration — gives `command` as the build command followed",
+        "  by the command that runs the test named in `testPath`, for",
+        "  example `<build> && <test command>`, so `command` exercises",
+        "  the test it names.",
+      ].join("\n"),
     );
-    expect(prompt).toContain("command followed by the command that runs the test named in");
-    expect(prompt).toContain("`testPath`, for example `<build> && <test command>`, so `command`");
-    expect(prompt).toContain("exercises the test it names whenever `testPath` is set.");
   });
 
   it("never claims command always exercises a test, since testPath may be null", async () => {
@@ -957,21 +970,56 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).not.toContain("always exercises the test it names");
   });
 
-  it("says a set testPath must be collected by the project's own test command, cited in a fact", async () => {
+  it("says a set testPath must be collected by the project's own test command, cited in a fact, addressing the scout as you", async () => {
     const { prompt } = await handoffInvocation();
 
-    expect(prompt).toContain("When `testPath` is set, it must sit where the project's own test");
-    expect(prompt).toContain("command collects it: a runner config's include globs, the test");
-    expect(prompt).toContain("recipe in a justfile, Makefile or package.json, or the runner's");
-    expect(prompt).toContain("default discovery. The scout confirms this and states it in a");
-    expect(prompt).toContain("fact, citing the config or recipe line that collects it. With no");
-    expect(prompt).toContain("explicit include globs, it cites the line that invokes the runner");
-    expect(prompt).toContain("runner's default pattern in the fact's text. This fact may cite a");
-    expect(prompt).toContain("config or recipe file the ticket does not change, an exception to");
-    expect(prompt).toContain("facts being about the code the ticket touches. A path the runner");
-    expect(prompt).toContain("does not collect — a file under `scripts/` when the runner only");
-    expect(prompt).toContain("globs `src/**/*.test.ts` — is not a proof: pick a path the runner");
-    expect(prompt).toContain("collects.");
+    expect(prompt).toContain(
+      [
+        "  When `testPath` is set, it must sit where the project's own test",
+        "  command collects it: a runner config's include globs, the test",
+        "  recipe in a justfile, Makefile or package.json, or the runner's",
+        "  default discovery. You confirm this and state it in a fact,",
+        "  citing the config or recipe line that collects it. With no",
+        "  explicit include globs, cite the line that invokes the runner",
+        '  (e.g. `package.json`\'s `"test": "vitest run"`) and name the',
+        "  runner's default pattern in the fact's text. When no file",
+        "  invokes the runner either, state the runner's default",
+        "  discovery rule in the fact and cite an existing test file the",
+        "  same runner already collects under the same pattern; never",
+        "  cite a line that does not show collection. This fact may cite",
+        "  a config or recipe file the ticket does not change, an",
+        "  exception to facts being about the code the ticket touches.",
+        "  A path the runner does not collect — a file under `scripts/`",
+        "  when the runner only globs `src/**/*.test.ts` — is not a",
+        "  proof: pick a path the runner collects.",
+      ].join("\n"),
+    );
+    expect(prompt).not.toContain("The scout confirms this and states it in a");
+  });
+
+  it("states the runner's default discovery example line, naming its default pattern, when no include globs are explicit", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  explicit include globs, cite the line that invokes the runner",
+        '  (e.g. `package.json`\'s `"test": "vitest run"`) and name the',
+        "  runner's default pattern in the fact's text. When no file",
+      ].join("\n"),
+    );
+  });
+
+  it("tells the scout that when no file invokes the runner either, it must state the default discovery rule and cite an existing collected test file", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  invokes the runner either, state the runner's default",
+        "  discovery rule in the fact and cite an existing test file the",
+        "  same runner already collects under the same pattern; never",
+        "  cite a line that does not show collection. This fact may cite",
+      ].join("\n"),
+    );
   });
 
   it("says checks and commands run from the repository root, and paths after a cd are relative to it", async () => {
@@ -1030,11 +1078,19 @@ describe("what the adapter sends for a handoff scout", () => {
     );
   });
 
-  it("warns that a proof by an edited non-test file, or a path that ignores its cd, rejects the report", async () => {
+  it("warns that a proof by an edited non-test file, or a path that ignores its cd, rejects the report, with the closing rejected-reports summary byte-identical", async () => {
     const { prompt } = await handoffInvocation();
 
-    expect(prompt).toContain("a proof\nby a file the ticket edits that is not a test by its name, and a check");
-    expect(prompt).toContain("or command that names a path from the repository root after a `cd`.");
+    expect(prompt).toContain(
+      [
+        "Paths to create are checked too: a path outside the project, one that",
+        "already exists, or one the repository ignores rejects the whole report.",
+        "So does a dependency that names a path its blocker does not create or",
+        "edit, a test that is not among its ticket's files to change, a proof",
+        "by a file the ticket edits that is not a test by its name, and a check",
+        "or command that names a path from the repository root after a `cd`.",
+      ].join("\n"),
+    );
   });
 
   it("asks a fact to cite the whole declaration and state a positive consequence, not a claim of absence", async () => {
