@@ -95,7 +95,7 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `get-scout-report` | Read a session's scout report, or null when it has none: the server facts, the current state and proposed repo decisions, the commit and idea it read, the model, when it ran, its turn record, the keep/drop state of each proposal, and `stale`. |
 | `keep-repo-decision` | Keep one decision the session's scout report proposes: it enters the design tree settled, introduced by the repo, with the project's statement as its answer. Refused with `no-scout-report`, `proposal-not-found`, `already-kept`, `key-in-use`, `wrong-session-state`, or `turn-working`. See "Project scout" below. |
 | `drop-repo-decision` | Drop one decision the session's scout report proposes: recorded as dropped, still reaching the interviewer as unenforced context. Refused with `no-scout-report`, `proposal-not-found`, `already-kept`, `wrong-session-state`, or `turn-working`. |
-| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file the export will write as an absolute path (spec.md, intent.md, decisions.md when the tree holds decisions or out-of-scope items, HANDOFF.md and briefs/NN-slug.md when a handoff exists, and the manifest), `handoffIncluded`, the files the previous manifest lists that the plan drops, the project's tracker diagnostic, and the export gate as `exportBlocked`/`exportBlockedReason` (`handoff-missing` or `handoff-stale`, null once clear) — the same gate `export-session` refuses on, reported here without refusing so the UI can explain it first. `plannedWrites` and `plannedRemovals` repeat every planned write and removal as `{ path, relativePath, edited }`: `edited` is true when the file on disk no longer matches the hash the previous manifest recorded for it, or was never written by Grill Room at all — see "Exporting a session" below for the guard. Built by the same plan `export-session` writes, so the two cannot disagree; export-session checks for edits again when it writes, so this preview is not a lock. |
+| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file the export will write as an absolute path (spec.md, intent.md, decisions.md when the tree holds decisions or out-of-scope items, HANDOFF.md and briefs/NN-slug.md when a handoff exists, and the manifest), `handoffIncluded`, the files the previous manifest lists that the plan drops, the project's tracker diagnostic, and the export gate as `exportBlocked`/`exportBlockedReason` (`handoff-missing` or `handoff-stale`, null once clear) — the same gate `export-session` refuses on, reported here without refusing so the UI can explain it first. `plannedWrites` and `plannedRemovals` repeat every planned write and removal as `{ path, relativePath, edited }`: `edited` is true when the file on disk no longer matches the hash the previous manifest recorded for it, or was never written by Grill Room at all — see "Exporting a session" below for the guard. Also reports the session's brief grounding as `groundingState` (`absent`, `current` or `stale`) and `groundingStaleReason` (`head-moved` or `handoff-changed`, null while current or absent) — informational, like the other gate: it never blocks export. Built by the same plan `export-session` writes, so the two cannot disagree; export-session checks for edits again when it writes, so this preview is not a lock. |
 | `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md`, `intent.md`, `decisions.md` (when the tree holds decisions or out-of-scope items), `issues/NN-slug.md` per ticket (tickets only when current), and `HANDOFF.md` plus `briefs/NN-slug.md` from the session's generated handoff (recording that export on the handoff), creating missing folders. Also writes a provenance manifest (`.grill-room-export.json`: session id, export revision, scout commit, HEAD at export, and a CRLF-insensitive sha256 of every file written). Re-export removes files the previous manifest lists that the new export no longer writes. Edited files are kept: a planned write or removal already on disk that no longer matches the hash the previous manifest recorded, or that the previous manifest never listed, is neither overwritten nor removed unless its bundle-relative path is in `overridePaths` (a version-1 manifest's files are trusted as unedited once). The check is repeated from disk at write time, so a file edited after `preview-export` is kept unless overridden. An override resolving outside the bundle is refused with `override-outside-bundle`. Refuses, writing nothing, with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, `export-outside-root` when any path resolves (through symlinks) outside the real project root, `handoff-missing` when the session has no handoff, or `handoff-stale` when its handoff no longer matches today's spec, tickets or project; `preview-export` reports the same gate as `exportBlocked`/`exportBlockedReason` without refusing, and marks each edited file, so the UI can explain both before the operator tries. Returns `written`, `removed` and `kept` as absolute paths, plus a post-export visibility report — see "Exporting a session" below. |
 | `get-export-visibility` | Classify every file a session's export wrote (or would write) as `tracked`, `ignored`, or `untracked` in the project's repository, given the same `sessionId` and `slug` as `preview-export`/`export-session`. Read-only and side-effect-free, so the UI can re-check without exporting again. See "Exporting a session" below. |
 | `generate-handoff` | Generate or regenerate a session's handoff from deterministic templates (no model call): `HANDOFF.md` plus one brief per ticket. Refuses with `no-project`, `project-not-found`, `spec-missing`, `no-tickets` or `ticket-cycle`, and with `handoff-edited` when the stored handoff carries UI edits unless `overwriteEdits` is true. See "Handoff" below. |
@@ -457,11 +457,15 @@ session, and is readable and editable in the output page's Handoff block.
 - `briefs/NN-slug.md` (the same `NN-slug` as the ticket file) holds the
   ticket text, its blockers, the verify command, the file-boundary and
   git/worktree rules, the report format, and "report, then stop", plus two
-  labelled empty slots for the orchestrator: **File boundaries** and
-  **Codebase facts**. Its delivery section varies by delivery recipe the
-  same way HANDOFF.md's lifecycle does, and its report section names a
-  separate reviewer only when the review switch is on. Nothing is
-  pre-filled from the target repo.
+  labelled slots for the orchestrator: **File boundaries** and **Codebase
+  facts**. Its delivery section varies by delivery recipe the same way
+  HANDOFF.md's lifecycle does, and its report section names a separate
+  reviewer only when the review switch is on. The two slots are empty,
+  exactly as before, when the session has no brief grounding; once one
+  exists and is current, they are filled from it and the brief gains two
+  more sections, **Builds on** and **Proved by** — see "Grounding the
+  briefs" below for what fills each and how staleness and hand edits are
+  handled.
 - Bundle paths are stored as `{{BUNDLE}}` and filled in at export from the
   project's visibility flag, without re-checking git: `tracked` gives paths
   relative to the repo root plus a commit-before-delegating step (and a
@@ -533,6 +537,35 @@ inputs is the one it was made for and the project's `HEAD` is the commit it
 read; `get-brief-grounding` reports `handoff-changed` or `head-moved`
 otherwise. Regenerating the handoff does not make an old grounding current
 again: ground the briefs again instead.
+
+**Rendering from grounding.** `server/handoff.ts`'s `renderBrief` and
+`renderHandoff` take the grounding as an optional argument (a plain
+`{ tickets, commitRead, current, staleReason }` shape, not the stored row, so
+this module never needs a runtime import of `brief-grounding.ts`) and render
+each brief accordingly:
+
+- **Current grounding.** For each ticket the grounding covers, **File
+  boundaries** lists the files to create, the files to edit, and the existing
+  files it builds on, cited; **Codebase facts** lists each cited statement.
+  Two new sections appear: **Builds on**, one line per blocker naming what
+  this ticket needs from it, where — a citation, or "created by ticket NN at
+  `<path>`" for a dependency on a path that blocker has not created yet — and
+  the check to run first; and **Proved by**, the test path to add or extend
+  and the command that proves the ticket.
+- **Stale grounding.** The same content, under one line saying it was
+  grounded at commit `<short sha>` for an earlier version of the tickets
+  (`handoff-changed`), or that the repository has moved since (`head-moved`).
+- **No grounding**, or a ticket the grounding does not cover (a ticket added
+  since it ran): today's two empty slots, unchanged.
+- **An edited brief.** `update-handoff` is what marks a hand edit, at the
+  whole handoff's `editedAt`, not per brief; rendering takes a brief's stored,
+  edited markdown as `editedMarkdown` and returns it verbatim whenever it is
+  set, before looking at grounding at all — a brief the user edited always
+  keeps its text, and grounding never rewrites it.
+
+Nothing calls `renderHandoff` with a grounding yet: `generate-handoff` still
+renders from the deterministic templates alone. Wiring a live grounding into
+generation, and the UI, are ticket 04's.
 
 ### Logging a build from an agent
 

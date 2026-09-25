@@ -7,7 +7,9 @@ import {
   FILE_BOUNDARIES_SLOT,
   fillBundlePath,
   handoffFingerprint,
+  type HandoffGrounding,
   type HandoffSource,
+  renderBrief,
   renderHandoff,
 } from "./handoff.js";
 
@@ -418,5 +420,239 @@ describe("handoffFingerprint", () => {
     for (const variant of variants) {
       expect(handoffFingerprint(variant)).not.toBe(base);
     }
+  });
+});
+
+describe("grounded briefs", () => {
+  /** Ticket 1 has no blockers, so its grounding exercises facts and an empty "Builds on". */
+  const TICKET_1_GROUNDING = {
+    number: 1,
+    filesToChange: [
+      { path: "server/projects.ts", change: "create" as const },
+      { path: "server/db/schema.ts", change: "edit" as const },
+    ],
+    buildsOnFiles: ["server/git.ts:10-20"],
+    facts: [
+      {
+        statement: "Projects are registered through registerProject.",
+        citation: "actions/register-project.ts:5",
+      },
+    ],
+    buildsOn: [],
+    provedBy: {
+      testPath: "server/projects.test.ts",
+      command: "pnpm exec vitest run server/projects.test.ts",
+    },
+  };
+
+  /** Ticket 2 is blocked by 1, so its grounding exercises a "Builds on" dependency on a created path. */
+  const TICKET_2_GROUNDING = {
+    number: 2,
+    filesToChange: [{ path: "server/export-bundle.ts", change: "edit" as const }],
+    buildsOnFiles: [],
+    facts: [],
+    buildsOn: [
+      {
+        blocker: 1,
+        provides: "the project registry",
+        citation: null,
+        createdPath: "server/projects.ts",
+        check: "test -f server/projects.ts",
+      },
+    ],
+    provedBy: {
+      testPath: "server/export-bundle.test.ts",
+      command: "pnpm exec vitest run server/export-bundle.test.ts",
+    },
+  };
+
+  const CURRENT_GROUNDING: HandoffGrounding = {
+    tickets: [TICKET_1_GROUNDING, TICKET_2_GROUNDING],
+    commitRead: "abcdef1234567890",
+    current: true,
+    staleReason: null,
+  };
+
+  /** `markdown`'s section from `heading` up to (not including) the next `## ` heading. */
+  function section(markdown: string, heading: string): string {
+    const start = markdown.indexOf(heading);
+    expect(start).toBeGreaterThan(-1);
+    return markdown.slice(start, markdown.indexOf("\n## ", start + 1)).replace(/\n+$/, "");
+  }
+
+  function ticketByNumber(number: number) {
+    return aSource().tickets.find((ticket) => ticket.number === number)!;
+  }
+
+  it("fills File boundaries and Codebase facts, and adds Builds on and Proved by, from current grounding", () => {
+    const brief = renderBrief(aSource(), ticketByNumber(2), { grounding: CURRENT_GROUNDING });
+
+    expect(section(brief, "## File boundaries")).toBe(
+      ["## File boundaries", "", "Files to edit:", "", "- `server/export-bundle.ts`"].join("\n"),
+    );
+    expect(section(brief, "## Codebase facts")).toBe(
+      ["## Codebase facts", "", "No codebase facts cited."].join("\n"),
+    );
+    expect(section(brief, "## Builds on")).toBe(
+      [
+        "## Builds on",
+        "",
+        "- Ticket 01: the project registry — created by ticket 01 at `server/projects.ts` — check: `test -f server/projects.ts`",
+      ].join("\n"),
+    );
+    expect(section(brief, "## Proved by")).toBe(
+      [
+        "## Proved by",
+        "",
+        "Test: `server/export-bundle.test.ts`",
+        "",
+        "```bash",
+        "pnpm exec vitest run server/export-bundle.test.ts",
+        "```",
+      ].join("\n"),
+    );
+  });
+
+  it("fills a ticket with no blockers: cited facts, an existing file it builds on, and no Builds on section", () => {
+    const brief = renderBrief(aSource(), ticketByNumber(1), { grounding: CURRENT_GROUNDING });
+
+    expect(section(brief, "## File boundaries")).toBe(
+      [
+        "## File boundaries",
+        "",
+        "Files to create:",
+        "",
+        "- `server/projects.ts`",
+        "",
+        "Files to edit:",
+        "",
+        "- `server/db/schema.ts`",
+        "",
+        "Existing files it builds on:",
+        "",
+        "- `server/git.ts:10-20`",
+      ].join("\n"),
+    );
+    expect(section(brief, "## Codebase facts")).toBe(
+      [
+        "## Codebase facts",
+        "",
+        "- Projects are registered through registerProject. (`actions/register-project.ts:5`)",
+      ].join("\n"),
+    );
+    expect(brief).not.toContain("## Builds on");
+    expect(section(brief, "## Proved by")).toBe(
+      [
+        "## Proved by",
+        "",
+        "Test: `server/projects.test.ts`",
+        "",
+        "```bash",
+        "pnpm exec vitest run server/projects.test.ts",
+        "```",
+      ].join("\n"),
+    );
+  });
+
+  it("renders stale grounding under one line naming an earlier version of the tickets", () => {
+    const stale: HandoffGrounding = { ...CURRENT_GROUNDING, current: false, staleReason: "handoff-changed" };
+    const brief = renderBrief(aSource(), ticketByNumber(1), { grounding: stale });
+
+    expect(section(brief, "## File boundaries")).toBe(
+      [
+        "## File boundaries",
+        "",
+        "_Grounded at commit `abcdef1` for an earlier version of the tickets._",
+        "",
+        "Files to create:",
+        "",
+        "- `server/projects.ts`",
+        "",
+        "Files to edit:",
+        "",
+        "- `server/db/schema.ts`",
+        "",
+        "Existing files it builds on:",
+        "",
+        "- `server/git.ts:10-20`",
+      ].join("\n"),
+    );
+    // Codebase facts, Builds on and Proved by are unaffected by staleness beyond the shared banner.
+    expect(section(brief, "## Codebase facts")).toBe(
+      [
+        "## Codebase facts",
+        "",
+        "- Projects are registered through registerProject. (`actions/register-project.ts:5`)",
+      ].join("\n"),
+    );
+  });
+
+  it("renders stale grounding under one line naming that the repository has moved since", () => {
+    const stale: HandoffGrounding = { ...CURRENT_GROUNDING, current: false, staleReason: "head-moved" };
+    const brief = renderBrief(aSource(), ticketByNumber(1), { grounding: stale });
+
+    expect(section(brief, "## File boundaries")).toBe(
+      [
+        "## File boundaries",
+        "",
+        "_Grounded at commit `abcdef1`; the repository has moved since._",
+        "",
+        "Files to create:",
+        "",
+        "- `server/projects.ts`",
+        "",
+        "Files to edit:",
+        "",
+        "- `server/db/schema.ts`",
+        "",
+        "Existing files it builds on:",
+        "",
+        "- `server/git.ts:10-20`",
+      ].join("\n"),
+    );
+  });
+
+  it("keeps today's slots exactly when there is no grounding", () => {
+    const withoutOption = renderBrief(aSource(), ticketByNumber(2));
+    const withNullGrounding = renderBrief(aSource(), ticketByNumber(2), { grounding: null });
+    expect(withNullGrounding).toBe(withoutOption);
+    expect(withoutOption).toContain(FILE_BOUNDARIES_SLOT);
+    expect(withoutOption).toContain(CODEBASE_FACTS_SLOT);
+    expect(withoutOption).not.toContain("## Builds on");
+    expect(withoutOption).not.toContain("## Proved by");
+    expect(withoutOption).not.toContain("_Grounded");
+  });
+
+  it("keeps a grounding ticket's absence the same as no grounding for that ticket", () => {
+    const partial: HandoffGrounding = { ...CURRENT_GROUNDING, tickets: [TICKET_2_GROUNDING] };
+    const brief = renderBrief(aSource(), ticketByNumber(1), { grounding: partial });
+    expect(brief).toContain(FILE_BOUNDARIES_SLOT);
+    expect(brief).toContain(CODEBASE_FACTS_SLOT);
+  });
+
+  it("keeps an edited brief's text verbatim, ignoring grounding entirely", () => {
+    const edited = "# Brief 02: Hand-edited\n\nSomeone already wrote this by hand.\n";
+    const brief = renderBrief(aSource(), ticketByNumber(2), {
+      grounding: CURRENT_GROUNDING,
+      editedMarkdown: edited,
+    });
+    expect(brief).toBe(edited);
+  });
+
+  it("renderHandoff grounds every brief and keeps only the ones named in editedBriefs", () => {
+    const { briefs } = renderHandoff(aSource(), {
+      grounding: CURRENT_GROUNDING,
+      editedBriefs: new Map([[2, "EDITED TICKET 2\n"]]),
+    });
+
+    expect(briefs.find((brief) => brief.ticketNumber === 2)!.markdown).toBe("EDITED TICKET 2\n");
+
+    const first = briefs.find((brief) => brief.ticketNumber === 1)!.markdown;
+    expect(first).toContain("Files to create:");
+    expect(first).toContain("## Proved by");
+
+    // Ticket 3 has no grounding entry, so it keeps today's empty slots.
+    const third = briefs.find((brief) => brief.ticketNumber === 3)!.markdown;
+    expect(third).toContain(FILE_BOUNDARIES_SLOT);
   });
 });

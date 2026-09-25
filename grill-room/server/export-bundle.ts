@@ -51,6 +51,16 @@
  * surfaces it for the UI, and `export-session` is the one that refuses to
  * write when it is non-null.
  *
+ * ## Brief grounding state
+ *
+ * `briefGroundingState` (`"absent"`, `"current"`, or `"stale"`, from
+ * `currentBriefGrounding` in `server/brief-grounding.ts`) reports whether the
+ * session's handoff briefs have been grounded and whether that grounding
+ * still describes today's handoff and project; `briefGroundingStaleReason`
+ * names why when stale (`"head-moved"` or `"handoff-changed"`), null
+ * otherwise. This is informational only: nothing here or in `export-session`
+ * ever refuses on it, unlike the export gate above.
+ *
  * ## Containment
  *
  * The project's export folder was checked lexically at registration; that
@@ -101,6 +111,7 @@ import { fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 
 import type { ProjectVisibility } from "../shared/session-constants.js";
+import { currentBriefGrounding, type BriefGroundingStaleReason } from "./brief-grounding.js";
 import { getDb, schema } from "./db/index.js";
 import {
   applySlugPattern,
@@ -137,6 +148,9 @@ import { describeDecisions } from "./tree.js";
 const NO_TICKETS_REASON = "This session has no tickets to export.";
 const STALE_TICKETS_REASON =
   "The session's tickets are out of date with its spec and were not exported.";
+
+/** Whether the session's handoff briefs have been grounded, and whether that grounding is still current. */
+export type BriefGroundingState = "absent" | "current" | "stale";
 
 export interface BundleFile {
   /** Relative to the bundle directory, forward slashes: `spec.md`, `issues/01-slug.md`. */
@@ -195,6 +209,10 @@ export interface ExportBundlePlan {
   exportBlocked: boolean;
   /** Why export is blocked, or null once a current handoff exists. See "Export gate" above. */
   exportBlockedReason: ExportGateReason | null;
+  /** Whether the session's handoff briefs are grounded and current. See "Brief grounding state" above. */
+  briefGroundingState: BriefGroundingState;
+  /** Why the grounding is stale, or null while current or absent. */
+  briefGroundingStaleReason: BriefGroundingStaleReason | null;
 }
 
 export interface PlanExportBundleInput {
@@ -543,6 +561,13 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
 
   const handoff = (await getHandoffRow(session.id)) ?? null;
   const gate = await getExportGate(session.id);
+  const grounding = await currentBriefGrounding(session.id);
+  const briefGroundingState: BriefGroundingState = !grounding
+    ? "absent"
+    : grounding.current
+      ? "current"
+      : "stale";
+  const briefGroundingStaleReason = grounding && !grounding.current ? grounding.staleReason : null;
   const handoffFiles: { relativePath: string; content: string }[] = [];
   if (handoff) {
     const bundlePath = bundlePathFor(project.visibility, project.rootPath, bundleDir);
@@ -651,6 +676,8 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     handoff,
     exportBlocked: gate.blocked,
     exportBlockedReason: gate.reason,
+    briefGroundingState,
+    briefGroundingStaleReason,
   };
 }
 
