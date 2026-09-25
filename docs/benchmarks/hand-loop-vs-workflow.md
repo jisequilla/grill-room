@@ -105,3 +105,20 @@ The monitor session listed 13. They are for its owner to file:
 - transcript output-token counts look low;
 - there is no GitHub PR lifecycle;
 - several UI issues.
+
+## What the loop changed afterwards
+
+Most failed review rounds in this project traced back to the ticket, not to the model. No ticket needed escalating from sonnet to opus. The process now answers the patterns that caused those rounds (`.claude/rules/worktrees.md`, `.claude/templates/delegation/`):
+
+- **Behaviour is specified by example.** An input → expected-output table replaces prose where it can. One ambiguous sentence about backtick padding produced two different implementations under identical ticket text.
+- **Each acceptance line names a test that fails without it.** Builders and reviewers both revert the change to prove it. Reviewers approved tests that guarded nothing (#70, #74), and the blind judge's reverts found it.
+- **A seam test runs whenever a prompt and its enforcing check change together.** Three PRs (#63, #66, #68) shipped a prompt rule that contradicted a server check.
+- **A disclosure valve covers edits outside the file list.** Two builders independently needed the same one-word export outside their files. One disclosed it and one did not, and the two reviewers treated it differently.
+- **A sonnet pre-flight read clears each ticket before launch.** The owner decisions (a nullable `testPath`, a widened scope) and a wrong premise (run 2's "dead end") each surfaced a full review round too late.
+- **Tickets that touch checks, schemas or prompts get two reviewer lenses.** The same commit reviewed twice produced different real findings.
+- **One set of templates serves both loops,** and verification must finish in the foreground before an agent reports.
+
+These changes are measured by the rate of first-round approvals on the next wave, against this session's baseline. Of the tickets through the review gate:
+- first-round approvals: PRs #60, #61, #62, #69, #70, #72 to #75, #77;
+- two rounds: #63, #64, #66, #68, #71;
+- no convergence: #76.
