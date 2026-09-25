@@ -146,13 +146,63 @@ describe("classifyVisibility", () => {
       ]);
     });
   });
+
+  describe("unchecked (git could not tell)", () => {
+    it("classifies a path under a symlinked directory as unchecked, not untracked — `check-ignore` exits 128 ('beyond a symbolic link') on it", async () => {
+      const root = repos.create({ gitignore: "dist/\n" });
+      await fs.mkdir(path.join(root, "real-dir"), { recursive: true });
+      await fs.writeFile(path.join(root, "real-dir", "foo.txt"), "hello");
+      await fs.symlink(path.join(root, "real-dir"), path.join(root, "linked-dir"));
+
+      const files = await classifyVisibility(root, [path.join(root, "linked-dir", "foo.txt")]);
+
+      expect(files).toEqual([
+        {
+          path: path.join(root, "linked-dir", "foo.txt"),
+          relativePath: "linked-dir/foo.txt",
+          visibility: "unchecked",
+        },
+      ]);
+    });
+
+    // `ls-files` does not fail on a path beyond a symlink (it just reports it
+    // not tracked), so a tracked path classifies normally even when another
+    // path in the same call makes `check-ignore` fail for the whole batch.
+    it("leaves a tracked path in the same call classified as tracked", async () => {
+      const root = repos.create({
+        gitignore: "dist/\n",
+        files: { "issues/01-tracked.md": "tracked ticket" },
+      });
+      await fs.mkdir(path.join(root, "real-dir"), { recursive: true });
+      await fs.writeFile(path.join(root, "real-dir", "foo.txt"), "hello");
+      await fs.symlink(path.join(root, "real-dir"), path.join(root, "linked-dir"));
+
+      const files = await classifyVisibility(root, [
+        path.join(root, "issues", "01-tracked.md"),
+        path.join(root, "linked-dir", "foo.txt"),
+      ]);
+
+      expect(files).toEqual([
+        {
+          path: path.join(root, "issues", "01-tracked.md"),
+          relativePath: "issues/01-tracked.md",
+          visibility: "tracked",
+        },
+        {
+          path: path.join(root, "linked-dir", "foo.txt"),
+          relativePath: "linked-dir/foo.txt",
+          visibility: "unchecked",
+        },
+      ]);
+    });
+  });
 });
 
 describe("buildVisibilityWarnings", () => {
   const root = "/repo";
   const bundleRelativePath = ".scratch/05-feature";
 
-  function file(relativePath: string, visibility: "tracked" | "ignored" | "untracked") {
+  function file(relativePath: string, visibility: "tracked" | "ignored" | "untracked" | "unchecked") {
     return { path: `/repo/${relativePath}`, relativePath, visibility };
   }
 
@@ -167,9 +217,11 @@ describe("buildVisibilityWarnings", () => {
     expect(result).toEqual({
       hasUntracked: false,
       hasIgnored: false,
+      hasUnchecked: false,
       warning: null,
       untrackedRemedy: null,
       ignoredRemedy: null,
+      uncheckedWarning: null,
       mismatchWarning: null,
     });
   });
@@ -220,12 +272,42 @@ describe("buildVisibilityWarnings", () => {
     expect(result.ignoredRemedy).not.toBeNull();
   });
 
+  it("sets uncheckedWarning naming each unchecked file, says git could not tell, and does not set hasUntracked or hasIgnored", () => {
+    const result = buildVisibilityWarnings({
+      root,
+      bundleRelativePath,
+      files: [file("issues/01-a.md", "unchecked"), file("issues/02-b.md", "unchecked")],
+      visibility: "tracked",
+    });
+
+    expect(result.hasUnchecked).toBe(true);
+    expect(result.hasUntracked).toBe(false);
+    expect(result.hasIgnored).toBe(false);
+    expect(result.uncheckedWarning).not.toBeNull();
+    expect(result.uncheckedWarning).toMatch(/could not tell/);
+    expect(result.uncheckedWarning).toContain(`git -C ${root} check-ignore -v issues/01-a.md`);
+    expect(result.uncheckedWarning).toContain(`git -C ${root} check-ignore -v issues/02-b.md`);
+  });
+
+  it("leaves untrackedRemedy null when the only non-tracked files are unchecked", () => {
+    const result = buildVisibilityWarnings({
+      root,
+      bundleRelativePath,
+      files: [file("spec.md", "tracked"), file("issues/01-a.md", "unchecked")],
+      visibility: "tracked",
+    });
+
+    expect(result.untrackedRemedy).toBeNull();
+    expect(result.uncheckedWarning).not.toBeNull();
+  });
+
   it.each([
     ["tracked", "tracked" as const, [], false],
     ["tracked", "tracked" as const, ["ignored"], true],
     ["ignored", "ignored" as const, ["ignored"], false],
     ["ignored", "ignored" as const, ["tracked"], true],
     ["ignored", "ignored" as const, ["untracked"], true],
+    ["ignored", "ignored" as const, ["unchecked"], false],
   ] as const)(
     "mismatch for flag %s with file visibilities %s -> %s",
     (_label, flag, visibilities, expectMismatch) => {

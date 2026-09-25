@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 type VisibilityReport = AgentNativeActionRegistry["get-export-visibility"]["result"];
 type ClassifiedFile = VisibilityReport["files"][number];
 
-/** A file's git standing, on a canvas that is otherwise neutral: tracked is calm, the other two want attention. */
+/** A file's git standing, on a canvas that is otherwise neutral: tracked is calm, unchecked is a neutral unknown, the other two want attention. */
 const CLASS_BY_VISIBILITY: Record<ClassifiedFile["visibility"], string> = {
   tracked:
     "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/10 dark:text-emerald-300",
@@ -14,12 +14,15 @@ const CLASS_BY_VISIBILITY: Record<ClassifiedFile["visibility"], string> = {
     "border-amber-600/30 bg-amber-500/15 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300",
   untracked:
     "border-orange-600/30 bg-orange-500/15 text-orange-700 dark:border-orange-400/30 dark:bg-orange-400/10 dark:text-orange-300",
+  unchecked:
+    "border-slate-600/30 bg-slate-500/15 text-slate-700 dark:border-slate-400/30 dark:bg-slate-400/10 dark:text-slate-300",
 };
 
 const VISIBILITY_LABEL_KEY: Record<ClassifiedFile["visibility"], string> = {
   tracked: "output.visibilityTracked",
   ignored: "output.visibilityIgnored",
   untracked: "output.visibilityUntracked",
+  unchecked: "output.visibilityUnchecked",
 };
 
 function VisibilityBadge({ visibility }: { visibility: ClassifiedFile["visibility"] }) {
@@ -89,6 +92,17 @@ export function ExportVisibilityReport({ report }: { report: VisibilityReport })
                 </pre>
               </div>
             ) : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {report.uncheckedWarning ? (
+        <Alert data-testid="export-visibility-unchecked">
+          <AlertTitle>{t("output.visibilityUncheckedHeading")}</AlertTitle>
+          <AlertDescription className="space-y-2">
+            <pre className="overflow-x-auto rounded-md bg-muted/60 p-2 font-mono text-xs whitespace-pre-wrap">
+              {report.uncheckedWarning}
+            </pre>
           </AlertDescription>
         </Alert>
       ) : null}
