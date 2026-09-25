@@ -37,6 +37,10 @@ import type {
 } from "../shared/session-constants.js";
 import { getDb, schema } from "./db/index.js";
 import { padTicketNumber, sanitizeTicketSlug } from "./export.js";
+// Type-only: erased at compile time, so this never becomes a runtime import.
+// `server/brief-grounding.ts` already imports this module at runtime, and a
+// runtime import back into it would be a cycle.
+import type { HandoffScoutResult } from "./interviewer/index.js";
 import { getProject } from "./projects.js";
 import { computeWaves, describeTickets } from "./tickets.js";
 
@@ -85,6 +89,29 @@ export interface HandoffBrief {
   /** Relative to the bundle: `briefs/NN-slug.md`, the same `NN-slug` as the ticket's file. */
   relativePath: string;
   markdown: string;
+}
+
+/** Why a brief grounding no longer describes the session's handoff and project. */
+export type HandoffGroundingStaleReason = "head-moved" | "handoff-changed";
+
+/** One ticket's grounding, as a handoff scout reports it. */
+export type HandoffTicketGrounding = HandoffScoutResult["tickets"][number];
+
+/**
+ * The session's brief grounding, as brief rendering needs it: every ticket
+ * the scout covered, the commit it read, and whether it is still current.
+ * `server/brief-grounding.ts` holds the stored record (id, session,
+ * fingerprint, model, turn); this is only the shape rendering reads from it,
+ * kept separate so this module never needs a runtime import of that one.
+ */
+export interface HandoffGrounding {
+  /** The scout's result for every ticket it covered. */
+  tickets: readonly HandoffTicketGrounding[];
+  /** The commit it read, or null for a repository with no commits yet. */
+  commitRead: string | null;
+  current: boolean;
+  /** Null while current. */
+  staleReason: HandoffGroundingStaleReason | null;
 }
 
 export interface RenderedHandoff {
@@ -251,6 +278,20 @@ function beforeDelegatingSection(source: HandoffSource): string {
   return lines.join("\n");
 }
 
+/**
+ * The "Before launching a ticket" bullet about the brief's two slots. With
+ * current grounding they are already filled, so the orchestrator checks them
+ * instead of filling them by hand; with no grounding, or stale grounding that
+ * still needs checking against today's code, today's fill-them-in wording is
+ * unchanged.
+ */
+function fillSlotsLine(groundingCurrent: boolean): string {
+  if (groundingCurrent) {
+    return "- The briefs are grounded and current: **File boundaries** and **Codebase facts** are already filled in from the code. Check them against the ticket before delegating, rather than filling them by hand. Then paste the whole brief as the delegation prompt.";
+  }
+  return "- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.";
+}
+
 function wavesSection(source: HandoffSource): string {
   const total = source.tickets.length;
   const byNumber = new Map(source.tickets.map((ticket) => [ticket.number, ticket]));
@@ -287,7 +328,7 @@ function wavesSection(source: HandoffSource): string {
  * gate is on: with the gate on, the reviewer marks it ready on approval;
  * with it off, the main session marks it ready itself once satisfied.
  */
-function pullRequestLifecycle(source: HandoffSource): string {
+function pullRequestLifecycle(source: HandoffSource, groundingCurrent: boolean): string {
   const verify = `\`${source.project.verifyCommand}\``;
   const review = source.project.adversarialReview;
   const closeStep =
@@ -324,7 +365,7 @@ function pullRequestLifecycle(source: HandoffSource): string {
     "### Before launching a ticket",
     "",
     "- Local `main` holds nothing unpushed (`git status`, `git log origin/main..main`). Push it first if it does, so the worktree's base includes it.",
-    "- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.",
+    fillSlotsLine(groundingCurrent),
     "",
     "### The subagent",
     "",
@@ -349,7 +390,7 @@ function pullRequestLifecycle(source: HandoffSource): string {
  * in "Before delegating the first ticket") is what makes a new worktree
  * branch from the main session's current `main`.
  */
-function localMergeLifecycle(source: HandoffSource): string {
+function localMergeLifecycle(source: HandoffSource, groundingCurrent: boolean): string {
   const verify = `\`${source.project.verifyCommand}\``;
   const review = source.project.adversarialReview;
   const closeStep =
@@ -386,7 +427,7 @@ function localMergeLifecycle(source: HandoffSource): string {
     "### Before launching a ticket",
     "",
     "- Local `main` holds every change you want the next worktree to start from — commit it before delegating.",
-    "- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.",
+    fillSlotsLine(groundingCurrent),
     "",
     "### The subagent",
     "",
@@ -400,10 +441,10 @@ function localMergeLifecycle(source: HandoffSource): string {
   ].join("\n");
 }
 
-function lifecycleSection(source: HandoffSource): string {
+function lifecycleSection(source: HandoffSource, groundingCurrent: boolean): string {
   return source.project.deliveryRecipe === "pull-request"
-    ? pullRequestLifecycle(source)
-    : localMergeLifecycle(source);
+    ? pullRequestLifecycle(source, groundingCurrent)
+    : localMergeLifecycle(source, groundingCurrent);
 }
 
 /**
@@ -516,7 +557,7 @@ function buildRecordSection(source: HandoffSource): string {
   ].join("\n");
 }
 
-export function renderHandoffMarkdown(source: HandoffSource): string {
+export function renderHandoffMarkdown(source: HandoffSource, groundingCurrent = false): string {
   const sections = [
     `# Handoff: ${source.session.title}`,
     source.session.idea,
@@ -527,7 +568,9 @@ export function renderHandoffMarkdown(source: HandoffSource): string {
       "",
       `- Spec: \`${BUNDLE_TOKEN}/spec.md\``,
       `- Tickets: \`${BUNDLE_TOKEN}/issues/\``,
-      `- Briefs: \`${BUNDLE_TOKEN}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled`,
+      groundingCurrent
+        ? `- Briefs: \`${BUNDLE_TOKEN}/briefs/\`, one per ticket, grounded and ready to paste as a delegation prompt`
+        : `- Briefs: \`${BUNDLE_TOKEN}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled`,
       `- Grill Room session: \`${source.session.id}\``,
     ].join("\n"),
     [
@@ -539,7 +582,7 @@ export function renderHandoffMarkdown(source: HandoffSource): string {
     ].join("\n"),
     beforeDelegatingSection(source),
     wavesSection(source),
-    lifecycleSection(source),
+    lifecycleSection(source, groundingCurrent),
   ];
   if (source.project.adversarialReview) sections.push(reviewingSection(source));
   sections.push(recordingSection(), trackingSection(source));
@@ -621,7 +664,154 @@ function briefReportSection(source: HandoffSource): string {
   return lines.join("\n");
 }
 
-export function renderBrief(source: HandoffSource, ticket: HandoffTicket): string {
+/** The grounding entry for `ticket`, or null when the grounding has none (absent, or this ticket is not in it). */
+function groundingEntryFor(
+  grounding: HandoffGrounding | null,
+  ticket: HandoffTicket,
+): HandoffTicketGrounding | null {
+  return grounding?.tickets.find((entry) => entry.number === ticket.number) ?? null;
+}
+
+/**
+ * The one line rendered when a grounded brief's grounding is stale: which
+ * commit it read (a short hash, or "before this repository had a commit" for
+ * one with none yet), and why it no longer describes today's handoff or
+ * project.
+ */
+function groundingStaleLine(grounding: HandoffGrounding): string {
+  const at = grounding.commitRead
+    ? `at commit \`${grounding.commitRead.slice(0, 7)}\``
+    : "before this repository had a commit";
+  return grounding.staleReason === "handoff-changed"
+    ? `_Grounded ${at} for an earlier version of the handoff (tickets or project settings)._`
+    : `_Grounded ${at}; the repository has moved since._`;
+}
+
+function fileBoundariesContent(entry: HandoffTicketGrounding): string {
+  const creates = entry.filesToChange.filter((file) => file.change === "create");
+  const edits = entry.filesToChange.filter((file) => file.change === "edit");
+  const groups: string[] = [];
+  if (creates.length > 0) {
+    groups.push(["Files to create:", "", ...creates.map((file) => `- \`${file.path}\``)].join("\n"));
+  }
+  if (edits.length > 0) {
+    groups.push(["Files to edit:", "", ...edits.map((file) => `- \`${file.path}\``)].join("\n"));
+  }
+  if (entry.buildsOnFiles.length > 0) {
+    groups.push(
+      ["Existing files it builds on:", "", ...entry.buildsOnFiles.map((citation) => `- \`${citation}\``)].join(
+        "\n",
+      ),
+    );
+  }
+  return groups.length > 0 ? groups.join("\n\n") : "No files to create or edit.";
+}
+
+function codebaseFactsContent(entry: HandoffTicketGrounding): string {
+  if (entry.facts.length === 0) return "No codebase facts cited.";
+  return entry.facts.map((fact) => `- ${fact.statement} (\`${fact.citation}\`)`).join("\n");
+}
+
+/**
+ * The "File boundaries" section: today's empty slot when the ticket has no
+ * grounding entry (absent grounding, or one that does not cover this
+ * ticket), otherwise the files to create and edit and the existing files it
+ * builds on, cited — with the staleness line first when the grounding is
+ * stale.
+ */
+function fileBoundariesSection(ticket: HandoffTicket, grounding: HandoffGrounding | null): string {
+  const entry = groundingEntryFor(grounding, ticket);
+  if (!entry) {
+    return [
+      "## File boundaries",
+      "",
+      FILE_BOUNDARIES_SLOT,
+      "",
+      "_Slot for the orchestrating session: the files and folders this ticket may create or edit, and the existing files it builds on._",
+    ].join("\n");
+  }
+  const lines = ["## File boundaries", ""];
+  if (!grounding!.current) lines.push(groundingStaleLine(grounding!), "");
+  lines.push(fileBoundariesContent(entry));
+  return lines.join("\n");
+}
+
+/** The "Codebase facts" section: today's empty slot, or the grounded facts, cited. */
+function codebaseFactsSection(ticket: HandoffTicket, grounding: HandoffGrounding | null): string {
+  const entry = groundingEntryFor(grounding, ticket);
+  if (!entry) {
+    return [
+      "## Codebase facts",
+      "",
+      CODEBASE_FACTS_SLOT,
+      "",
+      "_Slot for the orchestrating session: verified facts about the code this ticket touches._",
+    ].join("\n");
+  }
+  return ["## Codebase facts", "", codebaseFactsContent(entry)].join("\n");
+}
+
+/**
+ * A new "Builds on" section, one line per blocker: what this ticket needs
+ * from it, where — a citation, or "created by ticket NN at <path>" for a
+ * dependency on a path the blocker has not created yet — and the check to
+ * run first. Absent entirely when the ticket has no grounding entry or the
+ * entry names no dependency (no blockers).
+ */
+function buildsOnSection(
+  source: HandoffSource,
+  ticket: HandoffTicket,
+  grounding: HandoffGrounding | null,
+): string | null {
+  const entry = groundingEntryFor(grounding, ticket);
+  if (!entry || entry.buildsOn.length === 0) return null;
+  const total = source.tickets.length;
+  const lines = entry.buildsOn.map((dependency) => {
+    const label = padTicketNumber(dependency.blocker, total);
+    const where =
+      dependency.citation !== null
+        ? `\`${dependency.citation}\``
+        : `created by ticket ${label} at \`${dependency.createdPath}\``;
+    return `- Ticket ${label}: ${dependency.provides} — ${where} — check: \`${dependency.check}\``;
+  });
+  return ["## Builds on", "", ...lines].join("\n");
+}
+
+/**
+ * A new "Proved by" section: the test to add or extend, and the command that
+ * proves the ticket. Absent entirely when the ticket has no grounding entry.
+ */
+function provedBySection(ticket: HandoffTicket, grounding: HandoffGrounding | null): string | null {
+  const entry = groundingEntryFor(grounding, ticket);
+  if (!entry) return null;
+  return [
+    "## Proved by",
+    "",
+    `Test: \`${entry.provedBy.testPath}\``,
+    "",
+    codeBlock(entry.provedBy.command),
+  ].join("\n");
+}
+
+export interface RenderBriefOptions {
+  /** The session's grounding, current or stale; null or omitted when it has none. */
+  grounding?: HandoffGrounding | null;
+}
+
+/**
+ * Renders one brief fresh from today's template. Whether a *stored* brief
+ * should be rendered fresh at all — versus kept exactly as it is because the
+ * user edited it — is not this function's concern: `server/export-bundle.ts`
+ * decides that at export time, the only place grounding reaches a brief's
+ * text. This function always renders; it never returns anything but a fresh
+ * render.
+ */
+export function renderBrief(
+  source: HandoffSource,
+  ticket: HandoffTicket,
+  options: RenderBriefOptions = {},
+): string {
+  const grounding = options.grounding ?? null;
   const total = source.tickets.length;
   const { label, fileStem } = ticketNames(ticket, total);
   const blockers = blockerLabels(ticket, total);
@@ -631,7 +821,7 @@ export function renderBrief(source: HandoffSource, ticket: HandoffTicket): strin
       ? `\`<bead id>: ${ticket.title}\``
       : `\`${label}: ${ticket.title}\``;
 
-  return `${[
+  const sections: (string | null)[] = [
     `# Brief ${label}: ${ticket.title}`,
     `You are implementing ticket ${label} of "${source.session.title}". You work only inside the git worktree you were started in.`,
     briefStepZero(source, fileStem),
@@ -644,20 +834,10 @@ export function renderBrief(source: HandoffSource, ticket: HandoffTicket): strin
       "",
       ticket.body,
     ].join("\n"),
-    [
-      "## File boundaries",
-      "",
-      FILE_BOUNDARIES_SLOT,
-      "",
-      "_Slot for the orchestrating session: the files and folders this ticket may create or edit, and the existing files it builds on._",
-    ].join("\n"),
-    [
-      "## Codebase facts",
-      "",
-      CODEBASE_FACTS_SLOT,
-      "",
-      "_Slot for the orchestrating session: verified facts about the code this ticket touches._",
-    ].join("\n"),
+    fileBoundariesSection(ticket, grounding),
+    codebaseFactsSection(ticket, grounding),
+    buildsOnSection(source, ticket, grounding),
+    provedBySection(ticket, grounding),
     [
       "## Rules",
       "",
@@ -668,17 +848,25 @@ export function renderBrief(source: HandoffSource, ticket: HandoffTicket): strin
     ["## Verify", "", "From the repository root in your worktree, this must exit 0:", "", codeBlock(verify)].join("\n"),
     briefDeliverySection(source, prTitle),
     briefReportSection(source),
-  ].join("\n\n")}\n`;
+  ];
+
+  return `${sections.filter((section): section is string => section !== null).join("\n\n")}\n`;
 }
 
-export function renderHandoff(source: HandoffSource): RenderedHandoff {
+export interface RenderHandoffOptions {
+  /** The session's grounding, current or stale; null or omitted when it has none. */
+  grounding?: HandoffGrounding | null;
+}
+
+export function renderHandoff(source: HandoffSource, options: RenderHandoffOptions = {}): RenderedHandoff {
   const total = source.tickets.length;
+  const groundingCurrent = (options.grounding ?? null)?.current === true;
   return {
-    markdown: renderHandoffMarkdown(source),
+    markdown: renderHandoffMarkdown(source, groundingCurrent),
     briefs: source.tickets.map((ticket) => ({
       ticketNumber: ticket.number,
       relativePath: `briefs/${ticketNames(ticket, total).fileStem}.md`,
-      markdown: renderBrief(source, ticket),
+      markdown: renderBrief(source, ticket, { grounding: options.grounding }),
     })),
   };
 }

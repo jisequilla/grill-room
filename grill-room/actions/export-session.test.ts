@@ -7,7 +7,17 @@ import path from "node:path";
 import { eq } from "@agent-native/core/db/schema";
 import { describe, expect, it } from "vitest";
 
+import { storeBriefGrounding } from "../server/brief-grounding.js";
 import { EXPORT_MANIFEST_FILE, formatLocalDate, hashExportContent } from "../server/export.js";
+import {
+  bundlePathFor,
+  fillBundlePath,
+  FILE_BOUNDARIES_SLOT,
+  handoffFingerprint,
+  loadHandoffSource,
+  renderBrief,
+} from "../server/handoff.js";
+import { aHandoffScoutResult } from "../server/interviewer/test-fixtures.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 import createSession from "./create-session.js";
@@ -17,6 +27,7 @@ import listTickets from "./list-tickets.js";
 import previewExport from "./preview-export.js";
 import registerProject from "./register-project.js";
 import setTicketBlockedBy from "./set-ticket-blocked-by.js";
+import updateHandoff from "./update-handoff.js";
 
 const repos = useTempGitRepos();
 
@@ -1164,5 +1175,281 @@ describe("preview-export and export-session", () => {
       expect(await fs.readFile(specPath, "utf8")).toBe(EDITED);
       expect(await fs.readFile(path.join(elsewhere, "spec.md"), "utf8")).toBe("not the bundle's");
     });
+  });
+});
+
+describe("export writes grounded briefs", () => {
+  useTestDatabase();
+
+  /** Grounds the session right now: a valid result, today's fingerprint, HEAD as read. */
+  async function groundNow(sessionId: string, root: string): Promise<void> {
+    const loaded = await loadHandoffSource(sessionId);
+    if (!("source" in loaded)) throw new Error("expected a handoff source");
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    await storeBriefGrounding({
+      sessionId,
+      result: aHandoffScoutResult(),
+      commitRead: head,
+      handoffFingerprint: handoffFingerprint(loaded.source),
+      model: "sonnet",
+      turnId: null,
+      ranAt: new Date().toISOString(),
+    });
+  }
+
+  async function readBrief(bundleDir: string, relativePath: string): Promise<string> {
+    return fs.readFile(path.join(bundleDir, "briefs", relativePath), "utf8");
+  }
+
+  /**
+   * Overwrites ticket `number`'s stored brief text directly in the database,
+   * without touching `editedAt` — simulating a brief `generate-handoff` wrote
+   * under an earlier template version (its exact bytes no longer match
+   * today's `renderBrief`), as opposed to one a person edited through
+   * `update-handoff` (which always sets `editedAt`).
+   */
+  async function overwriteStoredBriefText(
+    sessionId: string,
+    ticketNumber: number,
+    markdown: string,
+  ): Promise<void> {
+    const [row] = await getDb()
+      .select()
+      .from(schema.handoffs)
+      .where(eq(schema.handoffs.sessionId, sessionId))
+      .limit(1);
+    const briefs = JSON.parse(row!.briefsJson) as {
+      ticketNumber: number;
+      relativePath: string;
+      markdown: string;
+    }[];
+    const updated = briefs.map((brief) =>
+      brief.ticketNumber === ticketNumber ? { ...brief, markdown } : brief,
+    );
+    await getDb()
+      .update(schema.handoffs)
+      .set({ briefsJson: JSON.stringify(updated) })
+      .where(eq(schema.handoffs.id, row!.id));
+  }
+
+  async function editedAtOf(sessionId: string): Promise<string | null> {
+    const [row] = await getDb()
+      .select()
+      .from(schema.handoffs)
+      .where(eq(schema.handoffs.sessionId, sessionId))
+      .limit(1);
+    return row!.editedAt;
+  }
+
+  it("exports an unedited brief with the grounded sections", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    await groundNow(session.id, root);
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(result.groundedBriefs.sort()).toEqual([1, 2]);
+    expect(result.ungroundedBriefs).toEqual([]);
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+
+    // Ticket 1 (aHandoffScoutResult's ticket 1: no blockers, cited facts, a Proved by).
+    const first = await readBrief(bundleDir, "01-build-the-workspace.md");
+    expect(first).toContain("## File boundaries");
+    expect(first).toContain("src/ingest/lag-alert.ts");
+    expect(first).toContain("## Codebase facts");
+    expect(first).toContain("Ingest lag is measured in src/ingest/metrics.ts.");
+    expect(first).toContain("## Proved by");
+    expect(first).toContain("src/ingest/lag-alert.test.ts");
+    expect(first).not.toContain(FILE_BOUNDARIES_SLOT);
+
+    // Ticket 2 (aHandoffScoutResult's ticket 2: blocked by 1, a Builds on entry).
+    const second = await readBrief(bundleDir, "02-store-on-disk.md");
+    expect(second).toContain("## Builds on");
+    expect(second).toContain("The lag alert module.");
+    expect(second).toContain("created by ticket 01 at `src/ingest/lag-alert.ts`");
+  });
+
+  it("exports a brief edited through update-handoff verbatim, ignoring grounding", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    const edited = "# Brief 01: Hand-edited\n\nSomeone already wrote this by hand.\n";
+    await updateHandoff.run({ sessionId: session.id, briefs: [{ ticketNumber: 1, markdown: edited }] });
+    await groundNow(session.id, root);
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(result.ungroundedBriefs).toEqual([{ ticket: 1, reason: "edited" }]);
+    expect(result.groundedBriefs).toEqual([2]);
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+
+    expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(edited);
+  });
+
+  it("grounds a brief stored under an older template: editedAt null overrides the text mismatch", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+
+    // Simulate a brief `generate-handoff` wrote before a later template
+    // wording change (e.g. #54): its stored bytes no longer match today's
+    // `renderBrief`, but nothing was hand-edited, so `editedAt` is still
+    // null. Without the `editedAt`-first check, this text mismatch alone
+    // would wrongly classify the brief as edited and skip grounding.
+    const olderTemplateText =
+      "# Brief 01: Build the workspace\n\nAn older rendering of this brief, before a template wording change.\n\n<!-- slot: file-boundaries -->\n\n<!-- slot: codebase-facts -->\n";
+    await overwriteStoredBriefText(session.id, 1, olderTemplateText);
+    expect(await editedAtOf(session.id)).toBeNull();
+
+    await groundNow(session.id, root);
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.groundingState).toBe("current");
+    expect(preview.groundedBriefs).toContain(1);
+    expect(preview.ungroundedBriefs.some((entry: { ticket: number }) => entry.ticket === 1)).toBe(false);
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(result.groundedBriefs).toContain(1);
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+
+    const first = await readBrief(bundleDir, "01-build-the-workspace.md");
+    expect(first).not.toContain("An older rendering of this brief");
+    expect(first).toContain("## Proved by");
+    expect(first).toContain("src/ingest/lag-alert.ts");
+  });
+
+  it("with stale grounding, the brief carries the stale line naming the handoff (tickets or project settings)", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    await groundNow(session.id, root);
+
+    // Removing ticket 2's blocker and regenerating the handoff keeps the
+    // handoff itself current (so export is not blocked) but leaves the
+    // grounding — made for the handoff before this edit — stale with reason
+    // `handoff-changed`.
+    await setTicketBlockedBy.run({ ticketId: await ticketIdFor(session.id, 2), blockedBy: [] });
+    await generateHandoff.run({ sessionId: session.id });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.exportBlocked).toBe(false);
+    expect(preview.groundingState).toBe("stale");
+    expect(preview.groundingStaleReason).toBe("handoff-changed");
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+
+    const first = await readBrief(bundleDir, "01-build-the-workspace.md");
+    expect(first).toContain("_Grounded at commit `");
+    expect(first).toContain("for an earlier version of the handoff (tickets or project settings)._");
+    // The grounded content itself is still there under the stale line.
+    expect(first).toContain("src/ingest/lag-alert.ts");
+  });
+
+  it("with no grounding, the brief is byte-identical to today's (unfilled slots)", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.groundingState).toBe("absent");
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+
+    const loaded = await loadHandoffSource(session.id);
+    if (!("source" in loaded)) throw new Error("expected a handoff source");
+    const ticket1 = loaded.source.tickets.find((ticket) => ticket.number === 1)!;
+    const bundlePath = bundlePathFor(loaded.source.project.visibility, loaded.source.project.rootPath, bundleDir);
+    const expected = fillBundlePath(renderBrief(loaded.source, ticket1), bundlePath);
+
+    expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(expected);
+  });
+
+  it("an older-template handoff with one brief hand-edited: HANDOFF.md keeps the fill wording, and the lists are accurate", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+
+    // Ticket 2's brief is left sitting under an older template — nobody
+    // touches it, and `editedAt` is still null at this point.
+    const olderTemplateText =
+      "# Brief 02: Store on disk\n\nAn older rendering of this brief, before a template wording change.\n\n<!-- slot: file-boundaries -->\n\n<!-- slot: codebase-facts -->\n";
+    await overwriteStoredBriefText(session.id, 2, olderTemplateText);
+    expect(await editedAtOf(session.id)).toBeNull();
+
+    // Editing ticket 1's brief through update-handoff sets `editedAt` for the
+    // whole handoff. From here, the equality check decides eligibility for
+    // *every* text — including ticket 2's, which nobody touched but which
+    // still no longer matches today's template.
+    const handEdited = "# Brief 01: Hand-edited\n\nSomeone already wrote this by hand.\n";
+    await updateHandoff.run({ sessionId: session.id, briefs: [{ ticketNumber: 1, markdown: handEdited }] });
+    expect(await editedAtOf(session.id)).not.toBeNull();
+
+    await groundNow(session.id, root);
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.groundingState).toBe("current");
+    expect(preview.groundedBriefs).toEqual([]);
+    expect(
+      [...preview.ungroundedBriefs].sort((a: { ticket: number }, b: { ticket: number }) => a.ticket - b.ticket),
+    ).toEqual([
+      { ticket: 1, reason: "edited" },
+      { ticket: 2, reason: "edited" },
+    ]);
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(result.groundedBriefs).toEqual([]);
+    expect(
+      [...result.ungroundedBriefs].sort((a: { ticket: number }, b: { ticket: number }) => a.ticket - b.ticket),
+    ).toEqual([
+      { ticket: 1, reason: "edited" },
+      { ticket: 2, reason: "edited" },
+    ]);
+
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    const handoffMarkdown = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoffMarkdown).toContain("Fill the brief's **File boundaries** slot");
+    expect(handoffMarkdown).toContain("Fill the **Codebase facts** slot");
+    expect(handoffMarkdown).not.toContain("grounded and current");
+
+    expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(handEdited);
+    const second = await readBrief(bundleDir, "02-store-on-disk.md");
+    expect(second).toBe(olderTemplateText);
+    expect(second).not.toContain("## Proved by");
+  });
+
+  it("a brief the hash guard kept is not reported as grounded", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    await groundNow(session.id, root);
+
+    // A first export writes both briefs grounded, so HANDOFF.md says so too.
+    const first = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(first.groundedBriefs.sort()).toEqual([1, 2]);
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    expect(await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8")).toContain("grounded and current");
+
+    // Someone hand-edits the exported brief file directly in the repo,
+    // outside Grill Room, after the export — the hash guard will keep it.
+    const editedOnDisk = "# Hand-edited directly in the repo, not through update-handoff\n";
+    await fs.writeFile(path.join(bundleDir, "briefs", "02-store-on-disk.md"), editedOnDisk);
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.groundedBriefs).toEqual([1]);
+    expect(preview.ungroundedBriefs).toEqual(
+      expect.arrayContaining([{ ticket: 2, reason: "kept" }]),
+    );
+
+    const second = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(second.groundedBriefs).toEqual([1]);
+    expect(second.ungroundedBriefs).toEqual(expect.arrayContaining([{ ticket: 2, reason: "kept" }]));
+    expect(second.kept.some((p) => p.endsWith("02-store-on-disk.md"))).toBe(true);
+
+    // Ticket 2's file on disk is untouched by the export; ticket 1's is
+    // still (re-)written grounded.
+    expect(await readBrief(bundleDir, "02-store-on-disk.md")).toBe(editedOnDisk);
+    expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toContain("## Proved by");
+
+    // Not every brief is actually grounded any more (ticket 2 is kept), so
+    // the re-exported HANDOFF.md must fall back to the fill-the-slots
+    // wording, not still claim the briefs are grounded and current.
+    const handoffMarkdown = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoffMarkdown).toContain("Fill the brief's **File boundaries** slot");
+    expect(handoffMarkdown).toContain("Fill the **Codebase facts** slot");
+    expect(handoffMarkdown).not.toContain("grounded and current");
   });
 });

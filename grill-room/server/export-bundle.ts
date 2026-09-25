@@ -41,6 +41,51 @@
  * `{{BUNDLE}}` placeholders are filled with the bundle path — repo-relative
  * for a `tracked` project, absolute for an `ignored` one.
  *
+ * `HANDOFF.md` and every eligible brief (see "Eligibility" below) are
+ * re-rendered fresh at this point — with the session's current brief
+ * grounding (see "Brief grounding state" below) — before their bundle path is
+ * filled in: current grounding fills an eligible, covered brief's slots and
+ * adds "Builds on"/"Proved by"; stale grounding renders the same under its
+ * one-line note; a brief the grounding does not cover, or with no grounding
+ * at all, still renders fresh but stays today's empty slots. This is the only
+ * place grounding reaches a brief's text — `generate-handoff` and
+ * `update-handoff` never read it.
+ *
+ * **Eligibility.** A stored text (HANDOFF.md, or one ticket's brief) is
+ * eligible for this fresh render when nothing in the handoff has ever been
+ * hand-edited (`editedAt` null — `update-handoff` is the only thing that sets
+ * it), or, once something has, when this particular text still equals an
+ * ungrounded render of it, the same one `generate-handoff` would have
+ * written. Checking `editedAt` first, before ever comparing text, is what
+ * makes a brief stored under an older template still eligible while nothing
+ * has been edited: its exact bytes no longer match today's `renderBrief` once
+ * the template's wording changes (as it did once already, in #54), but that
+ * mismatch is not an edit. Once `editedAt` is set, though, the equality check
+ * decides eligibility for *every* text, not only the one a person actually
+ * touched — a brief nobody edited, still under that older template, becomes
+ * ineligible the moment anything else in the handoff is edited, and stays
+ * that way until the handoff is regenerated. An ineligible text is written
+ * exactly as stored; grounding never touches it.
+ *
+ * **Grounded vs. eligible.** Eligibility alone is not "grounded": an eligible
+ * brief with no grounding to apply, or with a grounding that does not cover
+ * its ticket, still renders fresh but with nothing grounded in it. A brief
+ * counts as grounded — for `groundedBriefs`, and for whether HANDOFF.md may
+ * say the briefs are grounded — only when it is eligible *and* the session's
+ * grounding (current or stale) has an entry for its ticket. Every other
+ * brief this plan writes lands in `ungroundedBriefs` as `{ ticket, reason }`:
+ * `edited` (ineligible), `no-grounding` (eligible, no grounding exists),
+ * `not-covered` (eligible, a grounding exists but has no entry for this
+ * ticket), or `kept` (eligible, covered, rendered grounded — but the file
+ * already on disk was edited since the last export, so the hash guard is
+ * keeping it instead). So a brief the grounding skipped, for any reason, is
+ * never invisible. HANDOFF.md may say the briefs are grounded only when the
+ * grounding is current *and* `ungroundedBriefs` is empty — every brief this
+ * plan writes is actually grounded — *and* HANDOFF.md's own text is eligible;
+ * otherwise it keeps today's fill-the-slots wording. Since `preview-export`
+ * and `export-session` share this plan, the preview's file list, grounding
+ * state and per-brief lists always match what a real export would write.
+ *
  * ## Export gate
  *
  * `exportBlockedReason` ({@link ExportGateReason}, from `getExportGate`) is
@@ -50,6 +95,16 @@
  * the handoff is current. This module only reports it — `preview-export`
  * surfaces it for the UI, and `export-session` is the one that refuses to
  * write when it is non-null.
+ *
+ * ## Brief grounding state
+ *
+ * `briefGroundingState` (`"absent"`, `"current"`, or `"stale"`, from
+ * `currentBriefGrounding` in `server/brief-grounding.ts`) reports whether the
+ * session's handoff briefs have been grounded and whether that grounding
+ * still describes today's handoff and project; `briefGroundingStaleReason`
+ * names why when stale (`"head-moved"` or `"handoff-changed"`), null
+ * otherwise. This is informational only: nothing here or in `export-session`
+ * ever refuses on it, unlike the export gate above.
  *
  * ## Containment
  *
@@ -101,6 +156,7 @@ import { fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 
 import type { ProjectVisibility } from "../shared/session-constants.js";
+import { currentBriefGrounding, type BriefGroundingStaleReason } from "./brief-grounding.js";
 import { getDb, schema } from "./db/index.js";
 import {
   applySlugPattern,
@@ -124,7 +180,11 @@ import {
   getExportGate,
   getHandoffRow,
   HANDOFF_FILE,
+  loadHandoffSource,
+  renderBrief,
+  renderHandoffMarkdown,
   type ExportGateReason,
+  type HandoffGrounding,
   type HandoffRow,
   parseBriefs,
 } from "./handoff.js";
@@ -137,6 +197,28 @@ import { describeDecisions } from "./tree.js";
 const NO_TICKETS_REASON = "This session has no tickets to export.";
 const STALE_TICKETS_REASON =
   "The session's tickets are out of date with its spec and were not exported.";
+
+/** Whether the session's handoff briefs have been grounded, and whether that grounding is still current. */
+export type BriefGroundingState = "absent" | "current" | "stale";
+
+/**
+ * Why a brief is not grounded: `edited` (ineligible — a hand edit's text no
+ * longer matches an ungrounded render), `no-grounding` (eligible, but the
+ * session has no grounding at all), `not-covered` (eligible and a grounding
+ * exists, but it has no entry for this ticket), or `kept` (eligible, covered,
+ * and rendered grounded — but the file already on disk was edited since the
+ * last export, so the hash guard is keeping it instead of writing this text).
+ * `kept` is read from disk state alone, the same guard `plannedWrites`/`kept`
+ * already reflects, so it can appear in a preview too, not only after a real
+ * export writes (or, here, declines to write) the file.
+ */
+export type UngroundedBriefReason = "edited" | "no-grounding" | "not-covered" | "kept";
+
+/** A brief this plan does not write grounded, and why. */
+export interface UngroundedBrief {
+  ticket: number;
+  reason: UngroundedBriefReason;
+}
 
 export interface BundleFile {
   /** Relative to the bundle directory, forward slashes: `spec.md`, `issues/01-slug.md`. */
@@ -195,6 +277,18 @@ export interface ExportBundlePlan {
   exportBlocked: boolean;
   /** Why export is blocked, or null once a current handoff exists. See "Export gate" above. */
   exportBlockedReason: ExportGateReason | null;
+  /** Whether the session's handoff briefs are grounded and current. See "Brief grounding state" above. */
+  briefGroundingState: BriefGroundingState;
+  /** Why the grounding is stale, or null while current or absent. */
+  briefGroundingStaleReason: BriefGroundingStaleReason | null;
+  /**
+   * Ticket numbers of briefs this plan actually writes grounded: eligible
+   * under the edit rule, and the session's grounding (current or stale) has
+   * an entry for that ticket. See "Handoff" above.
+   */
+  groundedBriefs: number[];
+  /** Every other brief this plan writes, with why it is not grounded. See "Handoff" above. */
+  ungroundedBriefs: UngroundedBrief[];
 }
 
 export interface PlanExportBundleInput {
@@ -504,6 +598,15 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
 
   const bundleDir = path.join(exportDir, folderName);
 
+  // Hoisted so the handoff block below can work out, per brief, whether the
+  // hash guard will keep its file — before deciding whether HANDOFF.md may
+  // say the briefs are grounded. Whether a file is kept depends only on the
+  // disk hash against the previous manifest and on `overridePaths`, never on
+  // the content this plan renders for it, so reading these this early is
+  // safe: nothing below changes what they report.
+  const previous = await readPreviousManifest(bundleDir);
+  const overrides = await resolveOverrides(bundleDir, input.overridePaths ?? []);
+
   const ticketRows = await db
     .select()
     .from(schema.tickets)
@@ -543,19 +646,128 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
 
   const handoff = (await getHandoffRow(session.id)) ?? null;
   const gate = await getExportGate(session.id);
+  const grounding = await currentBriefGrounding(session.id);
+  const briefGroundingState: BriefGroundingState = !grounding
+    ? "absent"
+    : grounding.current
+      ? "current"
+      : "stale";
+  const briefGroundingStaleReason = grounding && !grounding.current ? grounding.staleReason : null;
+  const groundingForRender: HandoffGrounding | null = grounding
+    ? {
+        tickets: grounding.result.tickets,
+        commitRead: grounding.commitRead,
+        current: grounding.current,
+        staleReason: grounding.staleReason,
+      }
+    : null;
+  const groundingCurrent = groundingForRender?.current === true;
+
   const handoffFiles: { relativePath: string; content: string }[] = [];
+  // Populated inside `if (handoff)` below, before HANDOFF.md's own content is
+  // decided, so its wording can already see the final answer — including
+  // whether the hash guard will keep any brief's file.
+  const groundedBriefs: number[] = [];
+  const ungroundedBriefs: UngroundedBrief[] = [];
   if (handoff) {
     const bundlePath = bundlePathFor(project.visibility, project.rootPath, bundleDir);
+
+    // Export is the one place grounding reaches the handoff's text: it
+    // applies here, not at generation time, because grounding happens after
+    // the handoff exists and can go stale on its own — rendering at export
+    // is the only way to reflect its current state.
+    //
+    // A stored text (HANDOFF.md itself, or one ticket's brief) is eligible to
+    // be re-rendered fresh only when nothing in the handoff has been
+    // hand-edited (`editedAt` null — `update-handoff` is the only thing that
+    // sets it), or, once something has, when this particular text still
+    // equals an ungrounded render of it, the same one `generate-handoff`
+    // would have written. `editedAt` null is checked first and short-circuits
+    // the text comparison: a brief stored under an older template (its exact
+    // text no longer matches today's `renderBrief`, because the template
+    // changed after it was generated, not because anyone edited it) still
+    // counts as eligible, so a template change alone can never silently stop
+    // grounding from reaching it. Once `editedAt` is set, the equality check
+    // applies to *every* text, not only the one a person actually touched: a
+    // brief nobody edited, still sitting under an older template, becomes
+    // ineligible the moment anything else in the handoff is edited, and stays
+    // that way until the handoff is regenerated.
+    //
+    // Eligibility alone is not "grounded", though: an eligible text with no
+    // grounding to apply, or with a grounding that does not cover its ticket,
+    // still renders fresh (today's template) but with nothing grounded in
+    // it. Nor is being eligible and covered enough on its own: the hash
+    // guard may still keep the file already on disk instead of writing this
+    // plan's grounded text (see "The guard" above) — whether a file is kept
+    // depends only on its disk hash against the previous manifest and on
+    // `overridePaths`, never on the content rendered for it, so it can be
+    // checked here, before HANDOFF.md's own content is decided below. A
+    // brief only counts as grounded — for `groundedBriefs`, and for whether
+    // HANDOFF.md may say so — when it is eligible, the session's grounding
+    // (current or stale) has an entry for its ticket, and the guard is not
+    // keeping its file.
+    const loadedSource = await loadHandoffSource(session.id);
+    const briefSource = "source" in loadedSource ? loadedSource.source : null;
+    const wasEdited = handoff.editedAt !== null;
+
+    const briefEntries = parseBriefs(handoff.briefsJson);
+    const briefFiles: { relativePath: string; content: string }[] = [];
+
+    for (const brief of briefEntries) {
+      const ticket = briefSource?.tickets.find((candidate) => candidate.number === brief.ticketNumber) ?? null;
+      const eligible =
+        briefSource !== null &&
+        ticket !== null &&
+        (!wasEdited || brief.markdown === renderBrief(briefSource, ticket));
+      const covered =
+        groundingForRender?.tickets.some((entry) => entry.number === brief.ticketNumber) ?? false;
+      const markdown =
+        eligible && briefSource !== null && ticket !== null
+          ? renderBrief(briefSource, ticket, { grounding: groundingForRender })
+          : brief.markdown;
+
+      if (!eligible) {
+        ungroundedBriefs.push({ ticket: brief.ticketNumber, reason: "edited" });
+      } else if (!groundingForRender) {
+        ungroundedBriefs.push({ ticket: brief.ticketNumber, reason: "no-grounding" });
+      } else if (!covered) {
+        ungroundedBriefs.push({ ticket: brief.ticketNumber, reason: "not-covered" });
+      } else {
+        const briefAbsolutePath = path.resolve(bundleDir, brief.relativePath);
+        const briefEditedOnDisk = await isEdited(briefAbsolutePath, brief.relativePath, previous);
+        const briefKept = briefEditedOnDisk && !overrides.has(brief.relativePath);
+        if (briefKept) {
+          ungroundedBriefs.push({ ticket: brief.ticketNumber, reason: "kept" });
+        } else {
+          groundedBriefs.push(brief.ticketNumber);
+        }
+      }
+
+      briefFiles.push({ relativePath: brief.relativePath, content: fillBundlePath(markdown, bundlePath) });
+    }
+
+    // HANDOFF.md may say "the briefs are grounded" only once every brief this
+    // plan writes really is grounded (the corrected `groundedBriefs` above —
+    // eligible, covered, and not a `kept` file — not merely "eligible") and
+    // the grounding itself is current — stale grounding still needs checking
+    // against today's code, so it keeps today's fill-the-slots wording even
+    // when every brief is covered. `ungroundedBriefs` already reflects the
+    // hash guard at this point, computed per brief in the loop above, before
+    // this decision is made — never after, or a brief the guard kept could
+    // still count as grounded here.
+    const allBriefsGrounded = briefEntries.length > 0 && ungroundedBriefs.length === 0;
+    const useGroundedWording = groundingCurrent && allBriefsGrounded;
+    const headerEligible =
+      briefSource !== null && (!wasEdited || handoff.markdown === renderHandoffMarkdown(briefSource));
+    const headerMarkdown =
+      headerEligible && briefSource !== null
+        ? renderHandoffMarkdown(briefSource, useGroundedWording)
+        : handoff.markdown;
     handoffFiles.push({
       relativePath: HANDOFF_FILE,
-      content: fillBundlePath(handoff.markdown, bundlePath),
+      content: fillBundlePath(headerMarkdown, bundlePath),
     });
-    for (const brief of parseBriefs(handoff.briefsJson)) {
-      handoffFiles.push({
-        relativePath: brief.relativePath,
-        content: fillBundlePath(brief.markdown, bundlePath),
-      });
-    }
+    handoffFiles.push(...briefFiles);
   }
 
   const contentFiles = handoff
@@ -576,11 +788,9 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     return absolutePath;
   });
 
-  const previous = await readPreviousManifest(bundleDir);
   const removalPaths = await removalCandidates(bundleDir, previous, new Set(plannedPaths));
 
   await assertContained([bundleDir, ...plannedPaths, ...removalPaths], realRoot);
-  const overrides = await resolveOverrides(bundleDir, input.overridePaths ?? []);
 
   const contentBundleFiles: BundleFile[] = [];
   for (const [index, file] of contentFiles.entries()) {
@@ -651,6 +861,10 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     handoff,
     exportBlocked: gate.blocked,
     exportBlockedReason: gate.reason,
+    briefGroundingState,
+    briefGroundingStaleReason,
+    groundedBriefs,
+    ungroundedBriefs,
   };
 }
 
