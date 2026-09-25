@@ -383,6 +383,69 @@ describe("ground-briefs", () => {
       expect(reason).toMatch(/Ticket 1 marks dist\/lag-alert\.js as create, but git ignores that path/);
     });
 
+    it("a create inside an ignored path that git prints quoted", async () => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(1, (ticket) => {
+          ticket.filesToChange.push(
+            { path: "dist/é.js", change: "create" },
+            { path: 'dist/a"b.js', change: "create" },
+          );
+        }),
+      );
+      expect(reason).toContain("Ticket 1 marks dist/é.js as create, but git ignores that path");
+      expect(reason).toContain('Ticket 1 marks dist/a"b.js as create, but git ignores that path');
+    });
+
+    it("a create inside .git", async () => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(1, (ticket) => {
+          ticket.filesToChange.push({ path: ".git/hooks/pre-commit", change: "create" });
+        }),
+      );
+      expect(reason).toMatch(
+        /Ticket 1 marks \.git\/hooks\/pre-commit as create, but it is inside a \.git folder/,
+      );
+    });
+
+    it("an edit inside .git", async () => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(1, (ticket) => {
+          ticket.filesToChange.push({ path: ".git/config", change: "edit" });
+        }),
+      );
+      expect(reason).toMatch(/Ticket 1 marks \.git\/config as edit, but it is inside a \.git folder/);
+    });
+
+    it("a blocker with no buildsOn entry", async () => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(2, (ticket) => {
+          ticket.buildsOn = [];
+        }),
+      );
+      expect(reason).toMatch(
+        /Ticket 2 is blocked by ticket 1, but its buildsOn has no entry for ticket 1/,
+      );
+    });
+
+    it("a blocker named twice in buildsOn", async () => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(2, (ticket) => {
+          ticket.buildsOn = [ticket.buildsOn[0]!, ticket.buildsOn[0]!];
+        }),
+      );
+      expect(reason).toMatch(/Ticket 2's buildsOn names ticket 1 2 times/);
+    });
+
     it("a create outside the root, through a symlink", async () => {
       const root = aFixtureRepo();
       const outside = realpathSync(mkdtempSync(path.join(os.tmpdir(), "grill-room-outside-")));

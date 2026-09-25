@@ -490,7 +490,9 @@ with the reasons:
 - every citation (`buildsOnFiles`, `facts`, a citation-form `buildsOn`) points
   at real lines of the project, by the same check the project scout uses;
 - every ticket of the handoff appears exactly once, and no other;
-- every `buildsOn` names a real blocker of its ticket;
+- every blocker of a ticket has exactly one `buildsOn` entry, and every
+  `buildsOn` names a real blocker;
+- no file to change sits inside a `.git` folder;
 - a file marked `edit` exists;
 - a file marked `create` resolves inside the project root (through symlinks),
   does not exist yet, and is not ignored by git (`git check-ignore`);

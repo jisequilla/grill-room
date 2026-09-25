@@ -97,7 +97,11 @@ export async function latestBriefGrounding(
   return row ? readRow(row) : null;
 }
 
-/** Store an accepted grounding as the session's, replacing any it had. */
+/**
+ * Store an accepted grounding as the session's, replacing any it had. The
+ * old row is removed and the new one written in one transaction, so a failed
+ * write keeps the previous grounding.
+ */
 export async function storeBriefGrounding(input: {
   sessionId: string;
   result: HandoffScoutResult;
@@ -108,19 +112,20 @@ export async function storeBriefGrounding(input: {
   ranAt: string;
 }): Promise<BriefGrounding> {
   const grounding: BriefGrounding = { id: randomUUID(), ...input };
-  const db = getDb();
-  await db
-    .delete(schema.briefGroundings)
-    .where(eq(schema.briefGroundings.sessionId, input.sessionId));
-  await db.insert(schema.briefGroundings).values({
-    id: grounding.id,
-    sessionId: grounding.sessionId,
-    resultJson: JSON.stringify(grounding.result),
-    commitRead: grounding.commitRead,
-    handoffFingerprint: grounding.handoffFingerprint,
-    model: grounding.model,
-    ranAt: grounding.ranAt,
-    turnId: grounding.turnId,
+  await getDb().transaction(async (tx) => {
+    await tx
+      .delete(schema.briefGroundings)
+      .where(eq(schema.briefGroundings.sessionId, input.sessionId));
+    await tx.insert(schema.briefGroundings).values({
+      id: grounding.id,
+      sessionId: grounding.sessionId,
+      resultJson: JSON.stringify(grounding.result),
+      commitRead: grounding.commitRead,
+      handoffFingerprint: grounding.handoffFingerprint,
+      model: grounding.model,
+      ranAt: grounding.ranAt,
+      turnId: grounding.turnId,
+    });
   });
   return grounding;
 }
@@ -226,6 +231,62 @@ function resolvesInside(realRoot: string, candidate: string): boolean {
   }
 }
 
+/** Whether a path has a `.git` segment: git's own folder, which it never tracks. */
+function isInsideGitDir(candidate: string): boolean {
+  return candidate
+    .split(/[\\/]/)
+    .some((segment) => segment.toLowerCase() === ".git");
+}
+
+const C_ESCAPES: Record<string, number> = {
+  a: 0x07,
+  b: 0x08,
+  t: 0x09,
+  n: 0x0a,
+  v: 0x0b,
+  f: 0x0c,
+  r: 0x0d,
+  '"': 0x22,
+  "\\": 0x5c,
+};
+
+/**
+ * One path as git prints it, unquoted. git wraps a path holding a non-ASCII
+ * byte, a quote, a backslash or a control character in double quotes, with C
+ * escapes and octal bytes (`"dist/\303\251.js"`); any other path is printed
+ * as it is.
+ *
+ * `-z` would print every path raw, but `git check-ignore` accepts `-z` only
+ * with `--stdin` ("fatal: -z only makes sense with --stdin"), and the
+ * read-only wrapper gives git no stdin.
+ */
+export function unquoteGitPath(printed: string): string {
+  if (printed.length < 2 || !printed.startsWith('"') || !printed.endsWith('"')) {
+    return printed;
+  }
+  const body = printed.slice(1, -1);
+  const bytes: number[] = [];
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index]!;
+    if (char !== "\\") {
+      bytes.push(...Buffer.from(char, "utf8"));
+      continue;
+    }
+    const octal = /^[0-3][0-7]{2}/.exec(body.slice(index + 1));
+    const next = body[index + 1] ?? "";
+    if (octal) {
+      bytes.push(parseInt(octal[0], 8));
+      index += 3;
+    } else if (next in C_ESCAPES) {
+      bytes.push(C_ESCAPES[next]!);
+      index += 1;
+    } else {
+      bytes.push(0x5c);
+    }
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
 function listNumbers(numbers: readonly number[]): string {
   return numbers.length === 0 ? "none" : numbers.join(", ");
 }
@@ -237,7 +298,9 @@ function listNumbers(numbers: readonly number[]): string {
  * - every citation (`buildsOnFiles`, `facts`, a citation-form `buildsOn`)
  *   points at real lines of the project;
  * - every ticket of the handoff appears exactly once, and no other does;
- * - every `buildsOn` names a real blocker of its ticket;
+ * - every blocker of a ticket has exactly one `buildsOn` entry, and every
+ *   `buildsOn` names a real blocker;
+ * - no file to change has a `.git` segment;
  * - a file marked `edit` exists;
  * - a file marked `create` resolves inside the root, does not exist, and is
  *   not ignored by git;
@@ -306,6 +369,18 @@ export async function reasonsToRefuseHandoffGrounding(
   for (const ticket of result.tickets) {
     const blockers = blockersOf.get(ticket.number);
     if (!blockers) continue;
+    for (const blocker of [...blockers].sort((a, b) => a - b)) {
+      const entries = ticket.buildsOn.filter((entry) => entry.blocker === blocker).length;
+      if (entries === 0) {
+        reasons.push(
+          `Ticket ${ticket.number} is blocked by ticket ${blocker}, but its buildsOn has no entry for ticket ${blocker}; give one buildsOn entry per blocker, naming what this ticket needs from it and the check that proves it.`,
+        );
+      } else if (entries > 1) {
+        reasons.push(
+          `Ticket ${ticket.number}'s buildsOn names ticket ${blocker} ${entries} times; give exactly one buildsOn entry per blocker.`,
+        );
+      }
+    }
     for (const entry of ticket.buildsOn) {
       if (!blockers.has(entry.blocker)) {
         reasons.push(
@@ -337,6 +412,12 @@ export async function reasonsToRefuseHandoffGrounding(
   const toCheckIgnored: { ticket: number; path: string }[] = [];
   for (const ticket of result.tickets) {
     for (const file of ticket.filesToChange) {
+      if (isInsideGitDir(file.path)) {
+        reasons.push(
+          `Ticket ${ticket.number} marks ${file.path} as ${file.change}, but it is inside a .git folder, which the repository never tracks; plan files outside .git.`,
+        );
+        continue;
+      }
       const resolved = path.resolve(realRoot, file.path);
       const inside =
         !path.isAbsolute(file.path) &&
@@ -383,7 +464,9 @@ export async function reasonsToRefuseHandoffGrounding(
     const unique = [...new Set(toCheckIgnored.map((entry) => entry.path))];
     const checked = await runGit(realRoot, ["check-ignore", "--", ...unique]);
     if (checked.exitCode === 0 || checked.exitCode === 1) {
-      const ignored = new Set(checked.stdout.split("\n").filter(Boolean));
+      const ignored = new Set(
+        checked.stdout.split("\n").filter(Boolean).map(unquoteGitPath),
+      );
       for (const entry of toCheckIgnored) {
         if (ignored.has(entry.path)) {
           reasons.push(

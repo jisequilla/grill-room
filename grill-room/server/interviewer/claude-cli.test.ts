@@ -744,6 +744,13 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("it must not exist yet, it must sit inside the project");
   });
 
+  it("lets a ticket change no files", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("empty for a ticket that changes no files");
+    expect(prompt).not.toContain("at least one and at most");
+  });
+
   it("asks, for each blocker, what the ticket needs from it and the check that proves it", async () => {
     const { prompt } = await handoffInvocation();
 
