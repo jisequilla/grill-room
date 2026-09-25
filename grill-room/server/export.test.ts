@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { planExport } from "./export.js";
+import { createHash } from "node:crypto";
+
+import {
+  buildExportManifest,
+  hashExportContent,
+  parseExportManifest,
+  planExport,
+  renderExportManifest,
+} from "./export.js";
 import type { StoredReadiness } from "./readiness.js";
 import type { ScoutReportWithStaleness } from "./scout-report.js";
 import type { DecisionView } from "./tree.js";
@@ -506,8 +514,8 @@ describe("planExport: intent.md", () => {
         "",
         "**Evidence**",
         "",
-        "- The user said re-exports were silently destroying edits. · the user's statement",
-        "- The export bundle already writes decisions.md next to spec.md. · the repo's statement (server/export.ts:17)",
+        "- The user said re-exports were silently destroying edits. · the user said",
+        "- The export bundle already writes decisions.md next to spec.md. · the repo shows (server/export.ts:17)",
         "",
         "**Unknowns**",
         "",
@@ -608,5 +616,161 @@ describe("planExport: intent.md", () => {
       ].join("\n"),
     );
     expect(content).not.toContain("## Project state");
+  });
+});
+
+describe("the export manifest", () => {
+  const sha = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
+
+  function planned(relativePath: string, content: string, kept = false) {
+    return { relativePath, content, kept };
+  }
+
+  it("records the session, revision 1, both commits and a hash per written file, with no timestamps", () => {
+    const manifest = buildExportManifest({
+      sessionId: "session-1",
+      previous: null,
+      scoutCommit: "abc123",
+      headCommit: "def456",
+      planned: [planned("spec.md", "# Spec\n"), planned("intent.md", "# Intent\n")],
+      keptRemovals: [],
+    });
+
+    expect(renderExportManifest(manifest)).toBe(
+      [
+        "{",
+        '  "version": 2,',
+        '  "sessionId": "session-1",',
+        '  "revision": 1,',
+        '  "scoutCommit": "abc123",',
+        '  "headCommit": "def456",',
+        '  "files": [',
+        "    {",
+        '      "path": "spec.md",',
+        `      "sha256": "${sha("# Spec\n")}"`,
+        "    },",
+        "    {",
+        '      "path": "intent.md",',
+        `      "sha256": "${sha("# Intent\n")}"`,
+        "    }",
+        "  ]",
+        "}",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("records null commits outside a repository and without a scout report", () => {
+    const manifest = buildExportManifest({
+      sessionId: "session-1",
+      previous: null,
+      scoutCommit: null,
+      headCommit: null,
+      planned: [],
+      keptRemovals: [],
+    });
+    expect(manifest).toEqual({
+      version: 2,
+      sessionId: "session-1",
+      revision: 1,
+      scoutCommit: null,
+      headCommit: null,
+      files: [],
+    });
+  });
+
+  it("numbers revisions one past the previous manifest's, counting a version-1 manifest as 0", () => {
+    const base = { sessionId: "s", scoutCommit: null, headCommit: null, planned: [], keptRemovals: [] };
+
+    const v1 = parseExportManifest(JSON.stringify({ version: 1, files: ["spec.md"] }));
+    expect(v1?.revision).toBe(0);
+    expect(buildExportManifest({ ...base, previous: v1 }).revision).toBe(1);
+
+    const first = buildExportManifest({ ...base, previous: null });
+    const second = buildExportManifest({
+      ...base,
+      previous: parseExportManifest(renderExportManifest(first)),
+    });
+    const third = buildExportManifest({
+      ...base,
+      previous: parseExportManifest(renderExportManifest(second)),
+    });
+    expect([first.revision, second.revision, third.revision]).toEqual([1, 2, 3]);
+  });
+
+  it("hashes content with CRLF normalised to LF", () => {
+    expect(hashExportContent("a\r\nb\r\n")).toBe(hashExportContent("a\nb\n"));
+    expect(hashExportContent("a\nb\n")).toBe(sha("a\nb\n"));
+    expect(hashExportContent("a\nb\n")).not.toBe(hashExportContent("a\nb"));
+  });
+
+  it("keeps a kept file's previous hash, and leaves out a kept file it never hashed", () => {
+    const previous = parseExportManifest(
+      JSON.stringify({
+        version: 2,
+        sessionId: "s",
+        revision: 4,
+        scoutCommit: null,
+        headCommit: null,
+        files: [
+          { path: "spec.md", sha256: sha("old spec") },
+          { path: "issues/02-old.md", sha256: sha("old ticket") },
+        ],
+      }),
+    );
+
+    const manifest = buildExportManifest({
+      sessionId: "s",
+      previous,
+      scoutCommit: null,
+      headCommit: null,
+      planned: [
+        planned("spec.md", "new spec", true),
+        planned("intent.md", "new intent", true),
+        planned("decisions.md", "decisions"),
+      ],
+      keptRemovals: ["issues/02-old.md"],
+    });
+
+    expect(manifest.revision).toBe(5);
+    expect(manifest.files).toEqual([
+      { path: "spec.md", sha256: sha("old spec") },
+      { path: "decisions.md", sha256: sha("decisions") },
+      { path: "issues/02-old.md", sha256: sha("old ticket") },
+    ]);
+  });
+
+  it("parses both versions and refuses anything malformed", () => {
+    expect(parseExportManifest(JSON.stringify({ version: 1, files: ["a.md"] }))).toEqual({
+      version: 1,
+      sessionId: null,
+      revision: 0,
+      scoutCommit: null,
+      headCommit: null,
+      files: [{ path: "a.md", sha256: null }],
+    });
+
+    const v2 = buildExportManifest({
+      sessionId: "s",
+      previous: null,
+      scoutCommit: "c",
+      headCommit: null,
+      planned: [planned("a.md", "a")],
+      keptRemovals: [],
+    });
+    expect(parseExportManifest(renderExportManifest(v2))).toEqual(v2);
+
+    for (const malformed of [
+      "{ not json",
+      JSON.stringify({ version: 1 }),
+      JSON.stringify({ version: 1, files: ["a.md", 7] }),
+      JSON.stringify({ version: 3, files: [] }),
+      JSON.stringify({ ...v2, files: [{ path: "a.md", sha256: "not-a-hash" }] }),
+      JSON.stringify({ ...v2, files: ["a.md"] }),
+      JSON.stringify({ ...v2, revision: 0 }),
+      JSON.stringify({ ...v2, sessionId: 7 }),
+    ]) {
+      expect(parseExportManifest(malformed)).toBeNull();
+    }
   });
 });

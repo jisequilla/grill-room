@@ -272,7 +272,7 @@ export function ExportSection({
             <AlertTitle>{t("output.exportSuccessHeading")}</AlertTitle>
             <AlertDescription className="space-y-2">
               <p className="text-xs font-medium">{t("output.exportedFilesHeading")}</p>
-              <PathList paths={lastResult.files} testId="export-written-files" />
+              <PathList paths={lastResult.written} testId="export-written-files" />
               {lastResult.removed.length > 0 ? (
                 <>
                   <p className="text-xs font-medium">{t("output.exportRemovedFilesHeading")}</p>

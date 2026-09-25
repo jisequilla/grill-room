@@ -301,7 +301,7 @@ describe("handoff export", () => {
     ]);
 
     const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
-    expect(result.files).toEqual(preview.files);
+    expect(result.written).toEqual(preview.files);
     expect(result.handoffExported).toBe(true);
 
     const handoffOnDisk = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
@@ -315,7 +315,9 @@ describe("handoff export", () => {
     const manifest = parseExportManifest(
       await fs.readFile(path.join(bundleDir, EXPORT_MANIFEST_FILE), "utf8"),
     );
-    expect(manifest).toEqual(expect.arrayContaining(["HANDOFF.md", "briefs/02-store-on-disk.md"]));
+    expect(manifest?.files.map((file) => file.path)).toEqual(
+      expect.arrayContaining(["HANDOFF.md", "briefs/02-store-on-disk.md"]),
+    );
 
     const read = await getHandoff.run({ sessionId: session.id });
     expect(read.handoff?.exportedAt).not.toBeNull();

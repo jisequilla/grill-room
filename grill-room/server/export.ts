@@ -9,6 +9,8 @@
  * the same convention `tickets.ts` and `tree.ts` follow.
  */
 
+import { createHash } from "node:crypto";
+
 import type { StoredReadiness } from "./readiness.js";
 import type { ScoutReportWithStaleness } from "./scout-report.js";
 import type { DecisionView } from "./tree.js";
@@ -42,34 +44,166 @@ export interface ExportPlan {
 }
 
 /**
- * The manifest every export writes at the top of its bundle: the relative
- * paths of the files that export wrote. A re-export removes only paths the
- * previous manifest lists and the new plan no longer contains, so a file the
- * export did not write is never removed.
+ * The manifest every export writes at the top of its bundle: the provenance
+ * record of what Grill Room wrote there. Version 2 names the session, counts
+ * exports (`revision`), records the scout report's commit and the project's
+ * HEAD at export time, and holds, for each file Grill Room wrote, the sha256
+ * of its content with CRLF normalised to LF. It carries no timestamps, so it
+ * changes only when something real changes.
+ *
+ * A re-export compares each file already on disk with the hash recorded here
+ * to tell whether it was edited in the repo, and removes only paths listed
+ * here, so a file the export did not write is never removed or overwritten
+ * unasked. Version 1 (paths only) still parses: its files count as written by
+ * Grill Room and unedited, once.
  */
 export const EXPORT_MANIFEST_FILE = ".grill-room-export.json";
 
-/** The manifest's content for a set of written relative paths (the manifest itself excluded). */
-export function renderExportManifest(relativePaths: readonly string[]): string {
-  return `${JSON.stringify({ version: 1, files: relativePaths }, null, 2)}\n`;
+export const EXPORT_MANIFEST_VERSION = 2;
+
+export interface ExportManifestFile {
+  /** Relative to the bundle directory, forward slashes. */
+  path: string;
+  /** sha256 of the content Grill Room wrote, CRLF normalised to LF, lowercase hex. */
+  sha256: string;
+}
+
+/** What {@link renderExportManifest} writes. */
+export interface ExportManifestV2 {
+  version: 2;
+  sessionId: string;
+  revision: number;
+  scoutCommit: string | null;
+  headCommit: string | null;
+  files: ExportManifestFile[];
 }
 
 /**
- * The relative paths a manifest's content lists, or null when it is not a
- * manifest this version wrote (unparseable JSON, no `files` array, or a
- * non-string entry). Null means "no removals": a manifest is never guessed at.
+ * A previous manifest as {@link parseExportManifest} reads it, either
+ * version. A version-1 manifest has revision 0, no session or commits, and a
+ * null hash for every file.
  */
-export function parseExportManifest(content: string): string[] | null {
+export interface ParsedExportManifest {
+  version: 1 | 2;
+  sessionId: string | null;
+  revision: number;
+  scoutCommit: string | null;
+  headCommit: string | null;
+  files: { path: string; sha256: string | null }[];
+}
+
+/** The hash a manifest records for `content`: sha256 hex of it with every CRLF turned into LF. */
+export function hashExportContent(content: string): string {
+  return createHash("sha256").update(content.replace(/\r\n/g, "\n"), "utf8").digest("hex");
+}
+
+export interface BuildExportManifestInput {
+  sessionId: string;
+  /** The bundle's previous manifest, or null when it has none (or an unreadable one). */
+  previous: ParsedExportManifest | null;
+  scoutCommit: string | null;
+  headCommit: string | null;
+  /**
+   * Every planned file in plan order (the manifest itself excluded), with the
+   * content Grill Room planned for it and whether the guard kept the file on
+   * disk instead of writing it.
+   */
+  planned: readonly { relativePath: string; content: string; kept: boolean }[];
+  /** Paths the previous manifest listed that the plan drops but the guard kept on disk. */
+  keptRemovals: readonly string[];
+}
+
+/**
+ * The next manifest. A written file gets the hash of its new content. A kept
+ * file keeps the hash Grill Room last wrote for it, so later exports go on
+ * flagging it; a kept file the previous manifest never hashed is left out.
+ * The revision is one past the previous manifest's (a version-1 manifest
+ * counts as revision 0), or 1 when there was none.
+ */
+export function buildExportManifest(input: BuildExportManifestInput): ExportManifestV2 {
+  const previousHashes = new Map<string, string>();
+  for (const file of input.previous?.files ?? []) {
+    if (file.sha256 !== null) previousHashes.set(file.path, file.sha256);
+  }
+
+  const files: ExportManifestFile[] = [];
+  const keepEntry = (relativePath: string) => {
+    const sha256 = previousHashes.get(relativePath);
+    if (sha256 !== undefined) files.push({ path: relativePath, sha256 });
+  };
+
+  for (const file of input.planned) {
+    if (file.kept) keepEntry(file.relativePath);
+    else files.push({ path: file.relativePath, sha256: hashExportContent(file.content) });
+  }
+  for (const relativePath of input.keptRemovals) keepEntry(relativePath);
+
+  return {
+    version: EXPORT_MANIFEST_VERSION,
+    sessionId: input.sessionId,
+    revision: (input.previous?.revision ?? 0) + 1,
+    scoutCommit: input.scoutCommit,
+    headCommit: input.headCommit,
+    files,
+  };
+}
+
+/** The manifest file's content. */
+export function renderExportManifest(manifest: ExportManifestV2): string {
+  return `${JSON.stringify(manifest, null, 2)}\n`;
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+/**
+ * A manifest's content, read as either version, or null when it is not a
+ * manifest Grill Room wrote (unparseable JSON, an unknown version, or any
+ * malformed field). Null means "no previous export": a manifest is never
+ * guessed at. Content with no `version` is read as version 1.
+ */
+export function parseExportManifest(content: string): ParsedExportManifest | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch {
     return null;
   }
-  if (typeof parsed !== "object" || parsed === null) return null;
-  const files = (parsed as { files?: unknown }).files;
-  if (!Array.isArray(files) || !files.every((file) => typeof file === "string")) return null;
-  return files as string[];
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const record = parsed as Record<string, unknown>;
+  const files = record.files;
+  if (!Array.isArray(files)) return null;
+
+  if (record.version === undefined || record.version === 1) {
+    if (!files.every((file) => typeof file === "string")) return null;
+    return {
+      version: 1,
+      sessionId: null,
+      revision: 0,
+      scoutCommit: null,
+      headCommit: null,
+      files: (files as string[]).map((file) => ({ path: file, sha256: null })),
+    };
+  }
+
+  if (record.version !== 2) return null;
+  const { sessionId, revision, scoutCommit, headCommit } = record;
+  if (typeof sessionId !== "string") return null;
+  if (typeof revision !== "number" || !Number.isInteger(revision) || revision < 1) return null;
+  if (!isNullableString(scoutCommit) || !isNullableString(headCommit)) return null;
+  const entries: ExportManifestFile[] = [];
+  for (const file of files) {
+    if (typeof file !== "object" || file === null) return null;
+    const { path, sha256 } = file as Record<string, unknown>;
+    if (typeof path !== "string" || !isSha256(sha256)) return null;
+    entries.push({ path, sha256 });
+  }
+  return { version: 2, sessionId, revision, scoutCommit, headCommit, files: entries };
 }
 
 export interface PlanExportInput {
@@ -502,8 +636,8 @@ type ScoutCurrentStateItem = ScoutReportWithStaleness["result"]["currentState"][
 
 function evidenceLine(item: ReadinessEvidenceItem): string {
   return item.source === "repo"
-    ? `- ${item.text} · the repo's statement (${item.citation})`
-    : `- ${item.text} · the user's statement`;
+    ? `- ${item.text} · the repo shows (${item.citation})`
+    : `- ${item.text} · the user said`;
 }
 
 /**
