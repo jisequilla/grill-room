@@ -474,4 +474,10 @@ ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS scout_report_id TEXT`,
     name: "sessions-last-export-folder-column",
     sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS last_export_folder TEXT`,
   },
+  {
+    version: 61,
+    name: "projects-delivery-recipe-columns",
+    sql: `ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS delivery_recipe TEXT NOT NULL DEFAULT 'pull-request';
+ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS adversarial_review BOOLEAN NOT NULL DEFAULT TRUE`,
+  },
 ];

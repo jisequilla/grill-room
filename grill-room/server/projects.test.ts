@@ -1,11 +1,15 @@
+import { execFileSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
+import { getDb, schema } from "./db/index.js";
 import { runGit } from "./git.js";
 import {
+  guessDeliveryRecipe,
   inspectProjectFolder,
   listProjects,
   registerProject,
@@ -26,6 +30,11 @@ function registered<T extends object>(outcome: T) {
     throw new Error(`Expected a project, got a refusal: ${JSON.stringify(outcome)}`);
   }
   return (outcome as { project: import("./projects.js").Project }).project;
+}
+
+/** Add a bare remote to a temp repo — for delivery-recipe guessing tests only, never a write `runGit` allows. */
+function addRemote(root: string, url = "https://example.invalid/repo.git"): void {
+  execFileSync("git", ["-C", root, "remote", "add", "origin", url], { stdio: "ignore" });
 }
 
 describe("registerProject", () => {
@@ -90,6 +99,9 @@ describe("registerProject", () => {
       slugPattern: "{slug}",
       trackerKind: "markdown",
       buildRecordLogging: false,
+      // No remote on this fixture, so the guessed recipe is local-merge.
+      deliveryRecipe: "local-merge",
+      adversarialReview: true,
     });
   });
 
@@ -106,6 +118,8 @@ describe("registerProject", () => {
         trackerKind: "beads",
         buildRecordLogging: true,
         visibility: "ignored",
+        deliveryRecipe: "local-merge",
+        adversarialReview: false,
       }),
     );
 
@@ -117,6 +131,8 @@ describe("registerProject", () => {
       trackerKind: "beads",
       buildRecordLogging: true,
       visibility: "ignored",
+      deliveryRecipe: "local-merge",
+      adversarialReview: false,
     });
   });
 
@@ -149,7 +165,7 @@ describe("registerProject", () => {
     ).toBe("invalid-slug-pattern");
   });
 
-  it("refuses an unknown tracker kind or visibility", async () => {
+  it("refuses an unknown tracker kind, visibility, or delivery recipe", async () => {
     const root = repos.create();
 
     expect(refusalCode(await registerProject({ root, ...required, trackerKind: "jira" }))).toBe(
@@ -158,6 +174,9 @@ describe("registerProject", () => {
     expect(refusalCode(await registerProject({ root, ...required, visibility: "public" }))).toBe(
       "invalid-visibility",
     );
+    expect(
+      refusalCode(await registerProject({ root, ...required, deliveryRecipe: "carrier-pigeon" })),
+    ).toBe("invalid-delivery-recipe");
   });
 
   it("refuses a second project for the same repository", async () => {
@@ -208,6 +227,71 @@ describe("registerProject", () => {
 
       expect(project.visibility).toBe("tracked");
     });
+  });
+
+  describe("delivery recipe guessing", () => {
+    it("defaults to pull-request when the repository has a remote", async () => {
+      const root = repos.create();
+      addRemote(root);
+
+      expect(await guessDeliveryRecipe(root)).toBe("pull-request");
+
+      const project = registered(await registerProject({ root, ...required }));
+      expect(project.deliveryRecipe).toBe("pull-request");
+    });
+
+    it("defaults to local-merge when the repository has no remote", async () => {
+      const root = repos.create();
+
+      expect(await guessDeliveryRecipe(root)).toBe("local-merge");
+
+      const project = registered(await registerProject({ root, ...required }));
+      expect(project.deliveryRecipe).toBe("local-merge");
+    });
+
+    it("lets an explicit value win over the guess, in either direction", async () => {
+      const withRemote = repos.create();
+      addRemote(withRemote);
+      const explicitLocal = registered(
+        await registerProject({ root: withRemote, ...required, deliveryRecipe: "local-merge" }),
+      );
+      expect(explicitLocal.deliveryRecipe).toBe("local-merge");
+
+      const withoutRemote = repos.create();
+      const explicitPr = registered(
+        await registerProject({ root: withoutRemote, ...required, deliveryRecipe: "pull-request" }),
+      );
+      expect(explicitPr.deliveryRecipe).toBe("pull-request");
+    });
+
+    it("falls back to pull-request, not local-merge, when git remote -v fails", async () => {
+      const root = repos.create();
+      // A broken .git/config makes every git subcommand exit non-zero with
+      // empty stdout — indistinguishable from "no remotes" by stdout alone,
+      // so the exit code is what must be checked.
+      appendFileSync(path.join(root, ".git", "config"), "not valid ini [[[\n");
+
+      expect(await guessDeliveryRecipe(root)).toBe("pull-request");
+    });
+  });
+
+  it("a row written before this column existed reads as pull-request with review on", async () => {
+    const now = new Date().toISOString();
+    const [row] = await getDb()
+      .insert(schema.projects)
+      .values({
+        id: "legacy-project",
+        name: "Legacy",
+        rootPath: "/legacy/repo",
+        verifyCommand: "pnpm test",
+        exportFolder: ".scratch",
+        visibility: "tracked",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+
+    expect(row).toMatchObject({ deliveryRecipe: "pull-request", adversarialReview: true });
   });
 
   it("never changes the target repository's git state", async () => {
@@ -351,6 +435,39 @@ describe("updateProject", () => {
     const updated = registered(await updateProject(project.id, { exportFolder: "docs" }));
 
     expect(updated).toMatchObject({ exportFolder: "docs", visibility: "ignored" });
+  });
+
+  it("changes the delivery recipe and the review switch, without re-guessing the recipe", async () => {
+    const project = await aProject();
+    expect(project.deliveryRecipe).toBe("local-merge");
+    expect(project.adversarialReview).toBe(true);
+
+    const updated = registered(
+      await updateProject(project.id, { deliveryRecipe: "pull-request", adversarialReview: false }),
+    );
+
+    expect(updated).toMatchObject({ deliveryRecipe: "pull-request", adversarialReview: false });
+
+    // Nothing else given: both settings carry over untouched.
+    const untouched = registered(await updateProject(project.id, { name: "Renamed" }));
+    expect(untouched).toMatchObject({ deliveryRecipe: "pull-request", adversarialReview: false });
+  });
+
+  it("ignores a blank or unrecognized delivery recipe in a patch, keeping the existing value rather than re-guessing", async () => {
+    const project = await aProject();
+    expect(project.deliveryRecipe).toBe("local-merge");
+
+    // A remote added after registration would flip a fresh guess to
+    // pull-request; it must not flip an edit that only reaches `blank()`.
+    addRemote(project.rootPath);
+
+    const blankPatch = registered(await updateProject(project.id, { deliveryRecipe: "" }));
+    expect(blankPatch.deliveryRecipe).toBe("local-merge");
+
+    const unknownPatch = registered(
+      await updateProject(project.id, { deliveryRecipe: "carrier-pigeon" }),
+    );
+    expect(unknownPatch.deliveryRecipe).toBe("local-merge");
   });
 
   it("refuses to blank a required field", async () => {
