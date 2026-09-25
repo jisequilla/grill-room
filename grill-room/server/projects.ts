@@ -406,24 +406,24 @@ function checkDeliveryRecipe(recipe: string): DeliveryRecipe | Refused {
 
 /**
  * What `updateProject`'s merge carries forward for `deliveryRecipe`: the
- * patch when it is a recognized recipe, the existing value otherwise. A
- * blank patch (which `??` lets through unlike `undefined`/`null`) or an
- * unrecognized one is ignored rather than passed to `validate()` — where a
- * blank value there means "guess it". The action's `z.enum` already keeps
- * either case from reaching here through `update-project`; this is what
- * makes "editing never re-guesses" (see `guessDeliveryRecipe` and
- * `AGENTS.md`) true of this function's own contract, not just the action
- * layered in front of it.
+ * existing value for a blank patch (which `??` lets through unlike
+ * `undefined`/`null`, and which means "keep it" here, not "guess it" as a
+ * blank value means in `validate()`), the trimmed patch otherwise —
+ * unrecognized values included, so `validate()`'s `checkDeliveryRecipe`
+ * refuses them with `invalid-delivery-recipe` instead of this function
+ * quietly keeping the stored recipe. Since a non-blank result is always
+ * passed through here, `validate()` never sees a blank `deliveryRecipe` from
+ * an edit and so never re-guesses it (see `guessDeliveryRecipe` and
+ * `AGENTS.md`) — that holds regardless of what the patch contains. The
+ * action's `z.enum` already refuses an unrecognized value before it reaches
+ * here through `update-project`; this is what makes the server's own
+ * contract correct independent of that.
  */
 function sanitizedDeliveryRecipePatch(
   patch: string | null | undefined,
   existing: DeliveryRecipe,
-): DeliveryRecipe {
-  if (blank(patch)) return existing;
-  const trimmed = (patch as string).trim();
-  return (DELIVERY_RECIPES as readonly string[]).includes(trimmed)
-    ? (trimmed as DeliveryRecipe)
-    : existing;
+): string {
+  return blank(patch) ? existing : (patch as string).trim();
 }
 
 async function findByRoot(root: string): Promise<Project | undefined> {
