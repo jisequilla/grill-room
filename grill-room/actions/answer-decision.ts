@@ -5,7 +5,12 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { describeDecisions, LOOSE_END_ANSWER_KINDS } from "../server/tree.js";
+import {
+  CLEARED_ANSWER_LINKS,
+  CLEARED_PROPOSAL,
+  describeDecisions,
+  LOOSE_END_ANSWER_KINDS,
+} from "../server/tree.js";
 
 export default defineAction({
   description:
@@ -64,9 +69,8 @@ export default defineAction({
         settledAt: now,
         // The user answered it themselves, so whatever the interviewer thought
         // had already answered it is moot.
-        supersededById: null,
-        supersessionAnswer: null,
-        supersessionReason: null,
+        ...CLEARED_PROPOSAL,
+        ...CLEARED_ANSWER_LINKS,
         updatedAt: now,
       })
       .where(eq(schema.decisions.id, decisionId))

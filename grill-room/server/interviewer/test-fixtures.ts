@@ -82,6 +82,8 @@ export function aFindSupersededRequest(
     kind: "find-superseded",
     context: aContext(),
     looseEndKeys: ["storage"],
+    replaceableKeys: [],
+    laterKeys: {},
     rejectionReason: null,
     ...overrides,
   };
@@ -139,6 +141,7 @@ export function aFindSupersededResult(
         reason: "The workspace decision already commits to a database on disk.",
       },
     ],
+    replacements: [],
     ...overrides,
   };
 }

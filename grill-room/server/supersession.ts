@@ -1,6 +1,6 @@
 /**
  * The supersession turn: which loose ends a later settled decision has already
- * answered.
+ * answered, and which settled decisions a later one replaced.
  *
  * A loose end is a question the user left open — "I don't know", deferred,
  * flagged for a prototype, or pushed back with no response. The interview
@@ -8,11 +8,16 @@
  * those questions have been answered under a different heading: asked again,
  * the user would only repeat what they already decided.
  *
- * What comes back is stored as a **proposal** and nothing else. The loose end
- * keeps its answer, its kind and its place in the list of things blocking
- * confirmation until the user accepts; the three `supersession*` columns are
- * the whole of what this writes. An interviewer that is wrong here costs one
- * dismissal, not a decision recorded in the user's name.
+ * A settled decision can go out of date the same way from the other side: a
+ * decision that settled later changes, narrows or reverses it, and a builder
+ * reading the earlier answer alone would build the wrong thing.
+ *
+ * What comes back is stored as a **proposal** and nothing else. The decision
+ * keeps its answer, its kind and its place in the tree until the user accepts;
+ * the proposal columns (`supersededById`, `supersessionAnswer`,
+ * `supersessionReason`) are the whole of what this writes. An interviewer that
+ * is wrong here costs one dismissal, not a decision recorded in the user's
+ * name. A pending proposal never blocks confirmation.
  *
  * Both entry points live here so `request-next-round` and the explicit action
  * share one implementation, and both go through `turn.ts` rather than keeping
@@ -78,14 +83,82 @@ export function supersedableLooseEnds(
   });
 }
 
+/** Answer kinds that answer a question for real, rather than set it aside. */
+const ANSWERED_KINDS: readonly string[] = ["accepted-recommendation", "own-answer"];
+
+/** Rows answered for real and derived settled, in the order given. */
+function answeredRows(rows: readonly DecisionRow[]): DecisionRow[] {
+  const states = deriveTreeStates(treeFacts(rows));
+  return rows.filter(
+    (row) =>
+      states.get(row.id) === "settled" &&
+      row.answerKind != null &&
+      ANSWERED_KINDS.includes(row.answerKind),
+  );
+}
+
+/** The answered rows that settled strictly after `row`, in the order given. */
+function settledAfter(
+  row: DecisionRow,
+  answered: readonly DecisionRow[],
+): DecisionRow[] {
+  return answered.filter(
+    (later) =>
+      later.id !== row.id &&
+      later.settledAt != null &&
+      later.settledAt > (row.settledAt ?? ""),
+  );
+}
+
 /**
- * Why a result cannot be stored, written for the interviewer: it is sent back
- * verbatim. Empty when every entry names a loose end that was asked about and a
- * decision that really is settled, and no loose end appears twice.
+ * Rows of the settled decisions this turn would check for replacement, in tree
+ * order: answered for real, not already replaced, and followed by at least one
+ * other decision answered for real that settled strictly later — whether or not
+ * that later one was itself replaced.
  */
-export function supersessionRejectionReasons(input: {
+export function replaceableDecisions(
+  rows: readonly DecisionRow[],
+): DecisionRow[] {
+  const answered = answeredRows(rows);
+  return answered.filter(
+    (row) => row.replacedById == null && settledAfter(row, answered).length > 0,
+  );
+}
+
+/**
+ * For each replaceable decision, by key, the keys of the decisions answered for
+ * real that settled strictly after it, in tree order: the only decisions that
+ * may replace it. Decisions answered in the same round share `settledAt`, so
+ * they never replace each other.
+ */
+export function laterKeysOf(
+  rows: readonly DecisionRow[],
+): Record<string, string[]> {
+  const answered = answeredRows(rows);
+  return Object.fromEntries(
+    replaceableDecisions(rows).map((row) => [
+      portKey(row),
+      settledAfter(row, answered).map(portKey),
+    ]),
+  );
+}
+
+/** Whether a turn has anything to ask about: a loose end or a replaceable decision. */
+function hasAnythingToCheck(rows: readonly DecisionRow[]): boolean {
+  return (
+    supersedableLooseEnds(rows).length > 0 ||
+    replaceableDecisions(rows).length > 0
+  );
+}
+
+/** What a result is checked against: the request, and the tree it was asked about. */
+export interface SupersessionCheck {
   /** The loose-end keys the request listed. */
   askedKeys: readonly string[];
+  /** The replaceable keys the request listed. */
+  replaceableKeys: readonly string[];
+  /** The request's `laterKeys`: each replaceable key's possible replacers. */
+  laterKeys: Readonly<Record<string, readonly string[]>>;
   /** The keys of every decision currently derived settled. */
   settledKeys: readonly string[];
   /**
@@ -95,15 +168,22 @@ export function supersessionRejectionReasons(input: {
    * answers nothing, so it cannot supersede a loose end.
    */
   dispositionedKeys: readonly string[];
-  result: FindSupersededResult;
-}): string[] {
+  /** The keys of every kept repo decision: settled, but not an interview answer. */
+  repoEstablishedKeys: readonly string[];
+}
+
+/** Why the result's loose-end supersessions cannot be stored. */
+function looseEndRejectionReasons(
+  check: SupersessionCheck,
+  result: FindSupersededResult,
+): string[] {
   const reasons: string[] = [];
-  const asked = new Set(input.askedKeys);
-  const settled = new Set(input.settledKeys);
-  const dispositioned = new Set(input.dispositionedKeys);
+  const asked = new Set(check.askedKeys);
+  const settled = new Set(check.settledKeys);
+  const dispositioned = new Set(check.dispositionedKeys);
   const seen = new Set<string>();
 
-  for (const entry of input.result.supersessions) {
+  for (const entry of result.supersessions) {
     if (seen.has(entry.looseEndKey)) {
       reasons.push(
         `Loose end "${entry.looseEndKey}" was superseded twice. Give at most one superseding decision per loose end.`,
@@ -132,6 +212,100 @@ export function supersessionRejectionReasons(input: {
 }
 
 /**
+ * Why each of the result's replacements cannot be stored, one list per entry
+ * in the result's order: empty for an entry that can be. A second entry for
+ * the same decision is the one refused.
+ */
+function replacementRejectionReasons(
+  check: SupersessionCheck,
+  result: FindSupersededResult,
+): string[][] {
+  const replaceable = new Set(check.replaceableKeys);
+  const settled = new Set(check.settledKeys);
+  const dispositioned = new Set(check.dispositionedKeys);
+  const repoEstablished = new Set(check.repoEstablishedKeys);
+  const seen = new Set<string>();
+
+  return result.replacements.map((entry) => {
+    const reasons: string[] = [];
+    if (seen.has(entry.replacedKey)) {
+      reasons.push(
+        `Decision "${entry.replacedKey}" was replaced twice. Give at most one replacing decision per decision.`,
+      );
+    }
+    seen.add(entry.replacedKey);
+
+    if (!replaceable.has(entry.replacedKey)) {
+      reasons.push(
+        `"${entry.replacedKey}" is not one of the decisions to check for replacement. Rule only on the ones listed.`,
+      );
+    }
+
+    const later = check.laterKeys[entry.replacedKey] ?? [];
+    if (entry.byKey === entry.replacedKey) {
+      reasons.push(`"${entry.byKey}" cannot replace itself.`);
+    } else if (repoEstablished.has(entry.byKey)) {
+      reasons.push(
+        `"${entry.byKey}" cannot replace "${entry.replacedKey}": only an interview answer can replace one.`,
+      );
+    } else if (dispositioned.has(entry.byKey)) {
+      reasons.push(
+        `"${entry.byKey}" cannot replace "${entry.replacedKey}": it was set aside (dispositioned), not answered.`,
+      );
+    } else if (!settled.has(entry.byKey)) {
+      reasons.push(
+        `"${entry.byKey}" cannot replace "${entry.replacedKey}": it is not a settled decision of this tree.`,
+      );
+    } else if (!later.includes(entry.byKey)) {
+      reasons.push(
+        `"${entry.byKey}" cannot replace "${entry.replacedKey}": it is not one of the decisions listed after it.`,
+      );
+    }
+    return reasons;
+  });
+}
+
+/**
+ * Why a result cannot be stored, written for the interviewer: it is sent back
+ * verbatim. Empty when every supersession names a loose end that was asked
+ * about and a decision that really is settled, every replacement names a
+ * decision that was asked about and one listed after it, and nothing appears
+ * twice.
+ */
+export function supersessionRejectionReasons(
+  input: SupersessionCheck & { result: FindSupersededResult },
+): string[] {
+  return [
+    ...looseEndRejectionReasons(input, input.result),
+    ...replacementRejectionReasons(input, input.result).flat(),
+  ];
+}
+
+/**
+ * The result with its invalid replacements dropped, and a line for the attempt
+ * log naming each dropped entry and why; null when nothing was dropped.
+ */
+function keepValidReplacements(
+  check: SupersessionCheck,
+  result: FindSupersededResult,
+): { result: FindSupersededResult; dropped: string | null } {
+  const reasons = replacementRejectionReasons(check, result);
+  const kept = result.replacements.filter((_, index) => reasons[index]!.length === 0);
+  const dropped = result.replacements.flatMap((entry, index) =>
+    reasons[index]!.length === 0
+      ? []
+      : [`"${entry.replacedKey}" by "${entry.byKey}" (${reasons[index]!.join(" ")})`],
+  );
+  return {
+    result: { ...result, replacements: kept },
+    dropped:
+      dropped.length === 0
+        ? null
+        : `Kept the valid entries after the last retry. Dropped ${dropped.length === 1 ? "this replacement" : "these replacements"}: ${dropped.join("; ")}`,
+  };
+}
+
+/**
  * Ask, validate, and store the proposals. No turn bookkeeping of its own: both
  * callers below wrap it, one in a turn of its own and one inside the turn that
  * proposed done.
@@ -157,23 +331,36 @@ async function scan(
 
   const rows = await loadDecisions();
   const looseEnds = supersedableLooseEnds(rows);
-  if (looseEnds.length === 0) return conversationId;
+  const replaceable = replaceableDecisions(rows);
+  if (looseEnds.length === 0 && replaceable.length === 0) return conversationId;
 
   const askedKeys = looseEnds.map(portKey);
+  const replaceableKeys = replaceable.map(portKey);
+  const laterKeys = laterKeysOf(rows);
   const states = deriveTreeStates(treeFacts(rows));
   const settledRows = rows.filter((row) => states.get(row.id) === "settled");
-  const settledKeys = settledRows.map(portKey);
-  const dispositionedKeys = settledRows
-    .filter((row) => row.answerKind === "dispositioned")
-    .map(portKey);
+  const check: SupersessionCheck = {
+    askedKeys,
+    replaceableKeys,
+    laterKeys,
+    settledKeys: settledRows.map(portKey),
+    dispositionedKeys: settledRows
+      .filter((row) => row.answerKind === "dispositioned")
+      .map(portKey),
+    repoEstablishedKeys: settledRows
+      .filter((row) => row.answerKind === "repo-established")
+      .map(portKey),
+  };
 
   const interviewer = getInterviewer();
+  let attemptsAsked = 0;
 
-  const turn = await askUntilAccepted<FindSupersededResult>({
+  const accepted = await askUntilAccepted<FindSupersededResult>({
     conversationId,
     recorder,
-    ask: async (attempt) =>
-      interviewer.findSuperseded(
+    ask: async (attempt) => {
+      attemptsAsked += 1;
+      return interviewer.findSuperseded(
         {
           kind: "find-superseded",
           context: {
@@ -188,23 +375,34 @@ async function scan(
             projectContext: await projectContextFor(session),
           },
           looseEndKeys: askedKeys,
+          replaceableKeys,
+          laterKeys,
           rejectionReason: attempt.rejectionReason,
         },
         attempt.observer,
-      ),
-    reasonsToRefuse: (result) =>
-      supersessionRejectionReasons({
-        askedKeys,
-        settledKeys,
-        dispositionedKeys,
-        result,
-      }),
+      );
+    },
+    reasonsToRefuse: (result) => {
+      const reasons = supersessionRejectionReasons({ ...check, result });
+      // On the last attempt, invalid replacements alone no longer fail the
+      // scan: the valid entries are kept and the invalid ones dropped below.
+      // Invalid loose-end entries still do.
+      const lastAttempt = attemptsAsked > MAX_TURN_RETRIES;
+      if (lastAttempt && looseEndRejectionReasons(check, result).length === 0) {
+        return [];
+      }
+      return reasons;
+    },
     exhausted: (lastReason) =>
       new TurnRejected(
         "invalid-supersession",
         `The interviewer proposed supersessions the tree does not support ${MAX_TURN_RETRIES + 1} times. Last reason: ${lastReason}`,
       ),
   });
+
+  const kept = keepValidReplacements(check, accepted.result);
+  if (kept.dropped) await recorder?.noted(kept.dropped);
+  const turn = { ...accepted, result: kept.result };
 
   const idByKey = new Map(rows.map((row) => [portKey(row), row.id] as const));
   const now = new Date().toISOString();
@@ -225,6 +423,22 @@ async function scan(
       .where(eq(schema.decisions.id, looseEndId));
   }
 
+  for (const entry of turn.result.replacements) {
+    const replacedId = idByKey.get(entry.replacedKey);
+    const byId = idByKey.get(entry.byKey);
+    if (!replacedId || !byId) continue;
+
+    await db
+      .update(schema.decisions)
+      .set({
+        supersededById: byId,
+        supersessionAnswer: null,
+        supersessionReason: entry.reason,
+        updatedAt: now,
+      })
+      .where(eq(schema.decisions.id, replacedId));
+  }
+
   return turn.conversationId;
 }
 
@@ -241,8 +455,8 @@ async function scan(
  * This runs nested inside the propose-round turn, not through `runTurn`, but
  * it still gets its own `find-superseded` turn record: `startTurnRecorder` is
  * used directly, and the recorder is closed here rather than by `runTurn`.
- * Does nothing at all — not even a turn record — when the session has no
- * loose end this could apply to.
+ * Does nothing at all — not even a turn record — when the session has neither
+ * a loose end nor a replaceable decision this could apply to.
  */
 export async function findSupersessionsForDone(input: {
   session: SupersessionSession;
@@ -258,7 +472,7 @@ export async function findSupersessionsForDone(input: {
     .from(schema.decisions)
     .where(eq(schema.decisions.sessionId, input.session.id));
 
-  if (supersedableLooseEnds(rows).length === 0) {
+  if (!hasAnythingToCheck(rows)) {
     return { conversationId: input.conversationId, failure: null };
   }
 
@@ -300,8 +514,8 @@ export async function findSupersessionsForDone(input: {
 /**
  * The whole turn, for the explicit action: the session reads as working while
  * the model thinks, and a failure is stored on it the way any other failed turn
- * is. Does nothing at all — not even a turn status — when the session has no
- * loose end this could apply to.
+ * is. Does nothing at all — not even a turn status — when the session has
+ * neither a loose end nor a replaceable decision this could apply to.
  */
 export async function runSupersessionTurn(sessionId: string): Promise<void> {
   const db = getDb();
@@ -319,7 +533,7 @@ export async function runSupersessionTurn(sessionId: string): Promise<void> {
     .from(schema.decisions)
     .where(eq(schema.decisions.sessionId, sessionId));
 
-  if (supersedableLooseEnds(rows).length === 0) return;
+  if (!hasAnythingToCheck(rows)) return;
 
   await runTurn({
     sessionId,

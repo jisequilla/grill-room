@@ -33,6 +33,8 @@ function decision(key: string, overrides: Partial<DecisionView> = {}): DecisionV
     state: "settled",
     answer: { text: `Answer of ${key}`, kind: "accepted-recommendation" },
     supersession: null,
+    replacedBy: null,
+    settledBy: null,
     dispositionTarget: null,
     settledAt: "2026-09-01T00:00:00.000Z",
     reopenedAt: null,
@@ -278,6 +280,80 @@ describe("planExport: decisions.md", () => {
       }),
     ]);
     expect(recorded).toContain("- **Origin:** repo (recorded) · reopened");
+  });
+
+  it("marks a replaced entry Superseded by its replacer, linked when the replacer is an entry, after Depends on and before the repo lines", () => {
+    const content = decisionsFile([
+      decision("shape"),
+      decision("repo-db", {
+        introducedBy: "repo",
+        dependsOn: ["id-shape"],
+        answer: { text: "Move to Postgres.", kind: "own-answer" },
+        repo: { source: "inferred", citation: "server/db/index.ts:4", statement: "SQLite.", scoutReportId: null },
+        replacedBy: { id: "id-location", key: "location", title: "Title of location", reason: "The data moved to a synced folder." },
+      }),
+      decision("location"),
+    ])!;
+
+    expect(content).toContain(
+      [
+        "- **Depends on:** [Title of shape](#shape)",
+        "- **Superseded by:** [Title of location](#location): The data moved to a synced folder.",
+        "- **Source:** server/db/index.ts:4",
+        '- **Supersedes:** "SQLite."',
+      ].join("\n"),
+    );
+    // The replaced entry stays an entry, in its usual place.
+    expect(content).toContain('<a id="repo-db"></a>');
+  });
+
+  it("names a replacer that is not an entry by its key", () => {
+    const content = decisionsFile([
+      decision("storage", {
+        replacedBy: { id: "id-gone", key: "gone", title: null, reason: "Moved." },
+      }),
+    ])!;
+
+    expect(content).toContain("- **Superseded by:** `gone`: Moved.\n");
+  });
+
+  it("marks a settled loose end Settled by the decision that answered it, linked when that is an entry", () => {
+    const content = decisionsFile([
+      keptRepo("repo-stack", "AGENTS.md:12"),
+      decision("shape"),
+      decision("storage", {
+        settledBy: { id: "id-shape", key: "shape", title: "Title of shape" },
+      }),
+      decision("hosting", {
+        settledBy: { id: "id-repo-stack", key: "repo-stack", title: "Title of repo-stack" },
+      }),
+    ])!;
+
+    expect(content).toContain(
+      '<a id="storage"></a>\n### Title of storage\n\n- **Decision:** Answer of storage\n- **Origin:** interviewer · accepted recommendation\n- **Settled by:** [Title of shape](#shape)\n',
+    );
+    expect(content).toContain("- **Settled by:** `repo-stack`\n");
+  });
+
+  it("adds no line for a pending proposal, or when there is no link", () => {
+    const plain = decisionsFile([decision("shape"), decision("storage")])!;
+    const pending = decisionsFile([
+      decision("shape"),
+      decision("storage", {
+        supersession: {
+          kind: "replaces-settled",
+          byId: "id-shape",
+          byKey: "shape",
+          byTitle: "Title of shape",
+          answer: "",
+          reason: "A guess.",
+        },
+      }),
+    ])!;
+
+    expect(plain).not.toContain("Superseded by");
+    expect(plain).not.toContain("Settled by");
+    expect(pending).toBe(plain);
   });
 
   it("lists a kept repo decision only under Built under, as key and citation, never restated", () => {

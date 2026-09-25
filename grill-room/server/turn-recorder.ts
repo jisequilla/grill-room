@@ -40,6 +40,11 @@ export interface AttemptRecorder {
    * interviewer.
    */
   refused(reason: string): Promise<void>;
+  /**
+   * The app kept the result the last successful call produced, but not all of
+   * it: that attempt stays a success, carrying `note` as its reason.
+   */
+  noted(note: string): Promise<void>;
 }
 
 export interface TurnRecorder extends AttemptRecorder {
@@ -113,6 +118,11 @@ function recorderFor(turnId: string, runId: string): TurnRecorder {
       lastSucceeded = null;
       if (!attemptId) return;
       await relabelAttempt({ attemptId, kind: "tree-rule-refusal", reason });
+    },
+    async noted(note) {
+      const attemptId = lastSucceeded;
+      if (!attemptId) return;
+      await relabelAttempt({ attemptId, kind: "success", reason: note });
     },
     async finish(outcome) {
       await completeTurn({ turnId, outcome });

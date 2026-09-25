@@ -109,6 +109,35 @@ describe("supersededEntries", () => {
     ]);
   });
 
+  it("ignores the Superseded by and Settled by lines an accepted replacement writes", () => {
+    const text = [
+      HEADER,
+      entry("storage", "Where does the data live?", [
+        "- **Decision:** On disk",
+        "- **Origin:** interviewer · accepted recommendation",
+        "- **Superseded by:** [Which disk does the data live on?](#storage-location): The data moved to a synced folder.",
+        "- **Settled by:** `repo-stack`",
+        // Not a line the renderer writes without Supersedes: here only to show
+        // that Superseded by alone never marks an entry.
+        "- **Source:** docs/adr/001-storage.md:3",
+      ]),
+      "",
+      entry("repo-db", "Move to Postgres", [
+        "- **Decision:** Postgres",
+        "- **Origin:** repo (inferred) · reopened",
+        "- **Superseded by:** `hosting`: Hosted elsewhere.",
+        "- **Settled by:** [Where does the data live?](#storage)",
+        "- **Source:** server/db/index.ts:4",
+        '- **Supersedes:** "SQLite."',
+      ]),
+      "",
+    ].join("\n");
+
+    expect(supersededEntries(text)).toEqual([
+      { key: "repo-db", title: "Move to Postgres", source: "server/db/index.ts:4" },
+    ]);
+  });
+
   it("ignores fields other than Source and Supersedes", () => {
     const text = `${HEADER}${entry("adr-amendment-scope", "Should the scoped exception be written down?", [
       "- **Decision:** No edits to the ADR.",

@@ -26,7 +26,7 @@ import {
   selectedFakeInterviewer,
   setInterviewer,
 } from "./index.js";
-import type { ModelCallObserver } from "./types.js";
+import type { FindSupersededRequest, ModelCallObserver } from "./types.js";
 import {
   aContext,
   anAssessReadinessRequest,
@@ -355,6 +355,53 @@ describe("named scenarios for every request kind", () => {
     });
     expect(done.state).toBe("done-proposed");
     expect(interviewer.remainingFor(session.id)).toBe(0);
+  });
+
+  it("replacement scripts two rounds, the done proposal, and a check that proposes the later decision as replacing the earlier", async () => {
+    const session = await aSession();
+    const interviewer = useScenario(session.id, "replacement");
+
+    const { round } = await requestNextRound.run({ sessionId: session.id });
+    expect(round?.decisions.map((card) => card.key)).toEqual(["storage"]);
+    await saveDraftAnswer.run({
+      decisionId: round!.decisions[0]!.id,
+      answerKind: "accepted-recommendation",
+    });
+    const second = await submitRound.run({ id: round!.id });
+    expect(second.round?.decisions.map((card) => card.key)).toEqual([
+      "storage-location",
+    ]);
+    await saveDraftAnswer.run({
+      decisionId: second.round!.decisions[0]!.id,
+      answerKind: "own-answer",
+      answer: "A synced cloud folder.",
+    });
+    const done = await submitRound.run({ id: second.round!.id });
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "propose-round",
+      "propose-round",
+      "propose-round",
+      "find-superseded",
+    ]);
+    expect(interviewer.requests[3]).toMatchObject({
+      kind: "find-superseded",
+      looseEndKeys: [],
+      replaceableKeys: ["storage"],
+    });
+    expect((interviewer.requests[3] as FindSupersededRequest).laterKeys).toEqual({
+      storage: ["storage-location"],
+    });
+    expect(done.state).toBe("done-proposed");
+    expect(interviewer.remainingFor(session.id)).toBe(0);
+
+    const tree = await getTree.run({ sessionId: session.id });
+    const storage = tree.decisions.find((decision) => decision.key === "storage");
+    expect(storage).toMatchObject({
+      answer: { kind: "accepted-recommendation" },
+      supersession: { kind: "replaces-settled", byKey: "storage-location" },
+      replacedBy: null,
+    });
   });
 
   it("refusal-then-success scripts one refused attempt and the accepted retry, in the same turn", async () => {

@@ -227,6 +227,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   "readiness-not-ready": { turns: readinessNotReadyTurns() },
   "reopen-stale-review": { turns: reopenStaleReviewTurns() },
   supersession: { turns: supersessionTurns() },
+  replacement: { turns: replacementTurns() },
   "refusal-then-success": { turns: refusalThenSuccessTurns() },
   // Long enough to see the turn running before it fails, and again before the
   // manual retry succeeds — with enough margin that a slow machine (several
@@ -264,6 +265,8 @@ export interface ScenarioInterviewer extends Interviewer {
 interface TurnSource {
   /** Removes and returns the next turn for the request, if there is one. */
   take(request: InterviewerRequest): ScriptedTurn | undefined;
+  /** Returns the next turn for the request without removing it. */
+  peek(request: InterviewerRequest): ScriptedTurn | undefined;
   /** Names the queue the request was served from, for fault messages. */
   queueName(request: InterviewerRequest): string;
   /** How long to wait before answering the request. */
@@ -296,6 +299,7 @@ export function createFakeInterviewer(
   const requests: InterviewerRequest[] = [];
   const interviewer = createScriptedInterviewer(requests, {
     take: () => queue.shift(),
+    peek: () => queue[0],
     queueName: () => "queued turn",
     delayMs: () => 0,
   });
@@ -348,6 +352,7 @@ export function createScenarioInterviewer(
 
   const interviewer = createScriptedInterviewer(requests, {
     take: (request) => sessionOf(request).queue.shift(),
+    peek: (request) => sessionOf(request).queue[0],
     queueName: (request) =>
       `scripted turn of session "${request.context.sessionId}"`,
     delayMs: (request) => sessionOf(request).delayMs,
@@ -363,6 +368,25 @@ export function createScenarioInterviewer(
       return sessions.get(sessionId)?.queue.length ?? null;
     },
   };
+}
+
+/**
+ * A replacement-only `find-superseded` request — no loose ends, only settled
+ * decisions to check — that no script asked for. A done proposal asks one
+ * whenever two decisions settled at different times, which scripts written
+ * (or recorded) before the check existed never queued. Answered empty without
+ * taking anything from the queue, so those scripts stay in step; a script that
+ * does queue a `find-superseded` turn next still gets it.
+ */
+function answersWithoutScript(
+  request: InterviewerRequest,
+  next: ScriptedTurn | undefined,
+): boolean {
+  return (
+    request.kind === "find-superseded" &&
+    request.looseEndKeys.length === 0 &&
+    next?.kind !== "find-superseded"
+  );
 }
 
 function createScriptedInterviewer(
@@ -412,6 +436,26 @@ function createScriptedInterviewer(
     observer: ModelCallObserver | undefined,
   ): Promise<InterviewerTurn<unknown>> {
     requests.push(request);
+
+    if (answersWithoutScript(request, source.peek(request))) {
+      const resumes = conversationOf(request) != null;
+      const result = { supersessions: [], replacements: [] };
+      return observeCall(
+        observer,
+        {
+          requestKind: request.kind,
+          call: 1,
+          conversation: resumes ? "resumed" : "new",
+        },
+        async () => ({
+          turn: {
+            result,
+            conversationId: conversationOf(request) ?? FAKE_CONVERSATION_ID,
+          },
+          rawOutput: JSON.stringify(result),
+        }),
+      );
+    }
 
     const next = source.take(request);
     const queueName = source.queueName(request);
@@ -700,6 +744,67 @@ export function supersessionTurns(): ScriptedTurn[] {
             answer: "On disk, inside the workspace shape.",
             reason:
               "The shape decision already commits to data living on disk.",
+          },
+        ],
+        replacements: [],
+      },
+    },
+  ];
+}
+
+/**
+ * A settled decision that a later one replaces. Round 1 asks `storage`, which
+ * the user settles by accepting its recommendation; round 2 asks
+ * `storage-location`, whose answer changes it; then the done proposal, and the
+ * check that follows it, which proposes `storage-location` as replacing
+ * `storage`. What `replacement` schedules.
+ */
+export function replacementTurns(): ScriptedTurn[] {
+  return [
+    {
+      kind: "propose-round",
+      result: aRound([
+        aProposedDecision("storage", {
+          title: "Where does the data live?",
+          body: "Storage is worth settling before anything reads it.",
+          choices: [
+            { label: "On disk", rationale: "Simple, and one machine is enough." },
+            { label: "In the cloud", rationale: "Shared, and costs an account." },
+          ],
+          recommendedChoice: 0,
+          recommendedAnswer: "On disk, in a local database.",
+        }),
+      ]),
+    },
+    {
+      kind: "propose-round",
+      result: aRound([
+        aProposedDecision("storage-location", {
+          title: "Which disk does the data live on?",
+          body: "Now that storage is settled, where exactly.",
+          dependsOn: ["storage"],
+          recommendedAnswer: "A synced cloud folder, so it follows the user.",
+        }),
+      ]),
+    },
+    {
+      kind: "propose-round",
+      result: aRound([], {
+        done: {
+          summary: "Storage and where it lives are settled.",
+        },
+      }),
+    },
+    {
+      kind: "find-superseded",
+      result: {
+        supersessions: [],
+        replacements: [
+          {
+            replacedKey: "storage",
+            byKey: "storage-location",
+            reason:
+              "The data lives in a synced cloud folder, not only on the local disk.",
           },
         ],
       },
@@ -1007,7 +1112,7 @@ export function cannedInterviewTurns(): ScriptedTurn[] {
       // not answered anywhere else in the tree, so nothing is superseded and
       // the user resolves it by hand, exactly as before this turn existed.
       kind: "find-superseded",
-      result: { supersessions: [] },
+      result: { supersessions: [], replacements: [] },
     },
     {
       kind: "synthesize-spec",

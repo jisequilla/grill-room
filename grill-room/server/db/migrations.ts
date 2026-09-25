@@ -499,4 +499,11 @@ ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS adversarial_review BOOLEAN NOT 
     name: "brief-groundings-session-index",
     sql: `CREATE UNIQUE INDEX IF NOT EXISTS gr_idx_brief_groundings_session ON gr_brief_groundings(session_id)`,
   },
+  {
+    version: 64,
+    name: "decisions-replacement-link-columns",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS replaced_by_id TEXT;
+ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS replaced_reason TEXT;
+ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS settled_by_id TEXT`,
+  },
 ];

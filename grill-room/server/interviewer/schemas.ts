@@ -150,25 +150,46 @@ export const reviewStaleResultSchema = z.strictObject({
 });
 
 /**
- * Loose ends a later settled decision turns out to have answered.
+ * Loose ends a later settled decision turns out to have answered, and settled
+ * decisions a later one replaced.
  *
- * At most one entry per loose end, and only for loose ends genuinely answered:
+ * Either list may be absent from a recorded result, and reads as empty. At
+ * most one entry per loose end or replaced decision, and only when genuine:
  * the result is a set of proposals the user accepts or rejects one by one, so
  * an over-eager entry costs the user the same work it was meant to save.
  */
 export const findSupersededResultSchema = z.strictObject({
-  supersessions: z.array(
-    z.strictObject({
-      /** The loose end, by key. One of the keys the request listed. */
-      looseEndKey: decisionKey,
-      /** The settled decision that answers it. Must already be settled. */
-      answeredByKey: decisionKey,
-      /** The answer to record on the loose end, in the loose end's own terms. */
-      answer: z.string().min(1),
-      /** Which settled decision answers it, and why that answer covers it. */
-      reason: z.string(),
-    }),
-  ),
+  supersessions: z
+    .array(
+      z.strictObject({
+        /** The loose end, by key. One of the keys the request listed. */
+        looseEndKey: decisionKey,
+        /** The settled decision that answers it. Must already be settled. */
+        answeredByKey: decisionKey,
+        /** The answer to record on the loose end, in the loose end's own terms. */
+        answer: z.string().min(1),
+        /** Which settled decision answers it, and why that answer covers it. */
+        reason: z.string(),
+      }),
+    )
+    .default([]),
+  /**
+   * Settled decisions a decision that settled later changed, narrowed or
+   * reversed. Proposals too: the earlier decision keeps its answer until the
+   * user accepts, and even then only gains a link to what replaced it.
+   */
+  replacements: z
+    .array(
+      z.strictObject({
+        /** The earlier decision, by key. One of the keys the request listed. */
+        replacedKey: decisionKey,
+        /** The decision that settled later and replaced it. */
+        byKey: decisionKey,
+        /** What the later decision changes. */
+        reason: z.string().min(1),
+      }),
+    )
+    .default([]),
 });
 
 export const synthesizeSpecResultSchema = z.strictObject({

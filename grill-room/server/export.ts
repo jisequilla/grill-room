@@ -520,6 +520,21 @@ function dependencyReference(dependency: DecisionView): string | null {
   return null;
 }
 
+/**
+ * Another decision named by a lasting link: a link to its entry when it has
+ * one, and its key otherwise (a kept repo decision, or one not described).
+ */
+function linkedReference(
+  link: { id: string; key: string | null },
+  byId: ReadonlyMap<string, DecisionView>,
+): string {
+  const linked = byId.get(link.id);
+  if (linked && isEntry(linked)) {
+    return `[${oneLine(linked.questionTitle)}](#${decisionKey(linked)})`;
+  }
+  return `\`${linked ? decisionKey(linked) : (link.key ?? link.id)}\``;
+}
+
 function renderEntry(
   decision: DecisionView,
   order: ReadonlyMap<string, number>,
@@ -558,6 +573,18 @@ function renderEntry(
     .map(dependencyReference)
     .filter((reference): reference is string => reference !== null);
   if (dependencies.length > 0) lines.push(field("Depends on", dependencies.join(", ")));
+
+  if (decision.replacedBy) {
+    lines.push(
+      field(
+        "Superseded by",
+        `${linkedReference(decision.replacedBy, byId)}: ${decision.replacedBy.reason}`,
+      ),
+    );
+  }
+  if (decision.settledBy) {
+    lines.push(field("Settled by", linkedReference(decision.settledBy, byId)));
+  }
 
   if (decision.introducedBy === "repo" && decision.repo) {
     lines.push(field("Source", decision.repo.citation));

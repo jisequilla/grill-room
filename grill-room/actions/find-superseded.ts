@@ -9,7 +9,7 @@ import listLooseEnds from "./list-loose-ends.js";
 
 export default defineAction({
   description:
-    "Ask the interviewer which of a session's open loose ends — unknown, deferred, prototype flagged, or pushed back — have already been answered by a decision that settled later under a different question. What comes back is stored as a proposal on each loose end, which stays a loose end until the user accepts it. Runs on its own turn, so it can be repeated after more questions have been answered. Allowed while interviewing or with a done proposal pending, and refused while a turn is working.",
+    "Ask the interviewer which of a session's open loose ends — unknown, deferred, prototype flagged, or pushed back — have already been answered by a decision that settled later under a different question, and which settled decisions a decision that settled later changed, narrowed or reversed. What comes back is stored as a proposal on each decision, which stays exactly as it was until the user accepts it; a pending proposal never blocks confirmation. Runs on its own turn, so it can be repeated after more questions have been answered. Allowed while interviewing or with a done proposal pending, and refused while a turn is working.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
   }),
