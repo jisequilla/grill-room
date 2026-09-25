@@ -904,6 +904,20 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("declare a 404.");
   });
 
+  it("says a fact never claims a field matches, holds or maps to a column the code does not hold", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  A fact never says a field matches, holds or maps to a column or",
+        "  field the spec asks for unless the cited code shows it holds that",
+        "  data. When the spec asks for data the code does not hold, use the",
+        "  positive-claim form above: cite the whole type and state what it",
+        "  holds, then name the consequence.",
+      ].join("\n"),
+    );
+  });
+
   it("does not let the facts rule contradict the exclusivity rule that follows it", async () => {
     const { prompt } = await handoffInvocation();
 
