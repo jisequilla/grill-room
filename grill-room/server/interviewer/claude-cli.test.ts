@@ -183,6 +183,82 @@ describe("what the adapter sends to the command line", () => {
   });
 });
 
+describe("what the adapter sends for a find-superseded check", () => {
+  const LOOSE_END_SECTION = [
+    "## Your task: find the loose ends a later decision already answered",
+    "",
+    "Every decision below marked with a loose-end answer was left open by the",
+    "user at the time. The interview has moved on since, and some of them may",
+    "already be answered by a decision that settled later, under a different",
+    "question.",
+    "",
+    "Loose ends to judge: storage, tone",
+    "",
+    "Return one entry in `supersessions` for each loose end above that a",
+    "settled decision in the tree fully answers, naming that decision in",
+    "`answeredByKey`, the answer to record on the loose end in `answer`, in",
+    "the loose end's own terms, and in `reason` which decision answers it and",
+    "why. Leave out every loose end you are not sure about; an empty list is",
+    "the right answer when nothing has been superseded.",
+    "",
+    "Be conservative. A partial overlap is not a supersession: the settled",
+    "decision must answer the whole of the question the loose end asks, not",
+    "merely touch on it. Never invent an answer no settled decision carries —",
+    "the user will see it as something they already decided.",
+  ].join("\n");
+
+  const REPLACEMENT_BODY = [
+    "Decisions to check: shape, storage-location",
+    "",
+    "Return one entry in `replacements` for each decision above whose answer a",
+    "decision that settled later changes, narrows or reverses, so that a builder",
+    "reading the earlier answer alone would build the wrong thing. Name the earlier",
+    "decision in `replacedKey`, the later one in `byKey`, and say in `reason` what",
+    "the later decision changes. A later decision that only adds detail the earlier",
+    "one left open is not a replacement. Be conservative: an empty list is the right",
+    "answer when nothing was replaced.",
+  ].join("\n");
+
+  async function promptFor(looseEndKeys: string[], replaceableKeys: string[]) {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: aFindSupersededResult() })),
+    ]);
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).findSuperseded(
+      aFindSupersededRequest({ looseEndKeys, replaceableKeys }),
+    );
+    return valueOf(runner.invocations[0].args, "-p") as string;
+  }
+
+  it("sends the loose-end section, then the replacement section, when both lists have keys", async () => {
+    const prompt = await promptFor(
+      ["storage", "tone"],
+      ["shape", "storage-location"],
+    );
+
+    expect(prompt).toContain(
+      `${LOOSE_END_SECTION}\n\n## Also: settled decisions a later decision replaced\n\n${REPLACEMENT_BODY}`,
+    );
+  });
+
+  it("sends today's loose-end section alone when nothing is replaceable", async () => {
+    const prompt = await promptFor(["storage", "tone"], []);
+
+    expect(prompt).toContain(LOOSE_END_SECTION);
+    expect(prompt).not.toContain("replacements");
+    expect(prompt).not.toContain("Decisions to check");
+  });
+
+  it("sends the replacement section alone, as the task, when there are no loose ends", async () => {
+    const prompt = await promptFor([], ["shape", "storage-location"]);
+
+    expect(prompt).toContain(
+      `## Your task: find settled decisions a later decision replaced\n\n${REPLACEMENT_BODY}`,
+    );
+    expect(prompt).not.toContain("Loose ends to judge");
+    expect(prompt).not.toContain("## Also:");
+  });
+});
+
 /**
  * The docs-folder turn is the one place the app points the model at the user's
  * own filesystem. These assertions are the security contract: what it may use,

@@ -24,6 +24,7 @@ import {
   anAssessReadinessRequest,
   anAssessReadinessResult,
   aFindSupersededRequest,
+  aFindSupersededResult,
   aHandoffScoutRequest,
   aHandoffScoutResult,
   aProposeRoundRequest,
@@ -144,6 +145,61 @@ describe("the scripted fake interviewer", () => {
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(InterviewerError);
     expect((error as Error).message).toContain("no queued turn");
+  });
+
+  it("answers a find-superseded request with no loose ends empty, without taking the next scripted turn", async () => {
+    const round = aProposeRoundResult();
+    const interviewer = createFakeInterviewer([
+      { kind: "propose-round", result: round },
+    ]);
+
+    const checked = await interviewer.findSuperseded(
+      aFindSupersededRequest({ looseEndKeys: [], replaceableKeys: ["shape"] }),
+    );
+
+    expect(checked.result).toEqual({ supersessions: [], replacements: [] });
+    expect(interviewer.remaining).toBe(1);
+    expect((await interviewer.proposeRound(aProposeRoundRequest())).result).toEqual(
+      round,
+    );
+  });
+
+  it("answers a find-superseded request with no loose ends empty when nothing is left to take", async () => {
+    const interviewer = createFakeInterviewer();
+
+    const checked = await interviewer.findSuperseded(
+      aFindSupersededRequest({ looseEndKeys: [], replaceableKeys: ["shape"] }),
+    );
+
+    expect(checked.result).toEqual({ supersessions: [], replacements: [] });
+    expect(interviewer.requests).toHaveLength(1);
+  });
+
+  it("serves a scripted find-superseded turn to a request with no loose ends when it is next", async () => {
+    const scripted = aFindSupersededResult({
+      supersessions: [],
+      replacements: [{ replacedKey: "shape", byKey: "storage", reason: "Moved." }],
+    });
+    const interviewer = createFakeInterviewer([
+      { kind: "find-superseded", result: scripted },
+    ]);
+
+    const checked = await interviewer.findSuperseded(
+      aFindSupersededRequest({ looseEndKeys: [], replaceableKeys: ["shape"] }),
+    );
+
+    expect(checked.result).toEqual(scripted);
+    expect(interviewer.remaining).toBe(0);
+  });
+
+  it("still takes the next scripted turn for a find-superseded request with loose ends", async () => {
+    const interviewer = createFakeInterviewer([
+      { kind: "propose-round", result: aProposeRoundResult() },
+    ]);
+
+    await expect(
+      interviewer.findSuperseded(aFindSupersededRequest()),
+    ).rejects.toThrow(/"propose-round" but the request was "find-superseded"/);
   });
 
   it("refuses a queued turn of the wrong kind", async () => {
