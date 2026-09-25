@@ -117,6 +117,9 @@ describe("supersededEntries", () => {
         "- **Origin:** interviewer · accepted recommendation",
         "- **Superseded by:** [Which disk does the data live on?](#storage-location): The data moved to a synced folder.",
         "- **Settled by:** `repo-stack`",
+        // Not a line the renderer writes without Supersedes: here only to show
+        // that Superseded by alone never marks an entry.
+        "- **Source:** docs/adr/001-storage.md:3",
       ]),
       "",
       entry("repo-db", "Move to Postgres", [
