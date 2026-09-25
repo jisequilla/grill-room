@@ -853,16 +853,18 @@ describe("what the adapter sends for a handoff scout", () => {
     );
   });
 
-  it("says a ticket whose kind of change the spec keeps untested is proved by a build or a command, and a fact says so", async () => {
+  it("says a ticket whose kind of change the spec keeps untested sets testPath to null and is proved by its command, and a fact says so", async () => {
     const { prompt } = await handoffInvocation();
 
     expect(prompt).toContain(
       [
-        "  When the spec rules out tests for this ticket's kind of change, do not",
-        "  add one: prove it with a build or a command over the files it owns, and",
+        "  When the spec rules out tests for this ticket's kind of change, set",
+        "  `testPath` to null and give as `command` a command over the ticket's",
+        "  own files, such as a build or a grep, that fails on the current commit;",
         "  say in a fact that the spec excludes tests.",
       ].join("\n"),
     );
+    expect(prompt).not.toContain("do not\n  add one");
   });
 
   it("says a ticket proved by a build builds the whole module, adding any file outside its own the build needs", async () => {

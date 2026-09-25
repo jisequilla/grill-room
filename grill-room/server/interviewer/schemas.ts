@@ -384,9 +384,12 @@ function groundedTicket<Citation extends z.ZodType, BuildsOn extends z.ZodType>(
     /**
      * The test to add or extend, and the command that proves the ticket. The
      * test is one of the ticket's own files to change, unless it has none.
+     * `testPath` is null when the spec rules out tests for the ticket's kind
+     * of change: `command` alone proves it, a build or a grep over the
+     * ticket's own files. A grounding stored before this always has a string.
      */
     provedBy: z.strictObject({
-      testPath: handoffText,
+      testPath: handoffText.nullable(),
       command: handoffText,
     }),
   });

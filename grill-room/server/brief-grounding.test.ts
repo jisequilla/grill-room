@@ -195,7 +195,7 @@ type ScoutTicket = ReturnType<typeof aHandoffScoutResult>["tickets"][number];
 function aTicket(
   number: number,
   files: Record<string, "create" | "edit">,
-  testPath: string,
+  testPath: string | null,
   buildsOn: { blocker: number; createdPath: string; check?: string }[] = [],
   command = "cd backend && go test ./export/...",
 ): ScoutTicket {
@@ -317,6 +317,44 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
           { number: 3, blockedBy: [1] },
           { number: 4, blockedBy: [1] },
           { number: 5, blockedBy: [4] },
+        ],
+      },
+    );
+
+    expect(reasons).toEqual([]);
+  });
+
+  it("accepts the third run's ticket 5 as the prompt now describes it: it edits only server.go, the spec excludes handler tests, testPath is null and a build proves it", async () => {
+    const root = repos.create({
+      files: { "backend/server/server.go": "package server\n" },
+    });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      {
+        tickets: [
+          aTicket(3, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
+          {
+            ...aTicket(
+              5,
+              { "backend/server/server.go": "edit" },
+              null,
+              [{ blocker: 3, createdPath: EXPORT, check: "cd backend && grep -n 'func ' export/export.go" }],
+              "cd backend && go build ./...",
+            ),
+            facts: [
+              {
+                statement: "The spec excludes handler tests, so this ticket is proved by building the whole module; server.go is the package the handler joins.",
+                citation: "backend/server/server.go:1",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        projectRoot: root,
+        tickets: [
+          { number: 3, blockedBy: [] },
+          { number: 5, blockedBy: [3] },
         ],
       },
     );
@@ -542,6 +580,58 @@ describe("reasonsToRefuseHandoffGrounding on a check or command whose path ignor
     expect(await refuseTicket4(check)).toEqual([]);
   });
 
+  it.each([
+    ["Django's mysite/mysite/", "mysite", "mysite/mysite/settings.py", "cd mysite && grep -n INSTALLED_APPS mysite/settings.py"],
+    ["a package named like its folder", "api", "api/api/tests/test_export.py", "cd api && pytest api/tests/test_export.py"],
+  ])("accepts a path after cd when the project really nests the folder: %s", async (_label, dir, nested, command) => {
+    const root = repos.create({ files: { [nested]: "x = 1\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { tickets: [aTicket(1, { [`${dir}/new_test.py`]: "create" }, `${dir}/new_test.py`, [], command)] },
+      { projectRoot: root, tickets: aSingleTicket() },
+    );
+
+    expect(reasons).toEqual([]);
+  });
+
+  it("still refuses the third run's check in a project with a backend/ folder but no backend/backend/", async () => {
+    const root = repos.create({ files: { "backend/go.mod": "module backend\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      {
+        tickets: [
+          aTicket(3, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
+          aTicket(4, { [EXPORT_TEST]: "edit" }, EXPORT_TEST, [
+            {
+              blocker: 3,
+              createdPath: EXPORT_TEST,
+              check: "cd backend && go test ./export/... && grep -n 'func Test' backend/export/export_test.go",
+            },
+          ]),
+        ],
+      },
+      {
+        projectRoot: root,
+        tickets: [
+          { number: 3, blockedBy: [] },
+          { number: 4, blockedBy: [3] },
+        ],
+      },
+    );
+
+    expect(reasons).toEqual([
+      expect.stringContaining("Ticket 4's buildsOn check on ticket 3 runs `cd backend` and then names backend/export/export_test.go"),
+    ]);
+  });
+
+  it("suggests the folder itself for a bare <dir>/, never an empty path", async () => {
+    const reasons = await refuseTicket4("cd backend && ls backend/");
+
+    expect(reasons).toEqual([
+      "Ticket 4's buildsOn check on ticket 3 runs `cd backend` and then names backend/; after `cd backend`, paths are relative to backend, so it would look for backend/backend/. Write it as . (the folder the cd moved into), or run the command from the repository root without the cd.",
+    ]);
+  });
+
   it("applies the same rule to provedBy.command", async () => {
     const reasons = await refuseTicket4(
       "test -f backend/export/export_test.go",
@@ -574,7 +664,28 @@ describe("reasonsToRefuseHandoffGrounding on what counts as a proof", () => {
     );
 
     expect(reasons).toEqual([
-      "Ticket 1 is proved by api/openapi.yaml, a file it edits that is not a test by its name (_test.go, .test.*, .spec.*, test_*.py, *_test.py, or a file under a __tests__/, tests/ or test/ folder), so it would pass before the change as well as after. The proof must be a test, or a command that fails on the current commit (a build, or a grep for what the ticket adds), with a test path the ticket creates or edits.",
+      "Ticket 1 is proved by api/openapi.yaml, a file it edits that is not a test by its name (a source file named *_test.*, *_spec.*, *.test.*, *.spec.* or test_*, or one under a __tests__/, test/, tests/, Tests/, *.Tests/ or spec/ folder), so it would pass before the change as well as after. The proof must be a test, or a command that fails on the current commit (a build, or a grep for what the ticket adds), with a test path the ticket creates or edits; when the spec rules out tests for this kind of change, set testPath to null and give that command alone.",
+    ]);
+  });
+
+  it("accepts a null testPath on a ticket that changes files, and still applies the cd rule to its command", async () => {
+    const root = repos.create({ files: { "backend/server/server.go": "package server\n" } });
+    const accepted = await reasonsToRefuseHandoffGrounding(
+      { tickets: [aTicket(1, { "backend/server/server.go": "edit" }, null, [], "cd backend && go build ./...")] },
+      { projectRoot: root, tickets: aSingleTicket() },
+    );
+    const refused = await reasonsToRefuseHandoffGrounding(
+      {
+        tickets: [
+          aTicket(1, { "backend/server/server.go": "edit" }, null, [], "cd backend && grep -n Export backend/server/server.go"),
+        ],
+      },
+      { projectRoot: root, tickets: aSingleTicket() },
+    );
+
+    expect(accepted).toEqual([]);
+    expect(refused).toEqual([
+      expect.stringContaining("Ticket 1's provedBy.command runs `cd backend` and then names backend/server/server.go"),
     ]);
   });
 
@@ -613,6 +724,11 @@ describe("isTestFileByName", () => {
     "src/__tests__/a.ts",
     "tests/helpers.py",
     "src/test/java/ExportIT.java",
+    "spec/models/user_spec.rb",
+    "app/spec/support/helpers.rb",
+    "Tests/FooTests/FooTests.swift",
+    "MyApp.Tests/UnitTest1.cs",
+    "lib/foo_test.exs",
   ])("counts %s as a test", (candidate) => {
     expect(isTestFileByName(candidate)).toBe(true);
   });
@@ -624,6 +740,9 @@ describe("isTestFileByName", () => {
     "src/latest/a.ts",
     "src/contest.ts",
     "pkg/attest_export.py",
+    "docker-compose.test.yml",
+    "src/test/resources/application.yml",
+    "tests/fixtures/export.json",
   ])("does not count %s as a test", (candidate) => {
     expect(isTestFileByName(candidate)).toBe(false);
   });
