@@ -480,28 +480,43 @@ describe("grounded briefs", () => {
     return markdown.slice(start, markdown.indexOf("\n## ", start + 1)).replace(/\n+$/, "");
   }
 
+  /**
+   * The whole grounded block, from "## File boundaries" up to (not
+   * including) "## Rules": pins not just each section's text but where the
+   * new sections sit — directly after Codebase facts, directly before Rules,
+   * in this order, with nothing else between them.
+   */
+  function groundedBlock(markdown: string): string {
+    const start = markdown.indexOf("## File boundaries");
+    expect(start).toBeGreaterThan(-1);
+    const end = markdown.indexOf("\n## Rules", start);
+    expect(end).toBeGreaterThan(-1);
+    return markdown.slice(start, end).replace(/\n+$/, "");
+  }
+
   function ticketByNumber(number: number) {
     return aSource().tickets.find((ticket) => ticket.number === number)!;
   }
 
-  it("fills File boundaries and Codebase facts, and adds Builds on and Proved by, from current grounding", () => {
+  it("fills File boundaries and Codebase facts, and adds Builds on and Proved by, from current grounding, in that order before Rules", () => {
     const brief = renderBrief(aSource(), ticketByNumber(2), { grounding: CURRENT_GROUNDING });
 
-    expect(section(brief, "## File boundaries")).toBe(
-      ["## File boundaries", "", "Files to edit:", "", "- `server/export-bundle.ts`"].join("\n"),
-    );
-    expect(section(brief, "## Codebase facts")).toBe(
-      ["## Codebase facts", "", "No codebase facts cited."].join("\n"),
-    );
-    expect(section(brief, "## Builds on")).toBe(
+    expect(groundedBlock(brief)).toBe(
       [
+        "## File boundaries",
+        "",
+        "Files to edit:",
+        "",
+        "- `server/export-bundle.ts`",
+        "",
+        "## Codebase facts",
+        "",
+        "No codebase facts cited.",
+        "",
         "## Builds on",
         "",
         "- Ticket 01: the project registry — created by ticket 01 at `server/projects.ts` — check: `test -f server/projects.ts`",
-      ].join("\n"),
-    );
-    expect(section(brief, "## Proved by")).toBe(
-      [
+        "",
         "## Proved by",
         "",
         "Test: `server/export-bundle.test.ts`",
@@ -513,10 +528,10 @@ describe("grounded briefs", () => {
     );
   });
 
-  it("fills a ticket with no blockers: cited facts, an existing file it builds on, and no Builds on section", () => {
+  it("fills a ticket with no blockers: cited facts, an existing file it builds on, and no Builds on section, Proved by directly before Rules", () => {
     const brief = renderBrief(aSource(), ticketByNumber(1), { grounding: CURRENT_GROUNDING });
 
-    expect(section(brief, "## File boundaries")).toBe(
+    expect(groundedBlock(brief)).toBe(
       [
         "## File boundaries",
         "",
@@ -531,18 +546,11 @@ describe("grounded briefs", () => {
         "Existing files it builds on:",
         "",
         "- `server/git.ts:10-20`",
-      ].join("\n"),
-    );
-    expect(section(brief, "## Codebase facts")).toBe(
-      [
+        "",
         "## Codebase facts",
         "",
         "- Projects are registered through registerProject. (`actions/register-project.ts:5`)",
-      ].join("\n"),
-    );
-    expect(brief).not.toContain("## Builds on");
-    expect(section(brief, "## Proved by")).toBe(
-      [
+        "",
         "## Proved by",
         "",
         "Test: `server/projects.test.ts`",
@@ -552,9 +560,10 @@ describe("grounded briefs", () => {
         "```",
       ].join("\n"),
     );
+    expect(brief).not.toContain("## Builds on");
   });
 
-  it("renders stale grounding under one line naming an earlier version of the tickets", () => {
+  it("renders stale grounding under one line naming an earlier version of the handoff", () => {
     const stale: HandoffGrounding = { ...CURRENT_GROUNDING, current: false, staleReason: "handoff-changed" };
     const brief = renderBrief(aSource(), ticketByNumber(1), { grounding: stale });
 
@@ -562,7 +571,7 @@ describe("grounded briefs", () => {
       [
         "## File boundaries",
         "",
-        "_Grounded at commit `abcdef1` for an earlier version of the tickets._",
+        "_Grounded at commit `abcdef1` for an earlier version of the handoff (tickets or project settings)._",
         "",
         "Files to create:",
         "",
@@ -630,29 +639,35 @@ describe("grounded briefs", () => {
     expect(brief).toContain(CODEBASE_FACTS_SLOT);
   });
 
-  it("keeps an edited brief's text verbatim, ignoring grounding entirely", () => {
-    const edited = "# Brief 02: Hand-edited\n\nSomeone already wrote this by hand.\n";
-    const brief = renderBrief(aSource(), ticketByNumber(2), {
-      grounding: CURRENT_GROUNDING,
-      editedMarkdown: edited,
-    });
-    expect(brief).toBe(edited);
-  });
-
-  it("renderHandoff grounds every brief and keeps only the ones named in editedBriefs", () => {
-    const { briefs } = renderHandoff(aSource(), {
-      grounding: CURRENT_GROUNDING,
-      editedBriefs: new Map([[2, "EDITED TICKET 2\n"]]),
-    });
-
-    expect(briefs.find((brief) => brief.ticketNumber === 2)!.markdown).toBe("EDITED TICKET 2\n");
+  it("renderHandoff grounds every brief the grounding covers, ticket 3 (uncovered) keeping today's empty slots", () => {
+    const { briefs } = renderHandoff(aSource(), { grounding: CURRENT_GROUNDING });
 
     const first = briefs.find((brief) => brief.ticketNumber === 1)!.markdown;
     expect(first).toContain("Files to create:");
     expect(first).toContain("## Proved by");
 
+    const second = briefs.find((brief) => brief.ticketNumber === 2)!.markdown;
+    expect(second).toContain("## Builds on");
+
     // Ticket 3 has no grounding entry, so it keeps today's empty slots.
     const third = briefs.find((brief) => brief.ticketNumber === 3)!.markdown;
     expect(third).toContain(FILE_BOUNDARIES_SLOT);
+  });
+
+  it("HANDOFF.md tells the orchestrator to check the slots, not fill them, when grounding is current", () => {
+    const current = renderHandoff(aSource(), { grounding: CURRENT_GROUNDING }).markdown;
+    expect(current).toContain("grounded and current");
+    expect(current).not.toContain("Fill the brief's **File boundaries** slot");
+    expect(current).not.toContain("Fill the **Codebase facts** slot");
+
+    const stale = renderHandoff(aSource(), {
+      grounding: { ...CURRENT_GROUNDING, current: false, staleReason: "head-moved" },
+    }).markdown;
+    expect(stale).toContain("Fill the brief's **File boundaries** slot");
+    expect(stale).toContain("Fill the **Codebase facts** slot");
+
+    const none = renderHandoff(aSource()).markdown;
+    expect(none).toContain("Fill the brief's **File boundaries** slot");
+    expect(none).toContain("Fill the **Codebase facts** slot");
   });
 });

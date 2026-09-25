@@ -154,6 +154,8 @@ describe("preview-export: brief grounding state", () => {
 
     expect(preview.groundingState).toBe("current");
     expect(preview.groundingStaleReason).toBeNull();
+    expect(preview.groundedBriefs.sort()).toEqual([1, 2]);
+    expect(preview.ungroundedBriefs).toEqual([]);
   });
 
   it("reports stale with handoff-changed once a ticket edit outdates the grounding", async () => {
@@ -182,12 +184,25 @@ describe("preview-export: brief grounding state", () => {
     expect(preview.groundingStaleReason).toBe("head-moved");
   });
 
-  it("never blocks export on grounding: an absent or stale grounding leaves exportBlocked to the handoff gate alone", async () => {
+  it("never blocks export on grounding: an absent grounding leaves exportBlocked to the handoff gate alone", async () => {
     const { session } = await aSessionWithHandoff();
 
     const preview = await previewExport.run({ sessionId: session.id });
 
     expect(preview.groundingState).toBe("absent");
+    expect(preview.exportBlocked).toBe(false);
+    expect(preview.exportBlockedReason).toBeNull();
+  });
+
+  it("never blocks export on grounding: a stale grounding leaves exportBlocked to the handoff gate alone", async () => {
+    const { root, session } = await aSessionWithHandoff();
+    await groundNow(session.id, root);
+    commitMore(root);
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.groundingState).toBe("stale");
+    expect(preview.groundingStaleReason).toBe("head-moved");
     expect(preview.exportBlocked).toBe(false);
     expect(preview.exportBlockedReason).toBeNull();
   });
