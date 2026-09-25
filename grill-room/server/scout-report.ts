@@ -17,6 +17,7 @@ import { and, desc, eq, isNull } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "./db/index.js";
+import { supersededEntries, type SupersededEntry } from "./decisions-file.js";
 import { runGit } from "./git.js";
 import {
   scoutProjectResultSchema,
@@ -466,14 +467,101 @@ export function checkCitation(
 }
 
 /**
+ * A citation's file and line range, or null when it is not `path:line` or
+ * `path:start-end` (the same grammar `checkCitation` parses). Kept separate
+ * from `checkCitation` because that function's job is a filesystem check with
+ * its own worded refusals; this one only compares two citations' ranges.
+ */
+function parseCitationRange(
+  citation: string,
+): { path: string; start: number; end: number } | null {
+  const separator = citation.lastIndexOf(":");
+  const citedPath = separator > 0 ? citation.slice(0, separator) : "";
+  const range = separator > 0 ? citation.slice(separator + 1) : "";
+  const match = /^([1-9][0-9]*)(?:-([1-9][0-9]*))?$/.exec(range);
+  if (!citedPath || !match) return null;
+  const start = Number(match[1]);
+  const end = match[2] === undefined ? start : Number(match[2]);
+  if (end < start) return null;
+  return { path: citedPath, start, end };
+}
+
+/** Whether two citations name the same file and their line ranges overlap. */
+function citationsOverlap(a: string, b: string): boolean {
+  const rangeA = parseCitationRange(a);
+  const rangeB = parseCitationRange(b);
+  if (!rangeA || !rangeB) return false;
+  if (path.normalize(rangeA.path) !== path.normalize(rangeB.path)) return false;
+  return rangeA.start <= rangeB.end && rangeB.start <= rangeA.end;
+}
+
+/**
+ * A tracked decisions.md's superseded entries, read the same way a citation
+ * is checked — the project's working tree, resolved against its root — or
+ * empty when the file cannot be read. A missing or unreadable decisions.md
+ * is not this check's problem to report; `checkCitation` already refuses a
+ * proposal that cites one that does not exist.
+ */
+function readSupersededEntries(
+  projectRoot: string,
+  decisionsFilePath: string,
+): SupersededEntry[] {
+  try {
+    const resolved = path.resolve(projectRoot, decisionsFilePath);
+    return supersededEntries(readFileSync(resolved, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Why a proposed decision restates a source one of the project's tracked
+ * decisions.md files has already superseded: names the decisions.md file and
+ * the entry that supersedes it, and asks the scout to propose that entry
+ * instead. Empty when no proposal's citation overlaps a superseded source.
+ *
+ * A proposal citing the decisions.md entry itself is unaffected — it names a
+ * different file (the decisions.md, not the source it supersedes) and so
+ * never overlaps. See `docs/spikes/decisions-round-trip.md`, check 3.
+ */
+function reasonsForStaleSupersededProposals(
+  result: ScoutProjectResult,
+  input: { projectRoot: string; decisionFiles: readonly string[] },
+): string[] {
+  const reasons: string[] = [];
+  for (const decisionsFile of input.decisionFiles) {
+    const superseded = readSupersededEntries(input.projectRoot, decisionsFile);
+    if (superseded.length === 0) continue;
+
+    for (const decision of result.proposedDecisions) {
+      const stale = superseded.find((entry) =>
+        citationsOverlap(decision.citation, entry.source),
+      );
+      if (stale) {
+        reasons.push(
+          `Proposed decision "${decision.key}" cites ${decision.citation}, which ${decisionsFile}'s "${stale.title}" entry (\`${stale.key}\`) already supersedes; propose that entry instead, cited to ${decisionsFile}.`,
+        );
+      }
+    }
+  }
+  return reasons;
+}
+
+/**
  * Why a scout result cannot be stored, written for the scout. Empty when it
  * can: every citation points at real lines of the project, every proposed
- * decision has its own key, and on a re-run every decision of the previous
- * report is accounted for in `previousDecisions`.
+ * decision has its own key, on a re-run every decision of the previous
+ * report is accounted for in `previousDecisions`, and no proposal restates a
+ * source a tracked decisions.md has already superseded.
  */
 export function reasonsToRefuseScoutReport(
   result: ScoutProjectResult,
-  input: { projectRoot: string; previousDecisionKeys: readonly string[] },
+  input: {
+    projectRoot: string;
+    previousDecisionKeys: readonly string[];
+    /** Project-relative paths of the project's tracked decisions.md files. */
+    decisionFiles?: readonly string[];
+  },
 ): string[] {
   const reasons: string[] = [];
 
@@ -505,6 +593,13 @@ export function reasonsToRefuseScoutReport(
       `previousDecisions is missing ${missing.map((key) => `"${key}"`).join(", ")}; report every decision of the previous report as unchanged, changed or removed.`,
     );
   }
+
+  reasons.push(
+    ...reasonsForStaleSupersededProposals(result, {
+      projectRoot: input.projectRoot,
+      decisionFiles: input.decisionFiles ?? [],
+    }),
+  );
 
   return reasons;
 }

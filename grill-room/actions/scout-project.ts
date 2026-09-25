@@ -186,6 +186,7 @@ export async function scoutProjectCore(input: {
           reasonsToRefuseScoutReport(result, {
             projectRoot: project.rootPath,
             previousDecisionKeys,
+            decisionFiles: facts.decisionFiles,
           }),
         exhausted: (lastReason) =>
           new TurnRejected(
