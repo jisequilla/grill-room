@@ -95,8 +95,8 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `get-scout-report` | Read a session's scout report, or null when it has none: the server facts, the current state and proposed repo decisions, the commit and idea it read, the model, when it ran, its turn record, the keep/drop state of each proposal, and `stale`. |
 | `keep-repo-decision` | Keep one decision the session's scout report proposes: it enters the design tree settled, introduced by the repo, with the project's statement as its answer. Refused with `no-scout-report`, `proposal-not-found`, `already-kept`, `key-in-use`, `wrong-session-state`, or `turn-working`. See "Project scout" below. |
 | `drop-repo-decision` | Drop one decision the session's scout report proposes: recorded as dropped, still reaching the interviewer as unenforced context. Refused with `no-scout-report`, `proposal-not-found`, `already-kept`, `wrong-session-state`, or `turn-working`. |
-| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file that will be written as an absolute path (HANDOFF.md and the briefs when a handoff exists, and the manifest), `handoffIncluded`, the files from the previous manifest that will be removed, the project's tracker diagnostic, and the export gate as `exportBlocked`/`exportBlockedReason` (`handoff-missing` or `handoff-stale`, null once clear) — the same gate `export-session` refuses on, reported here without refusing so the UI can explain it first. Built by the same plan `export-session` writes. |
-| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md` plus `issues/NN-slug.md` per ticket (tickets only when current), and `HANDOFF.md` plus `briefs/NN-slug.md` from the session's generated handoff (recording that export on the handoff), creating missing folders. Also writes a manifest (`.grill-room-export.json`) of what it wrote; re-export overwrites the planned files and removes exactly the files the previous manifest lists that the new plan no longer writes, never anything else. Writes exactly what `preview-export` lists. Refuses, writing nothing, with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, `export-outside-root` when any path resolves (through symlinks) outside the real project root, `handoff-missing` when the session has no handoff, or `handoff-stale` when its handoff no longer matches today's spec, tickets or project. Also returns a post-export visibility report — see "Exporting a session" below. |
+| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file the export will write as an absolute path (spec.md, intent.md, decisions.md when the tree holds decisions or out-of-scope items, HANDOFF.md and briefs/NN-slug.md when a handoff exists, and the manifest), `handoffIncluded`, the files the previous manifest lists that the plan drops, the project's tracker diagnostic, and the export gate as `exportBlocked`/`exportBlockedReason` (`handoff-missing` or `handoff-stale`, null once clear) — the same gate `export-session` refuses on, reported here without refusing so the UI can explain it first. `plannedWrites` and `plannedRemovals` repeat every planned write and removal as `{ path, relativePath, edited }`: `edited` is true when the file on disk no longer matches the hash the previous manifest recorded for it, or was never written by Grill Room at all — see "Exporting a session" below for the guard. Built by the same plan `export-session` writes, so the two cannot disagree; export-session checks for edits again when it writes, so this preview is not a lock. |
+| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<exportFolder>/<folderName>/spec.md`, `intent.md`, `decisions.md` (when the tree holds decisions or out-of-scope items), `issues/NN-slug.md` per ticket (tickets only when current), and `HANDOFF.md` plus `briefs/NN-slug.md` from the session's generated handoff (recording that export on the handoff), creating missing folders. Also writes a provenance manifest (`.grill-room-export.json`: session id, export revision, scout commit, HEAD at export, and a CRLF-insensitive sha256 of every file written). Re-export removes files the previous manifest lists that the new export no longer writes. Edited files are kept: a planned write or removal already on disk that no longer matches the hash the previous manifest recorded, or that the previous manifest never listed, is neither overwritten nor removed unless its bundle-relative path is in `overridePaths` (a version-1 manifest's files are trusted as unedited once). The check is repeated from disk at write time, so a file edited after `preview-export` is kept unless overridden. An override resolving outside the bundle is refused with `override-outside-bundle`. Refuses, writing nothing, with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, `export-outside-root` when any path resolves (through symlinks) outside the real project root, `handoff-missing` when the session has no handoff, or `handoff-stale` when its handoff no longer matches today's spec, tickets or project; `preview-export` reports the same gate as `exportBlocked`/`exportBlockedReason` without refusing, and marks each edited file, so the UI can explain both before the operator tries. Returns `written`, `removed` and `kept` as absolute paths, plus a post-export visibility report — see "Exporting a session" below. |
 | `get-export-visibility` | Classify every file a session's export wrote (or would write) as `tracked`, `ignored`, or `untracked` in the project's repository, given the same `sessionId` and `slug` as `preview-export`/`export-session`. Read-only and side-effect-free, so the UI can re-check without exporting again. See "Exporting a session" below. |
 | `generate-handoff` | Generate or regenerate a session's handoff from deterministic templates (no model call): `HANDOFF.md` plus one brief per ticket. Refuses with `no-project`, `project-not-found`, `spec-missing`, `no-tickets` or `ticket-cycle`, and with `handoff-edited` when the stored handoff carries UI edits unless `overwriteEdits` is true. See "Handoff" below. |
 | `get-handoff` | A session's handoff (HANDOFF.md, briefs by ticket number, timestamps) or null, with `stale` (its inputs changed since generation), `exportStale` (edited or regenerated after the last export that included it), `canGenerate`, and `cannotGenerateReason`. |
@@ -338,18 +338,56 @@ The bundle is one directory per session:
 ```
 <root>/<exportFolder>/<folderName>/HANDOFF.md
 <root>/<exportFolder>/<folderName>/spec.md
+<root>/<exportFolder>/<folderName>/intent.md
+<root>/<exportFolder>/<folderName>/decisions.md        # when the tree holds decisions or out-of-scope items
 <root>/<exportFolder>/<folderName>/issues/NN-slug.md   # "Blocked by: NN, NN" line
 <root>/<exportFolder>/<folderName>/briefs/NN-slug.md
 <root>/<exportFolder>/<folderName>/.grill-room-export.json
 ```
 
-`.grill-room-export.json` is the export's manifest: the relative paths of the
-other files that export wrote. It is part of the plan, listed in the preview
-and checked for containment like every other file. Re-export overwrites every
-planned file and removes only the paths the previous manifest lists that the
-new plan no longer contains (a dropped ticket, say). A file the previous
-manifest does not list is never removed, whatever its name or folder; a bundle
-with no manifest, or a malformed one, gets no removals.
+`intent.md` is the why, for people: rendered from stored data alone, no model
+call, so it states exactly what the session holds and nothing it does not.
+It opens with the idea verbatim, then the readiness objective, expected
+outcome, verdict, each evidence item marked as the user's statement or the
+repo's (with its citation for repo evidence), and the unknowns — "Not judged
+for this version of the idea" when the judgment is missing or was made for an
+earlier idea — then the scout's current state of the project (each built,
+partial and gap item with its citation and the commit the report read, saying
+when the project has moved since). No scout section when the session was
+never scouted. `intent.md` is always planned; it is not a decision source,
+so the scout prompt never reads it.
+
+`.grill-room-export.json` is the export's provenance manifest: the session
+id, the export revision (the previous manifest's plus one, starting at 1, no
+database column), the scout report's commit, the project's `HEAD` at export
+time, and, for every file Grill Room wrote, its path and the sha256 of its
+content with CRLF normalised to LF — no timestamps. It is part of the plan,
+listed in the preview and checked for containment like every other file. A
+version-1 manifest (paths only, no hashes) still parses; its files are
+treated as written by Grill Room and unedited, once.
+
+**The edited-file guard.** Before writing, every planned file already on disk,
+and every file the previous manifest lists that the new plan drops, is
+classified from disk: **unedited** when the previous manifest has its hash and
+the file matches it (or the previous manifest is version 1 and lists the
+path), **edited** otherwise — including a file the previous manifest never
+listed at all. An edited file is kept — neither overwritten nor removed —
+unless its bundle-relative path is passed in `overridePaths`; a kept file
+stays in the new manifest with the hash Grill Room last wrote for it, and one
+that was never hashed is not added. `preview-export`'s `plannedWrites` and
+`plannedRemovals` mark each planned path `edited` so the UI can flag it before
+the operator tries; `export-session` recomputes the classification from disk
+at the moment it writes, so a file edited after the preview is still kept
+unless its path was overridden. Every override must resolve inside the bundle
+directory, through symlinks, or the plan is refused with
+`override-outside-bundle`. `export-session` returns `written`, `removed` and
+`kept` as absolute paths.
+
+Re-export overwrites every planned, unkept file and removes only the unkept
+paths the previous manifest lists that the new plan no longer contains (a
+dropped ticket, say). A file the previous manifest does not list is never
+removed, whatever its name or folder; a bundle with no manifest, or a
+malformed one, gets no removals.
 
 `folderName` is the project's slug pattern with its placeholders filled:
 
