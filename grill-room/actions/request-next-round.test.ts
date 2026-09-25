@@ -1472,6 +1472,23 @@ describe("idea readiness", () => {
       );
     });
 
+    it("carries the previous refused result forward on a retry", async () => {
+      const session = await aSession();
+      const refused = judged({ evidence: [], objectiveIsProcess: true });
+      const interviewer = scriptInterviewer([
+        refused,
+        judged({ evidence: [], objectiveIsProcess: true, verdict: "not-ready" }),
+      ]);
+
+      const { readiness } = await assessReadiness.run({ sessionId: session.id });
+
+      expect(readiness?.result.verdict).toBe("not-ready");
+      expect(interviewer.requests[0]).toMatchObject({ previousResult: null });
+      expect(interviewer.requests[1]).toMatchObject({
+        previousResult: refused.result,
+      });
+    });
+
     it("sends back a ready verdict whose only evidence restates the objective", async () => {
       const session = await aSession();
       const interviewer = scriptInterviewer([

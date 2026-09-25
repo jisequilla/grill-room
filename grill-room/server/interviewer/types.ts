@@ -251,6 +251,12 @@ export interface AssessReadinessRequest extends RequestBase {
   kind: "assess-readiness";
   /** The session's current scout report, or null without a project or report. */
   scoutReport: ScoutReportForReadiness | null;
+  /**
+   * On a retry, the result the app refused last, as the judge returned it;
+   * null on the first attempt. The judge never resumes a conversation, so a
+   * retry starts fresh and this is how it sees the answer it is correcting.
+   */
+  previousResult: AssessReadinessResult | null;
 }
 
 export type { ProjectServerFacts };
@@ -280,6 +286,12 @@ export interface ScoutProjectRequest extends RequestBase {
   facts: ProjectServerFacts;
   /** The previous report's decisions on a re-run; empty on a first run. */
   previousDecisions: PreviousRepoDecision[];
+  /**
+   * On a retry, the result the app refused last, as the scout returned it;
+   * null on the first attempt. The scout never resumes a conversation, so a
+   * retry starts fresh and this is how it sees the answer it is correcting.
+   */
+  previousResult: ScoutProjectResult | null;
 }
 
 /** The model every scout runs on. The session's model lock does not apply. */

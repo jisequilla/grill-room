@@ -228,6 +228,69 @@ function renderHandoffScoutRetry(request: HandoffScoutRequest): string {
   ].join("\n");
 }
 
+/**
+ * The project scout's retry. Like the handoff scout, it never resumes a
+ * conversation, so a retry starts fresh: it gets its previous answer back
+ * and is told to correct only what the reasons name, rather than rewriting a
+ * report that mostly already passed.
+ */
+function renderScoutProjectRetry(request: ScoutProjectRequest): string {
+  if (!request.rejectionReason) return "";
+  return [
+    "",
+    "## Your previous answer was rejected",
+    "",
+    request.rejectionReason,
+    ...(request.previousResult
+      ? [
+          "",
+          "Your previous answer, exactly as the app received it:",
+          "",
+          ...fenced(JSON.stringify(request.previousResult, null, 2), "json"),
+        ]
+      : []),
+    "",
+    "Correct only what the reasons above name:",
+    "",
+    "- Keep every entry the reasons do not name exactly as it is in your",
+    "  previous answer: it already passed every check.",
+    "- Change only the entries the reasons name.",
+    "- Do not re-read files already read for your previous answer unless a",
+    "  reason concerns them.",
+  ].join("\n");
+}
+
+/**
+ * The readiness judge's retry. It never resumes a conversation either, so a
+ * retry starts fresh: it gets its previous verdict back and is told to
+ * correct only what the reasons name.
+ */
+function renderAssessReadinessRetry(request: AssessReadinessRequest): string {
+  if (!request.rejectionReason) return "";
+  return [
+    "",
+    "## Your previous answer was rejected",
+    "",
+    request.rejectionReason,
+    ...(request.previousResult
+      ? [
+          "",
+          "Your previous answer, exactly as the app received it:",
+          "",
+          ...fenced(JSON.stringify(request.previousResult, null, 2), "json"),
+        ]
+      : []),
+    "",
+    "Correct only what the reasons above name:",
+    "",
+    "- Keep every entry the reasons do not name exactly as it is in your",
+    "  previous answer: it already passed every check.",
+    "- Change only the entries the reasons name.",
+    "- Do not re-read files already read for your previous answer unless a",
+    "  reason concerns them.",
+  ].join("\n");
+}
+
 function renderTask(
   request: Exclude<
     InterviewerRequest,
@@ -556,7 +619,7 @@ function buildReadinessPrompt(request: AssessReadinessRequest): string {
     "  naming one gap the user could fill by editing the idea. Empty when the",
     "  verdict is `ready` and nothing is missing. Name gaps only; do not",
     "  rewrite the idea.",
-    renderRetry(request.rejectionReason),
+    renderAssessReadinessRetry(request),
   ]
     .join("\n")
     .trimEnd();
@@ -723,7 +786,7 @@ function buildScoutPrompt(request: ScoutProjectRequest): string {
     "",
     "When the project has nothing relevant to the idea, say so with empty",
     "lists rather than stretching an unrelated item to fit.",
-    renderRetry(request.rejectionReason),
+    renderScoutProjectRetry(request),
   ]
     .join("\n")
     .trimEnd();

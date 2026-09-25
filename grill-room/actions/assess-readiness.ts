@@ -73,11 +73,14 @@ export default defineAction({
       failedMessage: "The readiness turn failed.",
       record: { turnKind: "assess-readiness", model: session.model },
       take: async (recorder) => {
+        // The judge never resumes a conversation, so a retry starts fresh: it
+        // gets the answer it is correcting in the request instead.
+        let previousResult: AssessReadinessResult | null = null;
         const accepted = await askUntilAccepted<AssessReadinessResult>({
           conversationId: null,
           recorder,
-          ask: async ({ rejectionReason, observer }) =>
-            getInterviewer().assessReadiness(
+          ask: async ({ rejectionReason, observer }) => {
+            const turn = await getInterviewer().assessReadiness(
               {
                 kind: "assess-readiness",
                 context: {
@@ -93,9 +96,13 @@ export default defineAction({
                 },
                 scoutReport: report ? scoutReportForReadiness(report) : null,
                 rejectionReason,
+                previousResult: rejectionReason === null ? null : previousResult,
               },
               observer,
-            ),
+            );
+            previousResult = turn.result;
+            return turn;
+          },
           reasonsToRefuse: (result) =>
             reasonsToRefuseReadiness(
               result,

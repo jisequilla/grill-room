@@ -213,6 +213,28 @@ describe("scout-project", () => {
     expect(report!.result).toEqual(aScoutProjectResult());
   });
 
+  it("carries the previous refused result forward on a retry", async () => {
+    const { session } = await aSessionWithProject();
+    const refused = aScoutProjectResult({
+      currentState: [
+        { status: "gap", summary: "No alerting yet.", citations: ["src/alerts.ts:1"] },
+      ],
+    });
+    const interviewer = scriptInterviewer([
+      { kind: "scout-project", result: refused },
+      { kind: "scout-project", result: aScoutProjectResult() },
+    ]);
+
+    await scoutProject.run({ sessionId: session.id });
+
+    const requests = scoutRequests(interviewer.requests);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]!.previousResult).toBeNull();
+    expect(requests[1]!.previousResult).toEqual(refused);
+    const { report } = await getScoutReport.run({ sessionId: session.id });
+    expect(report!.result).toEqual(aScoutProjectResult());
+  });
+
   it("refuses a citation to a line past the file's end and asks again", async () => {
     const { session } = await aSessionWithProject();
     const outOfRange = aScoutProjectResult();
