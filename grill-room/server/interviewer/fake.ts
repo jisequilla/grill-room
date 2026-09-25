@@ -7,6 +7,7 @@ import type {
   AssessReadinessRequest,
   BreakIntoTicketsRequest,
   FindSupersededRequest,
+  HandoffScoutRequest,
   Interviewer,
   InterviewerRequest,
   InterviewerTurn,
@@ -16,6 +17,7 @@ import type {
   ScoutProjectRequest,
   SynthesizeSpecRequest,
 } from "./types.js";
+import { isProjectScoutRequest } from "./types.js";
 
 /** The conversation id the fake hands back when the session has none yet. */
 export const FAKE_CONVERSATION_ID = "fake-conversation";
@@ -190,7 +192,7 @@ function isError(turn: ScriptedTurn): turn is ScriptedError {
 
 /** The conversation a request resumes. A scout never resumes one, as with the real adapter. */
 function conversationOf(request: InterviewerRequest): string | null {
-  return request.kind === "scout-project" ? null : request.context.conversationId;
+  return isProjectScoutRequest(request) ? null : request.context.conversationId;
 }
 
 /**
@@ -233,6 +235,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   "rate-limit-then-retry": { turns: rateLimitThenRetryTurns(), delayMs: 5_000 },
   "scout-project": { turns: scoutProjectTurns() },
   "scout-project-readiness": { turns: scoutProjectReadinessTurns() },
+  "handoff-scout": { turns: handoffScoutTurns() },
   ...(demoScenario ? { [DEMO_SCENARIO]: demoScenario } : {}),
 };
 
@@ -507,6 +510,10 @@ function createScriptedInterviewer(
     scoutProject: (request: ScoutProjectRequest, observer?: ModelCallObserver) =>
       turn(request, observer) as Promise<
         InterviewerTurn<ResultFor<"scout-project">>
+      >,
+    scoutHandoff: (request: HandoffScoutRequest, observer?: ModelCallObserver) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"handoff-scout">>
       >,
   };
 }
@@ -786,6 +793,69 @@ export function scoutProjectTurns(): ScriptedTurn[] {
           },
         ],
         previousDecisions: [],
+      },
+    },
+  ];
+}
+
+/**
+ * A grounding of a two-ticket handoff: ticket 1 adds an ingest-lag alert
+ * beside the metrics it reads, and ticket 2, blocked by 1, wires that alert
+ * into the queue. Ticket 2 depends on a file ticket 1 creates, so the result
+ * exercises both halves of a dependency. Cites the same fixture paths as
+ * {@link scoutProjectTurns}. What `handoff-scout` schedules, for a session's
+ * one `handoff-scout` request.
+ */
+export function handoffScoutTurns(): ScriptedTurn[] {
+  return [
+    {
+      kind: "handoff-scout",
+      result: {
+        tickets: [
+          {
+            number: 1,
+            filesToChange: [
+              { path: "src/ingest/lag-alert.ts", change: "create" },
+              { path: "src/ingest/lag-alert.test.ts", change: "create" },
+            ],
+            buildsOnFiles: ["src/ingest/metrics.ts:12-30"],
+            facts: [
+              {
+                statement: "Ingest lag is measured in src/ingest/metrics.ts.",
+                citation: "src/ingest/metrics.ts:12-30",
+              },
+            ],
+            buildsOn: [],
+            provedBy: {
+              testPath: "src/ingest/lag-alert.test.ts",
+              command: "npm test -- lag-alert",
+            },
+          },
+          {
+            number: 2,
+            filesToChange: [{ path: "src/ingest/metrics.ts", change: "edit" }],
+            buildsOnFiles: ["docs/adr/0003-queue.md:5-9"],
+            facts: [
+              {
+                statement: "Ingest runs on a Postgres-backed queue.",
+                citation: "docs/adr/0003-queue.md:5-9",
+              },
+            ],
+            buildsOn: [
+              {
+                blocker: 1,
+                provides: "The lag alert module.",
+                citation: null,
+                createdPath: "src/ingest/lag-alert.ts",
+                check: "test -f src/ingest/lag-alert.ts",
+              },
+            ],
+            provedBy: {
+              testPath: "src/ingest/lag-alert.test.ts",
+              command: "npm test -- lag-alert",
+            },
+          },
+        ],
       },
     },
   ];

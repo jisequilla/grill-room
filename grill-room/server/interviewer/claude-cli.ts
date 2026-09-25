@@ -11,17 +11,19 @@ import type {
   AssessReadinessRequest,
   BreakIntoTicketsRequest,
   FindSupersededRequest,
+  HandoffScoutRequest,
   Interviewer,
   InterviewerRequest,
   InterviewerTurn,
   ModelCallConversation,
   ModelCallObserver,
+  ProjectScoutRequest,
   ProposeRoundRequest,
   ReviewStaleRequest,
   ScoutProjectRequest,
   SynthesizeSpecRequest,
 } from "./types.js";
-import { SCOUT_MODEL } from "./types.js";
+import { isProjectScoutRequest, SCOUT_MODEL } from "./types.js";
 
 /** The command line invocation, as the runner receives it. */
 export interface CliInvocation {
@@ -192,10 +194,11 @@ export const SCOUT_DENY_RULES = [
 ];
 
 /**
- * The scout's invocation: always sonnet, always a conversation of its own,
- * docs mode pointed at the project root, and the secret files denied on top.
+ * A scout's invocation, the project scout's and the handoff scout's alike:
+ * always sonnet, always a conversation of its own, docs mode pointed at the
+ * project root, and the secret files denied on top.
  */
-function scoutCliArgs(request: ScoutProjectRequest, prompt: string): string[] {
+function scoutCliArgs(request: ProjectScoutRequest, prompt: string): string[] {
   return [
     "-p",
     prompt,
@@ -215,21 +218,21 @@ function scoutCliArgs(request: ScoutProjectRequest, prompt: string): string[] {
 
 /** The folder a request may read, which is also where its child runs. */
 function readableFolder(request: InterviewerRequest): string | null {
-  return request.kind === "scout-project"
+  return isProjectScoutRequest(request)
     ? request.projectRoot
     : request.context.docsFolder;
 }
 
 /** The conversation a request resumes. A scout never resumes one. */
 function conversationToResume(request: InterviewerRequest): string | null {
-  return request.kind === "scout-project" ? null : request.context.conversationId;
+  return isProjectScoutRequest(request) ? null : request.context.conversationId;
 }
 
 export function buildCliArgs(
   request: InterviewerRequest,
   { prompt, resume }: { prompt: string; resume: string | null },
 ): string[] {
-  if (request.kind === "scout-project") return scoutCliArgs(request, prompt);
+  if (isProjectScoutRequest(request)) return scoutCliArgs(request, prompt);
   const { docsFolder } = request.context;
   const args = [
     "-p",
@@ -498,6 +501,10 @@ export function createClaudeCliInterviewer(
     scoutProject: (request: ScoutProjectRequest, observer?: ModelCallObserver) =>
       turn(request, observer) as Promise<
         InterviewerTurn<ResultFor<"scout-project">>
+      >,
+    scoutHandoff: (request: HandoffScoutRequest, observer?: ModelCallObserver) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"handoff-scout">>
       >,
   };
 }

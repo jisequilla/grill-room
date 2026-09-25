@@ -2,12 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   citation,
+  handoffScoutResultSchema,
   jsonSchemaFor,
+  MAX_HANDOFF_SCOUT_BUILDS_ON,
+  MAX_HANDOFF_SCOUT_BUILDS_ON_FILES,
+  MAX_HANDOFF_SCOUT_FACTS,
+  MAX_HANDOFF_SCOUT_FILES_TO_CHANGE,
+  MAX_HANDOFF_SCOUT_TICKETS,
   MAX_SCOUT_CURRENT_STATE,
   MAX_SCOUT_PROPOSED_DECISIONS,
+  repoPath,
   scoutProjectResultSchema,
 } from "./schemas.js";
-import { aScoutProjectResult } from "./test-fixtures.js";
+import { aHandoffScoutResult, aScoutProjectResult } from "./test-fixtures.js";
 
 const aStateItem = aScoutProjectResult().currentState[0];
 const aProposal = aScoutProjectResult().proposedDecisions[0];
@@ -149,6 +156,196 @@ describe("the scout report schema", () => {
     expect(schema.properties.proposedDecisions.maxItems).toBe(
       MAX_SCOUT_PROPOSED_DECISIONS,
     );
+    expect(JSON.stringify(schema)).toContain('"pattern"');
+  });
+});
+
+const [aGroundedTicket, aBlockedTicket] = aHandoffScoutResult().tickets;
+const aDependency = aBlockedTicket!.buildsOn[0]!;
+
+/** The result with its first ticket replaced by `ticket`. */
+function withTicket(ticket: Record<string, unknown>) {
+  return { tickets: [ticket, aBlockedTicket] };
+}
+
+function accepts(result: unknown): boolean {
+  return handoffScoutResultSchema.safeParse(result).success;
+}
+
+describe("a grounded ticket's paths", () => {
+  it.each(["src/ingest/lag-alert.ts", "e2e/scenario.spec.ts", ".claude/rules/x.md"])(
+    "accepts %s",
+    (value) => {
+      expect(repoPath.safeParse(value).success).toBe(true);
+    },
+  );
+
+  it.each([
+    ["an empty path", ""],
+    ["an absolute path", "/etc/passwd"],
+    ["a home path", "~/.ssh/config"],
+    ["a drive path", "C:\\repo\\a.ts"],
+    ["a path out of the repo", "../other/a.ts"],
+    ["a path stepping out midway", "src/../../a.ts"],
+    ["surrounding whitespace", " src/a.ts"],
+  ])("rejects %s", (_label, value) => {
+    expect(repoPath.safeParse(value).success).toBe(false);
+  });
+});
+
+describe("the handoff scout schema", () => {
+  it("accepts a grounding with a dependency on a path its blocker creates", () => {
+    expect(accepts(aHandoffScoutResult())).toBe(true);
+  });
+
+  it("accepts a dependency on existing code, cited", () => {
+    const blocked = {
+      ...aBlockedTicket,
+      buildsOn: [
+        { ...aDependency, citation: "src/ingest/metrics.ts:12", createdPath: null },
+      ],
+    };
+
+    expect(accepts({ tickets: [aGroundedTicket, blocked] })).toBe(true);
+  });
+
+  it("accepts an empty grounding, facts and dependencies", () => {
+    expect(accepts({ tickets: [] })).toBe(true);
+    expect(accepts(withTicket({ ...aGroundedTicket, facts: [], buildsOn: [], buildsOnFiles: [] }))).toBe(true);
+  });
+
+  it("rejects a dependency with both a citation and a created path, or neither", () => {
+    for (const dependency of [
+      { ...aDependency, citation: "src/ingest/metrics.ts:12" },
+      { ...aDependency, createdPath: null },
+    ]) {
+      expect(
+        accepts({ tickets: [aGroundedTicket, { ...aBlockedTicket, buildsOn: [dependency] }] }),
+      ).toBe(false);
+    }
+  });
+
+  it("rejects a ticket with no file to change", () => {
+    expect(accepts(withTicket({ ...aGroundedTicket, filesToChange: [] }))).toBe(false);
+  });
+
+  it("rejects a change that is neither create nor edit", () => {
+    expect(
+      accepts(
+        withTicket({
+          ...aGroundedTicket,
+          filesToChange: [{ path: "src/a.ts", change: "delete" }],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a path or citation that leaves the repository", () => {
+    for (const ticket of [
+      { ...aGroundedTicket, filesToChange: [{ path: "../a.ts", change: "create" }] },
+      { ...aGroundedTicket, buildsOnFiles: ["/etc/passwd:1"] },
+      { ...aGroundedTicket, facts: [{ statement: "A fact.", citation: "src/a.ts" }] },
+      { ...aGroundedTicket, provedBy: { testPath: "/tmp/a.test.ts", command: "npm test" } },
+    ]) {
+      expect(accepts(withTicket(ticket))).toBe(false);
+    }
+  });
+
+  it("rejects a ticket number that is not a positive integer", () => {
+    for (const number of [0, -1, 1.5]) {
+      expect(accepts(withTicket({ ...aGroundedTicket, number }))).toBe(false);
+    }
+    expect(
+      accepts({
+        tickets: [aGroundedTicket, { ...aBlockedTicket, buildsOn: [{ ...aDependency, blocker: 0 }] }],
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects empty text where text is required", () => {
+    for (const ticket of [
+      { ...aGroundedTicket, facts: [{ statement: "", citation: "src/a.ts:1" }] },
+      { ...aGroundedTicket, provedBy: { testPath: "src/a.test.ts", command: "" } },
+    ]) {
+      expect(accepts(withTicket(ticket))).toBe(false);
+    }
+    for (const dependency of [
+      { ...aDependency, provides: "" },
+      { ...aDependency, check: "" },
+    ]) {
+      expect(
+        accepts({ tickets: [aGroundedTicket, { ...aBlockedTicket, buildsOn: [dependency] }] }),
+      ).toBe(false);
+    }
+  });
+
+  it("holds every list to its bound", () => {
+    const files = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        path: `src/file-${index}.ts`,
+        change: "create" as const,
+      }));
+    const citations = (count: number) =>
+      Array.from({ length: count }, (_, index) => `src/a.ts:${index + 1}`);
+    const facts = (count: number) =>
+      citations(count).map((cited) => ({ statement: "A fact.", citation: cited }));
+    const dependencies = (count: number) =>
+      Array.from({ length: count }, () => aDependency);
+    const tickets = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({ ...aGroundedTicket, number: index + 1 }));
+
+    const cases: [string, number, (count: number) => unknown][] = [
+      ["filesToChange", MAX_HANDOFF_SCOUT_FILES_TO_CHANGE, (n) => withTicket({ ...aGroundedTicket, filesToChange: files(n) })],
+      ["buildsOnFiles", MAX_HANDOFF_SCOUT_BUILDS_ON_FILES, (n) => withTicket({ ...aGroundedTicket, buildsOnFiles: citations(n) })],
+      ["facts", MAX_HANDOFF_SCOUT_FACTS, (n) => withTicket({ ...aGroundedTicket, facts: facts(n) })],
+      ["buildsOn", MAX_HANDOFF_SCOUT_BUILDS_ON, (n) => withTicket({ ...aGroundedTicket, buildsOn: dependencies(n) })],
+      ["tickets", MAX_HANDOFF_SCOUT_TICKETS, (n) => ({ tickets: tickets(n) })],
+    ];
+    for (const [label, limit, build] of cases) {
+      expect(accepts(build(limit)), `${label} at its limit`).toBe(true);
+      expect(accepts(build(limit + 1)), `${label} over its limit`).toBe(false);
+    }
+  });
+
+  it("rejects fields it does not define, and missing ones", () => {
+    expect(accepts({ ...aHandoffScoutResult(), extra: 1 })).toBe(false);
+    expect(accepts(withTicket({ ...aGroundedTicket, extra: 1 }))).toBe(false);
+    expect(
+      accepts({
+        tickets: [aGroundedTicket, { ...aBlockedTicket, buildsOn: [{ ...aDependency, extra: 1 }] }],
+      }),
+    ).toBe(false);
+    expect(accepts({})).toBe(false);
+    for (const field of ["number", "filesToChange", "buildsOnFiles", "facts", "buildsOn", "provedBy"]) {
+      const { [field]: _dropped, ...missing } = aGroundedTicket as Record<string, unknown>;
+      expect(accepts(withTicket(missing)), field).toBe(false);
+    }
+    for (const field of ["blocker", "provides", "citation", "createdPath", "check"]) {
+      const { [field]: _dropped, ...missing } = aDependency as Record<string, unknown>;
+      expect(
+        accepts({ tickets: [aGroundedTicket, { ...aBlockedTicket, buildsOn: [missing] }] }),
+        field,
+      ).toBe(false);
+    }
+  });
+
+  it("hands the command line the limits and the citation shape", () => {
+    const schema = jsonSchemaFor("handoff-scout") as {
+      properties: {
+        tickets: {
+          maxItems?: number;
+          items: { properties: Record<string, { maxItems?: number; minItems?: number }> };
+        };
+      };
+    };
+    const ticket = schema.properties.tickets.items.properties;
+
+    expect(schema.properties.tickets.maxItems).toBe(MAX_HANDOFF_SCOUT_TICKETS);
+    expect(ticket.filesToChange!.minItems).toBe(1);
+    expect(ticket.filesToChange!.maxItems).toBe(MAX_HANDOFF_SCOUT_FILES_TO_CHANGE);
+    expect(ticket.buildsOnFiles!.maxItems).toBe(MAX_HANDOFF_SCOUT_BUILDS_ON_FILES);
+    expect(ticket.facts!.maxItems).toBe(MAX_HANDOFF_SCOUT_FACTS);
+    expect(ticket.buildsOn!.maxItems).toBe(MAX_HANDOFF_SCOUT_BUILDS_ON);
     expect(JSON.stringify(schema)).toContain('"pattern"');
   });
 });

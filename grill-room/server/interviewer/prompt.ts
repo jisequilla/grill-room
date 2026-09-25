@@ -1,5 +1,10 @@
 import { interviewerInstructions, loadSpecTemplate } from "./instructions.js";
 import {
+  MAX_HANDOFF_SCOUT_BUILDS_ON,
+  MAX_HANDOFF_SCOUT_BUILDS_ON_FILES,
+  MAX_HANDOFF_SCOUT_FACTS,
+  MAX_HANDOFF_SCOUT_FILES_TO_CHANGE,
+  MAX_HANDOFF_SCOUT_TICKETS,
   MAX_READY_UNKNOWNS,
   MAX_SCOUT_CURRENT_STATE,
   MAX_SCOUT_PROPOSED_DECISIONS,
@@ -7,6 +12,8 @@ import {
 import type {
   AssessReadinessRequest,
   DecisionSnapshot,
+  HandoffScoutRequest,
+  HandoffScoutTicket,
   InterviewContext,
   InterviewerRequest,
   ProjectServerFacts,
@@ -180,7 +187,7 @@ function renderRetry(rejectionReason: string | null): string {
 function renderTask(
   request: Exclude<
     InterviewerRequest,
-    AssessReadinessRequest | ScoutProjectRequest
+    AssessReadinessRequest | ScoutProjectRequest | HandoffScoutRequest
   >,
 ): string {
   switch (request.kind) {
@@ -506,6 +513,51 @@ function buildReadinessPrompt(request: AssessReadinessRequest): string {
 const SCOUT_OPENING_LINE =
   "You are scouting a project's repository, inside the Grill Room app, for one idea that is about to be grilled. You are not interviewing: you read the project and report what it already has and has already decided.";
 
+/**
+ * What every scout is told about the project it reads: the root is its
+ * working directory, it can only read, secrets are denied, and a file hidden
+ * from it is not evidence of absence.
+ */
+function renderProjectAccess(projectRoot: string): string[] {
+  return [
+    "## The project",
+    "",
+    `The project's root is your working directory: ${projectRoot}`,
+    "You can read it with Read, Grep and Glob, and nothing else. Never modify",
+    "anything, and never read outside it. Secret files (environment files,",
+    "keys, certificates, credentials) are denied to you: do not try to open",
+    "them, and never repeat a secret value if you meet one.",
+    "Those files, and the `.git` folder, are hidden from you on purpose: Read",
+    "refuses them and Glob and Grep pass over them. The absence of a file or",
+    "folder from Glob or Grep is therefore never evidence that it does not",
+    "exist, and the report must not claim something is missing on that",
+    "absence alone.",
+    "",
+  ];
+}
+
+/**
+ * The exclusivity rule, for whatever a scout states from cited lines: one
+ * citation shows what is there, never what is not.
+ */
+function exclusivityRule(subject: string): string[] {
+  return [
+    `  ${subject} states only what its cited lines show: it must not claim`,
+    "  something is the only way, the sole caller, that it never happens, or",
+    "  that there is no alternative, since one cited line cannot show an absence.",
+  ];
+}
+
+/** How every scout cites, and what the app does with a wrong citation. */
+const CITATION_RULES = [
+  "Every citation is a path relative to the project root, a colon, and a",
+  "line number or an inclusive line range: `src/server.ts:42` or",
+  "`docs/adr/0003-queue.md:5-12`. Cite only files you actually opened and",
+  "lines you actually read. Never invent a path, and never cite a line past",
+  "the end of its file: the app checks every citation against the repository",
+  "and rejects the whole report if any one is wrong.",
+];
+
 function renderFacts(facts: ProjectServerFacts): string {
   const remotes =
     facts.remotes.length > 0
@@ -577,19 +629,7 @@ function buildScoutPrompt(request: ScoutProjectRequest): string {
     "",
     request.context.idea,
     "",
-    "## The project",
-    "",
-    `The project's root is your working directory: ${request.projectRoot}`,
-    "You can read it with Read, Grep and Glob, and nothing else. Never modify",
-    "anything, and never read outside it. Secret files (environment files,",
-    "keys, certificates, credentials) are denied to you: do not try to open",
-    "them, and never repeat a secret value if you meet one.",
-    "Those files, and the `.git` folder, are hidden from you on purpose: Read",
-    "refuses them and Glob and Grep pass over them. The absence of a file or",
-    "folder from Glob or Grep is therefore never evidence that it does not",
-    "exist, and the report must not claim something is missing on that",
-    "absence alone.",
-    "",
+    ...renderProjectAccess(request.projectRoot),
     "What the app already knows about the repository, from git and the file",
     "system. Use it to decide where to look first: decisions and conventions",
     "usually live in the agent instructions, the decisions folder, the rules",
@@ -615,28 +655,114 @@ function buildScoutPrompt(request: ScoutProjectRequest): string {
     "  matters for this idea. The source is `recorded` only when the decision is",
     "  written down in an ADR or decisions file, the agent instructions or a",
     "  rules file, cited there; it is `inferred` when you read it from code or",
-    "  configuration, cited at the line you read it from. An inferred decision",
-    "  states only what its cited lines show: it must not claim something is",
-    "  the only way, the sole caller, that it never happens, or that there is",
-    "  no alternative, since one cited line cannot show an absence. Only a",
-    "  recorded decision whose document states an exclusivity may claim it; if",
-    "  you believe one holds but no document records it, state the positive",
-    "  part alone or leave the decision out.",
+    "  configuration, cited at the line you read it from.",
+    ...exclusivityRule("An inferred decision"),
+    "  Only a recorded decision whose document states an exclusivity may claim",
+    "  it; if you believe one holds but no document records it, state the",
+    "  positive part alone or leave the decision out.",
     "",
     "A decisions.md entry that carries a Supersedes line overrides the source",
     "it quotes: propose the entry's own decision, cited to its line in",
     "decisions.md, and not the statement it supersedes.",
     ...renderPreviousDecisions(request),
     "",
-    "Every citation is a path relative to the project root, a colon, and a",
-    "line number or an inclusive line range: `src/server.ts:42` or",
-    "`docs/adr/0003-queue.md:5-12`. Cite only files you actually opened and",
-    "lines you actually read. Never invent a path, and never cite a line past",
-    "the end of its file: the app checks every citation against the repository",
-    "and rejects the whole report if any one is wrong.",
+    ...CITATION_RULES,
     "",
     "When the project has nothing relevant to the idea, say so with empty",
     "lists rather than stretching an unrelated item to fit.",
+    renderRetry(request.rejectionReason),
+  ]
+    .join("\n")
+    .trimEnd();
+}
+
+/** The handoff scout's opening line. Like {@link OPENING_LINE}, it cannot be read as an option. */
+const HANDOFF_SCOUT_OPENING_LINE =
+  "You are grounding the briefs of a handoff in a project's repository, inside the Grill Room app. You are not interviewing and you change nothing: you read the project and report, for every ticket, what it touches, what it builds on, and what proves it.";
+
+function renderHandoffTicket(ticket: HandoffScoutTicket): string {
+  return [
+    `### Ticket ${ticket.number}: ${ticket.title}`,
+    "",
+    `Blocked by: ${
+      ticket.blockedBy.length > 0 ? ticket.blockedBy.join(", ") : "none"
+    }`,
+    "",
+    ticket.body,
+  ].join("\n");
+}
+
+/**
+ * The handoff scout reads the project for the work the spec and tickets
+ * define. Like the project scout, it carries none of the grilling method: only
+ * the idea, the spec, the tickets with their blockers, the facts the server
+ * collected and the result's rules.
+ */
+function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
+  const tickets =
+    request.tickets.length > 0
+      ? request.tickets.map(renderHandoffTicket).join("\n\n")
+      : "(none)";
+  return [
+    HANDOFF_SCOUT_OPENING_LINE,
+    "",
+    "## The idea, in the user's words",
+    "",
+    `Title: ${request.context.title ?? "(untitled)"}`,
+    "",
+    request.context.idea,
+    "",
+    ...renderProjectAccess(request.projectRoot),
+    "What the app already knows about the repository, from git and the file",
+    "system. Use it to decide where to look first: conventions usually live in",
+    "the agent instructions, the decisions folder and the rules folder.",
+    "",
+    renderFacts(request.facts),
+    "",
+    "## The spec",
+    "",
+    request.specMarkdown,
+    "",
+    "## The tickets",
+    "",
+    tickets,
+    "",
+    "## Your task: ground every ticket's brief in the code",
+    "",
+    "The idea, the spec and the tickets define the work; the code defines the",
+    "facts. Take what each ticket must do from its text, and take what exists,",
+    "where it lives and what it is called from the code alone. Where the spec",
+    "assumes something the code does not show, report what the code shows.",
+    "",
+    "Return `tickets`: exactly one entry for every ticket above, by its",
+    `\`number\`, and no other (at most ${MAX_HANDOFF_SCOUT_TICKETS}). Each entry has:`,
+    "",
+    `- \`filesToChange\`: at least one and at most ${MAX_HANDOFF_SCOUT_FILES_TO_CHANGE} files the ticket may`,
+    "  touch, each a `path` relative to the project root and a `change`.",
+    "  `edit` is a file that exists and that you opened. `create` is a new",
+    "  file: it must not exist yet, it must sit inside the project, and it",
+    "  must not be in a folder the repository ignores.",
+    `- \`buildsOnFiles\`: at most ${MAX_HANDOFF_SCOUT_BUILDS_ON_FILES} citations of existing code the ticket`,
+    "  builds on without changing it: the helpers, types and tables it uses.",
+    `- \`facts\`: at most ${MAX_HANDOFF_SCOUT_FACTS} facts about the code the ticket touches, each a`,
+    "  one-sentence `statement` and the `citation` it was read at.",
+    ...exclusivityRule("A fact"),
+    `- \`buildsOn\`: exactly one entry for every ticket in its Blocked by line`,
+    `  (at most ${MAX_HANDOFF_SCOUT_BUILDS_ON}), and none for any other ticket. \`blocker\` is the`,
+    "  blocking ticket's number; `provides` names what this ticket needs from",
+    "  it (a file, a symbol, a table); `check` is the command or test that",
+    "  proves it exists before work starts. When it already exists in the",
+    "  code, give its `citation` and leave `createdPath` null. When the",
+    "  blocker creates it, give the path in `createdPath`, which must be one",
+    "  of that blocker's `create` files, and leave `citation` null. A ticket",
+    "  with no blockers has an empty list.",
+    "- `provedBy`: the `testPath` of the test file to add or extend, relative",
+    "  to the project root, and the `command` that runs it, in the form the",
+    "  project already runs its tests.",
+    "",
+    ...CITATION_RULES,
+    "Paths to create are checked too: a path outside the project, one that",
+    "already exists, or one the repository ignores rejects the whole report.",
     renderRetry(request.rejectionReason),
   ]
     .join("\n")
@@ -655,6 +781,7 @@ export function buildPrompt(
 ): string {
   if (request.kind === "assess-readiness") return buildReadinessPrompt(request);
   if (request.kind === "scout-project") return buildScoutPrompt(request);
+  if (request.kind === "handoff-scout") return buildHandoffScoutPrompt(request);
 
   const preamble = primed
     ? [

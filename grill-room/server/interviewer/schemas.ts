@@ -21,6 +21,21 @@ const decisionKey = z.string().min(1);
 const CITATION_PATTERN = /^[^:\n]+:[1-9][0-9]*(-[1-9][0-9]*)?$/;
 
 /**
+ * Whether a path is relative to the repository root and cannot step outside
+ * it: not absolute, not home-relative, no drive letter, no `..` segment, and
+ * no surrounding whitespace.
+ */
+function staysInsideRepo(path: string): boolean {
+  return (
+    path.trim() === path &&
+    !path.startsWith("/") &&
+    !path.startsWith("~") &&
+    !/^[A-Za-z]:?[\\/]/.test(path) &&
+    !path.split(/[\\/]/).includes("..")
+  );
+}
+
+/**
  * A repo-relative path with a line number or line range: `path:line` or
  * `path:start-end`. The path may not be absolute or step outside the repo, and
  * a range must not run backwards. Whether the file and lines exist at the
@@ -29,16 +44,10 @@ const CITATION_PATTERN = /^[^:\n]+:[1-9][0-9]*(-[1-9][0-9]*)?$/;
 export const citation = z
   .string()
   .regex(CITATION_PATTERN, "A citation is `path:line` or `path:start-end`.")
-  .refine((value) => {
-    const path = value.slice(0, value.lastIndexOf(":"));
-    return (
-      path.trim() === path &&
-      !path.startsWith("/") &&
-      !path.startsWith("~") &&
-      !/^[A-Za-z]:?[\\/]/.test(path) &&
-      !path.split(/[\\/]/).includes("..")
-    );
-  }, "A citation's path is relative to the repository root and stays inside it.")
+  .refine(
+    (value) => staysInsideRepo(value.slice(0, value.lastIndexOf(":"))),
+    "A citation's path is relative to the repository root and stays inside it.",
+  )
   .refine((value) => {
     const [start, end] = value
       .slice(value.lastIndexOf(":") + 1)
@@ -256,6 +265,96 @@ export const scoutProjectResultSchema = z.strictObject({
   ),
 });
 
+/**
+ * A repo-relative file path with no line: a file a ticket creates or edits, or
+ * the test that proves it. Like a citation's path, it may not be absolute or
+ * step outside the repo. Whether it exists, or may be created, is the app's
+ * check, not the schema's.
+ */
+export const repoPath = z
+  .string()
+  .min(1)
+  .refine(
+    staysInsideRepo,
+    "A path is relative to the repository root and stays inside it.",
+  );
+
+/** A handoff scout grounds at most this many tickets in one turn. */
+export const MAX_HANDOFF_SCOUT_TICKETS = 40;
+
+/** A grounded ticket creates or edits at most this many files. */
+export const MAX_HANDOFF_SCOUT_FILES_TO_CHANGE = 20;
+
+/** A grounded ticket builds on at most this many existing files. */
+export const MAX_HANDOFF_SCOUT_BUILDS_ON_FILES = 20;
+
+/** A grounded ticket carries at most this many cited facts. */
+export const MAX_HANDOFF_SCOUT_FACTS = 15;
+
+/** A grounded ticket names at most this many dependencies: one per blocker. */
+export const MAX_HANDOFF_SCOUT_BUILDS_ON = 15;
+
+/**
+ * What a ticket needs from one of the tickets it waits on: where it already
+ * lives in the code (`citation`), or the path the blocker will create
+ * (`createdPath`). Exactly one of the two is set.
+ */
+const handoffBuildsOn = z
+  .strictObject({
+    /** The number of the blocking ticket. */
+    blocker: z.number().int().positive(),
+    /** What this ticket needs from it: a file, a symbol, a table. */
+    provides: z.string().min(1),
+    citation: citation.nullable(),
+    createdPath: repoPath.nullable(),
+    /** The command or test that proves the dependency exists before work starts. */
+    check: z.string().min(1),
+  })
+  .refine(
+    (entry) => (entry.citation === null) !== (entry.createdPath === null),
+    "A dependency carries either a citation or a path to be created, never both and never neither.",
+  );
+
+/** One ticket's grounding, as a handoff scout reports it. */
+const groundedTicket = z.strictObject({
+  /** The ticket's number, as the request listed it. */
+  number: z.number().int().positive(),
+  /** The files the ticket may create or edit. */
+  filesToChange: z
+    .array(
+      z.strictObject({
+        path: repoPath,
+        change: z.enum(["create", "edit"]),
+      }),
+    )
+    .min(1)
+    .max(MAX_HANDOFF_SCOUT_FILES_TO_CHANGE),
+  /** The existing code the ticket builds on, cited. */
+  buildsOnFiles: z.array(citation).max(MAX_HANDOFF_SCOUT_BUILDS_ON_FILES),
+  /** Verified facts about the code the ticket touches, each cited. */
+  facts: z
+    .array(z.strictObject({ statement: z.string().min(1), citation }))
+    .max(MAX_HANDOFF_SCOUT_FACTS),
+  /** One entry per ticket this one waits on; empty when it waits on none. */
+  buildsOn: z.array(handoffBuildsOn).max(MAX_HANDOFF_SCOUT_BUILDS_ON),
+  /** The test to add or extend, and the command that proves the ticket. */
+  provedBy: z.strictObject({
+    testPath: repoPath,
+    command: z.string().min(1),
+  }),
+});
+
+/**
+ * What a handoff scout found reading a project for every ticket of one
+ * handoff, one entry per ticket by number. The schema bounds the lists and
+ * shapes; the app checks that every ticket appears exactly once, that each
+ * dependency names a real blocker, and every citation and path against the
+ * repository.
+ */
+export const handoffScoutResultSchema = z.strictObject({
+  tickets: z.array(groundedTicket).max(MAX_HANDOFF_SCOUT_TICKETS),
+});
+
 export const resultSchemas = {
   "propose-round": proposeRoundResultSchema,
   "review-stale": reviewStaleResultSchema,
@@ -264,6 +363,7 @@ export const resultSchemas = {
   "break-into-tickets": breakIntoTicketsResultSchema,
   "assess-readiness": assessReadinessResultSchema,
   "scout-project": scoutProjectResultSchema,
+  "handoff-scout": handoffScoutResultSchema,
 } as const;
 
 export type RequestKind = keyof typeof resultSchemas;
@@ -279,6 +379,7 @@ export type SynthesizeSpecResult = ResultFor<"synthesize-spec">;
 export type BreakIntoTicketsResult = ResultFor<"break-into-tickets">;
 export type AssessReadinessResult = ResultFor<"assess-readiness">;
 export type ScoutProjectResult = ResultFor<"scout-project">;
+export type HandoffScoutResult = ResultFor<"handoff-scout">;
 
 /** The JSON Schema handed to the command line's `--json-schema` flag. */
 export function jsonSchemaFor(kind: RequestKind): Record<string, unknown> {

@@ -5,6 +5,8 @@ import { InterviewerError } from "./errors.js";
 import {
   cannedInterviewTurns,
   createFakeInterviewer,
+  createScenarioInterviewer,
+  handoffScoutTurns,
   rateLimitedTurn,
   schemaInvalidTurn,
   treeRuleViolation,
@@ -22,6 +24,8 @@ import {
   anAssessReadinessRequest,
   anAssessReadinessResult,
   aFindSupersededRequest,
+  aHandoffScoutRequest,
+  aHandoffScoutResult,
   aProposeRoundRequest,
   aProposeRoundResult,
   aScoutProjectRequest,
@@ -197,6 +201,55 @@ describe("the scripted fake interviewer", () => {
 
     await expect(
       interviewer.scoutProject(aScoutProjectRequest()),
+    ).rejects.toMatchObject({ code: "malformed-output" });
+  });
+
+  it("serves a scripted handoff grounding, in a conversation of its own", async () => {
+    const interviewer = createFakeInterviewer([
+      { kind: "handoff-scout", result: aHandoffScoutResult() },
+    ]);
+    const request = aHandoffScoutRequest({
+      context: { ...aHandoffScoutRequest().context, conversationId: "session-7" },
+    });
+    const calls: ModelCallEnd[] = [];
+
+    const turn = await interviewer.scoutHandoff(request, {
+      callEnded: (call) => void calls.push(call),
+    });
+
+    expect(turn.result).toEqual(aHandoffScoutResult());
+    expect(turn.conversationId).not.toBe("session-7");
+    expect(calls.map((call) => call.conversation)).toEqual(["new"]);
+    expect(interviewer.requests[0]).toMatchObject({
+      kind: "handoff-scout",
+      tickets: request.tickets,
+    });
+  });
+
+  it("serves the handoff-scout scenario's grounding for a session", async () => {
+    const interviewer = createScenarioInterviewer();
+    const request = aHandoffScoutRequest();
+    interviewer.useScenario(request.context.sessionId, "handoff-scout");
+
+    const turn = await interviewer.scoutHandoff(request);
+
+    const scripted = handoffScoutTurns();
+    expect(scripted).toHaveLength(1);
+    expect(scripted[0]).toMatchObject({ kind: "handoff-scout", result: turn.result });
+    expect(turn.result.tickets.map((ticket) => ticket.number)).toEqual([1, 2]);
+    expect(interviewer.remainingFor(request.context.sessionId)).toBe(0);
+  });
+
+  it("refuses a scripted handoff grounding the schema rejects", async () => {
+    const [first, second] = aHandoffScoutResult().tickets;
+    const interviewer = createFakeInterviewer([
+      schemaInvalidTurn("handoff-scout", {
+        tickets: [first, { ...second, filesToChange: [] }],
+      }),
+    ]);
+
+    await expect(
+      interviewer.scoutHandoff(aHandoffScoutRequest()),
     ).rejects.toMatchObject({ code: "malformed-output" });
   });
 
