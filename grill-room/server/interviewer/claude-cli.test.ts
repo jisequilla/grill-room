@@ -786,46 +786,73 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("Only a ticket that changes no files may name");
   });
 
-  it("says provedBy's testPath must be a real test and its command must fail without the change", async () => {
+  it("says provedBy's testPath must be a real test, never a source file the ticket changes", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("`testPath` is a test in the project's own test");
+    expect(prompt).toContain("layout, never a source file the ticket changes.");
+  });
+
+  it("says the command must fail without the change and be narrowed to that test file or package", async () => {
     const { prompt } = await handoffInvocation();
 
     expect(prompt).toContain(
-      "`testPath` is a test in the project's own test",
+      "that test and fail without this ticket's change; narrow it to that",
     );
-    expect(prompt).toContain("layout, never a source file the ticket changes.");
-    expect(prompt).toContain(
-      "`command` must run",
-    );
-    expect(prompt).toContain("that test and fail without this ticket's change");
-    expect(prompt).toContain("is not a proof on its own.");
-    expect(prompt).toContain(
-      "When no existing test",
-    );
-    expect(prompt).toContain("covers the ticket's acceptance criteria, add one: list it as a");
-    expect(prompt).toContain(
-      "A ticket",
-    );
-    expect(prompt).toContain("proved only by a build");
-    expect(prompt).toContain("the test among its files that exercises");
+    expect(prompt).toContain("test file or package where the project's runner allows one");
+    expect(prompt).toContain("project-wide command that runs every test is not a proof on its own.");
   });
 
-  it("asks facts to say when the code contradicts the ticket, the spec, or a blocker's scope", async () => {
+  it("limits the new-test rule to a ticket that changes files, so a no-files ticket keeps naming a test outside its list", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      "For a ticket that changes files, when no existing test covers its",
+    );
+    expect(prompt).toContain("acceptance criteria, add one: list it as a `create` in");
+    expect(prompt).toContain("`filesToChange` and name it here as `testPath`.");
+  });
+
+  it("says a build-only ticket's command chains the build with the command that runs the named test", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      "by a build — codegen, configuration — gives `command` as the build",
+    );
+    expect(prompt).toContain("command followed by the command that runs the test named in");
+    expect(prompt).toContain("`testPath`, for example `<build> && <test command>`, so `command`");
+    expect(prompt).toContain("always exercises the test it names.");
+  });
+
+  it("asks a fact to cite the whole declaration and state a positive consequence, not a claim of absence", async () => {
     const { prompt } = await handoffInvocation();
 
     expect(prompt).toContain(
       "the code shows contradicts the ticket, the spec, or what a blocker is",
     );
-    expect(prompt).toContain("scoped to provide, the statement says so and names the consequence for");
+    expect(prompt).toContain("scoped to provide, cite the whole type or declaration involved and");
+    expect(prompt).toContain("state what it holds, then name the consequence for this ticket as a");
+    expect(prompt).toContain("positive claim about that range");
     expect(prompt).toContain(
-      "a response it must return that the code cannot yet",
+      "the cited response",
     );
+    expect(prompt).toContain("type declares only text/csv, so this ticket needs the blocker to");
+    expect(prompt).toContain("declare a 404.");
+  });
+
+  it("does not let the facts rule contradict the exclusivity rule that follows it", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).not.toContain("a field the spec assumes that does not exist");
+    expect(prompt).not.toContain("a response it must return that the code cannot yet");
+    expect(prompt).toContain("A fact states only what its cited lines show");
   });
 
   it("asks buildsOn.provides to say when this ticket needs something its blocker does not promise", async () => {
     const { prompt } = await handoffInvocation();
 
     expect(prompt).toContain(
-      "When this ticket needs something its",
+      "it (a file, a symbol, a table). When this ticket needs something its",
     );
     expect(prompt).toContain("blocker's ticket text does not promise, say so in `provides` too.");
   });
@@ -834,10 +861,10 @@ describe("what the adapter sends for a handoff scout", () => {
     const { prompt } = await handoffInvocation();
 
     expect(prompt).toContain(
-      "A statement",
+      "declare a 404.\" A statement about a whole file or component cites",
     );
-    expect(prompt).toContain("about a whole file or component cites the full range it describes, or");
-    expect(prompt).toContain("it is split into facts that each carry their own citation.");
+    expect(prompt).toContain("the full range it describes, or it is split into facts that each");
+    expect(prompt).toContain("carry their own citation.");
   });
 
   it("limits buildsOnFiles to code this ticket itself reads, calls or imports", async () => {
