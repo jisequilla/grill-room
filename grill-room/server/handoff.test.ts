@@ -13,6 +13,20 @@ import {
 
 const ROOT = "/repos/target";
 
+/** The local-merge recipe must never tell a building session to push, use `gh`, or open a pull request. */
+function expectNoDeliveryMentions(text: string): void {
+  expect(text).not.toMatch(/\bpush\b/i);
+  expect(text).not.toMatch(/\bgh\b/i);
+  expect(text).not.toMatch(/pull request/i);
+  expect(text).not.toMatch(/\bPR\b/);
+  expect(text).not.toMatch(/\borigin\b/i);
+}
+
+/** With the review switch off, nothing should mention a reviewer, in any case. */
+function expectNoReviewerMention(text: string): void {
+  expect(text).not.toMatch(/reviewer/i);
+}
+
 /**
  * Three tickets: 01 and 03 have no blockers, 02 is blocked by 01. Waves are
  * given out of number order on purpose (wave 1 = [1, 3], wave 2 = [2]) so the
@@ -88,7 +102,7 @@ describe("HANDOFF.md", () => {
     expect(markdown).toContain(`  - Ticket: \`${BUNDLE_TOKEN}/issues/02-export-bundle.md\``);
   });
 
-  it("embeds the PR lifecycle with the verify command filled in", () => {
+  it("embeds the pull-request lifecycle with the verify command filled in, review on by default", () => {
     const { markdown } = renderHandoff(aSource());
     expect(markdown).toContain("## Delegation lifecycle");
     expect(markdown).toContain("Local `main` holds nothing unpushed");
@@ -96,12 +110,13 @@ describe("HANDOFF.md", () => {
     expect(markdown).toContain("Commits only on its worktree branch");
     expect(markdown).toContain("- Runs `just verify`; it must pass.");
     expect(markdown).toContain("stops before pushing and reports \"push pending: gh account\"");
-    expect(markdown).toContain("opens a pull request against `main` with `gh pr create`");
-    expect(markdown).toContain("It never merges.");
+    expect(markdown).toContain("opens a **draft** pull request against `main` with `gh pr create --draft`");
+    expect(markdown).toContain("It never merges, and a draft is never merged by anyone.");
     expect(markdown).toContain("Read the PR diff (`gh pr diff <n>`)");
-    expect(markdown).toContain("Re-run `just verify` yourself in the worktree, plus any browser check");
-    expect(markdown).toContain("Send failures back to the same agent");
-    expect(markdown).toContain("`gh pr merge <n> --merge --delete-branch`");
+    expect(markdown).toContain("re-run `just verify` yourself in the worktree, plus any browser check");
+    expect(markdown).toContain("gh pr ready --undo <n>");
+    expect(markdown).toContain("send the failure back to the same agent");
+    expect(markdown).toContain("`gh pr merge <n> --merge --delete-branch`. Never merge a draft.");
     expect(markdown).toContain("`git pull` on local `main` and re-run `just verify`");
     expect(markdown).toContain("Prune merged worktrees");
     expect(markdown).not.toContain("sync-to-local-main");
@@ -158,6 +173,93 @@ describe("HANDOFF.md", () => {
   });
 });
 
+describe("delivery recipe and the review gate", () => {
+  it("renders the pull-request recipe with review on: draft PR, reviewer section, undo ready on a failed re-verify", () => {
+    const { markdown } = renderHandoff(aSource({ deliveryRecipe: "pull-request", adversarialReview: true }));
+    expect(markdown).toMatchSnapshot();
+    expect(markdown).toContain("opens a **draft** pull request against `main` with `gh pr create --draft`");
+    expect(markdown).toContain("Never merge a draft.");
+    expect(markdown).toContain('2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below)');
+    expect(markdown).toContain("gh pr ready --undo <n>");
+    expect(markdown).toContain("## Reviewing a ticket");
+    expect(markdown).toContain("never the builder's report");
+    expect(markdown).toContain(
+      'It posts its verdict as a pull request comment, starting "Review verdict: approved" or "Review verdict: changes requested" with each finding, then runs `gh pr ready <n>` on approval.',
+    );
+    expect(markdown).toContain("After two rejected rounds, the operator decides.");
+    expect(markdown).toContain("The reviewer changes no code and never merges.");
+    expect(markdown).toContain("done (PR #<n>)");
+  });
+
+  it("renders the pull-request recipe with review off: draft PR, no reviewer anywhere", () => {
+    const { markdown } = renderHandoff(aSource({ deliveryRecipe: "pull-request", adversarialReview: false }));
+    expect(markdown).toMatchSnapshot();
+    expect(markdown).toContain("opens a **draft** pull request against `main` with `gh pr create --draft`");
+    expect(markdown).toContain("Never merge a draft.");
+    expect(markdown).toContain("Mark the pull request ready (`gh pr ready <n>`) once you are satisfied");
+    expect(markdown).not.toContain("## Reviewing a ticket");
+    expectNoReviewerMention(markdown);
+    expect(markdown).not.toContain("Review verdict");
+  });
+
+  it("renders the local-merge recipe with review on: baseRef head, verdict recorded through the tracker, never a push/gh/PR/origin", () => {
+    const { markdown } = renderHandoff(aSource({ deliveryRecipe: "local-merge", adversarialReview: true }));
+    expect(markdown).toMatchSnapshot();
+    expect(markdown).toContain(
+      'Set `{"worktree": {"baseRef": "head"}}` in this repository\'s `.claude/settings.json`',
+    );
+    expect(markdown).toContain("keep `main` checked out in this session");
+    expect(markdown).toContain("Commit again whenever the bundle is re-exported.");
+    expect(markdown).toContain(
+      "Local `main` holds every change you want the next worktree to start from — commit it before delegating.",
+    );
+    expect(markdown).toContain("Reports its branch name, then stops. It never merges.");
+    expect(markdown).toContain("Read the branch diff (`git diff main..<branch>`)");
+    expect(markdown).toContain('2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below)');
+    expect(markdown).toContain("Merge only approved, verified work, locally: `git merge --no-ff <branch>`.");
+    expect(markdown).toContain("Re-run `just verify` on `main` after merging.");
+    expect(markdown).toContain("done (merged)`, noting the reviewer's verdict.");
+    expect(markdown).toContain("## Reviewing a ticket");
+    expect(markdown).toContain("it writes to neither the tracker nor the bundle");
+    expect(markdown).toContain("as the ticket's `Status:` line in this file.");
+    expect(markdown.toLowerCase()).not.toContain("no remote");
+    expect(markdown.toLowerCase()).not.toContain("remote");
+    expectNoDeliveryMentions(markdown);
+  });
+
+  it("renders the local-merge recipe with review off: baseRef head, no reviewer, never a push/gh/PR/origin", () => {
+    const { markdown } = renderHandoff(aSource({ deliveryRecipe: "local-merge", adversarialReview: false }));
+    expect(markdown).toMatchSnapshot();
+    expect(markdown).toContain(
+      'Set `{"worktree": {"baseRef": "head"}}` in this repository\'s `.claude/settings.json`',
+    );
+    expect(markdown).toContain(
+      "Local `main` holds every change you want the next worktree to start from — commit it before delegating.",
+    );
+    expect(markdown).toContain("Merge only verified work, locally: `git merge --no-ff <branch>`.");
+    expect(markdown).toContain("Re-run `just verify` on `main` after merging.");
+    expect(markdown).toContain("done (merged)`.");
+    expect(markdown).not.toContain("## Reviewing a ticket");
+    expectNoReviewerMention(markdown);
+    expect(markdown).not.toContain("Review verdict");
+    expect(markdown.toLowerCase()).not.toContain("remote");
+    expectNoDeliveryMentions(markdown);
+  });
+
+  it("renders the local-merge recipe with beads and review on: verdict recorded as a bead comment", () => {
+    const { markdown } = renderHandoff(
+      aSource({ deliveryRecipe: "local-merge", adversarialReview: true, trackerKind: "beads" }),
+    );
+    expect(markdown).toMatchSnapshot();
+    expect(markdown).toContain("as a comment on the ticket's bead.");
+    expect(markdown).toContain(
+      "Close the ticket's bead with a comment naming the merge commit and the reviewer's verdict.",
+    );
+    expect(markdown).not.toContain("Status:");
+    expectNoDeliveryMentions(markdown);
+  });
+});
+
 describe("briefs", () => {
   it("renders one brief per ticket at briefs/NN-slug.md", () => {
     const { briefs } = renderHandoff(aSource());
@@ -177,10 +279,11 @@ describe("briefs", () => {
     expect(brief).toContain("Blocked by: 01");
     expect(brief).toContain("```bash\njust verify\n```");
     expect(brief).toContain("Create and edit files only within the file boundaries above");
-    expect(brief).toContain("never commit on or push to `main`, and never merge anything");
-    expect(brief).toContain("`git push -u origin HEAD`, then `gh pr create` against `main`");
+    expect(brief).toContain("never commit directly on `main`, and never merge anything");
+    expect(brief).toContain("`git push -u origin HEAD`, then `gh pr create --draft` against `main`");
     expect(brief).toContain("push pending: gh account");
     expect(brief).toContain("## Report, then stop");
+    expect(brief).toContain("A separate reviewer reviews the work before any merge.");
     expect(brief).toContain("Then stop. Do no further work of any kind.");
 
     for (const [heading, slot] of [
@@ -207,6 +310,59 @@ describe("briefs", () => {
   it("says a ticket with no blockers is blocked by none", () => {
     const brief = renderHandoff(aSource()).briefs[0]!.markdown;
     expect(brief).toContain("Blocked by: none");
+  });
+
+  describe("delivery recipe and the review gate", () => {
+    it("renders the pull-request recipe with review on: draft PR, the reviewer marks it ready, reviewer noted before stop", () => {
+      const brief = renderHandoff(aSource({ deliveryRecipe: "pull-request", adversarialReview: true })).briefs[1]!
+        .markdown;
+      expect(brief).toMatchSnapshot();
+      expect(brief).toContain("Your worktree was created from `origin/main`.");
+      expect(brief).toContain("## Delivery");
+      expect(brief).toContain("`git push -u origin HEAD`, then `gh pr create --draft` against `main`");
+      expect(brief).toContain("Never merge, and never mark it ready — the reviewer does that once it approves.");
+      expect(brief).toContain("- the PR URL, or \"push pending: gh account\" with your commit hash;");
+      expect(brief).toContain("A separate reviewer reviews the work before any merge.");
+    });
+
+    it("renders the pull-request recipe with review off: draft PR, the main session marks it ready, no reviewer mention", () => {
+      const brief = renderHandoff(aSource({ deliveryRecipe: "pull-request", adversarialReview: false })).briefs[1]!
+        .markdown;
+      expect(brief).toMatchSnapshot();
+      expect(brief).toContain("`git push -u origin HEAD`, then `gh pr create --draft` against `main`");
+      expect(brief).toContain(
+        "Never merge, and never mark it ready — the main session does that once it is satisfied.",
+      );
+      expectNoReviewerMention(brief);
+    });
+
+    it("renders the local-merge recipe with review on: worktree from the main session's current main, reviewer noted before stop, never a push/gh/PR/origin", () => {
+      const brief = renderHandoff(aSource({ deliveryRecipe: "local-merge", adversarialReview: true })).briefs[1]!
+        .markdown;
+      expect(brief).toMatchSnapshot();
+      expect(brief).toContain("Your worktree was created from the main session's current `main`.");
+      expect(brief).toContain("## Delivery");
+      expect(brief).toContain(
+        "Commit your work on your worktree branch, then report its name: this project uses the local-merge recipe, so nothing you do here reaches `main` on its own.",
+      );
+      expect(brief).toContain("A separate reviewer reviews the work before any merge.");
+      expect(brief).not.toContain("- the PR URL, or \"push pending: gh account\" with your commit hash;");
+      expect(brief.toLowerCase()).not.toContain("remote");
+      expectNoDeliveryMentions(brief);
+    });
+
+    it("renders the local-merge recipe with review off: worktree from the main session's current main, no reviewer mention, never a push/gh/PR/origin", () => {
+      const brief = renderHandoff(aSource({ deliveryRecipe: "local-merge", adversarialReview: false })).briefs[1]!
+        .markdown;
+      expect(brief).toMatchSnapshot();
+      expect(brief).toContain("Your worktree was created from the main session's current `main`.");
+      expect(brief).toContain(
+        "Commit your work on your worktree branch, then report its name: this project uses the local-merge recipe, so nothing you do here reaches `main` on its own.",
+      );
+      expectNoReviewerMention(brief);
+      expect(brief.toLowerCase()).not.toContain("remote");
+      expectNoDeliveryMentions(brief);
+    });
   });
 });
 

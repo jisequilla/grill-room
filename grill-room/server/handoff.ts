@@ -206,20 +206,43 @@ function pathsNote(source: HandoffSource): string {
 
 function beforeDelegatingSection(source: HandoffSource): string {
   const lines = ["## Before delegating the first ticket", ""];
-  if (source.project.visibility === "tracked") {
+  const { visibility, deliveryRecipe } = source.project;
+
+  if (deliveryRecipe === "local-merge") {
     lines.push(
-      "Worktree agents start from `origin/main`, so they see the bundle only once it is committed and pushed. Grill Room never commits in this repository; do it yourself, once, before delegating:",
+      `Set \`{"worktree": {"baseRef": "head"}}\` in this repository's \`.claude/settings.json\` before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far.`,
       "",
-      codeBlock(
-        [
-          `git add ${BUNDLE_TOKEN}`,
-          `git commit -m "Add the ${source.session.title} handoff bundle"`,
-          "git push",
-        ].join("\n"),
-      ),
-      "",
-      "Commit and push again whenever the bundle is re-exported.",
     );
+  }
+
+  if (visibility === "tracked") {
+    if (deliveryRecipe === "pull-request") {
+      lines.push(
+        "Worktree agents start from `origin/main`, so they see the bundle only once it is committed and pushed. Grill Room never commits in this repository; do it yourself, once, before delegating:",
+        "",
+        codeBlock(
+          [
+            `git add ${BUNDLE_TOKEN}`,
+            `git commit -m "Add the ${source.session.title} handoff bundle"`,
+            "git push",
+          ].join("\n"),
+        ),
+        "",
+        "Commit and push again whenever the bundle is re-exported.",
+      );
+    } else {
+      lines.push(
+        "Grill Room never commits in this repository; commit the bundle yourself, once, before delegating, so the first worktree contains it:",
+        "",
+        codeBlock(
+          [`git add ${BUNDLE_TOKEN}`, `git commit -m "Add the ${source.session.title} handoff bundle"`].join(
+            "\n",
+          ),
+        ),
+        "",
+        "Commit again whenever the bundle is re-exported.",
+      );
+    }
   } else {
     lines.push(
       `The bundle is ignored by git, so no worktree will ever contain it. Worktree agents must read the spec, their ticket and their brief by absolute path into this main checkout (\`${BUNDLE_TOKEN}\`); every brief says so. Do not copy the bundle into a worktree and do not commit it.`,
@@ -258,15 +281,41 @@ function wavesSection(source: HandoffSource): string {
 }
 
 /**
- * The PR-based worktree lifecycle, embedded whole so the target repository
- * needs no rules file of its own.
+ * The pull-request worktree lifecycle, embedded whole so the target
+ * repository needs no rules file of its own. The pull request is always
+ * opened as a draft, and a draft is never merged, whether or not the review
+ * gate is on: with the gate on, the reviewer marks it ready on approval;
+ * with it off, the main session marks it ready itself once satisfied.
  */
-function lifecycleSection(source: HandoffSource): string {
+function pullRequestLifecycle(source: HandoffSource): string {
   const verify = `\`${source.project.verifyCommand}\``;
+  const review = source.project.adversarialReview;
   const closeStep =
     source.project.trackerKind === "beads"
       ? "Close the ticket's bead with a comment naming the PR."
       : "Set the ticket's `Status:` line in this file to `done (PR #<n>)`.";
+
+  const mainSessionSteps = review
+    ? [
+        "1. Read the PR diff (`gh pr diff <n>`) against the brief's file boundaries.",
+        '2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below) and wait for its verdict comment on the pull request.',
+        `3. Once the reviewer approves and marks the pull request ready, re-run ${verify} yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.`,
+        "4. If it fails, run `gh pr ready --undo <n>` to put the pull request back in draft, then send the failure back to the same agent on its branch; the fix lands as a new commit on the same PR, and goes back to the reviewer.",
+        "5. Merge only a ready, approved pull request: `gh pr merge <n> --merge --delete-branch`. Never merge a draft.",
+        `6. \`git pull\` on local \`main\` and re-run ${verify} on the merged result.`,
+        `7. ${closeStep}`,
+        "8. Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).",
+      ]
+    : [
+        "1. Read the PR diff (`gh pr diff <n>`) against the brief's file boundaries.",
+        `2. Re-run ${verify} yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.`,
+        "3. Send failures back to the same agent on its branch; the fix lands as a new commit on the same PR.",
+        "4. Mark the pull request ready (`gh pr ready <n>`) once you are satisfied, then merge: `gh pr merge <n> --merge --delete-branch`. Never merge a draft.",
+        `5. \`git pull\` on local \`main\` and re-run ${verify} on the merged result.`,
+        `6. ${closeStep}`,
+        "7. Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).",
+      ];
+
   return [
     "## Delegation lifecycle",
     "",
@@ -282,18 +331,116 @@ function lifecycleSection(source: HandoffSource): string {
     "- Commits only on its worktree branch; runs no git command outside its worktree and never touches `main`.",
     `- Runs ${verify}; it must pass.`,
     "- Checks `gh auth status`. If the active account is not the one this repository expects, it stops before pushing and reports \"push pending: gh account\" with its commit hash.",
-    "- Otherwise pushes its branch (`git push -u origin HEAD`) and opens a pull request against `main` with `gh pr create`. The title names the ticket; the body carries the ticket path, files changed, the exact verification output, and anything the brief left ambiguous.",
-    "- Reports the PR, then stops. It never merges.",
+    "- Otherwise pushes its branch (`git push -u origin HEAD`) and opens a **draft** pull request against `main` with `gh pr create --draft`. The title names the ticket; the body carries the ticket path, files changed, the exact verification output, and anything the brief left ambiguous.",
+    "- Reports the PR, then stops. It never merges, and a draft is never merged by anyone.",
     "",
     "### You, the main session",
     "",
-    "1. Read the PR diff (`gh pr diff <n>`) against the brief's file boundaries.",
-    `2. Re-run ${verify} yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.`,
-    "3. Send failures back to the same agent on its branch; the fix lands as a new commit on the same PR.",
-    "4. Merge only verified work: `gh pr merge <n> --merge --delete-branch`.",
-    `5. \`git pull\` on local \`main\` and re-run ${verify} on the merged result.`,
-    `6. ${closeStep}`,
-    "7. Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).",
+    mainSessionSteps.join("\n"),
+  ].join("\n");
+}
+
+/**
+ * The local-merge worktree lifecycle: every ticket still runs on its own
+ * worktree branch, but it reaches `main` only once the main session merges
+ * it in locally, never through a push, `gh`, or a pull request. Chosen for a
+ * repository with no remote, or by hand for one that has a remote but is
+ * kept local for this workflow; either way `worktree.baseRef: "head"` (set
+ * in "Before delegating the first ticket") is what makes a new worktree
+ * branch from the main session's current `main`.
+ */
+function localMergeLifecycle(source: HandoffSource): string {
+  const verify = `\`${source.project.verifyCommand}\``;
+  const review = source.project.adversarialReview;
+  const closeStep =
+    source.project.trackerKind === "beads"
+      ? `Close the ticket's bead with a comment naming the merge commit${review ? " and the reviewer's verdict" : ""}.`
+      : `Set the ticket's \`Status:\` line in this file to \`done (merged)\`${review ? ", noting the reviewer's verdict" : ""}.`;
+
+  const mainSessionSteps = review
+    ? [
+        "1. Read the branch diff (`git diff main..<branch>`) against the brief's file boundaries.",
+        '2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below) and wait for its verdict.',
+        `3. Once the reviewer approves, re-run ${verify} yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.`,
+        "4. Send failures back to the same agent on its branch; the fix lands as a new commit there, and goes back to the reviewer.",
+        "5. Merge only approved, verified work, locally: `git merge --no-ff <branch>`.",
+        `6. Re-run ${verify} on \`main\` after merging.`,
+        `7. ${closeStep}`,
+        "8. Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).",
+      ]
+    : [
+        "1. Read the branch diff (`git diff main..<branch>`) against the brief's file boundaries.",
+        `2. Re-run ${verify} yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.`,
+        "3. Send failures back to the same agent on its branch; the fix lands as a new commit there.",
+        "4. Merge only verified work, locally: `git merge --no-ff <branch>`.",
+        `5. Re-run ${verify} on \`main\` after merging.`,
+        `6. ${closeStep}`,
+        "7. Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).",
+      ];
+
+  return [
+    "## Delegation lifecycle",
+    "",
+    "Every ticket runs in its own worktree (Agent tool, `isolation: \"worktree\"`), on its own branch, and reaches `main` only once you merge it in locally. With `worktree.baseRef` set to `head` (see \"Before delegating the first ticket\"), each new worktree branches from your current local `main`, so work merged there is immediately visible to the next one.",
+    "",
+    "### Before launching a ticket",
+    "",
+    "- Local `main` holds every change you want the next worktree to start from — commit it before delegating.",
+    "- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.",
+    "",
+    "### The subagent",
+    "",
+    "- Commits only on its worktree branch; runs no git command outside its worktree and never touches `main`.",
+    `- Runs ${verify}; it must pass.`,
+    "- Reports its branch name, then stops. It never merges.",
+    "",
+    "### You, the main session",
+    "",
+    mainSessionSteps.join("\n"),
+  ].join("\n");
+}
+
+function lifecycleSection(source: HandoffSource): string {
+  return source.project.deliveryRecipe === "pull-request"
+    ? pullRequestLifecycle(source)
+    : localMergeLifecycle(source);
+}
+
+/**
+ * The fixed "Reviewing a ticket" section, present only when the project's
+ * adversarial review switch is on. Its verdict paragraph is the one part
+ * that varies: a pull-request comment and `gh pr ready`, or, for local
+ * merge, the reviewer only reports its verdict — it writes to neither the
+ * tracker nor the bundle — and the main session is the one who records it,
+ * through the project's tracker, the same way the close step already does
+ * (a bead comment, or the ticket's `Status:` line in this file).
+ */
+function reviewingSection(source: HandoffSource): string {
+  let verdict: string;
+  if (source.project.deliveryRecipe === "pull-request") {
+    verdict =
+      'It posts its verdict as a pull request comment, starting "Review verdict: approved" or "Review verdict: changes requested" with each finding, then runs `gh pr ready <n>` on approval.';
+  } else {
+    const recordedAs =
+      source.project.trackerKind === "beads"
+        ? "a comment on the ticket's bead"
+        : "the ticket's `Status:` line in this file";
+    verdict = `It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it through the project's tracker, the same way you record the merge: as ${recordedAs}.`;
+  }
+  return [
+    "## Reviewing a ticket",
+    "",
+    "Every ticket is reviewed by a second, fresh-context agent before it can be merged.",
+    "",
+    "**Inputs.** The reviewer gets the spec, the ticket, its delegation brief and the diff — never the builder's report.",
+    "",
+    "**What to try to break.** Unmet acceptance criteria, changes outside the file boundaries, untested edge cases, seams with the tickets this one builds on, and claims the diff does not support.",
+    "",
+    `**Verdict.** ${verdict}`,
+    "",
+    "**Changes requested.** They go back to the builder on the same branch, and the same reviewer reviews again. After two rejected rounds, the operator decides.",
+    "",
+    "The reviewer changes no code and never merges.",
   ].join("\n");
 }
 
@@ -324,7 +471,7 @@ function trackingSection(source: HandoffSource): string {
     const lines = [
       "## Tracking with beads",
       "",
-      "Create one bead per ticket. Claim a bead before delegating its ticket, and close it only after you have verified and merged the PR, naming the PR in the close comment. Recover state with `bd ready` and `git log`, never from memory.",
+      "Create one bead per ticket. Claim a bead before delegating its ticket, and close it only after you have verified and merged the change, naming the merge in the close comment. Recover state with `bd ready` and `git log`, never from memory.",
       "",
     ];
     if (hasCommands) {
@@ -339,10 +486,11 @@ function trackingSection(source: HandoffSource): string {
     return lines.join("\n");
   }
 
+  const doneStatus = source.project.deliveryRecipe === "pull-request" ? "done (PR #<n>)" : "done (merged)";
   const lines = [
     "## Tracking in this file",
     "",
-    "This repository tracks tickets as plain markdown. Each ticket above carries a `Status:` line: set it to `in-progress` when you delegate the ticket and to `done (PR #<n>)` once you have verified and merged it.",
+    `This repository tracks tickets as plain markdown. Each ticket above carries a \`Status:\` line: set it to \`in-progress\` when you delegate the ticket and to \`${doneStatus}\` once you have verified and merged it.`,
   ];
   if (hasCommands) {
     lines.push("", "The repository's declared tracker commands:", "", ...commandsList(commands));
@@ -387,14 +535,14 @@ export function renderHandoffMarkdown(source: HandoffSource): string {
       "",
       codeBlock(source.project.verifyCommand),
       "",
-      "Run from the repository root, by the subagent before it opens its PR and again by you before you merge.",
+      "Run from the repository root: once by the subagent before it hands the ticket back, and again by you before you merge it in.",
     ].join("\n"),
     beforeDelegatingSection(source),
     wavesSection(source),
     lifecycleSection(source),
-    recordingSection(),
-    trackingSection(source),
   ];
+  if (source.project.adversarialReview) sections.push(reviewingSection(source));
+  sections.push(recordingSection(), trackingSection(source));
   if (source.project.buildRecordLogging) sections.push(buildRecordSection(source));
   return `${sections.join("\n\n")}\n`;
 }
@@ -406,6 +554,71 @@ function bundleAccess(source: HandoffSource, fileStem: string): string {
     return `The bundle is committed in this repository, so your worktree has it. Read the spec at ${specPath} and your ticket at ${ticketPath}, relative to the repository root in your worktree.`;
   }
   return `The bundle is ignored by git, so it is NOT in your worktree. Read it by absolute path from the main checkout: the spec at ${specPath} and your ticket at ${ticketPath}. Never write to it.`;
+}
+
+function briefStepZero(source: HandoffSource, fileStem: string): string {
+  const base =
+    source.project.deliveryRecipe === "pull-request"
+      ? "`origin/main`"
+      : "the main session's current `main`";
+  return [
+    "## Step 0: confirm your base",
+    "",
+    `Your worktree was created from ${base}. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.`,
+    "",
+    bundleAccess(source, fileStem),
+  ].join("\n");
+}
+
+/**
+ * The brief's delivery section, selected by the project's delivery recipe:
+ * a draft pull request, or a plain commit-and-report-your-branch step with
+ * no push, `gh`, pull request or `origin` anywhere. On the pull-request
+ * recipe, who marks it ready matches HANDOFF.md's lifecycle: the reviewer,
+ * with the review switch on, or the main session, with it off.
+ */
+function briefDeliverySection(source: HandoffSource, prTitle: string): string {
+  if (source.project.deliveryRecipe === "pull-request") {
+    const readyLine = source.project.adversarialReview
+      ? "Never merge, and never mark it ready — the reviewer does that once it approves."
+      : "Never merge, and never mark it ready — the main session does that once it is satisfied.";
+    return [
+      "## Delivery",
+      "",
+      "When verification passes, run `gh auth status`. If the active account is not the one this repository expects, do not switch it: stop after committing and report \"push pending: gh account\" with your commit hash.",
+      "",
+      `Otherwise run \`git push -u origin HEAD\`, then \`gh pr create --draft\` against \`main\`, titled ${prTitle}, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. ${readyLine}`,
+    ].join("\n");
+  }
+  return [
+    "## Delivery",
+    "",
+    "Commit your work on your worktree branch, then report its name: this project uses the local-merge recipe, so nothing you do here reaches `main` on its own. The main session reads the branch diff, verifies it, and merges it in locally.",
+  ].join("\n");
+}
+
+/**
+ * The brief's closing report, ending with the reviewer note only when the
+ * project's adversarial review switch is on: with it off, the section says
+ * nothing about a reviewer.
+ */
+function briefReportSection(source: HandoffSource): string {
+  const verify = source.project.verifyCommand;
+  const isPr = source.project.deliveryRecipe === "pull-request";
+  const lines = ["## Report, then stop", "", "Report:", "", "- worktree path and branch;"];
+  if (isPr) {
+    lines.push("- the PR URL, or \"push pending: gh account\" with your commit hash;");
+  }
+  lines.push(
+    "- commits and files changed;",
+    `- the exact output of \`${verify}\`;`,
+    "- anything ambiguous, and anything this brief was missing.",
+  );
+  if (source.project.adversarialReview) {
+    lines.push("", "A separate reviewer reviews the work before any merge.");
+  }
+  lines.push("", "Then stop. Do no further work of any kind.");
+  return lines.join("\n");
 }
 
 export function renderBrief(source: HandoffSource, ticket: HandoffTicket): string {
@@ -421,7 +634,7 @@ export function renderBrief(source: HandoffSource, ticket: HandoffTicket): strin
   return `${[
     `# Brief ${label}: ${ticket.title}`,
     `You are implementing ticket ${label} of "${source.session.title}". You work only inside the git worktree you were started in.`,
-    ["## Step 0: confirm your base", "", "Your worktree was created from `origin/main`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.", "", bundleAccess(source, fileStem)].join("\n"),
+    briefStepZero(source, fileStem),
     [
       "## The ticket",
       "",
@@ -449,30 +662,12 @@ export function renderBrief(source: HandoffSource, ticket: HandoffTicket): strin
       "## Rules",
       "",
       "- Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.",
-      "- Run git only inside your worktree. Never run git against another checkout, never commit on or push to `main`, and never merge anything.",
+      "- Run git only inside your worktree. Never run git against another checkout, never commit directly on `main`, and never merge anything.",
       "- Commit on your worktree branch as you go.",
     ].join("\n"),
     ["## Verify", "", "From the repository root in your worktree, this must exit 0:", "", codeBlock(verify)].join("\n"),
-    [
-      "## Pull request",
-      "",
-      "When verification passes, run `gh auth status`. If the active account is not the one this repository expects, do not switch it: stop after committing and report \"push pending: gh account\" with your commit hash.",
-      "",
-      `Otherwise run \`git push -u origin HEAD\`, then \`gh pr create\` against \`main\`, titled ${prTitle}, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. Never merge.`,
-    ].join("\n"),
-    [
-      "## Report, then stop",
-      "",
-      "Report:",
-      "",
-      "- worktree path and branch;",
-      "- the PR URL, or \"push pending: gh account\" with your commit hash;",
-      "- commits and files changed;",
-      `- the exact output of \`${verify}\`;`,
-      "- anything ambiguous, and anything this brief was missing.",
-      "",
-      "Then stop. Do no further work of any kind.",
-    ].join("\n"),
+    briefDeliverySection(source, prTitle),
+    briefReportSection(source),
   ].join("\n\n")}\n`;
 }
 

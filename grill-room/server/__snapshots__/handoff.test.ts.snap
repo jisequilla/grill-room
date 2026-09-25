@@ -22,7 +22,7 @@ Paths below are absolute, into the main checkout at \`/repos/target\`. The bundl
 just verify
 \`\`\`
 
-Run from the repository root, by the subagent before it opens its PR and again by you before you merge.
+Run from the repository root: once by the subagent before it hands the ticket back, and again by you before you merge it in.
 
 ## Before delegating the first ticket
 
@@ -64,18 +64,33 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`) an
 - Commits only on its worktree branch; runs no git command outside its worktree and never touches \`main\`.
 - Runs \`just verify\`; it must pass.
 - Checks \`gh auth status\`. If the active account is not the one this repository expects, it stops before pushing and reports "push pending: gh account" with its commit hash.
-- Otherwise pushes its branch (\`git push -u origin HEAD\`) and opens a pull request against \`main\` with \`gh pr create\`. The title names the ticket; the body carries the ticket path, files changed, the exact verification output, and anything the brief left ambiguous.
-- Reports the PR, then stops. It never merges.
+- Otherwise pushes its branch (\`git push -u origin HEAD\`) and opens a **draft** pull request against \`main\` with \`gh pr create --draft\`. The title names the ticket; the body carries the ticket path, files changed, the exact verification output, and anything the brief left ambiguous.
+- Reports the PR, then stops. It never merges, and a draft is never merged by anyone.
 
 ### You, the main session
 
 1. Read the PR diff (\`gh pr diff <n>\`) against the brief's file boundaries.
-2. Re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
-3. Send failures back to the same agent on its branch; the fix lands as a new commit on the same PR.
-4. Merge only verified work: \`gh pr merge <n> --merge --delete-branch\`.
-5. \`git pull\` on local \`main\` and re-run \`just verify\` on the merged result.
-6. Set the ticket's \`Status:\` line in this file to \`done (PR #<n>)\`.
-7. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
+2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below) and wait for its verdict comment on the pull request.
+3. Once the reviewer approves and marks the pull request ready, re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
+4. If it fails, run \`gh pr ready --undo <n>\` to put the pull request back in draft, then send the failure back to the same agent on its branch; the fix lands as a new commit on the same PR, and goes back to the reviewer.
+5. Merge only a ready, approved pull request: \`gh pr merge <n> --merge --delete-branch\`. Never merge a draft.
+6. \`git pull\` on local \`main\` and re-run \`just verify\` on the merged result.
+7. Set the ticket's \`Status:\` line in this file to \`done (PR #<n>)\`.
+8. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
+
+## Reviewing a ticket
+
+Every ticket is reviewed by a second, fresh-context agent before it can be merged.
+
+**Inputs.** The reviewer gets the spec, the ticket, its delegation brief and the diff — never the builder's report.
+
+**What to try to break.** Unmet acceptance criteria, changes outside the file boundaries, untested edge cases, seams with the tickets this one builds on, and claims the diff does not support.
+
+**Verdict.** It posts its verdict as a pull request comment, starting "Review verdict: approved" or "Review verdict: changes requested" with each finding, then runs \`gh pr ready <n>\` on approval.
+
+**Changes requested.** They go back to the builder on the same branch, and the same reviewer reviews again. After two rejected rounds, the operator decides.
+
+The reviewer changes no code and never merges.
 
 ## What to record per ticket
 
@@ -116,7 +131,7 @@ Paths below are relative to the repository root (\`/repos/target\`). The bundle 
 just verify
 \`\`\`
 
-Run from the repository root, by the subagent before it opens its PR and again by you before you merge.
+Run from the repository root: once by the subagent before it hands the ticket back, and again by you before you merge it in.
 
 ## Before delegating the first ticket
 
@@ -166,18 +181,33 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`) an
 - Commits only on its worktree branch; runs no git command outside its worktree and never touches \`main\`.
 - Runs \`just verify\`; it must pass.
 - Checks \`gh auth status\`. If the active account is not the one this repository expects, it stops before pushing and reports "push pending: gh account" with its commit hash.
-- Otherwise pushes its branch (\`git push -u origin HEAD\`) and opens a pull request against \`main\` with \`gh pr create\`. The title names the ticket; the body carries the ticket path, files changed, the exact verification output, and anything the brief left ambiguous.
-- Reports the PR, then stops. It never merges.
+- Otherwise pushes its branch (\`git push -u origin HEAD\`) and opens a **draft** pull request against \`main\` with \`gh pr create --draft\`. The title names the ticket; the body carries the ticket path, files changed, the exact verification output, and anything the brief left ambiguous.
+- Reports the PR, then stops. It never merges, and a draft is never merged by anyone.
 
 ### You, the main session
 
 1. Read the PR diff (\`gh pr diff <n>\`) against the brief's file boundaries.
-2. Re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
-3. Send failures back to the same agent on its branch; the fix lands as a new commit on the same PR.
-4. Merge only verified work: \`gh pr merge <n> --merge --delete-branch\`.
-5. \`git pull\` on local \`main\` and re-run \`just verify\` on the merged result.
-6. Set the ticket's \`Status:\` line in this file to \`done (PR #<n>)\`.
-7. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
+2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below) and wait for its verdict comment on the pull request.
+3. Once the reviewer approves and marks the pull request ready, re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
+4. If it fails, run \`gh pr ready --undo <n>\` to put the pull request back in draft, then send the failure back to the same agent on its branch; the fix lands as a new commit on the same PR, and goes back to the reviewer.
+5. Merge only a ready, approved pull request: \`gh pr merge <n> --merge --delete-branch\`. Never merge a draft.
+6. \`git pull\` on local \`main\` and re-run \`just verify\` on the merged result.
+7. Set the ticket's \`Status:\` line in this file to \`done (PR #<n>)\`.
+8. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
+
+## Reviewing a ticket
+
+Every ticket is reviewed by a second, fresh-context agent before it can be merged.
+
+**Inputs.** The reviewer gets the spec, the ticket, its delegation brief and the diff — never the builder's report.
+
+**What to try to break.** Unmet acceptance criteria, changes outside the file boundaries, untested edge cases, seams with the tickets this one builds on, and claims the diff does not support.
+
+**Verdict.** It posts its verdict as a pull request comment, starting "Review verdict: approved" or "Review verdict: changes requested" with each finding, then runs \`gh pr ready <n>\` on approval.
+
+**Changes requested.** They go back to the builder on the same branch, and the same reviewer reviews again. After two rejected rounds, the operator decides.
+
+The reviewer changes no code and never merges.
 
 ## What to record per ticket
 
@@ -230,7 +260,7 @@ _Slot for the orchestrating session: verified facts about the code this ticket t
 ## Rules
 
 - Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.
-- Run git only inside your worktree. Never run git against another checkout, never commit on or push to \`main\`, and never merge anything.
+- Run git only inside your worktree. Never run git against another checkout, never commit directly on \`main\`, and never merge anything.
 - Commit on your worktree branch as you go.
 
 ## Verify
@@ -241,11 +271,204 @@ From the repository root in your worktree, this must exit 0:
 just verify
 \`\`\`
 
-## Pull request
+## Delivery
 
 When verification passes, run \`gh auth status\`. If the active account is not the one this repository expects, do not switch it: stop after committing and report "push pending: gh account" with your commit hash.
 
-Otherwise run \`git push -u origin HEAD\`, then \`gh pr create\` against \`main\`, titled \`02: Export the bundle\`, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. Never merge.
+Otherwise run \`git push -u origin HEAD\`, then \`gh pr create --draft\` against \`main\`, titled \`02: Export the bundle\`, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. Never merge, and never mark it ready — the reviewer does that once it approves.
+
+## Report, then stop
+
+Report:
+
+- worktree path and branch;
+- the PR URL, or "push pending: gh account" with your commit hash;
+- commits and files changed;
+- the exact output of \`just verify\`;
+- anything ambiguous, and anything this brief was missing.
+
+A separate reviewer reviews the work before any merge.
+
+Then stop. Do no further work of any kind.
+"
+`;
+
+exports[`briefs > delivery recipe and the review gate > renders the local-merge recipe with review off: worktree from the main session's current main, no reviewer mention, never a push/gh/PR/origin 1`] = `
+"# Brief 02: Export the bundle
+
+You are implementing ticket 02 of "Export anywhere". You work only inside the git worktree you were started in.
+
+## Step 0: confirm your base
+
+Your worktree was created from the main session's current \`main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
+
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+
+## The ticket
+
+Blocked by: 01 (merged before this brief was delegated)
+
+### 02 Export the bundle
+
+Write the bundle.
+
+## File boundaries
+
+<!-- slot: file-boundaries -->
+
+_Slot for the orchestrating session: the files and folders this ticket may create or edit, and the existing files it builds on._
+
+## Codebase facts
+
+<!-- slot: codebase-facts -->
+
+_Slot for the orchestrating session: verified facts about the code this ticket touches._
+
+## Rules
+
+- Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.
+- Run git only inside your worktree. Never run git against another checkout, never commit directly on \`main\`, and never merge anything.
+- Commit on your worktree branch as you go.
+
+## Verify
+
+From the repository root in your worktree, this must exit 0:
+
+\`\`\`bash
+just verify
+\`\`\`
+
+## Delivery
+
+Commit your work on your worktree branch, then report its name: this project uses the local-merge recipe, so nothing you do here reaches \`main\` on its own. The main session reads the branch diff, verifies it, and merges it in locally.
+
+## Report, then stop
+
+Report:
+
+- worktree path and branch;
+- commits and files changed;
+- the exact output of \`just verify\`;
+- anything ambiguous, and anything this brief was missing.
+
+Then stop. Do no further work of any kind.
+"
+`;
+
+exports[`briefs > delivery recipe and the review gate > renders the local-merge recipe with review on: worktree from the main session's current main, reviewer noted before stop, never a push/gh/PR/origin 1`] = `
+"# Brief 02: Export the bundle
+
+You are implementing ticket 02 of "Export anywhere". You work only inside the git worktree you were started in.
+
+## Step 0: confirm your base
+
+Your worktree was created from the main session's current \`main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
+
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+
+## The ticket
+
+Blocked by: 01 (merged before this brief was delegated)
+
+### 02 Export the bundle
+
+Write the bundle.
+
+## File boundaries
+
+<!-- slot: file-boundaries -->
+
+_Slot for the orchestrating session: the files and folders this ticket may create or edit, and the existing files it builds on._
+
+## Codebase facts
+
+<!-- slot: codebase-facts -->
+
+_Slot for the orchestrating session: verified facts about the code this ticket touches._
+
+## Rules
+
+- Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.
+- Run git only inside your worktree. Never run git against another checkout, never commit directly on \`main\`, and never merge anything.
+- Commit on your worktree branch as you go.
+
+## Verify
+
+From the repository root in your worktree, this must exit 0:
+
+\`\`\`bash
+just verify
+\`\`\`
+
+## Delivery
+
+Commit your work on your worktree branch, then report its name: this project uses the local-merge recipe, so nothing you do here reaches \`main\` on its own. The main session reads the branch diff, verifies it, and merges it in locally.
+
+## Report, then stop
+
+Report:
+
+- worktree path and branch;
+- commits and files changed;
+- the exact output of \`just verify\`;
+- anything ambiguous, and anything this brief was missing.
+
+A separate reviewer reviews the work before any merge.
+
+Then stop. Do no further work of any kind.
+"
+`;
+
+exports[`briefs > delivery recipe and the review gate > renders the pull-request recipe with review off: draft PR, the main session marks it ready, no reviewer mention 1`] = `
+"# Brief 02: Export the bundle
+
+You are implementing ticket 02 of "Export anywhere". You work only inside the git worktree you were started in.
+
+## Step 0: confirm your base
+
+Your worktree was created from \`origin/main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
+
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+
+## The ticket
+
+Blocked by: 01 (merged before this brief was delegated)
+
+### 02 Export the bundle
+
+Write the bundle.
+
+## File boundaries
+
+<!-- slot: file-boundaries -->
+
+_Slot for the orchestrating session: the files and folders this ticket may create or edit, and the existing files it builds on._
+
+## Codebase facts
+
+<!-- slot: codebase-facts -->
+
+_Slot for the orchestrating session: verified facts about the code this ticket touches._
+
+## Rules
+
+- Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.
+- Run git only inside your worktree. Never run git against another checkout, never commit directly on \`main\`, and never merge anything.
+- Commit on your worktree branch as you go.
+
+## Verify
+
+From the repository root in your worktree, this must exit 0:
+
+\`\`\`bash
+just verify
+\`\`\`
+
+## Delivery
+
+When verification passes, run \`gh auth status\`. If the active account is not the one this repository expects, do not switch it: stop after committing and report "push pending: gh account" with your commit hash.
+
+Otherwise run \`git push -u origin HEAD\`, then \`gh pr create --draft\` against \`main\`, titled \`02: Export the bundle\`, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. Never merge, and never mark it ready — the main session does that once it is satisfied.
 
 ## Report, then stop
 
@@ -258,5 +481,625 @@ Report:
 - anything ambiguous, and anything this brief was missing.
 
 Then stop. Do no further work of any kind.
+"
+`;
+
+exports[`briefs > delivery recipe and the review gate > renders the pull-request recipe with review on: draft PR, the reviewer marks it ready, reviewer noted before stop 1`] = `
+"# Brief 02: Export the bundle
+
+You are implementing ticket 02 of "Export anywhere". You work only inside the git worktree you were started in.
+
+## Step 0: confirm your base
+
+Your worktree was created from \`origin/main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
+
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+
+## The ticket
+
+Blocked by: 01 (merged before this brief was delegated)
+
+### 02 Export the bundle
+
+Write the bundle.
+
+## File boundaries
+
+<!-- slot: file-boundaries -->
+
+_Slot for the orchestrating session: the files and folders this ticket may create or edit, and the existing files it builds on._
+
+## Codebase facts
+
+<!-- slot: codebase-facts -->
+
+_Slot for the orchestrating session: verified facts about the code this ticket touches._
+
+## Rules
+
+- Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.
+- Run git only inside your worktree. Never run git against another checkout, never commit directly on \`main\`, and never merge anything.
+- Commit on your worktree branch as you go.
+
+## Verify
+
+From the repository root in your worktree, this must exit 0:
+
+\`\`\`bash
+just verify
+\`\`\`
+
+## Delivery
+
+When verification passes, run \`gh auth status\`. If the active account is not the one this repository expects, do not switch it: stop after committing and report "push pending: gh account" with your commit hash.
+
+Otherwise run \`git push -u origin HEAD\`, then \`gh pr create --draft\` against \`main\`, titled \`02: Export the bundle\`, with a body giving the ticket path, the files changed, the exact verification output, and anything this brief left ambiguous. Never merge, and never mark it ready — the reviewer does that once it approves.
+
+## Report, then stop
+
+Report:
+
+- worktree path and branch;
+- the PR URL, or "push pending: gh account" with your commit hash;
+- commits and files changed;
+- the exact output of \`just verify\`;
+- anything ambiguous, and anything this brief was missing.
+
+A separate reviewer reviews the work before any merge.
+
+Then stop. Do no further work of any kind.
+"
+`;
+
+exports[`delivery recipe and the review gate > renders the local-merge recipe with beads and review on: verdict recorded as a bead comment 1`] = `
+"# Handoff: Export anywhere
+
+Export a grilled session into any repository.
+
+This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
+
+Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
+
+## Where things are
+
+- Spec: \`{{BUNDLE}}/spec.md\`
+- Tickets: \`{{BUNDLE}}/issues/\`
+- Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
+- Grill Room session: \`session-123\`
+
+## Verify command
+
+\`\`\`bash
+just verify
+\`\`\`
+
+Run from the repository root: once by the subagent before it hands the ticket back, and again by you before you merge it in.
+
+## Before delegating the first ticket
+
+Set \`{"worktree": {"baseRef": "head"}}\` in this repository's \`.claude/settings.json\` before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far.
+
+Grill Room never commits in this repository; commit the bundle yourself, once, before delegating, so the first worktree contains it:
+
+\`\`\`bash
+git add {{BUNDLE}}
+git commit -m "Add the Export anywhere handoff bundle"
+\`\`\`
+
+Commit again whenever the bundle is re-exported.
+
+## Waves
+
+Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.
+
+### Wave 1
+
+- **01 Register projects**
+  - Ticket: \`{{BUNDLE}}/issues/01-register-projects.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/01-register-projects.md\`](briefs/01-register-projects.md)
+- **03 Propose a slug**
+  - Ticket: \`{{BUNDLE}}/issues/03-slug-proposal.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/03-slug-proposal.md\`](briefs/03-slug-proposal.md)
+
+### Wave 2
+
+- **02 Export the bundle** (blocked by 01)
+  - Ticket: \`{{BUNDLE}}/issues/02-export-bundle.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/02-export-bundle.md\`](briefs/02-export-bundle.md)
+
+## Delegation lifecycle
+
+Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`), on its own branch, and reaches \`main\` only once you merge it in locally. With \`worktree.baseRef\` set to \`head\` (see "Before delegating the first ticket"), each new worktree branches from your current local \`main\`, so work merged there is immediately visible to the next one.
+
+### Before launching a ticket
+
+- Local \`main\` holds every change you want the next worktree to start from — commit it before delegating.
+- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+
+### The subagent
+
+- Commits only on its worktree branch; runs no git command outside its worktree and never touches \`main\`.
+- Runs \`just verify\`; it must pass.
+- Reports its branch name, then stops. It never merges.
+
+### You, the main session
+
+1. Read the branch diff (\`git diff main..<branch>\`) against the brief's file boundaries.
+2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below) and wait for its verdict.
+3. Once the reviewer approves, re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
+4. Send failures back to the same agent on its branch; the fix lands as a new commit there, and goes back to the reviewer.
+5. Merge only approved, verified work, locally: \`git merge --no-ff <branch>\`.
+6. Re-run \`just verify\` on \`main\` after merging.
+7. Close the ticket's bead with a comment naming the merge commit and the reviewer's verdict.
+8. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
+
+## Reviewing a ticket
+
+Every ticket is reviewed by a second, fresh-context agent before it can be merged.
+
+**Inputs.** The reviewer gets the spec, the ticket, its delegation brief and the diff — never the builder's report.
+
+**What to try to break.** Unmet acceptance criteria, changes outside the file boundaries, untested edge cases, seams with the tickets this one builds on, and claims the diff does not support.
+
+**Verdict.** It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it through the project's tracker, the same way you record the merge: as a comment on the ticket's bead.
+
+**Changes requested.** They go back to the builder on the same branch, and the same reviewer reviews again. After two rejected rounds, the operator decides.
+
+The reviewer changes no code and never merges.
+
+## What to record per ticket
+
+When a ticket closes, record:
+
+- the model the subagent ran on;
+- whether its first attempt passed verification;
+- whether it escalated to a stronger model;
+- what the delegation prompt was missing, when an attempt failed.
+
+An escalation is the most useful data point: it shows where the brief, not the model, was the weak link.
+
+## Tracking with beads
+
+Create one bead per ticket. Claim a bead before delegating its ticket, and close it only after you have verified and merged the change, naming the merge in the close comment. Recover state with \`bd ready\` and \`git log\`, never from memory.
+
+- \`bd ready\`: find work that is ready
+- \`bd update <id> --claim\`: claim a bead before delegating
+- \`bd close <id>\`: close it after merging
+"
+`;
+
+exports[`delivery recipe and the review gate > renders the local-merge recipe with review off: baseRef head, no reviewer, never a push/gh/PR/origin 1`] = `
+"# Handoff: Export anywhere
+
+Export a grilled session into any repository.
+
+This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
+
+Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
+
+## Where things are
+
+- Spec: \`{{BUNDLE}}/spec.md\`
+- Tickets: \`{{BUNDLE}}/issues/\`
+- Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
+- Grill Room session: \`session-123\`
+
+## Verify command
+
+\`\`\`bash
+just verify
+\`\`\`
+
+Run from the repository root: once by the subagent before it hands the ticket back, and again by you before you merge it in.
+
+## Before delegating the first ticket
+
+Set \`{"worktree": {"baseRef": "head"}}\` in this repository's \`.claude/settings.json\` before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far.
+
+Grill Room never commits in this repository; commit the bundle yourself, once, before delegating, so the first worktree contains it:
+
+\`\`\`bash
+git add {{BUNDLE}}
+git commit -m "Add the Export anywhere handoff bundle"
+\`\`\`
+
+Commit again whenever the bundle is re-exported.
+
+## Waves
+
+Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.
+
+### Wave 1
+
+- **01 Register projects**
+  - Ticket: \`{{BUNDLE}}/issues/01-register-projects.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/01-register-projects.md\`](briefs/01-register-projects.md)
+  - Status: ready-for-agent
+- **03 Propose a slug**
+  - Ticket: \`{{BUNDLE}}/issues/03-slug-proposal.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/03-slug-proposal.md\`](briefs/03-slug-proposal.md)
+  - Status: ready-for-agent
+
+### Wave 2
+
+- **02 Export the bundle** (blocked by 01)
+  - Ticket: \`{{BUNDLE}}/issues/02-export-bundle.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/02-export-bundle.md\`](briefs/02-export-bundle.md)
+  - Status: ready-for-agent
+
+## Delegation lifecycle
+
+Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`), on its own branch, and reaches \`main\` only once you merge it in locally. With \`worktree.baseRef\` set to \`head\` (see "Before delegating the first ticket"), each new worktree branches from your current local \`main\`, so work merged there is immediately visible to the next one.
+
+### Before launching a ticket
+
+- Local \`main\` holds every change you want the next worktree to start from — commit it before delegating.
+- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+
+### The subagent
+
+- Commits only on its worktree branch; runs no git command outside its worktree and never touches \`main\`.
+- Runs \`just verify\`; it must pass.
+- Reports its branch name, then stops. It never merges.
+
+### You, the main session
+
+1. Read the branch diff (\`git diff main..<branch>\`) against the brief's file boundaries.
+2. Re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
+3. Send failures back to the same agent on its branch; the fix lands as a new commit there.
+4. Merge only verified work, locally: \`git merge --no-ff <branch>\`.
+5. Re-run \`just verify\` on \`main\` after merging.
+6. Set the ticket's \`Status:\` line in this file to \`done (merged)\`.
+7. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
+
+## What to record per ticket
+
+When a ticket closes, record:
+
+- the model the subagent ran on;
+- whether its first attempt passed verification;
+- whether it escalated to a stronger model;
+- what the delegation prompt was missing, when an attempt failed.
+
+An escalation is the most useful data point: it shows where the brief, not the model, was the weak link.
+
+## Tracking in this file
+
+This repository tracks tickets as plain markdown. Each ticket above carries a \`Status:\` line: set it to \`in-progress\` when you delegate the ticket and to \`done (merged)\` once you have verified and merged it.
+"
+`;
+
+exports[`delivery recipe and the review gate > renders the local-merge recipe with review on: baseRef head, verdict recorded through the tracker, never a push/gh/PR/origin 1`] = `
+"# Handoff: Export anywhere
+
+Export a grilled session into any repository.
+
+This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
+
+Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
+
+## Where things are
+
+- Spec: \`{{BUNDLE}}/spec.md\`
+- Tickets: \`{{BUNDLE}}/issues/\`
+- Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
+- Grill Room session: \`session-123\`
+
+## Verify command
+
+\`\`\`bash
+just verify
+\`\`\`
+
+Run from the repository root: once by the subagent before it hands the ticket back, and again by you before you merge it in.
+
+## Before delegating the first ticket
+
+Set \`{"worktree": {"baseRef": "head"}}\` in this repository's \`.claude/settings.json\` before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far.
+
+Grill Room never commits in this repository; commit the bundle yourself, once, before delegating, so the first worktree contains it:
+
+\`\`\`bash
+git add {{BUNDLE}}
+git commit -m "Add the Export anywhere handoff bundle"
+\`\`\`
+
+Commit again whenever the bundle is re-exported.
+
+## Waves
+
+Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.
+
+### Wave 1
+
+- **01 Register projects**
+  - Ticket: \`{{BUNDLE}}/issues/01-register-projects.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/01-register-projects.md\`](briefs/01-register-projects.md)
+  - Status: ready-for-agent
+- **03 Propose a slug**
+  - Ticket: \`{{BUNDLE}}/issues/03-slug-proposal.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/03-slug-proposal.md\`](briefs/03-slug-proposal.md)
+  - Status: ready-for-agent
+
+### Wave 2
+
+- **02 Export the bundle** (blocked by 01)
+  - Ticket: \`{{BUNDLE}}/issues/02-export-bundle.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/02-export-bundle.md\`](briefs/02-export-bundle.md)
+  - Status: ready-for-agent
+
+## Delegation lifecycle
+
+Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`), on its own branch, and reaches \`main\` only once you merge it in locally. With \`worktree.baseRef\` set to \`head\` (see "Before delegating the first ticket"), each new worktree branches from your current local \`main\`, so work merged there is immediately visible to the next one.
+
+### Before launching a ticket
+
+- Local \`main\` holds every change you want the next worktree to start from — commit it before delegating.
+- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+
+### The subagent
+
+- Commits only on its worktree branch; runs no git command outside its worktree and never touches \`main\`.
+- Runs \`just verify\`; it must pass.
+- Reports its branch name, then stops. It never merges.
+
+### You, the main session
+
+1. Read the branch diff (\`git diff main..<branch>\`) against the brief's file boundaries.
+2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below) and wait for its verdict.
+3. Once the reviewer approves, re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
+4. Send failures back to the same agent on its branch; the fix lands as a new commit there, and goes back to the reviewer.
+5. Merge only approved, verified work, locally: \`git merge --no-ff <branch>\`.
+6. Re-run \`just verify\` on \`main\` after merging.
+7. Set the ticket's \`Status:\` line in this file to \`done (merged)\`, noting the reviewer's verdict.
+8. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
+
+## Reviewing a ticket
+
+Every ticket is reviewed by a second, fresh-context agent before it can be merged.
+
+**Inputs.** The reviewer gets the spec, the ticket, its delegation brief and the diff — never the builder's report.
+
+**What to try to break.** Unmet acceptance criteria, changes outside the file boundaries, untested edge cases, seams with the tickets this one builds on, and claims the diff does not support.
+
+**Verdict.** It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it through the project's tracker, the same way you record the merge: as the ticket's \`Status:\` line in this file.
+
+**Changes requested.** They go back to the builder on the same branch, and the same reviewer reviews again. After two rejected rounds, the operator decides.
+
+The reviewer changes no code and never merges.
+
+## What to record per ticket
+
+When a ticket closes, record:
+
+- the model the subagent ran on;
+- whether its first attempt passed verification;
+- whether it escalated to a stronger model;
+- what the delegation prompt was missing, when an attempt failed.
+
+An escalation is the most useful data point: it shows where the brief, not the model, was the weak link.
+
+## Tracking in this file
+
+This repository tracks tickets as plain markdown. Each ticket above carries a \`Status:\` line: set it to \`in-progress\` when you delegate the ticket and to \`done (merged)\` once you have verified and merged it.
+"
+`;
+
+exports[`delivery recipe and the review gate > renders the pull-request recipe with review off: draft PR, no reviewer anywhere 1`] = `
+"# Handoff: Export anywhere
+
+Export a grilled session into any repository.
+
+This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
+
+Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
+
+## Where things are
+
+- Spec: \`{{BUNDLE}}/spec.md\`
+- Tickets: \`{{BUNDLE}}/issues/\`
+- Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
+- Grill Room session: \`session-123\`
+
+## Verify command
+
+\`\`\`bash
+just verify
+\`\`\`
+
+Run from the repository root: once by the subagent before it hands the ticket back, and again by you before you merge it in.
+
+## Before delegating the first ticket
+
+Worktree agents start from \`origin/main\`, so they see the bundle only once it is committed and pushed. Grill Room never commits in this repository; do it yourself, once, before delegating:
+
+\`\`\`bash
+git add {{BUNDLE}}
+git commit -m "Add the Export anywhere handoff bundle"
+git push
+\`\`\`
+
+Commit and push again whenever the bundle is re-exported.
+
+## Waves
+
+Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.
+
+### Wave 1
+
+- **01 Register projects**
+  - Ticket: \`{{BUNDLE}}/issues/01-register-projects.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/01-register-projects.md\`](briefs/01-register-projects.md)
+  - Status: ready-for-agent
+- **03 Propose a slug**
+  - Ticket: \`{{BUNDLE}}/issues/03-slug-proposal.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/03-slug-proposal.md\`](briefs/03-slug-proposal.md)
+  - Status: ready-for-agent
+
+### Wave 2
+
+- **02 Export the bundle** (blocked by 01)
+  - Ticket: \`{{BUNDLE}}/issues/02-export-bundle.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/02-export-bundle.md\`](briefs/02-export-bundle.md)
+  - Status: ready-for-agent
+
+## Delegation lifecycle
+
+Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`) and reaches \`main\` only through a pull request you have reviewed and verified. Worktrees are created from \`origin/main\`, not from local \`main\`, so work merged only locally is invisible to the next worktree.
+
+### Before launching a ticket
+
+- Local \`main\` holds nothing unpushed (\`git status\`, \`git log origin/main..main\`). Push it first if it does, so the worktree's base includes it.
+- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+
+### The subagent
+
+- Commits only on its worktree branch; runs no git command outside its worktree and never touches \`main\`.
+- Runs \`just verify\`; it must pass.
+- Checks \`gh auth status\`. If the active account is not the one this repository expects, it stops before pushing and reports "push pending: gh account" with its commit hash.
+- Otherwise pushes its branch (\`git push -u origin HEAD\`) and opens a **draft** pull request against \`main\` with \`gh pr create --draft\`. The title names the ticket; the body carries the ticket path, files changed, the exact verification output, and anything the brief left ambiguous.
+- Reports the PR, then stops. It never merges, and a draft is never merged by anyone.
+
+### You, the main session
+
+1. Read the PR diff (\`gh pr diff <n>\`) against the brief's file boundaries.
+2. Re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
+3. Send failures back to the same agent on its branch; the fix lands as a new commit on the same PR.
+4. Mark the pull request ready (\`gh pr ready <n>\`) once you are satisfied, then merge: \`gh pr merge <n> --merge --delete-branch\`. Never merge a draft.
+5. \`git pull\` on local \`main\` and re-run \`just verify\` on the merged result.
+6. Set the ticket's \`Status:\` line in this file to \`done (PR #<n>)\`.
+7. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
+
+## What to record per ticket
+
+When a ticket closes, record:
+
+- the model the subagent ran on;
+- whether its first attempt passed verification;
+- whether it escalated to a stronger model;
+- what the delegation prompt was missing, when an attempt failed.
+
+An escalation is the most useful data point: it shows where the brief, not the model, was the weak link.
+
+## Tracking in this file
+
+This repository tracks tickets as plain markdown. Each ticket above carries a \`Status:\` line: set it to \`in-progress\` when you delegate the ticket and to \`done (PR #<n>)\` once you have verified and merged it.
+"
+`;
+
+exports[`delivery recipe and the review gate > renders the pull-request recipe with review on: draft PR, reviewer section, undo ready on a failed re-verify 1`] = `
+"# Handoff: Export anywhere
+
+Export a grilled session into any repository.
+
+This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
+
+Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
+
+## Where things are
+
+- Spec: \`{{BUNDLE}}/spec.md\`
+- Tickets: \`{{BUNDLE}}/issues/\`
+- Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
+- Grill Room session: \`session-123\`
+
+## Verify command
+
+\`\`\`bash
+just verify
+\`\`\`
+
+Run from the repository root: once by the subagent before it hands the ticket back, and again by you before you merge it in.
+
+## Before delegating the first ticket
+
+Worktree agents start from \`origin/main\`, so they see the bundle only once it is committed and pushed. Grill Room never commits in this repository; do it yourself, once, before delegating:
+
+\`\`\`bash
+git add {{BUNDLE}}
+git commit -m "Add the Export anywhere handoff bundle"
+git push
+\`\`\`
+
+Commit and push again whenever the bundle is re-exported.
+
+## Waves
+
+Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.
+
+### Wave 1
+
+- **01 Register projects**
+  - Ticket: \`{{BUNDLE}}/issues/01-register-projects.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/01-register-projects.md\`](briefs/01-register-projects.md)
+  - Status: ready-for-agent
+- **03 Propose a slug**
+  - Ticket: \`{{BUNDLE}}/issues/03-slug-proposal.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/03-slug-proposal.md\`](briefs/03-slug-proposal.md)
+  - Status: ready-for-agent
+
+### Wave 2
+
+- **02 Export the bundle** (blocked by 01)
+  - Ticket: \`{{BUNDLE}}/issues/02-export-bundle.md\`
+  - Brief: [\`{{BUNDLE}}/briefs/02-export-bundle.md\`](briefs/02-export-bundle.md)
+  - Status: ready-for-agent
+
+## Delegation lifecycle
+
+Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`) and reaches \`main\` only through a pull request you have reviewed and verified. Worktrees are created from \`origin/main\`, not from local \`main\`, so work merged only locally is invisible to the next worktree.
+
+### Before launching a ticket
+
+- Local \`main\` holds nothing unpushed (\`git status\`, \`git log origin/main..main\`). Push it first if it does, so the worktree's base includes it.
+- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+
+### The subagent
+
+- Commits only on its worktree branch; runs no git command outside its worktree and never touches \`main\`.
+- Runs \`just verify\`; it must pass.
+- Checks \`gh auth status\`. If the active account is not the one this repository expects, it stops before pushing and reports "push pending: gh account" with its commit hash.
+- Otherwise pushes its branch (\`git push -u origin HEAD\`) and opens a **draft** pull request against \`main\` with \`gh pr create --draft\`. The title names the ticket; the body carries the ticket path, files changed, the exact verification output, and anything the brief left ambiguous.
+- Reports the PR, then stops. It never merges, and a draft is never merged by anyone.
+
+### You, the main session
+
+1. Read the PR diff (\`gh pr diff <n>\`) against the brief's file boundaries.
+2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below) and wait for its verdict comment on the pull request.
+3. Once the reviewer approves and marks the pull request ready, re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
+4. If it fails, run \`gh pr ready --undo <n>\` to put the pull request back in draft, then send the failure back to the same agent on its branch; the fix lands as a new commit on the same PR, and goes back to the reviewer.
+5. Merge only a ready, approved pull request: \`gh pr merge <n> --merge --delete-branch\`. Never merge a draft.
+6. \`git pull\` on local \`main\` and re-run \`just verify\` on the merged result.
+7. Set the ticket's \`Status:\` line in this file to \`done (PR #<n>)\`.
+8. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
+
+## Reviewing a ticket
+
+Every ticket is reviewed by a second, fresh-context agent before it can be merged.
+
+**Inputs.** The reviewer gets the spec, the ticket, its delegation brief and the diff — never the builder's report.
+
+**What to try to break.** Unmet acceptance criteria, changes outside the file boundaries, untested edge cases, seams with the tickets this one builds on, and claims the diff does not support.
+
+**Verdict.** It posts its verdict as a pull request comment, starting "Review verdict: approved" or "Review verdict: changes requested" with each finding, then runs \`gh pr ready <n>\` on approval.
+
+**Changes requested.** They go back to the builder on the same branch, and the same reviewer reviews again. After two rejected rounds, the operator decides.
+
+The reviewer changes no code and never merges.
+
+## What to record per ticket
+
+When a ticket closes, record:
+
+- the model the subagent ran on;
+- whether its first attempt passed verification;
+- whether it escalated to a stronger model;
+- what the delegation prompt was missing, when an attempt failed.
+
+An escalation is the most useful data point: it shows where the brief, not the model, was the weak link.
+
+## Tracking in this file
+
+This repository tracks tickets as plain markdown. Each ticket above carries a \`Status:\` line: set it to \`in-progress\` when you delegate the ticket and to \`done (PR #<n>)\` once you have verified and merged it.
 "
 `;
