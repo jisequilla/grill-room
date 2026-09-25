@@ -23,7 +23,7 @@ The Agent tool creates each worktree from `origin/main`, not from local `main`. 
 
 A ticket that changes what the user sees is checked in two ways, and the delegation prompt names both.
 
-- The agent looks at its own screens with `agent-browser`, against its worktree's own server on a free port with `AUTH_DISABLED`, the fake interviewer and an isolated `DATABASE_URL`, never the user's server or database. It does not drive the user's Chrome.
+- The agent looks at its own screens with `agent-browser`, against its worktree's own server on a free port with `AUTH_DISABLED`, the fake interviewer and an isolated `DATABASE_URL`, never the user's server or database. It never uses the claude-in-chrome tools, which drive the user's own Chrome.
 - The agent adds or extends a Playwright scenario under `grill-room/e2e/` for the behaviour it built, so `just e2e` guards it from then on. An exploratory check that finds a defect becomes a scenario.
 
 ## The main session
