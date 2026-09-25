@@ -399,12 +399,15 @@ Each item names the shadcn primitive it builds on. No new component library.
   INTERVIEWER'S` (stale, unplaced, never answered), the second with **Continue
   the interview**.
 
-### Supersession proposal (inset band inside a loose-end row)
+### Supersession proposal (inset band inside a loose-end row or a replaced-decision row)
 
 - A `bg-repo/8` band with a 6px radius and no border.
-- Contents: a link glyph with "Answered by: {title}" (the title is a link to
-  the decision), the proposed answer at `body` size, the reason in Smoke, then
-  **Accept** (primary) and **Not the same** (ghost).
+- Contents: a link glyph with "Answered by: {title}" on a loose end, or
+  "Replaced by: {title}" on a settled decision a later one replaces (falling
+  back to "a later decision" when the title is unknown; the title is a link
+  to the decision either way), the proposed answer at `body` size (loose end
+  only), the reason in Smoke, then **Accept** (primary) and **Not the same**
+  (ghost). It serves both kinds of proposal `find-superseded` makes.
 - It reads as an offer inside the row, never as a replacement answer.
 
 ### Done panel
@@ -413,9 +416,14 @@ Each item names the shadcn primitive it builds on. No new component library.
    DONE", then the summary at `title` size (25px) when it is under 140
    characters, or `body` when longer.
 2. **Tally** (a mono strip): `12 settled · 1 loose end · 2 set aside`.
-3. **Loose ends** (above), with "Check for answered loose ends" as a ghost
-   action beside the heading.
-4. **Confirm bar:** the blocking sentence on the left and **Confirm shared
+3. **Loose ends** (above), with "Check for answered or replaced decisions" as
+   a ghost action beside the heading.
+4. **Replaced decisions**, only while one is pending: a `label` heading over a
+   hairline-separated list, not a card, each row the settled decision's
+   question title, its current answer in Smoke, and the same inset band as a
+   loose end's Supersession proposal with Accept / Not the same. Sits after
+   loose ends, before the confirm bar, and never blocks it.
+5. **Confirm bar:** the blocking sentence on the left and **Confirm shared
    understanding** (primary) on the right. Disabled while any loose end
    remains.
 

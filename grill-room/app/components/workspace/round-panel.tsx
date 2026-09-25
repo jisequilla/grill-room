@@ -161,6 +161,7 @@ export function RoundPanel({
         <DoneProposedPanel
           sessionId={round.sessionId}
           doneSummary={round.doneSummary}
+          decisions={decisions}
           onOpenDecision={onOpenDecision}
           onContinueInterview={onRequestNextRound}
           isContinuing={isRequesting}

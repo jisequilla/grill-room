@@ -16,10 +16,11 @@ import { toast } from "sonner";
 
 import { LooseEndList } from "@/components/workspace/loose-end-list";
 import { Markdown } from "@/components/workspace/markdown";
+import { ReplacedDecisions } from "@/components/workspace/replaced-decisions";
 import { TurnAttemptLog, type Turn } from "@/components/workspace/turn-attempt-log";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { actionErrorCode } from "@/lib/decisions";
+import { actionErrorCode, type TreeDecision } from "@/lib/decisions";
 
 /** The interviewer's closing summary, which is the thing being confirmed. */
 function Summary({
@@ -69,6 +70,7 @@ const TURN_TIMEOUT_MS = 10 * 60 * 1000;
 export function DoneProposedPanel({
   sessionId,
   doneSummary,
+  decisions,
   onOpenDecision,
   onContinueInterview,
   isContinuing,
@@ -76,6 +78,12 @@ export function DoneProposedPanel({
 }: {
   sessionId: string;
   doneSummary: string | null;
+  /**
+   * The whole tree, so this panel can read pending replacement proposals
+   * (`supersession.kind === "replaces-settled"`) and count settled decisions
+   * for the check button's visibility, without a second `get-tree` fetch.
+   */
+  decisions: readonly TreeDecision[];
   onOpenDecision: (decisionId: string) => void;
   onContinueInterview: () => void;
   isContinuing: boolean;
@@ -125,6 +133,14 @@ export function DoneProposedPanel({
   const remaining = looseEnds?.length ?? 0;
   const blocked = isLoading || remaining > 0;
 
+  // A plain count, not a "did anything change" check: two decisions settled
+  // in the same round, with no loose ends, still show the button, and a
+  // click may find nothing — the button already allowed that before this.
+  const settledCount = decisions.filter(
+    (decision) => decision.state === "settled",
+  ).length;
+  const showCheckButton = remaining > 0 || settledCount >= 2;
+
   return (
     <div className="space-y-5" data-testid="done-proposed-panel">
       <Summary
@@ -138,7 +154,7 @@ export function DoneProposedPanel({
           <h3 className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
             {t("workspace.looseEndsHeading")}
           </h3>
-          {remaining > 0 ? (
+          {showCheckButton ? (
             <Button
               type="button"
               size="sm"
@@ -169,6 +185,8 @@ export function DoneProposedPanel({
         />
         <TurnAttemptLog turn={turn} />
       </section>
+
+      <ReplacedDecisions decisions={decisions} onOpenDecision={onOpenDecision} />
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
         <p className="min-w-0 flex-1 text-sm text-muted-foreground">
