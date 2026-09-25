@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { ProjectDeliverySettings } from "@/components/projects/project-delivery-settings";
+import {
+  ProjectDeliverySettings,
+  seedDeliverySettings,
+  withDeliverySettings,
+} from "@/components/projects/project-delivery-settings";
+import { DELIVERY_RECIPE_HINT_KEY } from "@/lib/projects";
 
 /*
  * These render with no i18n catalog wired up (the same bare
@@ -43,11 +48,18 @@ describe("ProjectDeliverySettings", () => {
     expect(recipeHint(html)).toContain('id="project-delivery-recipe-hint"');
   });
 
-  it("gives each recipe its own hint, not a shared one", () => {
-    const pullRequest = recipeHint(render({ deliveryRecipe: "pull-request" }));
-    const localMerge = recipeHint(render({ deliveryRecipe: "local-merge" }));
+  it("shows the pull-request recipe's own hint key, not the local-merge one", () => {
+    const hint = recipeHint(render({ deliveryRecipe: "pull-request" }));
 
-    expect(pullRequest).not.toBe(localMerge);
+    expect(hint).toContain(`data-hint-key="${DELIVERY_RECIPE_HINT_KEY["pull-request"]}"`);
+    expect(hint).not.toContain(`data-hint-key="${DELIVERY_RECIPE_HINT_KEY["local-merge"]}"`);
+  });
+
+  it("shows the local-merge recipe's own hint key, not the pull-request one", () => {
+    const hint = recipeHint(render({ deliveryRecipe: "local-merge" }));
+
+    expect(hint).toContain(`data-hint-key="${DELIVERY_RECIPE_HINT_KEY["local-merge"]}"`);
+    expect(hint).not.toContain(`data-hint-key="${DELIVERY_RECIPE_HINT_KEY["pull-request"]}"`);
   });
 
   it("reflects the adversarial review switch's checked state", () => {
@@ -66,5 +78,58 @@ describe("ProjectDeliverySettings", () => {
     const html = render();
 
     expect(html).toContain('for="project-adversarial-review"');
+  });
+});
+
+describe("seedDeliverySettings", () => {
+  it("defaults to pull-request with review on when there is no project", () => {
+    expect(seedDeliverySettings(null)).toEqual({
+      deliveryRecipe: "pull-request",
+      adversarialReview: true,
+    });
+  });
+
+  it("reads both fields from the project being edited", () => {
+    expect(
+      seedDeliverySettings({ deliveryRecipe: "local-merge", adversarialReview: false }),
+    ).toEqual({ deliveryRecipe: "local-merge", adversarialReview: false });
+
+    expect(
+      seedDeliverySettings({ deliveryRecipe: "pull-request", adversarialReview: true }),
+    ).toEqual({ deliveryRecipe: "pull-request", adversarialReview: true });
+  });
+
+  it("falls back to the defaults for a project missing either field", () => {
+    expect(seedDeliverySettings({})).toEqual({
+      deliveryRecipe: "pull-request",
+      adversarialReview: true,
+    });
+    expect(seedDeliverySettings({ deliveryRecipe: null, adversarialReview: null })).toEqual({
+      deliveryRecipe: "pull-request",
+      adversarialReview: true,
+    });
+  });
+});
+
+describe("withDeliverySettings", () => {
+  it("folds both fields into the rest of the edit, for update-project's payload", () => {
+    const fields = { name: "Grill Room", verifyCommand: "pnpm test" };
+
+    expect(
+      withDeliverySettings(fields, { deliveryRecipe: "local-merge", adversarialReview: false }),
+    ).toEqual({
+      name: "Grill Room",
+      verifyCommand: "pnpm test",
+      deliveryRecipe: "local-merge",
+      adversarialReview: false,
+    });
+  });
+
+  it("leaves the original fields object untouched", () => {
+    const fields = { name: "Grill Room" };
+
+    withDeliverySettings(fields, { deliveryRecipe: "pull-request", adversarialReview: true });
+
+    expect(fields).toEqual({ name: "Grill Room" });
   });
 });

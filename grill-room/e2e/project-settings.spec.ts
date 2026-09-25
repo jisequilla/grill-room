@@ -60,7 +60,7 @@ test.describe("project settings", () => {
     page,
     request,
   }) => {
-    await registerProject(request, {
+    const project = await registerProject(request, {
       root: repoRoot,
       verifyCommand: "pnpm test",
       exportFolder: ".scratch",
@@ -71,12 +71,18 @@ test.describe("project settings", () => {
     const row = page
       .getByTestId("project-row")
       .filter({ hasText: "Settings fixture" });
+
+    // No remote on the fixture repo, so registration guessed "local-merge",
+    // visible on the row without opening Edit, and review defaults on (no
+    // "no review" marker).
+    await expect(row.getByTestId("project-recipe-badge")).toHaveText(/Local merge/);
+    await expect(row.getByTestId("project-review-off-marker")).toHaveCount(0);
+
     await row.getByRole("button", { name: "Edit" }).click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
 
-    // No remote on the fixture repo, so registration guessed "local-merge".
     const recipeTrigger = page.getByTestId("project-delivery-recipe");
     await expect(recipeTrigger).toHaveText(/Local merge/);
 
@@ -92,7 +98,21 @@ test.describe("project settings", () => {
     await page.getByTestId("project-save").click();
     await expect(dialog).toBeHidden();
 
+    // The stored values, not just what the UI echoes back.
+    const savedResponse = await request.get(
+      `/_agent-native/actions/get-project?id=${project.id}`,
+    );
+    expect(savedResponse.ok()).toBeTruthy();
+    const saved = await savedResponse.json();
+    expect(saved.deliveryRecipe).toBe("pull-request");
+    expect(saved.adversarialReview).toBe(false);
+
     await page.reload();
+
+    // The badge and marker on the row reflect the saved values too.
+    await expect(row.getByTestId("project-recipe-badge")).toHaveText(/Pull request/);
+    await expect(row.getByTestId("project-review-off-marker")).toBeVisible();
+
     await row.getByRole("button", { name: "Edit" }).click();
     await expect(dialog).toBeVisible();
 
@@ -102,5 +122,14 @@ test.describe("project settings", () => {
     await expect(
       page.getByTestId("project-adversarial-review"),
     ).toHaveAttribute("aria-checked", "false");
+
+    // The stored values are unchanged by the reload and reopen alone.
+    const reloadedResponse = await request.get(
+      `/_agent-native/actions/get-project?id=${project.id}`,
+    );
+    expect(reloadedResponse.ok()).toBeTruthy();
+    const reloaded = await reloadedResponse.json();
+    expect(reloaded.deliveryRecipe).toBe("pull-request");
+    expect(reloaded.adversarialReview).toBe(false);
   });
 });

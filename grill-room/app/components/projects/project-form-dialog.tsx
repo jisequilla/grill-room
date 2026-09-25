@@ -45,7 +45,11 @@ import {
   type ProjectVisibility,
 } from "@shared/session-constants";
 
-import { ProjectDeliverySettings } from "./project-delivery-settings";
+import {
+  ProjectDeliverySettings,
+  seedDeliverySettings,
+  withDeliverySettings,
+} from "./project-delivery-settings";
 
 interface ProjectFormDialogProps {
   open: boolean;
@@ -101,8 +105,9 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
     setBuildRecordLogging(project?.buildRecordLogging ?? false);
     setVisibility((project?.visibility as ProjectVisibility) ?? "tracked");
     setVisibilitySeeded(false);
-    setDeliveryRecipe((project?.deliveryRecipe as DeliveryRecipe) ?? "pull-request");
-    setAdversarialReview(project?.adversarialReview ?? true);
+    const seeded = seedDeliverySettings(project);
+    setDeliveryRecipe(seeded.deliveryRecipe);
+    setAdversarialReview(seeded.adversarialReview);
     setTrackerDiagnostic(project?.trackerDiagnostic ?? null);
     setErrors({});
     verifyTouched.current = project !== null;
@@ -208,7 +213,10 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
       visibility,
     };
     if (project) {
-      update.mutate({ id: project.id, ...fields, deliveryRecipe, adversarialReview });
+      update.mutate({
+        id: project.id,
+        ...withDeliverySettings(fields, { deliveryRecipe, adversarialReview }),
+      });
     } else {
       register.mutate(fields);
     }

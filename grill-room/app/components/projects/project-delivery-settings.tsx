@@ -20,6 +20,39 @@ interface ProjectDeliverySettingsProps {
   onAdversarialReviewChange: (value: boolean) => void;
 }
 
+export interface DeliverySettings {
+  deliveryRecipe: DeliveryRecipe;
+  adversarialReview: boolean;
+}
+
+/** The subset of a project's fields these settings are seeded from. */
+interface DeliverySettingsSource {
+  deliveryRecipe?: string | null;
+  adversarialReview?: boolean | null;
+}
+
+/**
+ * What the dialog seeds these two fields to when it opens: `project`'s own
+ * values, or the registration defaults (`pull-request`, review on) for a
+ * fresh project, or when `project` is null (registration renders no
+ * delivery settings, but a caller opening the dialog for "Add project"
+ * still resets this pair of fields through the same path).
+ */
+export function seedDeliverySettings(project: DeliverySettingsSource | null): DeliverySettings {
+  return {
+    deliveryRecipe: (project?.deliveryRecipe as DeliveryRecipe | undefined) ?? "pull-request",
+    adversarialReview: project?.adversarialReview ?? true,
+  };
+}
+
+/** Folds the delivery settings into the rest of an edit's fields, for `update-project`'s payload. */
+export function withDeliverySettings<T extends object>(
+  fields: T,
+  settings: DeliverySettings,
+): T & DeliverySettings {
+  return { ...fields, ...settings };
+}
+
 /**
  * How a ticket built for this project reaches main, and whether a second
  * agent reviews it first. Shown only once a project is registered: the
@@ -57,7 +90,11 @@ export function ProjectDeliverySettings({
             ))}
           </SelectContent>
         </Select>
-        <p id="project-delivery-recipe-hint" className="text-xs text-muted-foreground">
+        <p
+          id="project-delivery-recipe-hint"
+          data-hint-key={DELIVERY_RECIPE_HINT_KEY[deliveryRecipe]}
+          className="text-xs text-muted-foreground"
+        >
           {t(DELIVERY_RECIPE_HINT_KEY[deliveryRecipe])}
         </p>
       </div>
