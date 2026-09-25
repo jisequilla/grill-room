@@ -7,7 +7,10 @@ import path from "node:path";
 import { eq } from "@agent-native/core/db/schema";
 import { describe, expect, it } from "vitest";
 
+import { storeBriefGrounding } from "../server/brief-grounding.js";
 import { EXPORT_MANIFEST_FILE, formatLocalDate, hashExportContent } from "../server/export.js";
+import { FILE_BOUNDARIES_SLOT, handoffFingerprint, loadHandoffSource, renderBrief } from "../server/handoff.js";
+import { aHandoffScoutResult } from "../server/interviewer/test-fixtures.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 import createSession from "./create-session.js";
@@ -17,6 +20,7 @@ import listTickets from "./list-tickets.js";
 import previewExport from "./preview-export.js";
 import registerProject from "./register-project.js";
 import setTicketBlockedBy from "./set-ticket-blocked-by.js";
+import updateHandoff from "./update-handoff.js";
 
 const repos = useTempGitRepos();
 
@@ -1164,5 +1168,111 @@ describe("preview-export and export-session", () => {
       expect(await fs.readFile(specPath, "utf8")).toBe(EDITED);
       expect(await fs.readFile(path.join(elsewhere, "spec.md"), "utf8")).toBe("not the bundle's");
     });
+  });
+});
+
+describe("export writes grounded briefs", () => {
+  useTestDatabase();
+
+  /** Grounds the session right now: a valid result, today's fingerprint, HEAD as read. */
+  async function groundNow(sessionId: string, root: string): Promise<void> {
+    const loaded = await loadHandoffSource(sessionId);
+    if (!("source" in loaded)) throw new Error("expected a handoff source");
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    await storeBriefGrounding({
+      sessionId,
+      result: aHandoffScoutResult(),
+      commitRead: head,
+      handoffFingerprint: handoffFingerprint(loaded.source),
+      model: "sonnet",
+      turnId: null,
+      ranAt: new Date().toISOString(),
+    });
+  }
+
+  async function readBrief(bundleDir: string, relativePath: string): Promise<string> {
+    return fs.readFile(path.join(bundleDir, "briefs", relativePath), "utf8");
+  }
+
+  it("exports an unedited brief with the grounded sections", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    await groundNow(session.id, root);
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+
+    // Ticket 1 (aHandoffScoutResult's ticket 1: no blockers, cited facts, a Proved by).
+    const first = await readBrief(bundleDir, "01-build-the-workspace.md");
+    expect(first).toContain("## File boundaries");
+    expect(first).toContain("src/ingest/lag-alert.ts");
+    expect(first).toContain("## Codebase facts");
+    expect(first).toContain("Ingest lag is measured in src/ingest/metrics.ts.");
+    expect(first).toContain("## Proved by");
+    expect(first).toContain("src/ingest/lag-alert.test.ts");
+    expect(first).not.toContain(FILE_BOUNDARIES_SLOT);
+
+    // Ticket 2 (aHandoffScoutResult's ticket 2: blocked by 1, a Builds on entry).
+    const second = await readBrief(bundleDir, "02-store-on-disk.md");
+    expect(second).toContain("## Builds on");
+    expect(second).toContain("The lag alert module.");
+    expect(second).toContain("created by ticket 01 at `src/ingest/lag-alert.ts`");
+  });
+
+  it("exports a brief edited through update-handoff verbatim, ignoring grounding", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    const edited = "# Brief 01: Hand-edited\n\nSomeone already wrote this by hand.\n";
+    await updateHandoff.run({ sessionId: session.id, briefs: [{ ticketNumber: 1, markdown: edited }] });
+    await groundNow(session.id, root);
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+
+    expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(edited);
+  });
+
+  it("with stale grounding, the brief carries the stale line", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    await groundNow(session.id, root);
+
+    // Removing ticket 2's blocker and regenerating the handoff keeps the
+    // handoff itself current (so export is not blocked) but leaves the
+    // grounding — made for the handoff before this edit — stale with reason
+    // `handoff-changed`.
+    await setTicketBlockedBy.run({ ticketId: await ticketIdFor(session.id, 2), blockedBy: [] });
+    await generateHandoff.run({ sessionId: session.id });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.exportBlocked).toBe(false);
+    expect(preview.groundingState).toBe("stale");
+    expect(preview.groundingStaleReason).toBe("handoff-changed");
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+
+    const first = await readBrief(bundleDir, "01-build-the-workspace.md");
+    expect(first).toContain("_Grounded at commit `");
+    expect(first).toContain("for an earlier version of the tickets._");
+    // The grounded content itself is still there under the stale line.
+    expect(first).toContain("src/ingest/lag-alert.ts");
+  });
+
+  it("with no grounding, the brief is byte-identical to today's (unfilled slots)", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.groundingState).toBe("absent");
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+
+    const first = await readBrief(bundleDir, "01-build-the-workspace.md");
+    expect(first).toContain(FILE_BOUNDARIES_SLOT);
+    expect(first).not.toContain("## Builds on");
+    expect(first).not.toContain("## Proved by");
+    expect(first).not.toContain("_Grounded");
   });
 });

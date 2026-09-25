@@ -563,9 +563,23 @@ each brief accordingly:
   set, before looking at grounding at all — a brief the user edited always
   keeps its text, and grounding never rewrites it.
 
-Nothing calls `renderHandoff` with a grounding yet: `generate-handoff` still
-renders from the deterministic templates alone. Wiring a live grounding into
-generation, and the UI, are ticket 04's.
+**Where grounding is applied: at export, not at generation.** `generate-handoff`
+and `update-handoff` are unchanged: the handoff row always stores the plain,
+ungrounded (or hand-edited) markdown `renderHandoff` writes with no grounding.
+Grounding happens after the handoff exists and can go stale on its own, so
+`planExportBundle` (`server/export-bundle.ts`, shared by `preview-export` and
+`export-session`) is where it is actually applied, at the moment the bundle is
+built: for each stored brief it decides **unedited** — the stored markdown
+still equals `renderBrief` of the same ticket with no grounding, exactly what
+`generate-handoff` wrote — or **edited**, no new per-brief flag or schema
+column needed. An unedited brief is re-rendered with the session's grounding
+(current, or stale under its line) before its `{{BUNDLE}}` path is filled in;
+an edited brief is written exactly as stored, grounding never touching it.
+Reading the handoff (`get-handoff`) still shows the plain, ungrounded text —
+only an export's bundle carries the grounded one. Because `preview-export` and
+`export-session` build this same plan, the preview's listed files and its
+`groundingState`/`groundingStaleReason` always match what a real export
+writes.
 
 ### Logging a build from an agent
 

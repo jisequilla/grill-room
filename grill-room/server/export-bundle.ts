@@ -41,6 +41,19 @@
  * `{{BUNDLE}}` placeholders are filled with the bundle path — repo-relative
  * for a `tracked` project, absolute for an `ignored` one.
  *
+ * An unedited brief — its stored markdown still equal to `renderBrief` of the
+ * same ticket with no grounding, exactly what `generate-handoff` wrote — is
+ * re-rendered with the session's current brief grounding (see "Brief
+ * grounding state" below) before its bundle path is filled in: current
+ * grounding fills its slots and adds "Builds on"/"Proved by", stale grounding
+ * renders the same under its one-line note, and no grounding leaves it as
+ * today's empty slots. This is the only place grounding reaches a brief's
+ * text — `generate-handoff` and `update-handoff` never read it. A brief whose
+ * stored markdown differs (the user edited it through `update-handoff`) is
+ * written exactly as stored; grounding never touches it. Since `preview-export`
+ * and `export-session` share this plan, the preview's file list and grounding
+ * state always match what a real export would write.
+ *
  * ## Export gate
  *
  * `exportBlockedReason` ({@link ExportGateReason}, from `getExportGate`) is
@@ -135,7 +148,10 @@ import {
   getExportGate,
   getHandoffRow,
   HANDOFF_FILE,
+  loadHandoffSource,
+  renderBrief,
   type ExportGateReason,
+  type HandoffGrounding,
   type HandoffRow,
   parseBriefs,
 } from "./handoff.js";
@@ -568,6 +584,15 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       ? "current"
       : "stale";
   const briefGroundingStaleReason = grounding && !grounding.current ? grounding.staleReason : null;
+  const groundingForRender: HandoffGrounding | null = grounding
+    ? {
+        tickets: grounding.result.tickets,
+        commitRead: grounding.commitRead,
+        current: grounding.current,
+        staleReason: grounding.staleReason,
+      }
+    : null;
+
   const handoffFiles: { relativePath: string; content: string }[] = [];
   if (handoff) {
     const bundlePath = bundlePathFor(project.visibility, project.rootPath, bundleDir);
@@ -575,10 +600,28 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       relativePath: HANDOFF_FILE,
       content: fillBundlePath(handoff.markdown, bundlePath),
     });
+
+    // Export is the one place grounding reaches a brief's text: it applies
+    // here, not at generation time, because grounding happens after the
+    // handoff exists and can go stale on its own — rendering at export is
+    // the only way to reflect its current state. A brief counts as unedited
+    // exactly when its stored markdown still equals an ungrounded render of
+    // the same ticket (what `generate-handoff` would have written); only an
+    // unedited brief is re-rendered with grounding, an edited one is written
+    // exactly as stored. No new per-brief edit flag, no schema change.
+    const loadedSource = await loadHandoffSource(session.id);
+    const briefSource = "source" in loadedSource ? loadedSource.source : null;
+
     for (const brief of parseBriefs(handoff.briefsJson)) {
+      const ticket = briefSource?.tickets.find((candidate) => candidate.number === brief.ticketNumber) ?? null;
+      const unedited = briefSource !== null && ticket !== null && brief.markdown === renderBrief(briefSource, ticket);
+      const markdown =
+        unedited && briefSource !== null && ticket !== null
+          ? renderBrief(briefSource, ticket, { grounding: groundingForRender })
+          : brief.markdown;
       handoffFiles.push({
         relativePath: brief.relativePath,
-        content: fillBundlePath(brief.markdown, bundlePath),
+        content: fillBundlePath(markdown, bundlePath),
       });
     }
   }
