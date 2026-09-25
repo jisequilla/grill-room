@@ -6,8 +6,8 @@
  * while both still match; staleness is computed here on every read and never
  * stored, the same way readiness staleness is (`server/readiness.ts`).
  *
- * See `.scratch/project-scout/spec.md` ("Scout report schema", "Storage") and
- * `.scratch/project-scout/issues/03-scout-report-and-action.md`.
+ * See `.grill-room/project-scout/spec.md` ("Scout report schema", "Storage") and
+ * `.grill-room/project-scout/issues/03-scout-report-and-action.md`.
  */
 import { randomUUID } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
@@ -134,7 +134,7 @@ export async function latestScoutReport(
  * gives its key a disposition already reached before this run — a re-run's
  * proposal the scout reports `unchanged` and re-proposes under the same key
  * keeps whatever the user had it as (kept or dropped) rather than reverting
- * to undecided; see `.scratch/project-scout/issues/06-rescout-drift.md`
+ * to undecided; see `.grill-room/project-scout/issues/06-rescout-drift.md`
  * ("Dispositions carry forward"). Returns what was stored.
  */
 export async function storeScoutReport(input: {
@@ -327,7 +327,7 @@ export function previousRepoDecisions(
  * Independent of any report's own content: a decision kept several re-runs
  * ago is still returned here once its report row has long since been
  * replaced, because it lives in `gr_decisions`, not in a report. See
- * `.scratch/project-scout/issues/06-rescout-drift.md`
+ * `.grill-room/project-scout/issues/06-rescout-drift.md`
  * ("Which decisions a re-run carries").
  */
 export async function repoDecisionsInTree(

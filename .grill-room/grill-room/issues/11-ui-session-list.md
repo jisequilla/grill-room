@@ -8,7 +8,7 @@ Suggested model: sonnet
 
 Build the session list surface and new-session flow with the project's existing component kit: list with title, state and last activity; create form with title, idea, model picker defaulting to the global setting, and answering mode; delete with confirmation; global default model in settings. Data via the framework's action hooks, kept live with its database sync hook.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 

@@ -15,7 +15,7 @@ This guide is for development-mode agents editing this app's source code. For ap
 - **Dev:** `pnpm dev` (Vite dev server with both React Router + Nitro plugins)
 - **Build:** `pnpm build` (React Router build — client + SSR + Nitro server)
 - **Start:** `node .output/server/index.mjs` (production)
-- **Unit/action tests:** `pnpm test` (vitest, the action boundary — see "Testing Decisions" in `.scratch/grill-room/spec.md`)
+- **Unit/action tests:** `pnpm test` (vitest, the action boundary — see "Testing Decisions" in `.grill-room/grill-room/spec.md`)
 - **Browser smoke test:** `pnpm test:e2e` (Playwright — see below)
 - **Both:** `pnpm test:all`
 

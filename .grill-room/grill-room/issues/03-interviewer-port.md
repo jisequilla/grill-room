@@ -8,7 +8,7 @@ Suggested model: opus
 
 Build the interviewer port per the spec's section of that name: one narrow interface with four request kinds (propose round, review stale decisions, synthesize spec, break into tickets), each with a Zod output schema. Implement the scripted fake adapter (returns queued results, selected by configuration) and the real adapter, which spawns the Claude Code CLI headless once per turn with every tool disabled, the session's model, a JSON schema for structured output, and the previous conversation id for resume. The real adapter must clear the CLAUDECODE environment marker, fall back to a fresh conversation primed with the decision history when resume fails, report rate-limit failures distinctly from other errors, and report a missing or logged-out CLI clearly. Install a byte-identical copy of the upstream grilling skill text (source: repo-root .claude/skills/grilling/SKILL.md) inside the app and load it verbatim at runtime, followed by a short app-specific addendum. Verified working flags from the spike: `claude -p <prompt> --model <m> --output-format json --allowed-tools "" --json-schema <schema>`, continuation with `--resume <session_id>`; the result carries `structured_output` and `session_id`.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 

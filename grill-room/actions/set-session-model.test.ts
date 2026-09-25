@@ -9,7 +9,7 @@ import setSessionModel from "./set-session-model.js";
 
 /**
  * Proves the "Dedicated action" and "Refusal contract" decisions from
- * `.scratch/change-a-session-s-model-before-its-first-round/spec.md`: a
+ * `.grill-room/change-a-session-s-model-before-its-first-round/spec.md`: a
  * single-purpose action changes a session's model up until the interviewer
  * conversation exists or a turn is working, refuses with the typed
  * `model-locked` error once either holds, and never partially applies a

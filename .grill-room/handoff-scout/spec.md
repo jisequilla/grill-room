@@ -105,7 +105,7 @@ Export never waits for grounding. It says whether the briefs are grounded and cu
 
 ## Out of Scope
 
-- Delivery recipes and the review gate: `.scratch/delivery-recipe/`.
+- Delivery recipes and the review gate: `.grill-room/delivery-recipe/`.
 - Copying the project's rules into HANDOFF.md.
 - Grounding each ticket in a separate turn.
 - Running grounding automatically on handoff generation.

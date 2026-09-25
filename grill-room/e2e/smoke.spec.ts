@@ -74,7 +74,7 @@ function createExportProjectRepo(): string {
 }
 
 /**
- * The one browser smoke test the spec calls for (`.scratch/grill-room/spec.md`,
+ * The one browser smoke test the spec calls for (`.grill-room/grill-room/spec.md`,
  * "Testing Decisions"): walk a full grilling session through the real UI,
  * against the running app with the fake interviewer enabled. Everything else
  * in this app is tested at the action boundary (see `actions/*.test.ts`); this
@@ -113,13 +113,13 @@ function createExportProjectRepo(): string {
  * It then exports the session — also template-rendered, no interviewer turn
  * — and checks that the export wrote `decisions.md` with an entry for each
  * of the two decisions this session settled (`server/export.ts`'s
- * `renderDecisionsFile`; see `.scratch/decisions-export/spec.md`) and that
+ * `renderDecisionsFile`; see `.grill-room/decisions-export/spec.md`) and that
  * `intent.md` was written too. It then hand-edits the exported `spec.md` on
  * disk and walks the edited-file guard through the browser: the reopened
  * preview flags `spec.md` as edited with its "Overwrite anyway" checkbox
  * unticked, a re-export keeps the edit and lists `spec.md` as kept, and
  * ticking the checkbox and re-exporting overwrites it
- * (`.scratch/export-ownership/spec.md`, "The guard").
+ * (`.grill-room/export-ownership/spec.md`, "The guard").
  *
  * Other spec files in this suite (`e2e/*.spec.ts`) run against the same
  * `webServer` alongside it: each creates its own session and chooses its own
@@ -407,13 +407,13 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
   );
 
   // ---- intent.md is planned and written alongside the rest of the bundle -
-  // (`.scratch/export-ownership/spec.md`, "intent.md is always planned").
+  // (`.grill-room/export-ownership/spec.md`, "intent.md is always planned").
   await expect(
     exportSection.getByTestId("export-written-files").getByText(/intent\.md$/),
   ).toBeVisible();
 
   // ---- Edit the exported spec.md on disk, outside the app ----------------
-  // The guard (`.scratch/export-ownership/spec.md`, "The guard") is meant to
+  // The guard (`.grill-room/export-ownership/spec.md`, "The guard") is meant to
   // catch exactly this: a file re-exported after someone hand-edited it in
   // the repo.
   const writtenSpecFile = exportSection

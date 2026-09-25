@@ -10,7 +10,7 @@ import { answerOwnText, chooseScenario, createSession } from "./support";
  *
  * A round proposal's attempt log is only ever shown two places: the live
  * turn status while it runs, and collapsed in round history once the round
- * is submitted (`.scratch/turn-visibility/spec.md`, "Round proposals: in
+ * is submitted (`.grill-room/turn-visibility/spec.md`, "Round proposals: in
  * the live turn status and collapsed in round history"). This scenario has
  * no latency scripted, so — as `smoke.spec.ts` notes for its own round 1 —
  * the live view is gone by the time the page can act on it; round history

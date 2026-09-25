@@ -12,7 +12,7 @@
  * the project scout's `checkCitation`, and the tickets, their dependencies and
  * the files they plan are checked against the handoff and the working tree.
  *
- * See `.scratch/handoff-scout/spec.md` ("The rejection check", "Storage").
+ * See `.grill-room/handoff-scout/spec.md` ("The rejection check", "Storage").
  */
 import { randomUUID } from "node:crypto";
 import { lstatSync, realpathSync, statSync } from "node:fs";

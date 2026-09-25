@@ -1,19 +1,20 @@
-# 06 Reopening decisions and stale review
+# 02 Schema and session actions
 
 Status: ready-for-agent
-Blocked by: 04
-Suggested model: opus
+Blocked by: 01
+Suggested model: sonnet
 
 ## What to build
 
-Implement reopening per the spec: reopening a settled decision moves its answer to history, clears settled state, and marks all transitive dependents stale. The next turn is a stale review request to the port; each stale decision comes back as reconfirm (settled again with its old answer) or re-ask (rejoins the tree unsettled with an updated question). History of all previous answers is kept and retrievable. Reopening is allowed in any session state.
+Define the full domain schema from the spec's Domain model section (session, decision, decision history, round, spec, ticket, build record, global settings) using the framework's schema helpers, additive migrations only. Implement session actions: create (title, idea, model defaulting to the global setting, answering mode), list (title, state, last activity), get, delete, set answering mode, and get/set the global default model.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 
-- User stories 44-49 are satisfied at the action level.
-- Action tests cover transitive staleness across at least three levels, mixed reconfirm/re-ask results, and history contents.
+- User stories 1-8, 10, 11 are satisfied at the action level.
+- Deleting a session removes its decisions, rounds, spec, tickets and build records.
+- Action tests cover each action against the in-memory database.
 - `pnpm test` and `pnpm typecheck` both exit 0 from `grill-room/`.
 
 ## Boundaries

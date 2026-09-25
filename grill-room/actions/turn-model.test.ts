@@ -8,7 +8,7 @@ import requestNextRound from "./request-next-round.js";
 
 /**
  * Proves the "Turn launch reads the row" decision from
- * `.scratch/change-a-session-s-model-before-its-first-round/spec.md`: the
+ * `.grill-room/change-a-session-s-model-before-its-first-round/spec.md`: the
  * start-turn path reads the session's model from the row at the moment it
  * launches the interviewer, so a model changed before the first round is the
  * model the interviewer actually receives.

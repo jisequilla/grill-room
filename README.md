@@ -44,7 +44,7 @@ with the model, the outcome, and what the prompt was missing.
 | `docs/design/workspace-review.md` | Design review of the app, and its verification |
 | `docs/spikes/claude-code-harness.md` | Why the app shells out to `claude -p` |
 | `.claude/skills/` | The grilling skills, vendored verbatim |
-| `.scratch/grill-room/` | The spec and tickets the skills produced |
+| `.grill-room/grill-room/` | The spec and tickets the skills produced |
 | `grill-room/` | The app |
 
 ## Running the app

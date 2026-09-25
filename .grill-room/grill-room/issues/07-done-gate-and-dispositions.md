@@ -8,7 +8,7 @@ Suggested model: sonnet
 
 Implement finishing per the spec: the interviewer may propose done only when the app itself verifies the frontier is empty; the proposal carries a summary of settled decisions. Confirmation is refused while any decision is unknown, deferred, pushed back, or prototype flagged; each must get a real answer or a disposition (out of scope, or named open question). An action lists the loose ends blocking confirmation. Confirming moves the session to confirmed. Reopening a decision in a confirmed session returns it to interviewing and marks spec and tickets out of date.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 

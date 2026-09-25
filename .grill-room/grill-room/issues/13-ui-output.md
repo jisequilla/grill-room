@@ -1,18 +1,18 @@
-# 12 UI: session workspace (cards, tree, history)
+# 13 UI: session output (spec, tickets, build records, export)
 
 Status: ready-for-agent
-Blocked by: 05, 06, 11
-Suggested model: opus
+Blocked by: 09, 10, 11
+Suggested model: sonnet
 
 ## What to build
 
-Build the session workspace: round cards (recommended answer, offered choices, accept, own answer, and every steering move), answered/unanswered indication, submit round, working and error-with-retry states (rate limit shown distinctly), answering-mode switch, round history, and the design tree as an indented outline with state badges whose selection shows the decision's question, answer and history. Reopen from the tree. Loose-ends list and the done proposal summary with confirm. Live updates via the database sync hook.
+Build the session output surface: rendered spec with regenerate and out-of-date indication; ticket list with status and blocked-by; build record view/edit per ticket and the session summary; export with target folder selection, overwrite confirmation, written-files report, and error display.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 
-- User stories 12-24, 25-34, 35-41, 44-55 work in the browser against the fake interviewer.
+- User stories 62, 67, 70-75, 76-80 work in the browser.
 - Typecheck passes; existing component kit only.
 - `pnpm test` and `pnpm typecheck` both exit 0 from `grill-room/`.
 

@@ -90,7 +90,7 @@ The main session merges only approved work, and still re-runs the verification i
 
 ## Out of Scope
 
-- The handoff scout that fills the briefs: its own spec, `.scratch/handoff-scout/`.
+- The handoff scout that fills the briefs: its own spec, `.grill-room/handoff-scout/`.
 - Copying the project's own rules into HANDOFF.md.
 - A forge-side approval or required reviews: the forge refuses approvals from a pull request's author.
 - Running the reviewer from Grill Room: Grill Room writes the recipe, and the building session runs it.

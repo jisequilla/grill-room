@@ -39,7 +39,7 @@ type ScoutSession = typeof schema.sessions.$inferSelect;
  * `changed` one also gets the repo's new statement as its recommended
  * answer; `repoStatement` is left exactly as it was — it is what the
  * interview's next answer replaces (see
- * `.scratch/project-scout/issues/06-rescout-drift.md`,
+ * `.grill-room/project-scout/issues/06-rescout-drift.md`,
  * "Reopening leaves repo_statement as it is").
  *
  * Runs after `runTurn` returns, once the session's turn is idle again: the
@@ -110,7 +110,7 @@ export async function scoutProjectCore(input: {
   // latest report's own proposals that are dropped or still undecided. A
   // kept decision does not come from `previous` at all, so it is unaffected
   // by the report row being replaced. See
-  // `.scratch/project-scout/issues/06-rescout-drift.md`
+  // `.grill-room/project-scout/issues/06-rescout-drift.md`
   // ("Which decisions a re-run carries").
   const previous = await latestScoutReport(session.id);
   const keptFromTree = await repoDecisionsInTree(session.id);

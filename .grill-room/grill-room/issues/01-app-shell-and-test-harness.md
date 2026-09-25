@@ -8,7 +8,7 @@ Suggested model: opus
 
 Remove the template's chat surfaces from navigation and routes (the framework's embedded chat agent is not used). Add the three empty main surfaces as routes: session list (the landing page), session workspace, session output. Set up the test harness every later ticket depends on: a helper that gives each test a fresh in-memory instance of the embedded database with the app's schema applied, and a way to invoke an action's run function against it. Prove the harness with one trivial action test. Remove the stock hello action.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 

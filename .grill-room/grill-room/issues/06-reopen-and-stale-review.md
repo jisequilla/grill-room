@@ -1,19 +1,19 @@
-# 05 Steering moves and user-added decisions
+# 06 Reopening decisions and stale review
 
 Status: ready-for-agent
 Blocked by: 04
-Suggested model: sonnet
+Suggested model: opus
 
 ## What to build
 
-Extend round answering with the steering moves: unknown (I don't know), push back with a reason, defer, prototype flag (paused until the user records what the prototype taught them, which then becomes a real answer), and adding a user-authored decision that the interviewer places in the tree. None of these count as settled, so dependents stay blocked. A push back is sent to the interviewer with its reason; a response that re-asks the same decision unchanged is rejected.
+Implement reopening per the spec: reopening a settled decision moves its answer to history, clears settled state, and marks all transitive dependents stale. The next turn is a stale review request to the port; each stale decision comes back as reconfirm (settled again with its old answer) or re-ask (rejoins the tree unsettled with an updated question). History of all previous answers is kept and retrievable. Reopening is allowed in any session state.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 
-- User stories 25-34 and 38 are satisfied at the action level.
-- Action tests cover each move, the blocking of dependents, the unchanged re-ask rejection, and resolving a prototype flag.
+- User stories 44-49 are satisfied at the action level.
+- Action tests cover transitive staleness across at least three levels, mixed reconfirm/re-ask results, and history contents.
 - `pnpm test` and `pnpm typecheck` both exit 0 from `grill-room/`.
 
 ## Boundaries

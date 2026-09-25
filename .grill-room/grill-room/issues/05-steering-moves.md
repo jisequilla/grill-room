@@ -1,19 +1,19 @@
-# 13 UI: session output (spec, tickets, build records, export)
+# 05 Steering moves and user-added decisions
 
 Status: ready-for-agent
-Blocked by: 09, 10, 11
+Blocked by: 04
 Suggested model: sonnet
 
 ## What to build
 
-Build the session output surface: rendered spec with regenerate and out-of-date indication; ticket list with status and blocked-by; build record view/edit per ticket and the session summary; export with target folder selection, overwrite confirmation, written-files report, and error display.
+Extend round answering with the steering moves: unknown (I don't know), push back with a reason, defer, prototype flag (paused until the user records what the prototype taught them, which then becomes a real answer), and adding a user-authored decision that the interviewer places in the tree. None of these count as settled, so dependents stay blocked. A push back is sent to the interviewer with its reason; a response that re-asks the same decision unchanged is rejected.
 
-The spec at `.scratch/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
+The spec at `.grill-room/grill-room/spec.md` is the source of truth; read the sections relevant to this ticket before starting. Where this ticket and the spec disagree, stop and report rather than guess.
 
 ## Acceptance criteria
 
-- User stories 62, 67, 70-75, 76-80 work in the browser.
-- Typecheck passes; existing component kit only.
+- User stories 25-34 and 38 are satisfied at the action level.
+- Action tests cover each move, the blocking of dependents, the unchanged re-ask rejection, and resolving a prototype flag.
 - `pnpm test` and `pnpm typecheck` both exit 0 from `grill-room/`.
 
 ## Boundaries

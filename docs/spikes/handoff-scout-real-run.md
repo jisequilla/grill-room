@@ -1,6 +1,6 @@
 # Spike: a real grounding run
 
-Bead gr-5e7.8, ticket `.scratch/handoff-scout/issues/05-real-run.md`. One run with the real interviewer and the real handoff scout against a temp clone of the marathon tracker. It takes a session through to a handoff, grounds the briefs, exports them, and checks every grounded claim against the clone's code by hand.
+Bead gr-5e7.8, ticket `.grill-room/handoff-scout/issues/05-real-run.md`. One run with the real interviewer and the real handoff scout against a temp clone of the marathon tracker. It takes a session through to a handoff, grounds the briefs, exports them, and checks every grounded claim against the clone's code by hand.
 
 ## Verdicts
 
