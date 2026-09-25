@@ -122,3 +122,18 @@ These changes are measured by the rate of first-round approvals on the next wave
 - first-round approvals: PRs #60, #61, #62, #69, #70, #72 to #75, #77;
 - two rounds: #63, #64, #66, #68, #71;
 - no convergence: #76.
+
+## ngine-monitor live-run-observability: tickets 01 + 01b
+
+The second A/B ran on another repository: ngine-monitor, driven by its own session with branches `ab/hand` and `ab/wf` from base `f3230e9`. Ticket 01 built the span read model. The spec gave no ticket the job of writing the table, so ticket 01b was added mid-build for the writer. Both arms got identical 01b text, including a premise that turned out false: that the plugin always sends `run_id = null` on the orchestrator's own events. Neither wave had a pre-flight.
+
+An opus judge compared the two arms' cumulative diffs for 01 + 01b (`f3230e9..a4da9a7` for wf, `f3230e9..56757f7` for hand), labelled A and B at random. Comments that named the arms were reworded in both diffs, and the judge could not open the bead comments. It checked every premise against the plugin at the base commit.
+
+| | Workflow arm | Hand arm |
+|---|---|---|
+| Score /30 (correctness, tests, scope and clarity) | **21** (7, 7, 7) | 15 (5, 5, 5) |
+| Blocking defect | Orchestrator tool spans take the event's own run_id, so run grouping and trace grouping disagree when a run label is set. Costs no tokens | Parent usage that arrives on Stop or SessionEnd is dropped for sessions without a later tool event, and a session with no tool calls gets no root |
+| Fixtures | Payloads stored as jsonb objects, as production does | Payloads double-encoded into jsonb strings. The builder then wrote production workarounds and recorded in NMON-019 that payloads are "not reliably a jsonb object", which is false |
+| Where it was right and the other wrong | Per-model never-regress floor; refreshes every active session; deterministic cost ownership | Persisted watermark on arrival time; one TypeScript implementation that is also the writer; a top-level agent parented to its session root |
+
+The judge preferred the workflow arm. Its tokens survive every data path the plugin produces, and the hand arm's writer loses orchestrator usage. Both arms were built on the same false premise and the same underspecified writer, and the owner sent both to a redesign ticket, 01c, whose design is fixed in advance. The comparison says less about the two loops than about the ticket: the arm whose fixtures matched production reasoned correctly about the data, and the other built on a fixture artifact (bead gr-c0t.12).
