@@ -1,0 +1,113 @@
+{
+  "version": 2,
+  "sessionId": "a0c5709c-ceab-4024-8a27-bf166754dbaa",
+  "revision": 1,
+  "scoutCommit": "3003fa3499c557ee7a3a06d03becc01912ed3f55",
+  "headCommit": "3bde6221411516f13ac11a197b934fd0f607a949",
+  "files": [
+    {
+      "path": "HANDOFF.md",
+      "sha256": "06bcad2d36e6d23bd8492c22b9790f5a4ee41ba6dadac21af2786f213a7c7e07"
+    },
+    {
+      "path": "spec.md",
+      "sha256": "26b398009107d9cabafd78e412bea034e2416147d1efee0ee40f3082d953c7a6"
+    },
+    {
+      "path": "intent.md",
+      "sha256": "14c6a81601733adfc418aea83aea4eca422b9f45602f6c451c17ef1ee92c9b3b"
+    },
+    {
+      "path": "decisions.md",
+      "sha256": "692c8ded1e2b240f77d8b8e855303b657a114d159486510498b6538c4b4b8c19"
+    },
+    {
+      "path": "issues/01-two-export-roots-settings.md",
+      "sha256": "9b3baeb18df528b355a0349049db3c2b880d72072c79d13566f0eac24f0e399e"
+    },
+    {
+      "path": "issues/02-export-root-migration.md",
+      "sha256": "73d7d70b327dac575ec734cf3f5fc34282dfed4339ad132d60b3db9b9a593bf1"
+    },
+    {
+      "path": "issues/03-export-plan-two-roots.md",
+      "sha256": "cf4663aceb8c335fe69e2c1002d98574f2ea34c9984131e293a7f2ed96ca5a09"
+    },
+    {
+      "path": "issues/04-visibility-policy-per-root.md",
+      "sha256": "d11e264171dcfcbf985d5ffb38710adc8c3497a15d82dc4c71ef45ad6e421038"
+    },
+    {
+      "path": "issues/05-retirement-and-reexport.md",
+      "sha256": "26c55e20cd0f20edde161e84be1702583b890de3b5c5f94b8ad1be5ca9d8591a"
+    },
+    {
+      "path": "issues/06-adr-worthy-flag-and-consequences.md",
+      "sha256": "6af65f76c395a711616bd639a13d08f53ebf62441dcf827e6c2a704b8d929d16"
+    },
+    {
+      "path": "issues/07-issue-decision-keys.md",
+      "sha256": "92472a0143d4831e1a9a21192197811431343d76ef0296b7352476b071813b6b"
+    },
+    {
+      "path": "issues/08-decisions-md-adr-marks.md",
+      "sha256": "36bd6da878d00610d9c553ac0c03d24ae338b9bae55d9712432e8a7adab1f0cf"
+    },
+    {
+      "path": "issues/09-adr-convention-detection.md",
+      "sha256": "fbc6d80f19efbdcdfe9c9ca9e2987d642150ff4ac2cafcfde81fe33362823455"
+    },
+    {
+      "path": "issues/10-adr-suggestion-files.md",
+      "sha256": "d4e991b06735528258834b9700d61a7a3c003d30a75f020ac646a1f47cca6e21"
+    },
+    {
+      "path": "issues/11-adr-record-ticket-and-handoff.md",
+      "sha256": "4ae1686a9ea4fc2e101db5c64663b8e16b8ca43f46a7cd960e727f461a0a2ae2"
+    },
+    {
+      "path": "briefs/01-two-export-roots-settings.md",
+      "sha256": "b0624bac9063e7b1cbcca74e6c93f7de0f386f34a28988185e7116929b37f791"
+    },
+    {
+      "path": "briefs/02-export-root-migration.md",
+      "sha256": "430899c5f4e3caba74b713a316a63ee04b8f6f0847ab1f870991df0b1b507e37"
+    },
+    {
+      "path": "briefs/03-export-plan-two-roots.md",
+      "sha256": "e43d8d0f3fe0278d4e6f6dc2a312fe0b9feaaa55f424b42efb4179b6058a3245"
+    },
+    {
+      "path": "briefs/04-visibility-policy-per-root.md",
+      "sha256": "f7647f1b7bf3b30b14e622fd18641f983a5af97b1754f9e6a19b2e08876cfd39"
+    },
+    {
+      "path": "briefs/05-retirement-and-reexport.md",
+      "sha256": "149bae39c02520fc20da10de029e0878039ff5b2042b116d71a1fae0e0f014cf"
+    },
+    {
+      "path": "briefs/06-adr-worthy-flag-and-consequences.md",
+      "sha256": "fe88716e10fbd8f91c286fdfc408a5311967f05aa11aac2cf95863fd69e772b1"
+    },
+    {
+      "path": "briefs/07-issue-decision-keys.md",
+      "sha256": "fe9dfd5f87ea545668fe4e73a2d48ce13fad0cf5b84f9324b150a737f20406a1"
+    },
+    {
+      "path": "briefs/08-decisions-md-adr-marks.md",
+      "sha256": "95b010fba1b0470ca95729690a00faeb915e26d0acd80026f590da81a56ab415"
+    },
+    {
+      "path": "briefs/09-adr-convention-detection.md",
+      "sha256": "a985a42e5ab16f0e2dc84952aa622ee8aadf8906dd2321c8c9a525fb7566f325"
+    },
+    {
+      "path": "briefs/10-adr-suggestion-files.md",
+      "sha256": "add008b0f9759d4d951cc40534ae2f1384325913c36908f4bd646b8d8463345a"
+    },
+    {
+      "path": "briefs/11-adr-record-ticket-and-handoff.md",
+      "sha256": "47de85ee26269e505935518b079716e6ef0dd3130d8031342eb5ca01c90ffd4a"
+    }
+  ]
+}
