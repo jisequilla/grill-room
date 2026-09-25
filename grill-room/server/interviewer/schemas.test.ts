@@ -163,7 +163,6 @@ describe("the scout report schema", () => {
   });
 });
 
-
 const [aGroundedTicket, aBlockedTicket] = aHandoffScoutResult().tickets;
 const aDependency = aBlockedTicket!.buildsOn[0]!;
 

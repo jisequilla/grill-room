@@ -640,6 +640,25 @@ describe("ground-briefs", () => {
         `Ticket 1's provedBy.testPath "../elsewhere.test.ts" is not a path relative to the project root that stays inside it`,
       );
     });
+
+    // The path-shape refusal is the only guard for these: the per-file checks
+    // skip a path that fails it.
+    it.each([
+      ["a create that steps out of the repo", "../escape.ts", "create"],
+      ["an edit of an absolute path", "/etc/hosts", "edit"],
+      ["an edit that steps out of the repo midway", "src/../../etc/passwd", "edit"],
+    ] as const)("%s", async (_label, escaping, change) => {
+      const { session } = await aSessionWithHandoff();
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(1, (ticket) => {
+          ticket.filesToChange.push({ path: escaping, change });
+        }),
+      );
+      expect(reason).toContain(
+        `Ticket 1's filesToChange "${escaping}" is not a path relative to the project root that stays inside it`,
+      );
+    });
   });
 
   it("retries a result that breaks a rule the schema once ended the turn on", async () => {
