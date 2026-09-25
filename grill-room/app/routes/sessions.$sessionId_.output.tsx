@@ -161,6 +161,7 @@ export default function SessionOutputRoute() {
         projectId={session.projectId}
         working={working}
         activeTurn={activeTurn ?? null}
+        onSettled={refresh}
       />
 
       <Separator />

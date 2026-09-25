@@ -61,6 +61,24 @@ const UNGROUNDED_BRIEF_REASON_KEY: Record<string, string> = {
   kept: "output.exportUngroundedReasonKept",
 };
 
+/**
+ * The per-ticket ungrounded list to render, given the plan's grounding
+ * state. With no grounding at all (`absent`), every brief's reason is
+ * `no-grounding` — already said once by the grounding line itself — so
+ * listing each of them again is pure repetition (an 18-ticket session would
+ * get 18 identical lines). Collapsed there to nothing; every other state
+ * (`current`, `stale`) still lists whichever briefs the plan does not write
+ * grounded, since those reasons (`edited`, `not-covered`, `kept`) are each
+ * informative on their own. Pure and data-only, so it is cheap to test
+ * without rendering anything.
+ */
+export function visibleUngroundedBriefs<T extends { reason: string }>(
+  groundingState: "absent" | "current" | "stale",
+  ungroundedBriefs: readonly T[],
+): readonly T[] {
+  return groundingState === "absent" ? [] : ungroundedBriefs;
+}
+
 /** How long the slug must sit still before the preview is refreshed. */
 const SLUG_DEBOUNCE_MS = 250;
 
@@ -199,6 +217,9 @@ export function ExportSection({
   }
 
   const plan = preview.isError ? null : preview.data;
+  const shownUngroundedBriefs = plan
+    ? visibleUngroundedBriefs(plan.groundingState, plan.ungroundedBriefs)
+    : [];
   const previewErrorKey = preview.isError
     ? EXPORT_ERROR_KEY[actionErrorCode(preview.error) ?? ""]
     : undefined;
@@ -343,7 +364,11 @@ export function ExportSection({
 
             <div className="space-y-1">
               <p
-                className="text-xs text-muted-foreground"
+                className={
+                  plan.groundingState === "current"
+                    ? "text-xs text-muted-foreground"
+                    : "text-xs text-amber-700 dark:text-amber-300"
+                }
                 data-testid="export-grounding-state"
                 data-state={plan.groundingState}
               >
@@ -352,12 +377,12 @@ export function ExportSection({
                   ? ` — ${t(EXPORT_GROUNDING_STALE_REASON_KEY[plan.groundingStaleReason])}`
                   : ""}
               </p>
-              {plan.ungroundedBriefs.length > 0 ? (
+              {shownUngroundedBriefs.length > 0 ? (
                 <ul
-                  className="space-y-0.5 text-xs text-muted-foreground"
+                  className="space-y-0.5 text-xs text-amber-700 dark:text-amber-300"
                   data-testid="export-ungrounded-briefs"
                 >
-                  {plan.ungroundedBriefs.map((entry) => (
+                  {shownUngroundedBriefs.map((entry) => (
                     <li key={entry.ticket} data-testid={`export-ungrounded-brief-${entry.ticket}`}>
                       {t("output.exportUngroundedBrief", {
                         ticket: entry.ticket,

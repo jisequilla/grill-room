@@ -666,7 +666,7 @@ const messages = {
 
     groundBriefsHeading: "Ground the briefs",
     groundBriefsHint:
-      "Runs a read-only scout over the project's code to fill each brief's File boundaries and Codebase facts, and add Builds on and Proved by. Costs one turn; export never waits for it.",
+      "Runs a read-only scout over the project's code. The next export writes each brief with File boundaries and Codebase facts filled in, and Builds on and Proved by added — the briefs on this page keep their empty slots until then. Costs one turn; export never waits for it.",
     groundBriefs: "Ground the briefs",
     groundingBriefs: "Grounding…",
     groundBriefsFailed: "Could not ground the briefs.",
@@ -679,11 +679,11 @@ const messages = {
     groundBriefsTooManyBlockers:
       "A ticket here has more than {{max}} blockers; one grounding turn cannot cover them all.",
     groundingAbsent: "Not grounded",
-    groundingCurrent: "Grounded at {{sha}}",
-    groundingStaleHeadMoved: "Out of date — grounded at {{sha}}, but the repository has moved since",
-    groundingStaleHandoffChanged:
-      "Out of date — grounded at {{sha}} for an earlier version of the handoff",
-    groundingNoCommit: "no commits yet",
+    groundingCurrent: "Grounded {{at}}",
+    groundingStaleHeadMoved: "Out of date — grounded {{at}}, but the repository has moved since",
+    groundingStaleHandoffChanged: "Out of date — grounded {{at}} for an earlier version of the handoff",
+    groundingAtCommit: "at {{sha}}",
+    groundingBeforeFirstCommit: "before the repository's first commit",
 
     generateAll: "Generate everything",
     generatingAll: "Generating…",
