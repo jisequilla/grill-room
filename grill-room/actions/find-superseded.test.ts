@@ -6,6 +6,7 @@ import {
   InterviewerError,
   resetInterviewer,
   scriptInterviewer,
+  type FindSupersededRequest,
 } from "../server/interviewer/index.js";
 import { supersessionRejectionReasons } from "../server/supersession.js";
 import { describeDecisions } from "../server/tree.js";
@@ -318,9 +319,12 @@ describe("find-superseded", () => {
         kind: "find-superseded",
         looseEndKeys: [],
         replaceableKeys: ["late-first", "a"],
-        // Each one's possible replacers, in tree order: b counts although it
-        // was itself replaced.
-        laterKeys: { "late-first": ["c"], a: ["late-first", "b", "c"] },
+      });
+      // Each one's possible replacers, in tree order: b counts although it
+      // was itself replaced.
+      expect((interviewer.requests[1] as FindSupersededRequest).laterKeys).toEqual({
+        "late-first": ["c"],
+        a: ["late-first", "b", "c"],
       });
       expect(result.state).toBe("done-proposed");
     });
@@ -338,7 +342,9 @@ describe("find-superseded", () => {
       expect(interviewer.requests[1]).toMatchObject({
         kind: "find-superseded",
         replaceableKeys: ["shape"],
-        laterKeys: { shape: ["storage"] },
+      });
+      expect((interviewer.requests[1] as FindSupersededRequest).laterKeys).toEqual({
+        shape: ["storage"],
       });
     });
 
@@ -367,7 +373,9 @@ describe("find-superseded", () => {
       expect(interviewer.requests[1]).toMatchObject({
         kind: "find-superseded",
         replaceableKeys: ["shape"],
-        laterKeys: { shape: ["storage"] },
+      });
+      expect((interviewer.requests[1] as FindSupersededRequest).laterKeys).toEqual({
+        shape: ["storage"],
       });
     });
 
@@ -387,7 +395,9 @@ describe("find-superseded", () => {
       expect(interviewer.requests[0]).toMatchObject({
         kind: "find-superseded",
         replaceableKeys: ["tone"],
-        laterKeys: { tone: ["shape"] },
+      });
+      expect((interviewer.requests[0] as FindSupersededRequest).laterKeys).toEqual({
+        tone: ["shape"],
       });
     });
 

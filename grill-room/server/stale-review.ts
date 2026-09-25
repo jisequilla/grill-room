@@ -339,6 +339,20 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
           updatedAt: now,
         })
         .where(eq(schema.decisions.id, row.id));
+
+      // A re-ask is a reopen: the claims other decisions hold about this one's
+      // answer go with it, exactly as `reopen-decision` drops them. A pending
+      // proposal that it answers or replaces something is withdrawn, and the
+      // decisions it replaced read as current again. `settledById` pointing at
+      // it is kept: it records where that answer came from.
+      await db
+        .update(schema.decisions)
+        .set({ ...CLEARED_PROPOSAL, updatedAt: now })
+        .where(eq(schema.decisions.supersededById, row.id));
+      await db
+        .update(schema.decisions)
+        .set({ replacedById: null, replacedReason: null, updatedAt: now })
+        .where(eq(schema.decisions.replacedById, row.id));
     }
   }
 }

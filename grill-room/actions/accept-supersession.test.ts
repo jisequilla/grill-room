@@ -597,7 +597,11 @@ describe("the lasting links, when the answer changes", () => {
   async function setProposal(decisionId: string, byId: string) {
     await getDb()
       .update(schema.decisions)
-      .set({ supersededById: byId, supersessionReason: "A later decision changed it." })
+      .set({
+        supersededById: byId,
+        supersessionAnswer: "The answer it proposed.",
+        supersessionReason: "A later decision changed it.",
+      })
       .where(eq(schema.decisions.id, decisionId));
   }
 
@@ -694,6 +698,92 @@ describe("the lasting links, when the answer changes", () => {
     await submitRound.run({ id: opened.round!.id });
 
     expect(await readDecision(card.id)).toMatchObject(NO_PROPOSAL);
+  });
+
+  /**
+   * The chain, plus the claims other decisions hold about storage's answer: a
+   * decision storage replaced, a former loose end storage settled, and a loose
+   * end with a pending proposal that storage answers it.
+   */
+  async function aChainWithClaimsOnStorage() {
+    const session = await aChainWithLinks();
+    await insertDecision(session.id, {
+      id: "d-old",
+      key: "old-storage",
+      questionTitle: "Where did the data live before?",
+      answerKind: "own-answer",
+      currentAnswer: "In memory",
+      settledAt: "2026-09-01T00:00:00.000Z",
+      replacedById: "d-storage",
+      replacedReason: REPLACED_REASON,
+    });
+    await insertDecision(session.id, {
+      id: "d-backup",
+      key: "backup",
+      questionTitle: "Is it backed up?",
+      answerKind: "own-answer",
+      currentAnswer: "Backed up with the disk",
+      settledAt: "2026-09-01T00:00:03.000Z",
+      settledById: "d-storage",
+    });
+    await insertDecision(session.id, {
+      id: "d-open",
+      key: "retention",
+      questionTitle: "How long is data kept?",
+      answerKind: "unknown",
+      currentAnswer: "",
+      supersededById: "d-storage",
+      supersessionAnswer: "As long as it is on disk",
+      supersessionReason: "Storage already answers it.",
+    });
+    return session;
+  }
+
+  it("a stale review that re-asks a decision clears Superseded by on what it replaced, and keeps Settled by", async () => {
+    const session = await aChainWithClaimsOnStorage();
+
+    await reopenShapeAndReview(session.id, "re-ask");
+
+    expect(await readDecision("d-old")).toMatchObject({
+      replacedById: null,
+      replacedReason: null,
+      currentAnswer: "In memory",
+    });
+    expect(await readDecision("d-backup")).toMatchObject({
+      settledById: "d-storage",
+    });
+  });
+
+  it("a stale review that re-asks a decision withdraws the pending proposals that name it", async () => {
+    const session = await aChainWithClaimsOnStorage();
+
+    await reopenShapeAndReview(session.id, "re-ask");
+
+    expect(await readDecision("d-open")).toMatchObject({
+      answerKind: "unknown",
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+    });
+  });
+
+  it("a proposal naming a re-asked decision can no longer be accepted", async () => {
+    const session = await aChainWithClaimsOnStorage();
+
+    await reopenShapeAndReview(session.id, "re-ask");
+
+    await expect(
+      acceptSupersession.run({ decisionId: "d-open" }),
+    ).rejects.toThrow(/has no supersession to accept/);
+  });
+
+  it("a stale review that reconfirms a decision leaves the claims on it alone", async () => {
+    const session = await aChainWithClaimsOnStorage();
+
+    await reopenShapeAndReview(session.id, "reconfirm");
+
+    expect(await readDecision("d-old")).toMatchObject({ replacedById: "d-storage" });
+    expect(await readDecision("d-open")).toMatchObject({ supersededById: "d-storage" });
   });
 
   it("reopening a decision clears Superseded by on what it replaced, and keeps Settled by on what it settled", async () => {

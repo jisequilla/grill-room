@@ -26,7 +26,7 @@ import {
   selectedFakeInterviewer,
   setInterviewer,
 } from "./index.js";
-import type { ModelCallObserver } from "./types.js";
+import type { FindSupersededRequest, ModelCallObserver } from "./types.js";
 import {
   aContext,
   anAssessReadinessRequest,
@@ -388,7 +388,9 @@ describe("named scenarios for every request kind", () => {
       kind: "find-superseded",
       looseEndKeys: [],
       replaceableKeys: ["storage"],
-      laterKeys: { storage: ["storage-location"] },
+    });
+    expect((interviewer.requests[3] as FindSupersededRequest).laterKeys).toEqual({
+      storage: ["storage-location"],
     });
     expect(done.state).toBe("done-proposed");
     expect(interviewer.remainingFor(session.id)).toBe(0);
