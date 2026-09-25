@@ -598,6 +598,15 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
 
   const bundleDir = path.join(exportDir, folderName);
 
+  // Hoisted so the handoff block below can work out, per brief, whether the
+  // hash guard will keep its file — before deciding whether HANDOFF.md may
+  // say the briefs are grounded. Whether a file is kept depends only on the
+  // disk hash against the previous manifest and on `overridePaths`, never on
+  // the content this plan renders for it, so reading these this early is
+  // safe: nothing below changes what they report.
+  const previous = await readPreviousManifest(bundleDir);
+  const overrides = await resolveOverrides(bundleDir, input.overridePaths ?? []);
+
   const ticketRows = await db
     .select()
     .from(schema.tickets)
@@ -655,12 +664,11 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   const groundingCurrent = groundingForRender?.current === true;
 
   const handoffFiles: { relativePath: string; content: string }[] = [];
-  // Populated inside `if (handoff)` below; read again, after `files` is
-  // built, to adjust for the hash guard (a "kept" file's grounded text was
-  // never actually written) before they go on the returned plan.
+  // Populated inside `if (handoff)` below, before HANDOFF.md's own content is
+  // decided, so its wording can already see the final answer — including
+  // whether the hash guard will keep any brief's file.
   const groundedBriefs: number[] = [];
   const ungroundedBriefs: UngroundedBrief[] = [];
-  const briefRelativePathByTicket = new Map<number, string>();
   if (handoff) {
     const bundlePath = bundlePathFor(project.visibility, project.rootPath, bundleDir);
 
@@ -688,9 +696,16 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     // Eligibility alone is not "grounded", though: an eligible text with no
     // grounding to apply, or with a grounding that does not cover its ticket,
     // still renders fresh (today's template) but with nothing grounded in
-    // it. A brief only counts as grounded — for `groundedBriefs` below, and
-    // for whether HANDOFF.md may say so — when it is eligible *and* the
-    // session's grounding (current or stale) has an entry for its ticket.
+    // it. Nor is being eligible and covered enough on its own: the hash
+    // guard may still keep the file already on disk instead of writing this
+    // plan's grounded text (see "The guard" above) — whether a file is kept
+    // depends only on its disk hash against the previous manifest and on
+    // `overridePaths`, never on the content rendered for it, so it can be
+    // checked here, before HANDOFF.md's own content is decided below. A
+    // brief only counts as grounded — for `groundedBriefs`, and for whether
+    // HANDOFF.md may say so — when it is eligible, the session's grounding
+    // (current or stale) has an entry for its ticket, and the guard is not
+    // keeping its file.
     const loadedSource = await loadHandoffSource(session.id);
     const briefSource = "source" in loadedSource ? loadedSource.source : null;
     const wasEdited = handoff.editedAt !== null;
@@ -718,18 +733,28 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       } else if (!covered) {
         ungroundedBriefs.push({ ticket: brief.ticketNumber, reason: "not-covered" });
       } else {
-        groundedBriefs.push(brief.ticketNumber);
+        const briefAbsolutePath = path.resolve(bundleDir, brief.relativePath);
+        const briefEditedOnDisk = await isEdited(briefAbsolutePath, brief.relativePath, previous);
+        const briefKept = briefEditedOnDisk && !overrides.has(brief.relativePath);
+        if (briefKept) {
+          ungroundedBriefs.push({ ticket: brief.ticketNumber, reason: "kept" });
+        } else {
+          groundedBriefs.push(brief.ticketNumber);
+        }
       }
 
-      briefRelativePathByTicket.set(brief.ticketNumber, brief.relativePath);
       briefFiles.push({ relativePath: brief.relativePath, content: fillBundlePath(markdown, bundlePath) });
     }
 
     // HANDOFF.md may say "the briefs are grounded" only once every brief this
-    // plan writes really is grounded (the corrected `groundedBriefs` above,
-    // not merely "eligible") and the grounding itself is current — stale
-    // grounding still needs checking against today's code, so it keeps
-    // today's fill-the-slots wording even when every brief is covered.
+    // plan writes really is grounded (the corrected `groundedBriefs` above —
+    // eligible, covered, and not a `kept` file — not merely "eligible") and
+    // the grounding itself is current — stale grounding still needs checking
+    // against today's code, so it keeps today's fill-the-slots wording even
+    // when every brief is covered. `ungroundedBriefs` already reflects the
+    // hash guard at this point, computed per brief in the loop above, before
+    // this decision is made — never after, or a brief the guard kept could
+    // still count as grounded here.
     const allBriefsGrounded = briefEntries.length > 0 && ungroundedBriefs.length === 0;
     const useGroundedWording = groundingCurrent && allBriefsGrounded;
     const headerEligible =
@@ -763,11 +788,9 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     return absolutePath;
   });
 
-  const previous = await readPreviousManifest(bundleDir);
   const removalPaths = await removalCandidates(bundleDir, previous, new Set(plannedPaths));
 
   await assertContained([bundleDir, ...plannedPaths, ...removalPaths], realRoot);
-  const overrides = await resolveOverrides(bundleDir, input.overridePaths ?? []);
 
   const contentBundleFiles: BundleFile[] = [];
   for (const [index, file] of contentFiles.entries()) {
@@ -814,23 +837,6 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     },
   ];
 
-  // A brief the hash guard kept (edited on disk since the last export) never
-  // actually receives the grounded text this plan rendered for it — `kept`
-  // leaves the file exactly as it is. Move such a ticket out of
-  // `groundedBriefs` here, after the guard's verdict is known, so a grounded
-  // brief is reported grounded only when its grounded text is truly what
-  // lands (or already sits) on disk. This runs identically for `preview-export`
-  // and `export-session`, since both read the guard from the same disk state.
-  const keptGroundedBriefs = groundedBriefs.filter((ticket) => {
-    const relativePath = briefRelativePathByTicket.get(ticket);
-    return relativePath !== undefined && files.some((file) => file.relativePath === relativePath && file.kept);
-  });
-  const finalGroundedBriefs = groundedBriefs.filter((ticket) => !keptGroundedBriefs.includes(ticket));
-  const finalUngroundedBriefs: UngroundedBrief[] = [
-    ...ungroundedBriefs,
-    ...keptGroundedBriefs.map((ticket) => ({ ticket, reason: "kept" as const })),
-  ];
-
   return {
     sessionId: session.id,
     project: {
@@ -857,8 +863,8 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     exportBlockedReason: gate.reason,
     briefGroundingState,
     briefGroundingStaleReason,
-    groundedBriefs: finalGroundedBriefs,
-    ungroundedBriefs: finalUngroundedBriefs,
+    groundedBriefs,
+    ungroundedBriefs,
   };
 }
 

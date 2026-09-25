@@ -569,9 +569,12 @@ for what counts. HANDOFF.md's "Before launching a ticket" step says the
 briefs are grounded and to check them, instead of telling the orchestrator to
 fill File boundaries and Codebase facts by hand, only once the grounding is
 current *and* every brief in the plan is actually grounded — stale grounding,
-or even one brief that fell back to plain slots, keeps today's fill-the-slots
-wording, since it would otherwise tell the orchestrator slots are filled that
-are not.
+one brief that fell back to plain slots, or one the hash guard is keeping
+(rendered grounded, but never actually written — see "kept" below), keeps
+today's fill-the-slots wording, since it would otherwise tell the
+orchestrator slots are filled that are not. Whether a brief is kept is
+worked out before HANDOFF.md's wording is decided, not after, so a kept
+brief can never slip through as "grounded".
 
 **Where grounding is applied: at export, not at generation.** `generate-handoff`
 and `update-handoff` are unchanged: the handoff row always stores the plain,

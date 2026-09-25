@@ -1417,10 +1417,11 @@ describe("export writes grounded briefs", () => {
     await generateHandoff.run({ sessionId: session.id });
     await groundNow(session.id, root);
 
-    // A first export writes both briefs grounded.
+    // A first export writes both briefs grounded, so HANDOFF.md says so too.
     const first = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
     expect(first.groundedBriefs.sort()).toEqual([1, 2]);
     const bundleDir = path.join(root, ".scratch", "grill-room");
+    expect(await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8")).toContain("grounded and current");
 
     // Someone hand-edits the exported brief file directly in the repo,
     // outside Grill Room, after the export — the hash guard will keep it.
@@ -1442,5 +1443,13 @@ describe("export writes grounded briefs", () => {
     // still (re-)written grounded.
     expect(await readBrief(bundleDir, "02-store-on-disk.md")).toBe(editedOnDisk);
     expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toContain("## Proved by");
+
+    // Not every brief is actually grounded any more (ticket 2 is kept), so
+    // the re-exported HANDOFF.md must fall back to the fill-the-slots
+    // wording, not still claim the briefs are grounded and current.
+    const handoffMarkdown = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoffMarkdown).toContain("Fill the brief's **File boundaries** slot");
+    expect(handoffMarkdown).toContain("Fill the **Codebase facts** slot");
+    expect(handoffMarkdown).not.toContain("grounded and current");
   });
 });
