@@ -1276,7 +1276,7 @@ describe("export writes grounded briefs", () => {
     await groundNow(session.id, root);
 
     const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
-    expect(result.ungroundedBriefs).toEqual([1]);
+    expect(result.ungroundedBriefs).toEqual([{ ticket: 1, reason: "edited" }]);
     expect(result.groundedBriefs).toEqual([2]);
     const bundleDir = path.join(root, ".scratch", "grill-room");
 
@@ -1302,7 +1302,7 @@ describe("export writes grounded briefs", () => {
     const preview = await previewExport.run({ sessionId: session.id });
     expect(preview.groundingState).toBe("current");
     expect(preview.groundedBriefs).toContain(1);
-    expect(preview.ungroundedBriefs).not.toContain(1);
+    expect(preview.ungroundedBriefs.some((entry: { ticket: number }) => entry.ticket === 1)).toBe(false);
 
     const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
     expect(result.groundedBriefs).toContain(1);
@@ -1358,5 +1358,89 @@ describe("export writes grounded briefs", () => {
     const expected = fillBundlePath(renderBrief(loaded.source, ticket1), bundlePath);
 
     expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(expected);
+  });
+
+  it("an older-template handoff with one brief hand-edited: HANDOFF.md keeps the fill wording, and the lists are accurate", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+
+    // Ticket 2's brief is left sitting under an older template — nobody
+    // touches it, and `editedAt` is still null at this point.
+    const olderTemplateText =
+      "# Brief 02: Store on disk\n\nAn older rendering of this brief, before a template wording change.\n\n<!-- slot: file-boundaries -->\n\n<!-- slot: codebase-facts -->\n";
+    await overwriteStoredBriefText(session.id, 2, olderTemplateText);
+    expect(await editedAtOf(session.id)).toBeNull();
+
+    // Editing ticket 1's brief through update-handoff sets `editedAt` for the
+    // whole handoff. From here, the equality check decides eligibility for
+    // *every* text — including ticket 2's, which nobody touched but which
+    // still no longer matches today's template.
+    const handEdited = "# Brief 01: Hand-edited\n\nSomeone already wrote this by hand.\n";
+    await updateHandoff.run({ sessionId: session.id, briefs: [{ ticketNumber: 1, markdown: handEdited }] });
+    expect(await editedAtOf(session.id)).not.toBeNull();
+
+    await groundNow(session.id, root);
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.groundingState).toBe("current");
+    expect(preview.groundedBriefs).toEqual([]);
+    expect(
+      [...preview.ungroundedBriefs].sort((a: { ticket: number }, b: { ticket: number }) => a.ticket - b.ticket),
+    ).toEqual([
+      { ticket: 1, reason: "edited" },
+      { ticket: 2, reason: "edited" },
+    ]);
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(result.groundedBriefs).toEqual([]);
+    expect(
+      [...result.ungroundedBriefs].sort((a: { ticket: number }, b: { ticket: number }) => a.ticket - b.ticket),
+    ).toEqual([
+      { ticket: 1, reason: "edited" },
+      { ticket: 2, reason: "edited" },
+    ]);
+
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    const handoffMarkdown = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoffMarkdown).toContain("Fill the brief's **File boundaries** slot");
+    expect(handoffMarkdown).toContain("Fill the **Codebase facts** slot");
+    expect(handoffMarkdown).not.toContain("grounded and current");
+
+    expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(handEdited);
+    const second = await readBrief(bundleDir, "02-store-on-disk.md");
+    expect(second).toBe(olderTemplateText);
+    expect(second).not.toContain("## Proved by");
+  });
+
+  it("a brief the hash guard kept is not reported as grounded", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    await groundNow(session.id, root);
+
+    // A first export writes both briefs grounded.
+    const first = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(first.groundedBriefs.sort()).toEqual([1, 2]);
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+
+    // Someone hand-edits the exported brief file directly in the repo,
+    // outside Grill Room, after the export — the hash guard will keep it.
+    const editedOnDisk = "# Hand-edited directly in the repo, not through update-handoff\n";
+    await fs.writeFile(path.join(bundleDir, "briefs", "02-store-on-disk.md"), editedOnDisk);
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.groundedBriefs).toEqual([1]);
+    expect(preview.ungroundedBriefs).toEqual(
+      expect.arrayContaining([{ ticket: 2, reason: "kept" }]),
+    );
+
+    const second = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(second.groundedBriefs).toEqual([1]);
+    expect(second.ungroundedBriefs).toEqual(expect.arrayContaining([{ ticket: 2, reason: "kept" }]));
+    expect(second.kept.some((p) => p.endsWith("02-store-on-disk.md"))).toBe(true);
+
+    // Ticket 2's file on disk is untouched by the export; ticket 1's is
+    // still (re-)written grounded.
+    expect(await readBrief(bundleDir, "02-store-on-disk.md")).toBe(editedOnDisk);
+    expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toContain("## Proved by");
   });
 });

@@ -137,13 +137,21 @@ async function groundNow(sessionId: string, root: string): Promise<void> {
 describe("preview-export: brief grounding state", () => {
   useTestDatabase();
 
-  it("reports absent when the session has never been grounded", async () => {
+  it("reports absent when the session has never been grounded, and nothing counts as grounded", async () => {
     const { session } = await aSessionWithHandoff();
 
     const preview = await previewExport.run({ sessionId: session.id });
 
     expect(preview.groundingState).toBe("absent");
     expect(preview.groundingStaleReason).toBeNull();
+    // Eligible briefs render fresh from today's template with no grounding
+    // to apply, but that is not "grounded": groundedBriefs must stay empty,
+    // and every brief must be listed as ungrounded with reason no-grounding.
+    expect(preview.groundedBriefs).toEqual([]);
+    expect(preview.ungroundedBriefs.map((entry: { ticket: number }) => entry.ticket).sort()).toEqual([1, 2]);
+    for (const entry of preview.ungroundedBriefs) {
+      expect(entry.reason).toBe("no-grounding");
+    }
   });
 
   it("reports current once a grounding matches today's handoff and HEAD", async () => {
