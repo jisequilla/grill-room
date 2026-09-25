@@ -20,6 +20,7 @@ import path from "node:path";
 
 import { eq } from "@agent-native/core/db/schema";
 
+import { checkIgnored } from "./check-ignore.js";
 import { getDb, schema } from "./db/index.js";
 import { runGit } from "./git.js";
 import {
@@ -243,30 +244,6 @@ function listNumbers(numbers: readonly number[]): string {
 }
 
 /**
- * Whether one line of `git check-ignore -v -n` output — everything before
- * its trailing tab and pathname — means the path is genuinely excluded.
- *
- * `::` alone is the miss marker: no rule matched. Anything else is
- * `<source>:<line>:<pattern>`, and the path counts as ignored only when
- * `pattern` does not start with `!` — a negation re-includes a path an
- * earlier, broader pattern excluded (`*.log` + `!important.log`), and `-v`
- * reports that negating rule as the match, not a miss.
- *
- * `source` names a file (`.gitignore`, `.git/info/exclude`, ...) and can
- * itself contain colons, so the split point is found from `line` — always a
- * run of digits — rather than by counting colons from the left. A field
- * that doesn't fit this shape at all (a future git version's format
- * changing under us) is treated as an ordinary, non-negating match rather
- * than silently letting an unrecognized line make an ignored create look
- * safe.
- */
-function excludesPath(field: string): boolean {
-  if (field === "::") return false;
-  const pattern = /^.*?:\d+:(.*)$/.exec(field);
-  return pattern === null || !pattern[1]!.startsWith("!");
-}
-
-/**
  * Why a handoff scout result cannot be stored, written for the scout. Empty
  * when it can:
  *
@@ -436,54 +413,22 @@ export async function reasonsToRefuseHandoffGrounding(
   }
 
   if (toCheckIgnored.length > 0) {
+    // Deduplicated, batched into one call, and classified by the same
+    // position-based rules `visibility.ts`'s own ignore check uses — see
+    // `check-ignore.ts`.
     const unique = [...new Set(toCheckIgnored.map((entry) => entry.path))];
-    // A path starting with `:` is git pathspec magic (`:/` is "top", `:(word)`
-    // the long form); an untrusted, model-supplied path can start with it by
-    // chance. `./` in front of every argument makes it start with `.`
-    // instead, which git never reads as magic, and is a no-op for a path
-    // that did not start with `:` to begin with — it still matches the same
-    // ignore rules through the prefix.
-    //
-    // `-v` (verbose) plus `-n` (also show non-matching paths) prints exactly
-    // one line per argument, in the order given: `<source>:<line>:<pattern>`
-    // then a tab then the pathname for a match — including one decided by a
-    // negation (`!pattern`), which does NOT mean ignored, see `excludesPath`
-    // — or `::` then a tab then the pathname for a miss. Matched/not-matched
-    // is read off by POSITION, never by comparing that trailing pathname
-    // against what was sent — git is free to rewrite it (Unicode-normalize
-    // under `core.precomposeUnicode`, re-encode a lone surrogate its own
-    // way, quote-and-escape it) in ways that no longer equal the input
-    // string, so a text comparison can miss an ignored path silently. Line
-    // count is checked against the argument count before any line is
-    // trusted, so a git version that batches or reorders these differently
-    // fails the check rather than mismapping it.
-    const checked = await runGit(realRoot, [
-      "check-ignore",
-      "-v",
-      "-n",
-      "--",
-      ...unique.map((entry) => `./${entry}`),
-    ]);
-    const lines = checked.stdout.split("\n").filter(Boolean);
-    if (checked.exitCode !== 0 && checked.exitCode !== 1) {
+    const checked = await checkIgnored(realRoot, unique);
+    if (checked.status === "exit-error") {
       reasons.push(
         `The files marked create could not be checked against the project's ignore rules (git check-ignore exited ${checked.exitCode}); plan ordinary paths inside the project.`,
       );
-    } else if (lines.length !== unique.length) {
+    } else if (checked.status === "count-mismatch") {
       reasons.push(
-        `The files marked create could not be checked against the project's ignore rules (git check-ignore printed ${lines.length} results for ${unique.length} paths: ${unique.join(", ")}); plan ordinary paths inside the project.`,
+        `The files marked create could not be checked against the project's ignore rules (git check-ignore printed ${checked.lineCount} results for ${checked.pathCount} paths: ${unique.join(", ")}); plan ordinary paths inside the project.`,
       );
     } else {
-      const ignoredPaths = new Set(
-        unique.filter((_, index) => {
-          const line = lines[index]!;
-          const tab = line.indexOf("\t");
-          const field = tab === -1 ? line : line.slice(0, tab);
-          return excludesPath(field);
-        }),
-      );
       for (const entry of toCheckIgnored) {
-        if (ignoredPaths.has(entry.path)) {
+        if (checked.ignored.get(entry.path)) {
           reasons.push(
             `Ticket ${entry.ticket} marks ${entry.path} as create, but git ignores that path, so the repository would never track it; plan a path git tracks.`,
           );
