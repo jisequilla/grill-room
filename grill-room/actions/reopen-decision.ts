@@ -7,7 +7,11 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { laterTimestamp } from "../server/ordering.js";
 import { returnSessionToInterviewing } from "../server/session-state.js";
-import { deriveTreeStates, treeFacts } from "../server/tree.js";
+import {
+  CLEARED_ANSWER_LINKS,
+  deriveTreeStates,
+  treeFacts,
+} from "../server/tree.js";
 import { failIfTurnInProgress } from "../server/turn.js";
 import getCurrentRound from "./get-current-round.js";
 
@@ -98,6 +102,7 @@ export async function reopenDecisionCore(
       dispositionTarget: null,
       settledAt: null,
       reopenedAt: now,
+      ...CLEARED_ANSWER_LINKS,
       updatedAt: now,
     })
     .where(eq(schema.decisions.id, decisionId));
@@ -113,6 +118,14 @@ export async function reopenDecisionCore(
       updatedAt: now,
     })
     .where(eq(schema.decisions.supersededById, decisionId));
+
+  // Nor does it still replace anything: the decisions it replaced read as
+  // current again. A loose end it settled keeps `settledById`, which records
+  // where that answer came from rather than a claim about this one.
+  await db
+    .update(schema.decisions)
+    .set({ replacedById: null, replacedReason: null, updatedAt: now })
+    .where(eq(schema.decisions.replacedById, decisionId));
 
   if (session.state !== "interviewing") {
     await returnSessionToInterviewing(session, now);

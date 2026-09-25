@@ -305,6 +305,19 @@ export function classifyLooseEnds(
   return result;
 }
 
+/**
+ * The lasting links a decision's own answer carries: which later decision
+ * replaced it, and which decision's answer settled it. Both describe the
+ * answer as it stands, so any write that changes the answer or its kind
+ * spreads this into the same update — other than accepting a supersession,
+ * which is what sets them.
+ */
+export const CLEARED_ANSWER_LINKS = {
+  replacedById: null,
+  replacedReason: null,
+  settledById: null,
+} as const;
+
 /** A stored decision, exactly as the table holds it. */
 export type DecisionRow = typeof decisions.$inferSelect;
 

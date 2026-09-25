@@ -7,7 +7,7 @@ import { describeDecisions } from "../server/tree.js";
 
 export default defineAction({
   description:
-    "Reject the supersession proposed on a loose end: the proposal is dropped and the decision is left exactly as open as it was. Records nothing in history — the interviewer's guess was not something the user decided. Refuses a decision with no supersession pending.",
+    "Reject the supersession proposed on a decision — a loose end a later decision answered, or a settled decision a later one replaced: the proposal is dropped and the decision is left exactly as it was. Records nothing in history — the interviewer's guess was not something the user decided. Refuses a decision with no supersession pending.",
   schema: z.object({
     decisionId: z.string().min(1).describe("Decision id"),
   }),

@@ -21,6 +21,7 @@ import {
 import {
   deferredFrontierIds,
   neverAnsweredFrontierIds,
+  CLEARED_ANSWER_LINKS,
   toTreeDecision,
   validateProposal,
   type DecisionRow,
@@ -215,6 +216,7 @@ export default defineAction({
           answerKind: null,
           currentAnswer: null,
           settledAt: null,
+          ...CLEARED_ANSWER_LINKS,
           updatedAt: now,
         })
         .where(

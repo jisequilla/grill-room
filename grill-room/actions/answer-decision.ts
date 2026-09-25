@@ -5,7 +5,11 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { describeDecisions, LOOSE_END_ANSWER_KINDS } from "../server/tree.js";
+import {
+  CLEARED_ANSWER_LINKS,
+  describeDecisions,
+  LOOSE_END_ANSWER_KINDS,
+} from "../server/tree.js";
 
 export default defineAction({
   description:
@@ -67,6 +71,7 @@ export default defineAction({
         supersededById: null,
         supersessionAnswer: null,
         supersessionReason: null,
+        ...CLEARED_ANSWER_LINKS,
         updatedAt: now,
       })
       .where(eq(schema.decisions.id, decisionId))
