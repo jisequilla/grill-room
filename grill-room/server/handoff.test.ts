@@ -226,6 +226,20 @@ describe("handoffFingerprint", () => {
     expect(handoffFingerprint(aSource())).toBe(handoffFingerprint(aSource()));
   });
 
+  it("hashes a project on the delivery-recipe/review defaults exactly as it did before those fields existed", () => {
+    // Pinned by running the pre-change `handoffFingerprint` (the version
+    // with no `deliveryRecipe`/`adversarialReview` in its canonical object
+    // at all) over this same `aSource()` fixture, minus those two fields.
+    // `deliveryRecipe: "pull-request"` and `adversarialReview: true` are the
+    // migration defaults every existing project got, so a project still on
+    // them must keep hashing this way — otherwise every handoff stored
+    // before this change goes stale on upgrade for nothing that actually
+    // changed.
+    expect(handoffFingerprint(aSource())).toBe(
+      "7cb3834b6357f33c1d8fd7a276ceb2266946f3cf08139ebab86bf924b1125261",
+    );
+  });
+
   it("changes with a blocker, a ticket field, the spec, or a project field the templates use", () => {
     const base = handoffFingerprint(aSource());
     const variants: HandoffSource[] = [

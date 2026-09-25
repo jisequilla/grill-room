@@ -208,12 +208,19 @@ export async function seedVisibility(
 
 /**
  * Guess a project's delivery recipe from its repository's remotes, with
- * read-only `git remote -v`: any remote means work can reach a forge, so
- * `pull-request`; none means `local-merge`. Only registration calls this —
- * an explicit value always wins, and editing a project never re-guesses.
+ * read-only `git remote -v`: any remote (even a `pushurl`-only or URL-less
+ * stanza — anything `git remote -v` prints a line for) means work can reach
+ * a forge, so `pull-request`; none means `local-merge`. A non-zero exit —
+ * `remote -v` failed rather than answered, e.g. a broken `.git/config` —
+ * also guesses `pull-request`: the safer default, and the same one existing
+ * rows migrated to, rather than silently falling through to the less safe
+ * `local-merge` for a failure nobody is told about. Only registration calls
+ * this — an explicit value always wins, and editing a project never
+ * re-guesses.
  */
 export async function guessDeliveryRecipe(root: string): Promise<DeliveryRecipe> {
   const result = await runGit(root, ["remote", "-v"]);
+  if (result.exitCode !== 0) return "pull-request";
   return result.stdout.trim().length > 0 ? "pull-request" : "local-merge";
 }
 
@@ -395,6 +402,28 @@ function checkDeliveryRecipe(recipe: string): DeliveryRecipe | Refused {
         "invalid-delivery-recipe",
         `The delivery recipe must be one of ${DELIVERY_RECIPES.join(", ")}: ${recipe}`,
       );
+}
+
+/**
+ * What `updateProject`'s merge carries forward for `deliveryRecipe`: the
+ * patch when it is a recognized recipe, the existing value otherwise. A
+ * blank patch (which `??` lets through unlike `undefined`/`null`) or an
+ * unrecognized one is ignored rather than passed to `validate()` — where a
+ * blank value there means "guess it". The action's `z.enum` already keeps
+ * either case from reaching here through `update-project`; this is what
+ * makes "editing never re-guesses" (see `guessDeliveryRecipe` and
+ * `AGENTS.md`) true of this function's own contract, not just the action
+ * layered in front of it.
+ */
+function sanitizedDeliveryRecipePatch(
+  patch: string | null | undefined,
+  existing: DeliveryRecipe,
+): DeliveryRecipe {
+  if (blank(patch)) return existing;
+  const trimmed = (patch as string).trim();
+  return (DELIVERY_RECIPES as readonly string[]).includes(trimmed)
+    ? (trimmed as DeliveryRecipe)
+    : existing;
 }
 
 async function findByRoot(root: string): Promise<Project | undefined> {
@@ -583,7 +612,7 @@ export async function updateProject(
     trackerKind: patch.trackerKind ?? existing.trackerKind,
     buildRecordLogging: patch.buildRecordLogging ?? existing.buildRecordLogging,
     visibility: patch.visibility ?? existing.visibility,
-    deliveryRecipe: patch.deliveryRecipe ?? existing.deliveryRecipe,
+    deliveryRecipe: sanitizedDeliveryRecipePatch(patch.deliveryRecipe, existing.deliveryRecipe),
     adversarialReview: patch.adversarialReview ?? existing.adversarialReview,
   };
 

@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -262,6 +263,16 @@ describe("registerProject", () => {
       );
       expect(explicitPr.deliveryRecipe).toBe("pull-request");
     });
+
+    it("falls back to pull-request, not local-merge, when git remote -v fails", async () => {
+      const root = repos.create();
+      // A broken .git/config makes every git subcommand exit non-zero with
+      // empty stdout — indistinguishable from "no remotes" by stdout alone,
+      // so the exit code is what must be checked.
+      appendFileSync(path.join(root, ".git", "config"), "not valid ini [[[\n");
+
+      expect(await guessDeliveryRecipe(root)).toBe("pull-request");
+    });
   });
 
   it("a row written before this column existed reads as pull-request with review on", async () => {
@@ -442,12 +453,21 @@ describe("updateProject", () => {
     expect(untouched).toMatchObject({ deliveryRecipe: "pull-request", adversarialReview: false });
   });
 
-  it("refuses an unknown delivery recipe", async () => {
+  it("ignores a blank or unrecognized delivery recipe in a patch, keeping the existing value rather than re-guessing", async () => {
     const project = await aProject();
+    expect(project.deliveryRecipe).toBe("local-merge");
 
-    expect(
-      refusalCode(await updateProject(project.id, { deliveryRecipe: "carrier-pigeon" })),
-    ).toBe("invalid-delivery-recipe");
+    // A remote added after registration would flip a fresh guess to
+    // pull-request; it must not flip an edit that only reaches `blank()`.
+    addRemote(project.rootPath);
+
+    const blankPatch = registered(await updateProject(project.id, { deliveryRecipe: "" }));
+    expect(blankPatch.deliveryRecipe).toBe("local-merge");
+
+    const unknownPatch = registered(
+      await updateProject(project.id, { deliveryRecipe: "carrier-pigeon" }),
+    );
+    expect(unknownPatch.deliveryRecipe).toBe("local-merge");
   });
 
   it("refuses to blank a required field", async () => {

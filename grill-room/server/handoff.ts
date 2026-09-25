@@ -95,6 +95,13 @@ export interface RenderedHandoff {
 /**
  * A hash over every input the templates render from. The field list is fixed
  * and ordered here, so the same inputs always hash the same.
+ *
+ * `deliveryRecipe` and `adversarialReview` join the canonical object only
+ * when they differ from the migration default (`pull-request`, `true`):
+ * these two fields were added to every existing project by an additive
+ * migration, so a project still on the defaults must hash exactly as it did
+ * before these fields existed, or every handoff stored before this change
+ * goes stale on upgrade for nothing that actually changed.
  */
 export function handoffFingerprint(source: HandoffSource): string {
   const canonical = {
@@ -119,8 +126,10 @@ export function handoffFingerprint(source: HandoffSource): string {
       trackerKind: source.project.trackerKind,
       buildRecordLogging: source.project.buildRecordLogging,
       visibility: source.project.visibility,
-      deliveryRecipe: source.project.deliveryRecipe,
-      adversarialReview: source.project.adversarialReview,
+      ...(source.project.deliveryRecipe === "pull-request"
+        ? {}
+        : { deliveryRecipe: source.project.deliveryRecipe }),
+      ...(source.project.adversarialReview === false ? { adversarialReview: false } : {}),
       trackerCommandsJson: source.project.trackerCommandsJson,
     },
   };
