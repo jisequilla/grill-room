@@ -2,6 +2,7 @@ import type {
   AssessReadinessEvidenceItem,
   AssessReadinessResult,
   FindSupersededResult,
+  HandoffScoutResult,
   ProposeRoundResult,
   ScoutProjectResult,
 } from "./schemas.js";
@@ -9,6 +10,7 @@ import type {
   AssessReadinessRequest,
   DecisionSnapshot,
   FindSupersededRequest,
+  HandoffScoutRequest,
   InterviewContext,
   ProposeRoundRequest,
   ProjectServerFacts,
@@ -269,6 +271,87 @@ export function anAssessReadinessResult(
     unknowns: ["Where the sessions are stored"],
     verdict: "ready",
     missing: [],
+    ...overrides,
+  };
+}
+
+export function aHandoffScoutRequest(
+  overrides: Partial<Omit<HandoffScoutRequest, "kind">> = {},
+): HandoffScoutRequest {
+  return {
+    kind: "handoff-scout",
+    context: aContext({
+      idea: "Alert the on-call engineer when ingest falls behind.",
+      title: "Ingest lag alerts",
+    }),
+    projectRoot: "/Users/someone/projects/observability",
+    facts: someProjectServerFacts(),
+    specMarkdown:
+      "## Problem Statement\n\nNobody is told when ingest falls behind.",
+    tickets: [
+      {
+        number: 1,
+        title: "Measure the lag alert threshold",
+        body: "Add a lag alert beside the ingest metrics.",
+        blockedBy: [],
+      },
+      {
+        number: 2,
+        title: "Page the on-call engineer",
+        body: "Wire the lag alert into the ingest queue.",
+        blockedBy: [1],
+      },
+    ],
+    rejectionReason: null,
+    ...overrides,
+  };
+}
+
+/** A grounding of {@link aHandoffScoutRequest}'s two tickets. */
+export function aHandoffScoutResult(
+  overrides: Partial<HandoffScoutResult> = {},
+): HandoffScoutResult {
+  return {
+    tickets: [
+      {
+        number: 1,
+        filesToChange: [
+          { path: "src/ingest/lag-alert.ts", change: "create" },
+          { path: "src/ingest/metrics.ts", change: "edit" },
+        ],
+        buildsOnFiles: ["src/ingest/metrics.ts:12-30"],
+        facts: [
+          {
+            statement: "Ingest lag is measured in src/ingest/metrics.ts.",
+            citation: "src/ingest/metrics.ts:12-30",
+          },
+        ],
+        buildsOn: [],
+        provedBy: {
+          testPath: "src/ingest/lag-alert.test.ts",
+          command: "npm test -- lag-alert",
+        },
+      },
+      {
+        number: 2,
+        filesToChange: [{ path: "src/ingest/queue.ts", change: "edit" }],
+        buildsOnFiles: ["docs/adr/0003-queue.md:5-9"],
+        facts: [],
+        buildsOn: [
+          {
+            blocker: 1,
+            provides: "The lag alert module.",
+            citation: null,
+            createdPath: "src/ingest/lag-alert.ts",
+            check: "test -f src/ingest/lag-alert.ts",
+          },
+        ],
+        provedBy: {
+          testPath: "src/ingest/queue.test.ts",
+          command: "npm test -- queue",
+        },
+      },
+    ],
     ...overrides,
   };
 }

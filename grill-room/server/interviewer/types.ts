@@ -4,6 +4,7 @@ import type {
   AssessReadinessResult,
   BreakIntoTicketsResult,
   FindSupersededResult,
+  HandoffScoutResult,
   OfferedChoice,
   ProposeRoundResult,
   RequestKind,
@@ -284,6 +285,37 @@ export interface ScoutProjectRequest extends RequestBase {
 /** The model every scout runs on. The session's model lock does not apply. */
 export const SCOUT_MODEL: InterviewerModel = "sonnet";
 
+/** One ticket of the handoff a handoff scout grounds. */
+export interface HandoffScoutTicket {
+  number: number;
+  title: string;
+  body: string;
+  /** Numbers of the tickets that must land first. */
+  blockedBy: number[];
+}
+
+/**
+ * Ground every brief of a session's handoff in the project's code, in one
+ * turn. Like {@link ScoutProjectRequest}, it always runs on
+ * {@link SCOUT_MODEL} whatever the context's model, never resumes the
+ * context's conversation, and reads {@link HandoffScoutRequest.projectRoot},
+ * never the context's docs folder. From the context it reads only the idea
+ * and title.
+ */
+export interface HandoffScoutRequest extends RequestBase {
+  kind: "handoff-scout";
+  /** The absolute root of the project: the only folder the scout can read. */
+  projectRoot: string;
+  facts: ProjectServerFacts;
+  /** The session's spec, which defines the work with the tickets. */
+  specMarkdown: string;
+  /** Every ticket of the handoff, in number order. */
+  tickets: HandoffScoutTicket[];
+}
+
+/** A request that reads a whole project: sonnet, read-only, a conversation of its own. */
+export type ProjectScoutRequest = ScoutProjectRequest | HandoffScoutRequest;
+
 export type InterviewerRequest =
   | ProposeRoundRequest
   | ReviewStaleRequest
@@ -291,7 +323,15 @@ export type InterviewerRequest =
   | SynthesizeSpecRequest
   | BreakIntoTicketsRequest
   | AssessReadinessRequest
-  | ScoutProjectRequest;
+  | ScoutProjectRequest
+  | HandoffScoutRequest;
+
+/** Whether a request reads a whole project, as the project and handoff scouts do. */
+export function isProjectScoutRequest(
+  request: InterviewerRequest,
+): request is ProjectScoutRequest {
+  return request.kind === "scout-project" || request.kind === "handoff-scout";
+}
 
 /** A request narrowed to one kind, for generic code over every kind. */
 export type RequestFor<Kind extends RequestKind> = Extract<
@@ -408,4 +448,8 @@ export interface Interviewer {
     request: ScoutProjectRequest,
     observer?: ModelCallObserver,
   ): Promise<InterviewerTurn<ScoutProjectResult>>;
+  scoutHandoff(
+    request: HandoffScoutRequest,
+    observer?: ModelCallObserver,
+  ): Promise<InterviewerTurn<HandoffScoutResult>>;
 }

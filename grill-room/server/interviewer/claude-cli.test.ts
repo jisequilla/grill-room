@@ -22,6 +22,8 @@ import {
   anAssessReadinessResult,
   aFindSupersededRequest,
   aFindSupersededResult,
+  aHandoffScoutRequest,
+  aHandoffScoutResult,
   aProposeRoundRequest,
   aProposeRoundResult,
   aScoutProjectRequest,
@@ -604,6 +606,201 @@ describe("what the adapter sends for a project scout", () => {
     await expect(
       createClaudeCliInterviewer({ runCli: runner.runCli }).scoutProject(
         aScoutProjectRequest(),
+      ),
+    ).rejects.toMatchObject({ code: "malformed-output" });
+  });
+});
+
+/**
+ * The handoff scout reads the same whole project as the project scout, so it
+ * carries the same security contract, and its prompt carries the work it
+ * grounds: the spec, every ticket with its blockers, and the facts.
+ */
+describe("what the adapter sends for a handoff scout", () => {
+  const PROJECT_ROOT = "/Users/someone/projects/observability";
+
+  async function handoffInvocation(
+    request = aHandoffScoutRequest({ projectRoot: PROJECT_ROOT }),
+  ) {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: aHandoffScoutResult() })),
+    ]);
+    const turn = await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+    }).scoutHandoff(request);
+    const invocation = runner.invocations[0]!;
+    return { invocation, prompt: valueOf(invocation.args, "-p") as string, turn };
+  }
+
+  it("runs on sonnet whatever model the session interviews on", async () => {
+    for (const model of ["fable", "opus", "sonnet"] as const) {
+      const base = aHandoffScoutRequest({ projectRoot: PROJECT_ROOT });
+      const { invocation } = await handoffInvocation({
+        ...base,
+        context: { ...base.context, model },
+      });
+      expect(valueOf(invocation.args, "--model")).toBe(SCOUT_MODEL);
+      expect(valueOf(invocation.args, "--model")).toBe("sonnet");
+    }
+  });
+
+  it("runs in a conversation of its own, never resuming the session's", async () => {
+    const base = aHandoffScoutRequest({ projectRoot: PROJECT_ROOT });
+    const { invocation } = await handoffInvocation({
+      ...base,
+      context: { ...base.context, conversationId: "session-7" },
+    });
+
+    expect(invocation.args).not.toContain("--resume");
+    expect(invocation.args).not.toContain("session-7");
+  });
+
+  it("runs from the project root, its only added directory, even when the session has a docs folder", async () => {
+    const base = aHandoffScoutRequest({ projectRoot: PROJECT_ROOT });
+    const { invocation } = await handoffInvocation({
+      ...base,
+      context: { ...base.context, docsFolder: "/Users/someone/notes" },
+    });
+
+    expect(invocation.cwd).toBe(PROJECT_ROOT);
+    expect(invocation.args.filter((arg) => arg === "--add-dir")).toHaveLength(1);
+    expect(valueOf(invocation.args, "--add-dir")).toBe(PROJECT_ROOT);
+    expect(invocation.args).not.toContain("/Users/someone/notes");
+  });
+
+  it("sends exactly the project scout's read-only, deny-ruled argument list, with its own schema", async () => {
+    const { invocation } = await handoffInvocation();
+    const { args } = invocation;
+
+    expect(args).toEqual([
+      "-p",
+      valueOf(args, "-p"),
+      "--model",
+      "sonnet",
+      "--output-format",
+      "json",
+      "--allowed-tools",
+      "Read,Grep,Glob",
+      "--json-schema",
+      JSON.stringify(jsonSchemaFor("handoff-scout")),
+      "--tools",
+      "Read,Grep,Glob",
+      "--add-dir",
+      PROJECT_ROOT,
+      "--restricted",
+      "--strict-mcp-config",
+      "--disable-slash-commands",
+      "--permission-prompts",
+      "none",
+      "--disallowed-tools",
+      SCOUT_DENY_RULES.join(","),
+    ]);
+  });
+
+  it("carries the spec, every ticket with its blockers, and the facts", async () => {
+    const request = aHandoffScoutRequest({ projectRoot: PROJECT_ROOT });
+    const { prompt } = await handoffInvocation(request);
+
+    expect(prompt).toContain(request.context.idea);
+    expect(prompt).toContain(request.specMarkdown);
+    expect(prompt).toContain(PROJECT_ROOT);
+    for (const ticket of request.tickets) {
+      expect(prompt).toContain(`### Ticket ${ticket.number}: ${ticket.title}`);
+      expect(prompt).toContain(ticket.body);
+    }
+    expect(prompt).toContain(
+      "### Ticket 1: Measure the lag alert threshold\n\nBlocked by: none",
+    );
+    expect(prompt).toContain(
+      "### Ticket 2: Page the on-call engineer\n\nBlocked by: 1",
+    );
+    expect(prompt).toContain(String(request.facts.headCommit));
+    expect(prompt).toContain("Branch: main");
+    expect(prompt).toContain("Record the broker decision");
+    expect(prompt).not.toContain(loadGrillingSkill().trimEnd());
+    expect(prompt.startsWith("-")).toBe(false);
+  });
+
+  it("says the spec and tickets define the work, and the code defines the facts", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("the spec and the tickets define the work; the code defines the");
+    expect(prompt).toContain("facts.");
+  });
+
+  it("asks for every fact cited at a line, and only from files the scout opened", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("Cite only files you actually opened");
+    expect(prompt).toContain("Never invent a path");
+    expect(prompt).toContain("one cited line cannot show an absence");
+    expect(prompt).toContain("hidden from you on purpose");
+  });
+
+  it("says a file to create must be new and inside the project", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("`create` is a new");
+    expect(prompt).toContain("it must not exist yet, it must sit inside the project");
+  });
+
+  it("asks, for each blocker, what the ticket needs from it and the check that proves it", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("exactly one entry for every ticket in its Blocked by line");
+    expect(prompt).toContain("`provides` names what this ticket needs from");
+    expect(prompt).toContain("`check` is the command or test that");
+  });
+
+  it("passes the rejection reason back on a retry", async () => {
+    const { prompt } = await handoffInvocation(
+      aHandoffScoutRequest({
+        rejectionReason: "Ticket 2 is missing from the result.",
+      }),
+    );
+
+    expect(prompt).toContain("Ticket 2 is missing from the result.");
+  });
+
+  it("returns the validated grounding and reports its one call as new", async () => {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: aHandoffScoutResult() })),
+    ]);
+    const calls: ModelCallEnd[] = [];
+
+    const turn = await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+    }).scoutHandoff(aHandoffScoutRequest(), {
+      callEnded: (call) => void calls.push(call),
+    });
+
+    expect(turn.result).toEqual(aHandoffScoutResult());
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      requestKind: "handoff-scout",
+      conversation: "new",
+      outcome: { kind: "success" },
+    });
+  });
+
+  it("rejects a grounding whose path to create leaves the project", async () => {
+    const [first, second] = aHandoffScoutResult().tickets;
+    const runner = recordingRunner([
+      ok(
+        anEnvelope({
+          structured_output: {
+            tickets: [
+              { ...first, filesToChange: [{ path: "../elsewhere.ts", change: "create" }] },
+              second,
+            ],
+          },
+        }),
+      ),
+    ]);
+
+    await expect(
+      createClaudeCliInterviewer({ runCli: runner.runCli }).scoutHandoff(
+        aHandoffScoutRequest(),
       ),
     ).rejects.toMatchObject({ code: "malformed-output" });
   });
