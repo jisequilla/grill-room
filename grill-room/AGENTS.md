@@ -426,23 +426,48 @@ session, and is readable and editable in the output page's Handoff block.
 
 - `HANDOFF.md` is the entry point for a fresh orchestrating session: the
   session title and idea, the spec path, the waves (each ticket with its
-  ticket file and brief), the verify command, the PR-based worktree
-  lifecycle (embedded whole, so the target repo needs no rules file), and
-  what to record per ticket. Beads projects get bead commands (the declared
-  tracker's stored commands when present); markdown projects get a
-  `Status:` line per ticket instead. Build-record commands, with the session
-  id and ticket numbers filled in, appear only when the project logs build
-  records.
+  ticket file and brief), the verify command, the worktree lifecycle
+  (embedded whole, so the target repo needs no rules file), an optional
+  "Reviewing a ticket" section, and what to record per ticket. The lifecycle
+  is selected by the project's **delivery recipe**: `pull-request` pushes
+  each ticket's branch and opens it as a draft pull request, never merged
+  until it is ready — the reviewer marks it ready on approval with the
+  review switch on, the main session does with it off, and a re-verify that
+  fails after the reviewer marked it ready undoes that with
+  `gh pr ready --undo`; `local-merge` reaches `main` only through a local
+  `git merge`, after telling the building session to set
+  `worktree.baseRef: "head"` in the repository's `.claude/settings.json`
+  and keep `main` checked out, so each new worktree branches from the
+  latest local merge, whether or not the repository has a remote — that
+  render never mentions a push, `gh`, a pull request, or `origin`.
+  "Reviewing a ticket" appears only when the project's **adversarial
+  review** switch is on: it covers the reviewer's inputs (spec, ticket,
+  brief and diff, never the builder's report), what to try to break, how
+  the verdict is recorded per recipe (a pull-request comment plus
+  `gh pr ready`; or, for local merge, reported to the main session, which
+  writes it through the project's tracker the same way it records the
+  merge — a bead comment, or the ticket's `Status:` line in this file, the
+  reviewer itself never touching the tracker or the bundle), and the
+  same-branch fix loop with its two-round cap. With the switch off, the
+  section is absent and the lifecycle text has no review step. Beads
+  projects get bead commands (the declared tracker's stored commands when
+  present); markdown projects get a `Status:` line per ticket instead.
+  Build-record commands, with the session id and ticket numbers filled in,
+  appear only when the project logs build records.
 - `briefs/NN-slug.md` (the same `NN-slug` as the ticket file) holds the
-  ticket text, its blockers, the verify command, the file-boundary,
-  git/worktree and PR rules, the report format, and "report, then stop",
-  plus two labelled empty slots for the orchestrator: **File boundaries**
-  and **Codebase facts**. Nothing is pre-filled from the target repo.
+  ticket text, its blockers, the verify command, the file-boundary and
+  git/worktree rules, the report format, and "report, then stop", plus two
+  labelled empty slots for the orchestrator: **File boundaries** and
+  **Codebase facts**. Its delivery section varies by delivery recipe the
+  same way HANDOFF.md's lifecycle does, and its report section names a
+  separate reviewer only when the review switch is on. Nothing is
+  pre-filled from the target repo.
 - Bundle paths are stored as `{{BUNDLE}}` and filled in at export from the
   project's visibility flag, without re-checking git: `tracked` gives paths
-  relative to the repo root plus a commit-and-push-before-delegating step;
-  `ignored` gives absolute paths into the main checkout and tells worktree
-  agents to read the bundle by absolute path.
+  relative to the repo root plus a commit-before-delegating step (and a
+  push, on the pull-request recipe); `ignored` gives absolute paths into
+  the main checkout and tells worktree agents to read the bundle by
+  absolute path.
 
 The handoff is **stale** when a fingerprint over everything it renders
 differs from the one it was generated from: the session's title and idea,
