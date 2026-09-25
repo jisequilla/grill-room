@@ -476,6 +476,12 @@ ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS scout_report_id TEXT`,
   },
   {
     version: 61,
+    name: "projects-delivery-recipe-columns",
+    sql: `ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS delivery_recipe TEXT NOT NULL DEFAULT 'pull-request';
+ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS adversarial_review BOOLEAN NOT NULL DEFAULT TRUE`,
+  },
+  {
+    version: 62,
     name: "brief-groundings-table",
     sql: `CREATE TABLE IF NOT EXISTS gr_brief_groundings (
       id TEXT PRIMARY KEY,
@@ -489,7 +495,7 @@ ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS scout_report_id TEXT`,
     )`,
   },
   {
-    version: 62,
+    version: 63,
     name: "brief-groundings-session-index",
     sql: `CREATE UNIQUE INDEX IF NOT EXISTS gr_idx_brief_groundings_session ON gr_brief_groundings(session_id)`,
   },

@@ -25,8 +25,10 @@ import { eq } from "@agent-native/core/db/schema";
 
 import {
   DEFAULT_PROJECT_SLUG_PATTERN,
+  DELIVERY_RECIPES,
   PROJECT_TRACKER_KINDS,
   PROJECT_VISIBILITIES,
+  type DeliveryRecipe,
   type ProjectTrackerKind,
   type ProjectVisibility,
 } from "../shared/session-constants.js";
@@ -50,6 +52,7 @@ export type ProjectErrorCode =
   | "invalid-slug-pattern"
   | "invalid-tracker-kind"
   | "invalid-visibility"
+  | "invalid-delivery-recipe"
   | "project-exists"
   | "project-not-found";
 
@@ -85,6 +88,13 @@ export interface ProjectInput {
   buildRecordLogging?: boolean | null;
   /** `tracked` or `ignored`; seeded from `git check-ignore` when omitted. */
   visibility?: string | null;
+  /**
+   * `pull-request` or `local-merge`; guessed from the repository's remotes
+   * (registration only) when omitted.
+   */
+  deliveryRecipe?: string | null;
+  /** Defaults to true. */
+  adversarialReview?: boolean | null;
 }
 
 function blank(value: string | null | undefined): boolean {
@@ -194,6 +204,24 @@ export async function seedVisibility(
 ): Promise<ProjectVisibility> {
   const result = await runGit(root, ["check-ignore", "-q", "--", `${exportFolder}/`]);
   return result.exitCode === 0 ? "ignored" : "tracked";
+}
+
+/**
+ * Guess a project's delivery recipe from its repository's remotes, with
+ * read-only `git remote -v`: any remote (even a `pushurl`-only or URL-less
+ * stanza — anything `git remote -v` prints a line for) means work can reach
+ * a forge, so `pull-request`; none means `local-merge`. A non-zero exit —
+ * `remote -v` failed rather than answered, e.g. a broken `.git/config` —
+ * also guesses `pull-request`: the safer default, and the same one existing
+ * rows migrated to, rather than silently falling through to the less safe
+ * `local-merge` for a failure nobody is told about. Only registration calls
+ * this — an explicit value always wins, and editing a project never
+ * re-guesses.
+ */
+export async function guessDeliveryRecipe(root: string): Promise<DeliveryRecipe> {
+  const result = await runGit(root, ["remote", "-v"]);
+  if (result.exitCode !== 0) return "pull-request";
+  return result.stdout.trim().length > 0 ? "pull-request" : "local-merge";
 }
 
 /** Recipe or script names that usually mean "verify everything", most specific first. */
@@ -367,6 +395,37 @@ function checkVisibility(visibility: string): ProjectVisibility | Refused {
       );
 }
 
+function checkDeliveryRecipe(recipe: string): DeliveryRecipe | Refused {
+  return (DELIVERY_RECIPES as readonly string[]).includes(recipe)
+    ? (recipe as DeliveryRecipe)
+    : refuse(
+        "invalid-delivery-recipe",
+        `The delivery recipe must be one of ${DELIVERY_RECIPES.join(", ")}: ${recipe}`,
+      );
+}
+
+/**
+ * What `updateProject`'s merge carries forward for `deliveryRecipe`: the
+ * patch when it is a recognized recipe, the existing value otherwise. A
+ * blank patch (which `??` lets through unlike `undefined`/`null`) or an
+ * unrecognized one is ignored rather than passed to `validate()` — where a
+ * blank value there means "guess it". The action's `z.enum` already keeps
+ * either case from reaching here through `update-project`; this is what
+ * makes "editing never re-guesses" (see `guessDeliveryRecipe` and
+ * `AGENTS.md`) true of this function's own contract, not just the action
+ * layered in front of it.
+ */
+function sanitizedDeliveryRecipePatch(
+  patch: string | null | undefined,
+  existing: DeliveryRecipe,
+): DeliveryRecipe {
+  if (blank(patch)) return existing;
+  const trimmed = (patch as string).trim();
+  return (DELIVERY_RECIPES as readonly string[]).includes(trimmed)
+    ? (trimmed as DeliveryRecipe)
+    : existing;
+}
+
 async function findByRoot(root: string): Promise<Project | undefined> {
   const [row] = await getDb()
     .select()
@@ -470,6 +529,18 @@ async function validate(
     visibility = checked;
   }
 
+  // Guessed from the repository's remotes only when the caller gives none;
+  // an edit always carries the existing value forward through `merged` in
+  // `updateProject`, so this only guesses at registration.
+  let deliveryRecipe: DeliveryRecipe;
+  if (blank(input.deliveryRecipe)) {
+    deliveryRecipe = await guessDeliveryRecipe(root);
+  } else {
+    const checked = checkDeliveryRecipe((input.deliveryRecipe as string).trim());
+    if (typeof checked !== "string") return checked;
+    deliveryRecipe = checked;
+  }
+
   const clash = await findByRoot(root);
   if (clash && clash.id !== existing?.id) {
     return refuse(
@@ -488,6 +559,8 @@ async function validate(
       trackerKind,
       buildRecordLogging: input.buildRecordLogging ?? false,
       visibility,
+      deliveryRecipe,
+      adversarialReview: input.adversarialReview ?? true,
       trackerCommandsJson,
       trackerDiagnostic,
     },
@@ -539,6 +612,8 @@ export async function updateProject(
     trackerKind: patch.trackerKind ?? existing.trackerKind,
     buildRecordLogging: patch.buildRecordLogging ?? existing.buildRecordLogging,
     visibility: patch.visibility ?? existing.visibility,
+    deliveryRecipe: sanitizedDeliveryRecipePatch(patch.deliveryRecipe, existing.deliveryRecipe),
+    adversarialReview: patch.adversarialReview ?? existing.adversarialReview,
   };
 
   const outcome = await validate(merged, existing, { readTracker: false });

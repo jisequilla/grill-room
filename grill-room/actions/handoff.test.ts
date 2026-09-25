@@ -226,6 +226,20 @@ describe("handoff generation", () => {
     );
   });
 
+  it("goes stale when the delivery recipe or the review switch changes", async () => {
+    const { session, project } = await aReadySession();
+    // repos.create() leaves no remote, so registration guessed local-merge.
+    expect(project.deliveryRecipe).toBe("local-merge");
+    await generateHandoff.run({ sessionId: session.id });
+
+    await updateProject.run({ id: project.id, deliveryRecipe: "pull-request" });
+    expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(true);
+    await generateHandoff.run({ sessionId: session.id });
+
+    await updateProject.run({ id: project.id, adversarialReview: false });
+    expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(true);
+  });
+
   it("refuses to regenerate over edits without confirmation, and overwrites them with it", async () => {
     const { session } = await aReadySession();
     await generateHandoff.run({ sessionId: session.id });

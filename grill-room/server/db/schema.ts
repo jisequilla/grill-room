@@ -13,6 +13,7 @@ import {
   DECISION_ANSWER_KINDS,
   DECISION_DISPOSITION_TARGETS,
   DECISION_INTRODUCED_BY,
+  DELIVERY_RECIPES,
   PROJECT_TRACKER_KINDS,
   PROJECT_VISIBILITIES,
   REPO_DECISION_SOURCES,
@@ -39,6 +40,8 @@ export {
   DECISION_INTRODUCED_BY,
   type DecisionIntroducedBy,
   DEFAULT_PROJECT_SLUG_PATTERN,
+  DELIVERY_RECIPES,
+  type DeliveryRecipe,
   PROJECT_TRACKER_KINDS,
   type ProjectTrackerKind,
   PROJECT_VISIBILITIES,
@@ -86,6 +89,16 @@ export const projects = table("gr_projects", {
     .default("markdown"),
   buildRecordLogging: boolean("build_record_logging").notNull().default(false),
   visibility: text("visibility", { enum: PROJECT_VISIBILITIES }).notNull(),
+  /**
+   * How a ticket built for this project reaches its main branch. Guessed
+   * from the repository's remotes at registration unless given explicitly;
+   * editable afterwards. See `DELIVERY_RECIPES`.
+   */
+  deliveryRecipe: text("delivery_recipe", { enum: DELIVERY_RECIPES })
+    .notNull()
+    .default("pull-request"),
+  /** Whether a second, fresh-context reviewer checks each ticket before it merges. */
+  adversarialReview: boolean("adversarial_review").notNull().default(true),
   /**
    * The declared tracker's `commands` map, as JSON text, or null when no
    * tracker was found. Set at registration and by `refresh-project-tracker`
