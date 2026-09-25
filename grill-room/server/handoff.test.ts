@@ -88,7 +88,7 @@ describe("HANDOFF.md", () => {
     expect(markdown).toContain(`  - Ticket: \`${BUNDLE_TOKEN}/issues/02-export-bundle.md\``);
   });
 
-  it("embeds the PR lifecycle with the verify command filled in", () => {
+  it("embeds the pull-request lifecycle with the verify command filled in, review on by default", () => {
     const { markdown } = renderHandoff(aSource());
     expect(markdown).toContain("## Delegation lifecycle");
     expect(markdown).toContain("Local `main` holds nothing unpushed");
@@ -96,12 +96,12 @@ describe("HANDOFF.md", () => {
     expect(markdown).toContain("Commits only on its worktree branch");
     expect(markdown).toContain("- Runs `just verify`; it must pass.");
     expect(markdown).toContain("stops before pushing and reports \"push pending: gh account\"");
-    expect(markdown).toContain("opens a pull request against `main` with `gh pr create`");
-    expect(markdown).toContain("It never merges.");
+    expect(markdown).toContain("opens a **draft** pull request against `main` with `gh pr create --draft`");
+    expect(markdown).toContain("It never merges, and a draft is never merged by anyone.");
     expect(markdown).toContain("Read the PR diff (`gh pr diff <n>`)");
-    expect(markdown).toContain("Re-run `just verify` yourself in the worktree, plus any browser check");
+    expect(markdown).toContain("re-run `just verify` yourself in the worktree, plus any browser check");
     expect(markdown).toContain("Send failures back to the same agent");
-    expect(markdown).toContain("`gh pr merge <n> --merge --delete-branch`");
+    expect(markdown).toContain("`gh pr merge <n> --merge --delete-branch`. Never merge a draft.");
     expect(markdown).toContain("`git pull` on local `main` and re-run `just verify`");
     expect(markdown).toContain("Prune merged worktrees");
     expect(markdown).not.toContain("sync-to-local-main");
@@ -154,6 +154,70 @@ describe("HANDOFF.md", () => {
       expect(on.markdown).toContain(
         `pnpm action set-build-record --sessionId session-123 --ticketNumber ${number} `,
       );
+    }
+  });
+});
+
+describe("delivery recipe and the review gate", () => {
+  it("renders the pull-request recipe with review on: draft PR, reviewer section, gh pr ready on approval", () => {
+    const { markdown } = renderHandoff(aSource({ deliveryRecipe: "pull-request", adversarialReview: true }));
+    expect(markdown).toMatchSnapshot();
+    expect(markdown).toContain("opens a **draft** pull request against `main` with `gh pr create --draft`");
+    expect(markdown).toContain("Never merge a draft.");
+    expect(markdown).toContain('2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below)');
+    expect(markdown).toContain("## Reviewing a ticket");
+    expect(markdown).toContain("never the builder's report");
+    expect(markdown).toContain(
+      'It posts its verdict as a pull request comment, starting "Review verdict: approved" or "Review verdict: changes requested" with each finding, then runs `gh pr ready <n>` on approval.',
+    );
+    expect(markdown).toContain("After two rejected rounds, the operator decides.");
+    expect(markdown).toContain("The reviewer changes no code and never merges.");
+    expect(markdown).toContain("done (PR #<n>)");
+  });
+
+  it("renders the pull-request recipe with review off: draft PR, no reviewer anywhere", () => {
+    const { markdown } = renderHandoff(aSource({ deliveryRecipe: "pull-request", adversarialReview: false }));
+    expect(markdown).toMatchSnapshot();
+    expect(markdown).toContain("opens a **draft** pull request against `main` with `gh pr create --draft`");
+    expect(markdown).toContain("Never merge a draft.");
+    expect(markdown).toContain("Mark the pull request ready (`gh pr ready <n>`) once you are satisfied");
+    expect(markdown).not.toContain("## Reviewing a ticket");
+    expect(markdown).not.toContain("reviewer");
+    expect(markdown).not.toContain("Review verdict");
+  });
+
+  it("renders the local-merge recipe with review on: local merge, review recorded on the ticket, never a push/gh/PR/origin", () => {
+    const { markdown } = renderHandoff(aSource({ deliveryRecipe: "local-merge", adversarialReview: true }));
+    expect(markdown).toMatchSnapshot();
+    expect(markdown).toContain("Commit again whenever the bundle is re-exported.");
+    expect(markdown).toContain(
+      "Local `main` holds every change you want the next worktree to start from — commit it before delegating.",
+    );
+    expect(markdown).toContain("Reports its branch name, then stops. It never merges.");
+    expect(markdown).toContain("Read the branch diff (`git diff main..<branch>`)");
+    expect(markdown).toContain('2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below)');
+    expect(markdown).toContain("Merge only approved, verified work, locally: `git merge --no-ff <branch>`.");
+    expect(markdown).toContain("done (merged)`, noting the reviewer's verdict.");
+    expect(markdown).toContain("## Reviewing a ticket");
+    expect(markdown).toContain("It records its verdict on the ticket");
+    for (const banned of ["push", "gh ", "`gh", "pull request", "origin"]) {
+      expect(markdown.toLowerCase()).not.toContain(banned.toLowerCase());
+    }
+  });
+
+  it("renders the local-merge recipe with review off: local merge, no reviewer, never a push/gh/PR/origin", () => {
+    const { markdown } = renderHandoff(aSource({ deliveryRecipe: "local-merge", adversarialReview: false }));
+    expect(markdown).toMatchSnapshot();
+    expect(markdown).toContain(
+      "Local `main` holds every change you want the next worktree to start from — commit it before delegating.",
+    );
+    expect(markdown).toContain("Merge only verified work, locally: `git merge --no-ff <branch>`.");
+    expect(markdown).toContain("done (merged)`.");
+    expect(markdown).not.toContain("## Reviewing a ticket");
+    expect(markdown).not.toContain("reviewer");
+    expect(markdown).not.toContain("Review verdict");
+    for (const banned of ["push", "gh ", "`gh", "pull request", "origin"]) {
+      expect(markdown.toLowerCase()).not.toContain(banned.toLowerCase());
     }
   });
 });

@@ -424,13 +424,26 @@ session, and is readable and editable in the output page's Handoff block.
 
 - `HANDOFF.md` is the entry point for a fresh orchestrating session: the
   session title and idea, the spec path, the waves (each ticket with its
-  ticket file and brief), the verify command, the PR-based worktree
-  lifecycle (embedded whole, so the target repo needs no rules file), and
-  what to record per ticket. Beads projects get bead commands (the declared
-  tracker's stored commands when present); markdown projects get a
-  `Status:` line per ticket instead. Build-record commands, with the session
-  id and ticket numbers filled in, appear only when the project logs build
-  records.
+  ticket file and brief), the verify command, the worktree lifecycle
+  (embedded whole, so the target repo needs no rules file), an optional
+  "Reviewing a ticket" section, and what to record per ticket. The lifecycle
+  is selected by the project's **delivery recipe**: `pull-request` renders
+  today's PR-based lifecycle, with the pull request always opened as a
+  draft and a draft never merged; `local-merge`, for a repository with no
+  remote, renders a lifecycle where each ticket still runs on its own
+  worktree branch but reaches `main` only through a local `git merge` —
+  that render never mentions a push, `gh`, a pull request, or `origin`.
+  "Reviewing a ticket" appears only when the project's **adversarial
+  review** switch is on: it covers the reviewer's inputs (spec, ticket,
+  brief and diff, never the builder's report), what to try to break, how
+  the verdict is recorded per recipe (a pull-request comment plus
+  `gh pr ready`, or on the ticket for local merge), and the same-branch
+  fix loop with its two-round cap. With the switch off, the section is
+  absent and the lifecycle text has no review step. Beads projects get bead
+  commands (the declared tracker's stored commands when present); markdown
+  projects get a `Status:` line per ticket instead. Build-record commands,
+  with the session id and ticket numbers filled in, appear only when the
+  project logs build records.
 - `briefs/NN-slug.md` (the same `NN-slug` as the ticket file) holds the
   ticket text, its blockers, the verify command, the file-boundary,
   git/worktree and PR rules, the report format, and "report, then stop",
@@ -438,9 +451,10 @@ session, and is readable and editable in the output page's Handoff block.
   and **Codebase facts**. Nothing is pre-filled from the target repo.
 - Bundle paths are stored as `{{BUNDLE}}` and filled in at export from the
   project's visibility flag, without re-checking git: `tracked` gives paths
-  relative to the repo root plus a commit-and-push-before-delegating step;
-  `ignored` gives absolute paths into the main checkout and tells worktree
-  agents to read the bundle by absolute path.
+  relative to the repo root plus a commit-before-delegating step (and a
+  push, on the pull-request recipe); `ignored` gives absolute paths into
+  the main checkout and tells worktree agents to read the bundle by
+  absolute path.
 
 The handoff is **stale** when a fingerprint over everything it renders
 differs from the one it was generated from: the session's title and idea,
