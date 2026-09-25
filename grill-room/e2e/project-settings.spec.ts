@@ -95,7 +95,17 @@ test.describe("project settings", () => {
     await reviewSwitch.click();
     await expect(reviewSwitch).toHaveAttribute("aria-checked", "false");
 
+    // The dialog closes on the mutation's onSuccess callback, a tick before
+    // the response promise it comes from actually settles — so waiting for
+    // the dialog to hide is not enough to know the save has landed. Wait for
+    // the update-project response itself before reading the stored value.
+    const updateResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/_agent-native/actions/update-project") &&
+        response.ok(),
+    );
     await page.getByTestId("project-save").click();
+    await updateResponse;
     await expect(dialog).toBeHidden();
 
     // The stored values, not just what the UI echoes back.
