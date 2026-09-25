@@ -12,7 +12,10 @@ Every delegation uses the templates in `.claude/templates/delegation/`:
 - `ticket.md`, for the ticket itself;
 - `preflight.md`, `builder.md`, `reviewer.md` and `fix.md`, one for each agent.
 
-A hand-run loop fills them in. A Workflow script receives the filled-in text through `args`, because scripts cannot read files. Both loops send the same words, so neither drifts from the other.
+A hand-run loop fills them in. A Workflow script receives the filled-in text through `args`, because scripts cannot read files. Both loops send the same words, so neither drifts from the other. The saved workflow `.claude/workflows/ticket-build-review-loop.js` is that script:
+- It takes one reviewer template per lens. With more than one lens, the main session marks the PR ready once every lens approves.
+- It asks a fixer once more when the fixer reports no commit or a verification still running.
+- A run that stops half way is continued by passing `start` (the PR, branch, stage and last findings), not by resuming, because a resume re-runs every agent after the first changed call.
 
 A ticket's precision comes from examples, not from length:
 - A behaviour rule goes in an input → expected-output table, and prose only where an example cannot show it.
