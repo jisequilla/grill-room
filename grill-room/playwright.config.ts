@@ -44,6 +44,9 @@ if (WEB_SERVER_ENV[INTERVIEWER_ENV_VAR] !== "fake") {
 
 export default defineConfig({
   testDir: "./e2e",
+  // Pays the dev server's cold compile before the first spec starts, so it
+  // never lands inside one spec's own waits (see `e2e/global-setup.ts`).
+  globalSetup: "./e2e/global-setup.ts",
   timeout: 120_000,
   expect: { timeout: 15_000 },
   // The fake interviewer keeps one scripted turn queue per session
@@ -95,6 +98,8 @@ export default defineConfig({
     // The dev server itself binds the port in a few seconds, but the first
     // real page request compiles the route on demand — measured close to 20 s
     // cold. This timeout covers the bind; `timeout` above covers the test.
+    // `globalSetup` pays that compile before any spec runs, and gives each of
+    // its warm-up steps this same limit (`WARM_UP_LIMIT_MS` there).
     timeout: 180_000,
     env: WEB_SERVER_ENV,
   },
