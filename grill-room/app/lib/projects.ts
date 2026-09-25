@@ -1,4 +1,5 @@
 import type {
+  DeliveryRecipe,
   ProjectTrackerKind,
   ProjectVisibility,
 } from "@shared/session-constants";
@@ -50,6 +51,16 @@ export const TRACKER_KIND_LABEL_KEY: Record<ProjectTrackerKind, string> = {
 export const VISIBILITY_LABEL_KEY: Record<ProjectVisibility, string> = {
   tracked: "projects.visibilityTracked",
   ignored: "projects.visibilityIgnored",
+};
+
+export const DELIVERY_RECIPE_LABEL_KEY: Record<DeliveryRecipe, string> = {
+  "pull-request": "projects.deliveryRecipePullRequest",
+  "local-merge": "projects.deliveryRecipeLocalMerge",
+};
+
+export const DELIVERY_RECIPE_HINT_KEY: Record<DeliveryRecipe, string> = {
+  "pull-request": "projects.deliveryRecipePullRequestHint",
+  "local-merge": "projects.deliveryRecipeLocalMergeHint",
 };
 
 /** Radix Select reserves the empty string, so "no project" needs a value of its own. */
