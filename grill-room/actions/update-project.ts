@@ -20,7 +20,7 @@ export default defineAction({
       .optional()
       .describe("Absolute path to any folder inside the repository"),
     verifyCommand: z.string().optional().describe("The repository's verify command"),
-    exportFolder: z
+    workingExportFolder: z
       .string()
       .optional()
       .describe("Where exports land, relative to the repository root"),
@@ -37,7 +37,7 @@ export default defineAction({
     visibility: z
       .enum(PROJECT_VISIBILITIES)
       .optional()
-      .describe('Whether the export folder is "tracked" or "ignored" by git'),
+      .describe('Whether the working export folder is "tracked" or "ignored" by git'),
     deliveryRecipe: z
       .enum(DELIVERY_RECIPES)
       .optional()

@@ -46,7 +46,7 @@ The plain action routes above are what this skill is written and tested against.
 
 | Step | Action and body | Session state after | Notes |
 |---|---|---|---|
-| 1 | `list-projects` (GET), or `register-project {root, verifyCommand, exportFolder}` | | This repo's project is `poc-grill-me` with `exportFolder: ".grill-room"`. `update-project {id, exportFolder}` changes it |
+| 1 | `list-projects` (GET), or `register-project {root, verifyCommand, workingExportFolder}` | | This repo's project is `poc-grill-me` with `workingExportFolder: ".grill-room"`. `update-project {id, workingExportFolder}` changes it. Actions ignore unknown keys, so an old field name (`exportFolder`) is dropped silently and the call still reports success |
 | 2 | `create-session {title, idea, projectId}` | `interviewing` | Keep the idea in a file (`idea.txt`) and load it. Do not also pass `docsFolder` for a repo that contains `grill-room/`: it is refused with `folder-contains-app`. The project gives the interviewer the repo |
 | 3 | `scout-project {sessionId}` | `interviewing` | Needs a project. Optional: step 4 runs the scout itself when no current report exists. The report may propose decisions; `keep-repo-decision` or `drop-repo-decision` settles each, as the owner chooses |
 | 4 | `assess-readiness {sessionId}` | `interviewing` | Only before the first round (`has-rounds` after). With a project and no current scout report, it runs the scout first, as a second turn. Read the verdict before continuing; it never blocks the interview |

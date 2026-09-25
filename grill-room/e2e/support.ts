@@ -87,7 +87,7 @@ export async function registerProject(
   input: {
     root: string;
     verifyCommand: string;
-    exportFolder?: string;
+    workingExportFolder?: string;
     name?: string;
   },
 ): Promise<{ id: string }> {

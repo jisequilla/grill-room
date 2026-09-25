@@ -74,7 +74,7 @@ export interface HandoffSource {
   waves: readonly (readonly number[])[];
   project: {
     rootPath: string;
-    exportFolder: string;
+    workingExportFolder: string;
     verifyCommand: string;
     trackerKind: ProjectTrackerKind;
     buildRecordLogging: boolean;
@@ -205,7 +205,7 @@ export function handoffFingerprint(source: HandoffSource): string {
     })),
     project: {
       rootPath: source.project.rootPath,
-      exportFolder: source.project.exportFolder,
+      exportFolder: source.project.workingExportFolder, // key kept so existing handoffs do not go stale
       verifyCommand: source.project.verifyCommand,
       trackerKind: source.project.trackerKind,
       buildRecordLogging: source.project.buildRecordLogging,
@@ -295,12 +295,12 @@ function pathsNote(source: HandoffSource): string {
   if (project.visibility === "tracked") {
     return [
       `Paths below are relative to the repository root (\`${project.rootPath}\`).`,
-      `The bundle lives in \`${project.exportFolder}\`, which git tracks.`,
+      `The bundle lives in \`${project.workingExportFolder}\`, which git tracks.`,
     ].join(" ");
   }
   return [
     `Paths below are absolute, into the main checkout at \`${project.rootPath}\`.`,
-    `The bundle lives in \`${project.exportFolder}\`, which git ignores: it never reaches a worktree through git.`,
+    `The bundle lives in \`${project.workingExportFolder}\`, which git ignores: it never reaches a worktree through git.`,
   ].join(" ");
 }
 
@@ -1055,7 +1055,7 @@ export async function loadHandoffSource(
       waves: waves.waves,
       project: {
         rootPath: project.rootPath,
-        exportFolder: project.exportFolder,
+        workingExportFolder: project.workingExportFolder,
         verifyCommand: project.verifyCommand,
         trackerKind: project.trackerKind,
         buildRecordLogging: project.buildRecordLogging,

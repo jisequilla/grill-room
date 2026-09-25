@@ -68,7 +68,7 @@ export function ProjectsSection() {
                 <div className="min-w-0 space-y-1">
                   <p className="truncate text-sm font-medium">{project.name}</p>
                   <p className="truncate font-mono text-xs text-muted-foreground">
-                    {project.rootPath}/{project.exportFolder}
+                    {project.rootPath}/{project.workingExportFolder}
                   </p>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <Badge variant="secondary" className="font-mono">

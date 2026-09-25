@@ -278,7 +278,7 @@ export function ExportSection({
             <span className="font-medium">{plan.projectName}</span>
             <span className="font-mono text-xs text-muted-foreground">
               {" "}
-              {plan.projectRoot}/{plan.exportFolder}
+              {plan.projectRoot}/{plan.workingExportFolder}
             </span>
           </p>
         ) : null}

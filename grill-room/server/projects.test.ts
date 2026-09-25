@@ -42,13 +42,13 @@ describe("registerProject", () => {
 
   const required = {
     verifyCommand: "pnpm test",
-    exportFolder: ".scratch",
+    workingExportFolder: ".scratch",
   };
 
   it.each([
     ["root", "root-required"],
     ["verifyCommand", "verify-command-required"],
-    ["exportFolder", "export-folder-required"],
+    ["workingExportFolder", "export-folder-required"],
   ] as const)("refuses a project without %s", async (field, code) => {
     const root = repos.create();
     const input = { root, ...required, [field]: "  " };
@@ -95,7 +95,7 @@ describe("registerProject", () => {
     expect(project).toMatchObject({
       name: path.basename(root),
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
       slugPattern: "{slug}",
       trackerKind: "markdown",
       buildRecordLogging: false,
@@ -113,7 +113,7 @@ describe("registerProject", () => {
         root,
         name: "My repo",
         verifyCommand: "just check",
-        exportFolder: "docs/tickets/",
+        workingExportFolder: "docs/tickets/",
         slugPattern: "{seq}-{slug}",
         trackerKind: "beads",
         buildRecordLogging: true,
@@ -126,7 +126,7 @@ describe("registerProject", () => {
     expect(project).toMatchObject({
       name: "My repo",
       verifyCommand: "just check",
-      exportFolder: "docs/tickets",
+      workingExportFolder: "docs/tickets",
       slugPattern: "{seq}-{slug}",
       trackerKind: "beads",
       buildRecordLogging: true,
@@ -140,19 +140,19 @@ describe("registerProject", () => {
     const root = repos.create();
 
     const project = registered(
-      await registerProject({ root, ...required, exportFolder: path.join(root, "out", "specs") }),
+      await registerProject({ root, ...required, workingExportFolder: path.join(root, "out", "specs") }),
     );
 
-    expect(project.exportFolder).toBe("out/specs");
+    expect(project.workingExportFolder).toBe("out/specs");
   });
 
   it("refuses an export folder outside the root, or the root itself", async () => {
     const root = repos.create();
 
     expect(
-      refusalCode(await registerProject({ root, ...required, exportFolder: "../elsewhere" })),
+      refusalCode(await registerProject({ root, ...required, workingExportFolder: "../elsewhere" })),
     ).toBe("export-folder-outside-root");
-    expect(refusalCode(await registerProject({ root, ...required, exportFolder: "." }))).toBe(
+    expect(refusalCode(await registerProject({ root, ...required, workingExportFolder: "." }))).toBe(
       "export-folder-is-root",
     );
   });
@@ -202,7 +202,7 @@ describe("registerProject", () => {
       const root = repos.create({ gitignore: ".scratch/\n" });
 
       const project = registered(
-        await registerProject({ root, ...required, exportFolder: ".scratch/specs" }),
+        await registerProject({ root, ...required, workingExportFolder: ".scratch/specs" }),
       );
 
       expect(project.visibility).toBe("ignored");
@@ -212,7 +212,7 @@ describe("registerProject", () => {
       const root = repos.create({ gitignore: "node_modules/\n" });
 
       const project = registered(
-        await registerProject({ root, ...required, exportFolder: "docs/specs" }),
+        await registerProject({ root, ...required, workingExportFolder: "docs/specs" }),
       );
 
       expect(project.visibility).toBe("tracked");
@@ -284,7 +284,7 @@ describe("registerProject", () => {
         name: "Legacy",
         rootPath: "/legacy/repo",
         verifyCommand: "pnpm test",
-        exportFolder: ".scratch",
+        workingExportFolder: ".scratch",
         visibility: "tracked",
         createdAt: now,
         updatedAt: now,
@@ -321,14 +321,14 @@ describe("registerProject", () => {
       root,
       verifyCommand: "just check",
       visibility: "tracked",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
 
     const project = registered(
       await registerProject({
         root: path.join(root, "grill-room"),
         verifyCommand: "just check",
-        exportFolder: ".scratch",
+        workingExportFolder: ".scratch",
       }),
     );
     expect(project).toMatchObject({ rootPath: root, visibility: "tracked" });
@@ -408,7 +408,7 @@ describe("updateProject", () => {
   async function aProject() {
     const root = repos.create({ gitignore: ".scratch/\n" });
     return registered(
-      await registerProject({ root, verifyCommand: "pnpm test", exportFolder: ".scratch" }),
+      await registerProject({ root, verifyCommand: "pnpm test", workingExportFolder: ".scratch" }),
     );
   }
 
@@ -422,7 +422,7 @@ describe("updateProject", () => {
     expect(updated).toMatchObject({
       id: project.id,
       rootPath: project.rootPath,
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
       verifyCommand: "just check",
       trackerKind: "beads",
       visibility: "ignored",
@@ -432,9 +432,9 @@ describe("updateProject", () => {
   it("does not re-seed visibility when the export folder changes", async () => {
     const project = await aProject();
 
-    const updated = registered(await updateProject(project.id, { exportFolder: "docs" }));
+    const updated = registered(await updateProject(project.id, { workingExportFolder: "docs" }));
 
-    expect(updated).toMatchObject({ exportFolder: "docs", visibility: "ignored" });
+    expect(updated).toMatchObject({ workingExportFolder: "docs", visibility: "ignored" });
   });
 
   it("changes the delivery recipe and the review switch, without re-guessing the recipe", async () => {

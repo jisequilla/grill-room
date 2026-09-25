@@ -68,7 +68,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
   const [namePlaceholder, setNamePlaceholder] = useState("");
   const [verifyCommand, setVerifyCommand] = useState("");
   const [verifySuggested, setVerifySuggested] = useState(false);
-  const [exportFolder, setExportFolder] = useState("");
+  const [workingExportFolder, setWorkingExportFolder] = useState("");
   const [slugPattern, setSlugPattern] = useState(DEFAULT_PROJECT_SLUG_PATTERN);
   const [trackerKind, setTrackerKind] = useState<ProjectTrackerKind>("markdown");
   const [buildRecordLogging, setBuildRecordLogging] = useState(false);
@@ -76,7 +76,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
   const [deliveryRecipe, setDeliveryRecipe] = useState<DeliveryRecipe>("pull-request");
   const [adversarialReview, setAdversarialReview] = useState(true);
   const [visibilitySeeded, setVisibilitySeeded] = useState(false);
-  const [exportFolderSuggested, setExportFolderSuggested] = useState(false);
+  const [workingExportFolderSuggested, setWorkingExportFolderSuggested] = useState(false);
   const [slugPatternSuggested, setSlugPatternSuggested] = useState(false);
   const [trackerDiagnostic, setTrackerDiagnostic] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
@@ -85,7 +85,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
   // Whether the operator has set these by hand; a detection never overwrites that.
   const verifyTouched = useRef(false);
   const visibilityTouched = useRef(false);
-  const exportFolderTouched = useRef(false);
+  const workingExportFolderTouched = useRef(false);
   const slugPatternTouched = useRef(false);
   const detection = useRef(0);
 
@@ -97,8 +97,8 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
     setNamePlaceholder(project?.name ?? "");
     setVerifyCommand(project?.verifyCommand ?? "");
     setVerifySuggested(false);
-    setExportFolder(project?.exportFolder ?? "");
-    setExportFolderSuggested(false);
+    setWorkingExportFolder(project?.workingExportFolder ?? "");
+    setWorkingExportFolderSuggested(false);
     setSlugPattern(project?.slugPattern ?? DEFAULT_PROJECT_SLUG_PATTERN);
     setSlugPatternSuggested(false);
     setTrackerKind((project?.trackerKind as ProjectTrackerKind) ?? "markdown");
@@ -112,7 +112,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
     setErrors({});
     verifyTouched.current = project !== null;
     visibilityTouched.current = project !== null;
-    exportFolderTouched.current = project !== null;
+    workingExportFolderTouched.current = project !== null;
     slugPatternTouched.current = project !== null;
   }, [open, project]);
 
@@ -126,14 +126,14 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
         "suggest-project-defaults",
         {
           folder: folder.trim(),
-          ...(exportTo.trim().length > 0 ? { exportFolder: exportTo.trim() } : {}),
+          ...(exportTo.trim().length > 0 ? { workingExportFolder: exportTo.trim() } : {}),
         },
         { method: "GET" },
       );
       if (run !== detection.current) return;
       setResolvedRoot(found.root);
       setNamePlaceholder(found.name);
-      setErrors((current) => ({ ...current, root: undefined, exportFolder: undefined }));
+      setErrors((current) => ({ ...current, root: undefined, workingExportFolder: undefined }));
       if (!verifyTouched.current && found.verifyCommand) {
         setVerifyCommand(found.verifyCommand);
         setVerifySuggested(true);
@@ -142,9 +142,9 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
         setVisibility(found.visibility);
         setVisibilitySeeded(true);
       }
-      if (!exportFolderTouched.current && found.trackerExportFolder) {
-        setExportFolder(found.trackerExportFolder);
-        setExportFolderSuggested(true);
+      if (!workingExportFolderTouched.current && found.trackerExportFolder) {
+        setWorkingExportFolder(found.trackerExportFolder);
+        setWorkingExportFolderSuggested(true);
       }
       if (!slugPatternTouched.current && found.trackerSlugPattern) {
         setSlugPattern(found.trackerSlugPattern);
@@ -183,7 +183,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
 
   const refreshTracker = useActionMutation("refresh-project-tracker", {
     onSuccess: (updated) => {
-      setExportFolder(updated.exportFolder);
+      setWorkingExportFolder(updated.workingExportFolder);
       setSlugPattern(updated.slugPattern);
       setTrackerDiagnostic(updated.trackerDiagnostic ?? null);
       toast.success(t("projects.trackerRefreshed"));
@@ -196,7 +196,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
   const canSubmit =
     root.trim().length > 0 &&
     verifyCommand.trim().length > 0 &&
-    exportFolder.trim().length > 0;
+    workingExportFolder.trim().length > 0;
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -205,7 +205,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
     const fields = {
       root: root.trim(),
       verifyCommand: verifyCommand.trim(),
-      exportFolder: exportFolder.trim(),
+      workingExportFolder: workingExportFolder.trim(),
       name: name.trim(),
       slugPattern: slugPattern.trim(),
       trackerKind,
@@ -250,7 +250,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                 setResolvedRoot(null);
                 setErrors((current) => ({ ...current, root: undefined }));
               }}
-              onBlur={() => void detect(root, exportFolder)}
+              onBlur={() => void detect(root, workingExportFolder)}
               placeholder={t("projects.rootPlaceholder")}
               aria-invalid={errors.root !== undefined}
               aria-describedby="project-root-hint"
@@ -305,28 +305,28 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="project-export">{t("projects.exportFolderLabel")}</Label>
+              <Label htmlFor="project-export">{t("projects.workingExportFolderLabel")}</Label>
               <Input
                 id="project-export"
-                value={exportFolder}
+                value={workingExportFolder}
                 onChange={(event) => {
-                  exportFolderTouched.current = true;
-                  setExportFolderSuggested(false);
-                  setExportFolder(event.target.value);
-                  setErrors((current) => ({ ...current, exportFolder: undefined }));
+                  workingExportFolderTouched.current = true;
+                  setWorkingExportFolderSuggested(false);
+                  setWorkingExportFolder(event.target.value);
+                  setErrors((current) => ({ ...current, workingExportFolder: undefined }));
                 }}
-                onBlur={() => void detect(root, exportFolder)}
-                placeholder={t("projects.exportFolderPlaceholder")}
-                aria-invalid={errors.exportFolder !== undefined}
+                onBlur={() => void detect(root, workingExportFolder)}
+                placeholder={t("projects.workingExportFolderPlaceholder")}
+                aria-invalid={errors.workingExportFolder !== undefined}
                 aria-describedby="project-export-hint"
                 className="font-mono"
                 spellCheck={false}
               />
               {hint(
-                "exportFolder",
-                exportFolderSuggested
-                  ? t("projects.exportFolderSuggested")
-                  : t("projects.exportFolderHint"),
+                "workingExportFolder",
+                workingExportFolderSuggested
+                  ? t("projects.workingExportFolderSuggested")
+                  : t("projects.workingExportFolderHint"),
                 "project-export-hint",
               )}
             </div>

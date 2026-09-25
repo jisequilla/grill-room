@@ -63,7 +63,7 @@ test.describe("project settings", () => {
     const project = await registerProject(request, {
       root: repoRoot,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
       name: "Settings fixture",
     });
 

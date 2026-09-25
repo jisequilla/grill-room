@@ -97,7 +97,7 @@ test.describe("project scout", () => {
     const project = await registerProject(request, {
       root: repoRoot,
       verifyCommand: "pnpm test",
-      exportFolder: ".scratch",
+      workingExportFolder: ".scratch",
     });
 
     const sessionId = await createSession(page, {
