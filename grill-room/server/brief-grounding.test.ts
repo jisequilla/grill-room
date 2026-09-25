@@ -39,10 +39,15 @@ function aBareResult(): ReturnType<typeof aHandoffScoutResult> {
   };
 }
 
-/** Runs `reasonsToRefuseHandoffGrounding` for a single ticket that creates `path`. */
+/**
+ * Runs `reasonsToRefuseHandoffGrounding` for a single ticket that creates
+ * `path`, and proves itself with it, so the ignore check is the only one in
+ * play.
+ */
 function refuseSingleCreate(root: string, path: string): Promise<string[]> {
   const result = aBareResult();
   result.tickets[0]!.filesToChange = [{ path, change: "create" }];
+  result.tickets[0]!.provedBy.testPath = path;
   return reasonsToRefuseHandoffGrounding(result, { projectRoot: root, tickets: aSingleTicket() });
 }
 
@@ -129,6 +134,7 @@ describe("reasonsToRefuseHandoffGrounding's ignored-path check", () => {
       { path: "dist/plain.js", change: "create" },
       { path: ":/x", change: "create" },
     ];
+    result.tickets[0]!.provedBy.testPath = ":/x";
 
     const reasons = await reasonsToRefuseHandoffGrounding(result, {
       projectRoot: root,

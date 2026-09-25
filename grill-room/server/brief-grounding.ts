@@ -29,6 +29,7 @@ import {
 } from "./handoff.js";
 import {
   handoffScoutResultSchema,
+  staysInsideRepo,
   type HandoffScoutResult,
   type InterviewerModel,
 } from "./interviewer/index.js";
@@ -275,12 +276,21 @@ function excludesPath(field: string): boolean {
  * - every ticket of the handoff appears exactly once, and no other does;
  * - every blocker of a ticket has exactly one `buildsOn` entry, and every
  *   `buildsOn` names a real blocker;
+ * - every `buildsOn` sets exactly one of `citation`, `createdPath` and
+ *   `editedPath`, and `symbol` exactly when it sets `editedPath`;
+ * - every path (a file to change, `createdPath`, `editedPath`, the proving
+ *   test) is relative to the root and stays inside it;
  * - no file to change has a `.git` segment;
  * - a file marked `edit` exists;
  * - a file marked `create` resolves inside the root, does not exist, and is
  *   not ignored by git;
  * - a `buildsOn` on a path to be created names a path that blocker lists as
- *   a `create`.
+ *   a `create`, and one on a path it edits names a path that blocker lists as
+ *   an `edit`;
+ * - a ticket that changes files lists its proving test among them.
+ *
+ * These are the rules the result schema leaves to the app: breaking one is a
+ * refusal the scout retries, where a schema failure would end the turn.
  *
  * Async because the ignore check runs `git check-ignore` through the
  * read-only wrapper, once for every `create` path together.
@@ -331,15 +341,50 @@ export async function reasonsToRefuseHandoffGrounding(
     }
   }
 
-  const createsOf = new Map<number, string[]>();
   for (const ticket of result.tickets) {
-    createsOf.set(ticket.number, [
-      ...(createsOf.get(ticket.number) ?? []),
-      ...ticket.filesToChange
-        .filter((file) => file.change === "create")
-        .map((file) => file.path),
-    ]);
+    const paths = [
+      ...ticket.filesToChange.map((file) => ({ field: "filesToChange", path: file.path })),
+      ...ticket.buildsOn.flatMap((entry) => [
+        ...(entry.createdPath === null ? [] : [{ field: "createdPath", path: entry.createdPath }]),
+        ...(entry.editedPath === null ? [] : [{ field: "editedPath", path: entry.editedPath }]),
+      ]),
+      { field: "provedBy.testPath", path: ticket.provedBy.testPath },
+    ];
+    for (const { field, path: named } of paths) {
+      if (!staysInsideRepo(named)) {
+        reasons.push(
+          `Ticket ${ticket.number}'s ${field} "${named}" is not a path relative to the project root that stays inside it; give a relative path with no leading /, ~ or drive letter, no .. segment and no surrounding spaces.`,
+        );
+      }
+    }
+
+    // A ticket that changes no files, such as a spike, has no files to prove
+    // itself inside, so its test may live anywhere.
+    const { testPath } = ticket.provedBy;
+    if (
+      ticket.filesToChange.length > 0 &&
+      !ticket.filesToChange.some((file) => samePath(file.path, testPath))
+    ) {
+      reasons.push(
+        `Ticket ${ticket.number} is proved by ${testPath}, which is not one of its filesToChange; list the test file as a create or an edit, so the ticket may write it.`,
+      );
+    }
   }
+
+  const plannedOf = (change: "create" | "edit") => {
+    const planned = new Map<number, string[]>();
+    for (const ticket of result.tickets) {
+      planned.set(ticket.number, [
+        ...(planned.get(ticket.number) ?? []),
+        ...ticket.filesToChange
+          .filter((file) => file.change === change)
+          .map((file) => file.path),
+      ]);
+    }
+    return planned;
+  };
+  const createsOf = plannedOf("create");
+  const editsOf = plannedOf("edit");
 
   for (const ticket of result.tickets) {
     const blockers = blockersOf.get(ticket.number);
@@ -362,6 +407,40 @@ export async function reasonsToRefuseHandoffGrounding(
           `Ticket ${ticket.number}'s buildsOn names ticket ${entry.blocker}, which does not block it; ticket ${ticket.number} is blocked by ${listNumbers([...blockers].sort((a, b) => a - b))}. Give one buildsOn entry per real blocker.`,
         );
         continue;
+      }
+      const on = `Ticket ${ticket.number}'s buildsOn on ticket ${entry.blocker}`;
+      const forms = [entry.citation, entry.createdPath, entry.editedPath].filter(
+        (value) => value !== null,
+      ).length;
+      if (forms === 0) {
+        reasons.push(
+          `${on} says neither where it lives nor where ticket ${entry.blocker} puts it; set exactly one of citation (existing code), createdPath (a file ticket ${entry.blocker} creates), or editedPath with symbol (what ticket ${entry.blocker} adds to a file it edits).`,
+        );
+        continue;
+      }
+      if (forms > 1) {
+        reasons.push(
+          `${on} sets more than one of citation, createdPath and editedPath; set exactly one, and leave the others null.`,
+        );
+        continue;
+      }
+      if (entry.editedPath !== null && entry.symbol === null) {
+        reasons.push(
+          `${on} names ${entry.editedPath} but no symbol; name what ticket ${entry.blocker} adds to it: a function, a route, a table or a field.`,
+        );
+      }
+      if (entry.editedPath === null && entry.symbol !== null) {
+        reasons.push(
+          `${on} names the symbol ${entry.symbol} without an editedPath; a symbol goes only with the editedPath ticket ${entry.blocker} adds it to, so give that path or leave symbol null.`,
+        );
+      }
+      if (entry.editedPath !== null) {
+        const edited = editsOf.get(entry.blocker) ?? [];
+        if (!edited.some((planned) => samePath(planned, entry.editedPath!))) {
+          reasons.push(
+            `${on} says ticket ${entry.blocker} adds to ${entry.editedPath}, which ticket ${entry.blocker} does not list as an edit in its filesToChange; name a file ticket ${entry.blocker} edits, depend on a path it creates, or cite existing code.`,
+          );
+        }
       }
       if (entry.createdPath !== null) {
         const created = createsOf.get(entry.blocker) ?? [];
@@ -387,6 +466,8 @@ export async function reasonsToRefuseHandoffGrounding(
   const toCheckIgnored: { ticket: number; path: string }[] = [];
   for (const ticket of result.tickets) {
     for (const file of ticket.filesToChange) {
+      // Already refused above, with the reason worded for the path's shape.
+      if (!staysInsideRepo(file.path)) continue;
       if (isInsideGitDir(file.path)) {
         reasons.push(
           `Ticket ${ticket.number} marks ${file.path} as ${file.change}, but it is inside a .git folder, which the repository never tracks; plan files outside .git.`,

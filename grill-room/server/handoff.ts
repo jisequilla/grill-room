@@ -753,9 +753,10 @@ function codebaseFactsSection(ticket: HandoffTicket, grounding: HandoffGrounding
 
 /**
  * A new "Builds on" section, one line per blocker: what this ticket needs
- * from it, where — a citation, or "created by ticket NN at <path>" for a
- * dependency on a path the blocker has not created yet — and the check to
- * run first. Absent entirely when the ticket has no grounding entry or the
+ * from it, where — a citation, "created by ticket NN at <path>" for a
+ * dependency on a path the blocker has not created yet, or "ticket NN adds
+ * <symbol> to <path>" for one on what the blocker adds to a file it edits —
+ * and the check to run first. Absent entirely when the ticket has no grounding entry or the
  * entry names no dependency (no blockers).
  */
 function buildsOnSection(
@@ -771,7 +772,9 @@ function buildsOnSection(
     const where =
       dependency.citation !== null
         ? `\`${dependency.citation}\``
-        : `created by ticket ${label} at \`${dependency.createdPath}\``;
+        : dependency.createdPath !== null
+          ? `created by ticket ${label} at \`${dependency.createdPath}\``
+          : `ticket ${label} adds \`${dependency.symbol}\` to \`${dependency.editedPath}\``;
     return `- Ticket ${label}: ${dependency.provides} — ${where} — check: \`${dependency.check}\``;
   });
   return ["## Builds on", "", ...lines].join("\n");

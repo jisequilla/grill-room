@@ -4,6 +4,9 @@ import { z } from "zod";
  * The output schemas of the request kinds. Each one is both the contract
  * the model is constrained by (converted to JSON Schema for the command line)
  * and the validator every result is checked against before it leaves the port.
+ * The handoff scout's is the exception: its contract is stricter than its
+ * validator, because the app re-checks the extra rules as refusals it can
+ * retry (see `handoffScoutContractSchema`).
  *
  * Objects are strict and every property is required; absence is spelled as
  * `null` or an empty array. That keeps the generated JSON Schema in the shape
@@ -25,7 +28,7 @@ const CITATION_PATTERN = /^[^:\n]+:[1-9][0-9]*(-[1-9][0-9]*)?$/;
  * it: not absolute, not home-relative, no drive letter, no `..` segment, and
  * no surrounding whitespace.
  */
-function staysInsideRepo(path: string): boolean {
+export function staysInsideRepo(path: string): boolean {
   return (
     path.trim() === path &&
     !path.startsWith("/") &&
@@ -265,20 +268,6 @@ export const scoutProjectResultSchema = z.strictObject({
   ),
 });
 
-/**
- * A repo-relative file path with no line: a file a ticket creates or edits, or
- * the test that proves it. Like a citation's path, it may not be absolute or
- * step outside the repo. Whether it exists, or may be created, is the app's
- * check, not the schema's.
- */
-export const repoPath = z
-  .string()
-  .min(1)
-  .refine(
-    staysInsideRepo,
-    "A path is relative to the repository root and stays inside it.",
-  );
-
 /** A handoff scout grounds at most this many tickets in one turn. */
 export const MAX_HANDOFF_SCOUT_TICKETS = 40;
 
@@ -294,67 +283,136 @@ export const MAX_HANDOFF_SCOUT_FACTS = 15;
 /** A grounded ticket names at most this many dependencies: one per blocker. */
 export const MAX_HANDOFF_SCOUT_BUILDS_ON = 15;
 
-/**
- * What a ticket needs from one of the tickets it waits on: where it already
- * lives in the code (`citation`), or the path the blocker will create
- * (`createdPath`). Exactly one of the two is set.
+/*
+ * The handoff scout's result has two schemas.
+ *
+ * The contract (`handoffScoutContractSchema`) is what the model is
+ * constrained by: citations carry their pattern, and each `buildsOn` entry is
+ * one of its three forms. `z.toJSONSchema` keeps both; it drops every
+ * `.refine`, so the contract has none.
+ *
+ * The validator (`handoffScoutResultSchema`) checks only the shape. Every rule
+ * beyond the shape lives in the app's rejection check
+ * (`reasonsToRefuseHandoffGrounding` in `server/brief-grounding.ts`), which
+ * sends a result that breaks one back to the scout with the reason. A rule
+ * enforced here would end the turn as `malformed-output`, with no retry.
  */
-const handoffBuildsOn = z
-  .strictObject({
-    /** The number of the blocking ticket. */
-    blocker: z.number().int().positive(),
-    /** What this ticket needs from it: a file, a symbol, a table. */
-    provides: z.string().min(1),
-    citation: citation.nullable(),
-    createdPath: repoPath.nullable(),
-    /** The command or test that proves the dependency exists before work starts. */
-    check: z.string().min(1),
-  })
-  .refine(
-    (entry) => (entry.citation === null) !== (entry.createdPath === null),
-    "A dependency carries either a citation or a path to be created, never both and never neither.",
-  );
+
+const handoffText = z.string().min(1);
+
+const buildsOnCommon = {
+  /** The number of the blocking ticket. */
+  blocker: z.number().int().positive(),
+  /** What this ticket needs from it: a file, a symbol, a table. */
+  provides: handoffText,
+  /** The command or test that proves the dependency before work starts. */
+  check: handoffText,
+};
+
+/**
+ * What a ticket needs from one of the tickets it waits on, in one of three
+ * forms: where it already lives in the code (`citation`), the path the
+ * blocker will create (`createdPath`), or the `symbol` the blocker adds to a
+ * file it edits (`editedPath`). The app checks that exactly one form is set.
+ *
+ * `editedPath` and `symbol` default to null so a grounding stored before the
+ * edit form existed still reads.
+ */
+const handoffBuildsOn = z.strictObject({
+  ...buildsOnCommon,
+  citation: handoffText.nullable(),
+  createdPath: handoffText.nullable(),
+  editedPath: handoffText.nullable().default(null),
+  /** What the blocker adds to `editedPath`: a function, a route, a table, a field. */
+  symbol: handoffText.nullable().default(null),
+});
+
+/** The three `buildsOn` forms, as the model is constrained to them. */
+const handoffBuildsOnForms = z.union([
+  z.strictObject({
+    ...buildsOnCommon,
+    citation: z.string().regex(CITATION_PATTERN),
+    createdPath: z.null(),
+    editedPath: z.null(),
+    symbol: z.null(),
+  }),
+  z.strictObject({
+    ...buildsOnCommon,
+    citation: z.null(),
+    createdPath: handoffText,
+    editedPath: z.null(),
+    symbol: z.null(),
+  }),
+  z.strictObject({
+    ...buildsOnCommon,
+    citation: z.null(),
+    createdPath: z.null(),
+    editedPath: handoffText,
+    symbol: handoffText,
+  }),
+]);
 
 /** One ticket's grounding, as a handoff scout reports it. */
-const groundedTicket = z.strictObject({
-  /** The ticket's number, as the request listed it. */
-  number: z.number().int().positive(),
-  /**
-   * The files the ticket may create or edit. Empty for a ticket that changes
-   * no files, such as a spike run against a real project.
-   */
-  filesToChange: z
-    .array(
-      z.strictObject({
-        path: repoPath,
-        change: z.enum(["create", "edit"]),
-      }),
-    )
-    .max(MAX_HANDOFF_SCOUT_FILES_TO_CHANGE),
-  /** The existing code the ticket builds on, cited. */
-  buildsOnFiles: z.array(citation).max(MAX_HANDOFF_SCOUT_BUILDS_ON_FILES),
-  /** Verified facts about the code the ticket touches, each cited. */
-  facts: z
-    .array(z.strictObject({ statement: z.string().min(1), citation }))
-    .max(MAX_HANDOFF_SCOUT_FACTS),
-  /** One entry per ticket this one waits on; empty when it waits on none. */
-  buildsOn: z.array(handoffBuildsOn).max(MAX_HANDOFF_SCOUT_BUILDS_ON),
-  /** The test to add or extend, and the command that proves the ticket. */
-  provedBy: z.strictObject({
-    testPath: repoPath,
-    command: z.string().min(1),
-  }),
-});
+function groundedTicket<Citation extends z.ZodType, BuildsOn extends z.ZodType>(
+  citation: Citation,
+  buildsOn: BuildsOn,
+) {
+  return z.strictObject({
+    /** The ticket's number, as the request listed it. */
+    number: z.number().int().positive(),
+    /**
+     * The files the ticket may create or edit, each relative to the
+     * repository root. Empty for a ticket that changes no files, such as a
+     * spike run against a real project.
+     */
+    filesToChange: z
+      .array(
+        z.strictObject({
+          path: handoffText,
+          change: z.enum(["create", "edit"]),
+        }),
+      )
+      .max(MAX_HANDOFF_SCOUT_FILES_TO_CHANGE),
+    /** The existing code the ticket builds on, cited. */
+    buildsOnFiles: z.array(citation).max(MAX_HANDOFF_SCOUT_BUILDS_ON_FILES),
+    /** Verified facts about the code the ticket touches, each cited. */
+    facts: z
+      .array(z.strictObject({ statement: handoffText, citation }))
+      .max(MAX_HANDOFF_SCOUT_FACTS),
+    /** One entry per ticket this one waits on; empty when it waits on none. */
+    buildsOn: z.array(buildsOn).max(MAX_HANDOFF_SCOUT_BUILDS_ON),
+    /**
+     * The test to add or extend, and the command that proves the ticket. The
+     * test is one of the ticket's own files to change, unless it has none.
+     */
+    provedBy: z.strictObject({
+      testPath: handoffText,
+      command: handoffText,
+    }),
+  });
+}
 
 /**
  * What a handoff scout found reading a project for every ticket of one
- * handoff, one entry per ticket by number. The schema bounds the lists and
- * shapes; the app checks that every ticket appears exactly once, that each
- * dependency names a real blocker, and every citation and path against the
- * repository.
+ * handoff, one entry per ticket by number: the validator. It bounds the lists
+ * and checks the shapes; the app checks everything else, including that every
+ * ticket appears exactly once, that each dependency names a real blocker in
+ * exactly one form, that the proving test is one of the ticket's own files,
+ * and every citation and path against the repository.
  */
 export const handoffScoutResultSchema = z.strictObject({
-  tickets: z.array(groundedTicket).max(MAX_HANDOFF_SCOUT_TICKETS),
+  tickets: z
+    .array(groundedTicket(handoffText, handoffBuildsOn))
+    .max(MAX_HANDOFF_SCOUT_TICKETS),
+});
+
+/** The handoff scout's result as the model is constrained to it: the contract. */
+export const handoffScoutContractSchema = z.strictObject({
+  tickets: z
+    .array(
+      groundedTicket(z.string().regex(CITATION_PATTERN), handoffBuildsOnForms),
+    )
+    .max(MAX_HANDOFF_SCOUT_TICKETS),
 });
 
 export const resultSchemas = {
@@ -383,9 +441,17 @@ export type AssessReadinessResult = ResultFor<"assess-readiness">;
 export type ScoutProjectResult = ResultFor<"scout-project">;
 export type HandoffScoutResult = ResultFor<"handoff-scout">;
 
+/**
+ * The schemas the model is constrained by, where they are stricter than the
+ * validator: their extra rules are re-checked by the app as refusals.
+ */
+const contractSchemas: Partial<Record<RequestKind, z.ZodType>> = {
+  "handoff-scout": handoffScoutContractSchema,
+};
+
 /** The JSON Schema handed to the command line's `--json-schema` flag. */
 export function jsonSchemaFor(kind: RequestKind): Record<string, unknown> {
-  return z.toJSONSchema(resultSchemas[kind], {
+  return z.toJSONSchema(contractSchemas[kind] ?? resultSchemas[kind], {
     target: "draft-7",
     io: "output",
   }) as Record<string, unknown>;

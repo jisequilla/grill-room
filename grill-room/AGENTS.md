@@ -521,16 +521,35 @@ with the reasons:
 - every ticket of the handoff appears exactly once, and no other;
 - every blocker of a ticket has exactly one `buildsOn` entry, and every
   `buildsOn` names a real blocker;
+- every `buildsOn` takes exactly one of three forms: a `citation` of code
+  that already exists, a `createdPath` the blocker creates, or an
+  `editedPath` plus the `symbol` the blocker adds to it (a function, route,
+  table or field);
+- every path (a file to change, a `createdPath` or `editedPath`, the proving
+  test) is relative to the project root and stays inside it;
 - no file to change sits inside a `.git` folder;
 - a file marked `edit` exists;
 - a file marked `create` resolves inside the project root (through symlinks),
   does not exist yet, and is not ignored by git (`git check-ignore`);
 - a `buildsOn` on a path to be created names a path that blocker lists as a
-  `create`.
+  `create`, and one on a path it edits names a path that blocker lists as an
+  `edit`;
+- a ticket that changes files lists its proving test (`provedBy.testPath`)
+  among them, as a `create` or an `edit`.
 
-A ticket may list no files to change, as a spike does. A handoff with more
-tickets than one turn can ground, or a ticket with more blockers than a
-grounded ticket can name, is refused before any turn is spent.
+A ticket may list no files to change, as a spike does; its proving test may
+then live anywhere. A handoff with more tickets than one turn can ground, or a
+ticket with more blockers than a grounded ticket can name, is refused before
+any turn is spent.
+
+These rules live in the rejection check (`reasonsToRefuseHandoffGrounding`),
+not the result schema, so breaking one is a refusal the scout retries.
+`handoffScoutResultSchema` checks only the shape, since a schema failure is
+`malformed-output` and ends the turn. The model is still constrained by a
+stricter contract, `handoffScoutContractSchema`, which `jsonSchemaFor` hands
+the command line: the citation pattern, and the three `buildsOn` forms as an
+`anyOf`. What the contract cannot say, and the server cannot verify, the
+prompt states: a dependency's check must fail until the blocker lands.
 
 The grounding is **current** only while the handoff's fingerprint over today's
 inputs is the one it was made for and the project's `HEAD` is the commit it
@@ -551,10 +570,12 @@ fresh:
   **File boundaries** lists the files to create, the files to edit, and the
   existing files it builds on, cited; **Codebase facts** lists each cited
   statement. Two new sections appear: **Builds on**, one line per blocker
-  naming what this ticket needs from it, where — a citation, or "created by
+  naming what this ticket needs from it, where — a citation, "created by
   ticket NN at `<path>`" for a dependency on a path that blocker has not
-  created yet — and the check to run first; and **Proved by**, the test path
-  to add or extend and the command that proves the ticket. With **stale**
+  created yet, or "ticket NN adds `<symbol>` to `<path>`" for one on what
+  that blocker adds to a file it edits — and the check to run first; and
+  **Proved by**, the test path to add or extend and the command that proves
+  the ticket. With **stale**
   grounding this content sits under one line saying it was grounded at commit
   `<short sha>` for an earlier version of the handoff — tickets or project
   settings, since a setting alone (the delivery recipe, the review switch,

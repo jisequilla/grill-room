@@ -457,6 +457,8 @@ describe("grounded briefs", () => {
         provides: "the project registry",
         citation: null,
         createdPath: "server/projects.ts",
+        editedPath: null,
+        symbol: null,
         check: "test -f server/projects.ts",
       },
     ],
@@ -524,6 +526,46 @@ describe("grounded briefs", () => {
         "```bash",
         "pnpm exec vitest run server/export-bundle.test.ts",
         "```",
+      ].join("\n"),
+    );
+  });
+
+  it("names what a blocker adds to a file it edits, and the check, in Builds on", () => {
+    const grounding: HandoffGrounding = {
+      ...CURRENT_GROUNDING,
+      tickets: [
+        ...CURRENT_GROUNDING.tickets,
+        {
+          number: 3,
+          filesToChange: [{ path: "server/export.test.ts", change: "edit" }],
+          buildsOnFiles: [],
+          facts: [],
+          buildsOn: [
+            {
+              blocker: 1,
+              provides: "the column that records a project's root",
+              citation: null,
+              createdPath: null,
+              editedPath: "server/db/schema.ts",
+              symbol: "rootPath",
+              check: "grep -n rootPath server/db/schema.ts",
+            },
+          ],
+          provedBy: {
+            testPath: "server/export.test.ts",
+            command: "pnpm exec vitest run server/export.test.ts",
+          },
+        },
+      ],
+    };
+
+    const brief = renderBrief(aSource(), ticketByNumber(3), { grounding });
+
+    expect(section(brief, "## Builds on")).toBe(
+      [
+        "## Builds on",
+        "",
+        "- Ticket 01: the column that records a project's root — ticket 01 adds `rootPath` to `server/db/schema.ts` — check: `grep -n rootPath server/db/schema.ts`",
       ].join("\n"),
     );
   });
