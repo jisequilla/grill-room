@@ -453,7 +453,7 @@ describe("updateProject", () => {
     expect(untouched).toMatchObject({ deliveryRecipe: "pull-request", adversarialReview: false });
   });
 
-  it("ignores a blank or unrecognized delivery recipe in a patch, keeping the existing value rather than re-guessing", async () => {
+  it("ignores a blank delivery recipe in a patch, keeping the existing value rather than re-guessing", async () => {
     const project = await aProject();
     expect(project.deliveryRecipe).toBe("local-merge");
 
@@ -463,11 +463,19 @@ describe("updateProject", () => {
 
     const blankPatch = registered(await updateProject(project.id, { deliveryRecipe: "" }));
     expect(blankPatch.deliveryRecipe).toBe("local-merge");
+  });
 
-    const unknownPatch = registered(
-      await updateProject(project.id, { deliveryRecipe: "carrier-pigeon" }),
-    );
-    expect(unknownPatch.deliveryRecipe).toBe("local-merge");
+  it("refuses an unrecognized delivery recipe in a patch", async () => {
+    const project = await aProject();
+    expect(project.deliveryRecipe).toBe("local-merge");
+
+    expect(
+      refusalCode(await updateProject(project.id, { deliveryRecipe: "carrier-pigeon" })),
+    ).toBe("invalid-delivery-recipe");
+
+    // Refused, not silently kept-or-changed.
+    const untouched = registered(await updateProject(project.id, { name: "Renamed" }));
+    expect(untouched.deliveryRecipe).toBe("local-merge");
   });
 
   it("refuses to blank a required field", async () => {
