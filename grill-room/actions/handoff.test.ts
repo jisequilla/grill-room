@@ -290,6 +290,7 @@ describe("handoff export", () => {
     expect(preview.files).toEqual([
       path.join(bundleDir, "HANDOFF.md"),
       path.join(bundleDir, "spec.md"),
+      path.join(bundleDir, "intent.md"),
       path.join(bundleDir, "issues", "01-build-the-workspace.md"),
       path.join(bundleDir, "issues", "02-store-on-disk.md"),
       path.join(bundleDir, "issues", "03-export-it.md"),

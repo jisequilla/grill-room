@@ -261,6 +261,7 @@ describe("preview-export and export-session", () => {
     expect(preview.files).toEqual([
       path.join(bundleDir, "HANDOFF.md"),
       path.join(bundleDir, "spec.md"),
+      path.join(bundleDir, "intent.md"),
       path.join(bundleDir, "issues", "01-build-the-workspace.md"),
       path.join(bundleDir, "issues", "02-store-on-disk.md"),
       path.join(bundleDir, "briefs", "01-build-the-workspace.md"),
@@ -294,11 +295,24 @@ describe("preview-export and export-session", () => {
     expect(
       await fs.readFile(path.join(bundleDir, "issues", "02-store-on-disk.md"), "utf8"),
     ).toBe("# 02 Ticket 2\n\nStatus: ready-for-agent\nBlocked by: 01\n\nDo the work of ticket 2.");
+    expect(await fs.readFile(path.join(bundleDir, "intent.md"), "utf8")).toBe(
+      [
+        "# Intent: Grill Room",
+        "",
+        "A local app that grills me about an idea until it is decided.",
+        "",
+        "## Readiness",
+        "",
+        "Not judged for this version of the idea.",
+        "",
+      ].join("\n"),
+    );
     expect(JSON.parse(await fs.readFile(path.join(bundleDir, EXPORT_MANIFEST_FILE), "utf8"))).toEqual({
       version: 1,
       files: [
         "HANDOFF.md",
         "spec.md",
+        "intent.md",
         "issues/01-build-the-workspace.md",
         "issues/02-store-on-disk.md",
         "briefs/01-build-the-workspace.md",
@@ -441,7 +455,13 @@ describe("preview-export and export-session", () => {
     }
     expect(JSON.parse(await fs.readFile(path.join(bundleDir, EXPORT_MANIFEST_FILE), "utf8"))).toEqual({
       version: 1,
-      files: ["HANDOFF.md", "spec.md", "issues/01-build-the-workspace.md", "briefs/01-build-the-workspace.md"],
+      files: [
+        "HANDOFF.md",
+        "spec.md",
+        "intent.md",
+        "issues/01-build-the-workspace.md",
+        "briefs/01-build-the-workspace.md",
+      ],
     });
   });
 
@@ -547,6 +567,7 @@ describe("preview-export and export-session", () => {
     expect(second.files).toEqual([
       path.join(root, ".scratch", "stale", "HANDOFF.md"),
       path.join(root, ".scratch", "stale", "spec.md"),
+      path.join(root, ".scratch", "stale", "intent.md"),
       path.join(root, ".scratch", "stale", "briefs", "01-stale-ticket.md"),
       path.join(root, ".scratch", "stale", EXPORT_MANIFEST_FILE),
     ]);
@@ -733,6 +754,7 @@ describe("preview-export and export-session", () => {
         files: {
           ".scratch/grill-room/HANDOFF.md": "old handoff",
           ".scratch/grill-room/spec.md": "old committed content",
+          ".scratch/grill-room/intent.md": "old intent",
           ".scratch/grill-room/issues/01-build-the-workspace.md": "old",
           ".scratch/grill-room/issues/02-store-on-disk.md": "old",
           ".scratch/grill-room/briefs/01-build-the-workspace.md": "old brief",
@@ -742,6 +764,7 @@ describe("preview-export and export-session", () => {
             files: [
               "HANDOFF.md",
               "spec.md",
+              "intent.md",
               "issues/01-build-the-workspace.md",
               "issues/02-store-on-disk.md",
               "briefs/01-build-the-workspace.md",
@@ -801,9 +824,10 @@ describe("preview-export and export-session", () => {
       const bundleDir = path.join(root, ".scratch", "grill-room");
       const decisionsPath = path.join(bundleDir, "decisions.md");
       const preview = await previewExport.run({ sessionId: session.id });
-      expect(preview.files.slice(0, 3)).toEqual([
+      expect(preview.files.slice(0, 4)).toEqual([
         path.join(bundleDir, "HANDOFF.md"),
         path.join(bundleDir, "spec.md"),
+        path.join(bundleDir, "intent.md"),
         decisionsPath,
       ]);
 

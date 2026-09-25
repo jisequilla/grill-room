@@ -1,20 +1,25 @@
 /**
  * Export's pure parts: the bundle's folder name (slug proposal, slug pattern)
  * and the files the local-markdown tracker layout expects (see repo-root
- * `docs/agents/issue-tracker.md`), plus the session's `decisions.md`, with
- * their content. Nothing here touches the
+ * `docs/agents/issue-tracker.md`), plus the session's `decisions.md` and
+ * `intent.md`, with their content. Nothing here touches the
  * filesystem — `server/export-bundle.ts` reads what already exists, enforces
  * containment and does the writes; this module only decides names and renders
  * content. Tested through the `preview-export` and `export-session` actions,
  * the same convention `tickets.ts` and `tree.ts` follow.
  */
 
+import type { StoredReadiness } from "./readiness.js";
+import type { ScoutReportWithStaleness } from "./scout-report.js";
 import type { DecisionView } from "./tree.js";
 
 const STATUS_LINE = "Status: ready-for-agent";
 
 /** The decisions record every export with something settled writes beside the spec. */
 export const DECISIONS_FILE = "decisions.md";
+
+/** The why, for people: rendered from stored data, written beside the spec on every export. */
+export const INTENT_FILE = "intent.md";
 
 /** A ticket as `export-session` hands it here: `blockedBy` already resolved to ticket numbers. */
 export interface ExportTicket {
@@ -32,7 +37,7 @@ export interface PlannedExportFile {
 }
 
 export interface ExportPlan {
-  /** Spec first, then `decisions.md` when planned, then issues in ticket-number order — the order `export-session` writes and reports them in. */
+  /** Spec first, then `intent.md`, then `decisions.md` when planned, then issues in ticket-number order — the order `export-session` writes and reports them in. */
   files: PlannedExportFile[];
 }
 
@@ -69,11 +74,23 @@ export function parseExportManifest(content: string): string[] | null {
 
 export interface PlanExportInput {
   sessionTitle: string;
+  /** The session's idea, verbatim — `intent.md` opens with it unchanged. */
+  idea: string;
   specMarkdown: string;
   /** Tickets to export, already in ascending number order. Empty when tickets are not being exported. */
   tickets: readonly ExportTicket[];
   /** The session's whole design tree, states resolved; `decisions.md` is rendered from it. */
   decisions: readonly DecisionView[];
+  /**
+   * The session's stored readiness judgment, or null when it has none.
+   * `intent.md` renders it only when it was judged for `idea` — this is
+   * checked again here even though a caller following `currentReadiness`'s
+   * own idea rule has usually already filtered it, so the fallback text is
+   * correct however the value was produced.
+   */
+  readiness: StoredReadiness | null;
+  /** The session's current scout report with staleness, or null when it has never been scouted. */
+  scoutReport: ScoutReportWithStaleness | null;
 }
 
 /** Lowercase; anything not a letter or digit collapses to one hyphen; leading/trailing hyphens trimmed. */
@@ -480,6 +497,100 @@ export function renderDecisionsFile(
   return `${sections.join("\n\n")}\n`;
 }
 
+type ReadinessEvidenceItem = StoredReadiness["result"]["evidence"][number];
+type ScoutCurrentStateItem = ScoutReportWithStaleness["result"]["currentState"][number];
+
+function evidenceLine(item: ReadinessEvidenceItem): string {
+  return item.source === "repo"
+    ? `- ${item.text} · the repo's statement (${item.citation})`
+    : `- ${item.text} · the user's statement`;
+}
+
+/**
+ * `intent.md`'s "Readiness" section: the objective, expected outcome and
+ * verdict, then the evidence (each item marked as the user's or the repo's,
+ * a repo item with its citation), then the unknowns. Exactly "Not judged for
+ * this version of the idea." when `readiness` is null or was judged for a
+ * different idea than `idea`.
+ */
+function renderReadinessSection(idea: string, readiness: StoredReadiness | null): string {
+  if (readiness === null || readiness.ideaJudged !== idea) {
+    return "## Readiness\n\nNot judged for this version of the idea.";
+  }
+
+  const { result } = readiness;
+  const lines = [
+    "## Readiness",
+    "",
+    field("Objective", result.objective ?? "None stated."),
+    field("Expected outcome", result.expectedOutcome ?? "None stated."),
+    field("Verdict", result.verdict),
+  ];
+
+  if (result.evidence.length > 0) {
+    lines.push("", "**Evidence**", "", ...result.evidence.map(evidenceLine));
+  }
+  if (result.unknowns.length > 0) {
+    lines.push("", "**Unknowns**", "", ...result.unknowns.map((unknown) => `- ${unknown}`));
+  }
+
+  return lines.join("\n");
+}
+
+function statusLabel(status: ScoutCurrentStateItem["status"]): string {
+  return status === "built" ? "Built" : status === "partial" ? "Partial" : "Gap";
+}
+
+function currentStateLine(item: ScoutCurrentStateItem): string {
+  return `- **${statusLabel(item.status)}:** ${item.summary} (${item.citations.join(", ")})`;
+}
+
+/**
+ * `intent.md`'s "Project state" section: each current-state item from the
+ * scout report with its citation, then the commit it read. Null (the section
+ * is left out) when the session has never been scouted; a note is added when
+ * the report is stale.
+ */
+function renderProjectStateSection(scoutReport: ScoutReportWithStaleness | null): string | null {
+  if (scoutReport === null) return null;
+
+  const lines = [
+    "## Project state",
+    "",
+    ...scoutReport.result.currentState.map(currentStateLine),
+    "",
+    field("Commit read", scoutReport.commitRead ?? "none"),
+  ];
+  if (scoutReport.stale) {
+    lines.push("", "The project has changed since this report was read.");
+  }
+  return lines.join("\n");
+}
+
+/**
+ * `intent.md`'s content: the why, for people, rendered from stored data with
+ * no model call — the idea verbatim, the readiness judgment (or its "not
+ * judged" fallback), and the scout report's current project state (omitted
+ * entirely when the session has never been scouted).
+ */
+export function renderIntentFile(
+  sessionTitle: string,
+  idea: string,
+  readiness: StoredReadiness | null,
+  scoutReport: ScoutReportWithStaleness | null,
+): string {
+  const sections = [
+    `# Intent: ${oneLine(sessionTitle)}`,
+    idea.trim(),
+    renderReadinessSection(idea, readiness),
+  ];
+
+  const projectState = renderProjectStateSection(scoutReport);
+  if (projectState !== null) sections.push(projectState);
+
+  return `${sections.join("\n\n")}\n`;
+}
+
 /**
  * The full set of files an export would write, and their content, with no
  * filesystem access. `server/export-bundle.ts` resolves each `relativePath`
@@ -492,6 +603,10 @@ export function planExport(input: PlanExportInput): ExportPlan {
 
   const files: PlannedExportFile[] = [
     { relativePath: "spec.md", content: renderSpecFile(input.sessionTitle, input.specMarkdown) },
+    {
+      relativePath: INTENT_FILE,
+      content: renderIntentFile(input.sessionTitle, input.idea, input.readiness, input.scoutReport),
+    },
   ];
 
   const decisionsFile = renderDecisionsFile(input.sessionTitle, input.decisions);

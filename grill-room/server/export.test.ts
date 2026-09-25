@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { planExport } from "./export.js";
+import type { StoredReadiness } from "./readiness.js";
+import type { ScoutReportWithStaleness } from "./scout-report.js";
 import type { DecisionView } from "./tree.js";
 
 let counter = 0;
@@ -57,7 +59,15 @@ function openQuestion(key: string) {
 }
 
 function decisionsFile(decisions: readonly DecisionView[], sessionTitle = "Grill Room"): string | undefined {
-  const plan = planExport({ sessionTitle, specMarkdown: "## Problem\n\nA spec.", tickets: [], decisions });
+  const plan = planExport({
+    sessionTitle,
+    idea: "An idea.",
+    specMarkdown: "## Problem\n\nA spec.",
+    tickets: [],
+    decisions,
+    readiness: null,
+    scoutReport: null,
+  });
   return plan.files.find((file) => file.relativePath === "decisions.md")?.content;
 }
 
@@ -337,12 +347,16 @@ describe("planExport: decisions.md", () => {
   it("plans decisions.md beside the spec with one entry, or with one out-of-scope item alone", () => {
     const withEntry = planExport({
       sessionTitle: "Grill Room",
+      idea: "An idea.",
       specMarkdown: "A spec.",
       tickets: [{ number: 1, slug: "first", title: "First", body: "Body", blockedBy: [] }],
       decisions: [decision("only")],
+      readiness: null,
+      scoutReport: null,
     });
     expect(withEntry.files.map((file) => file.relativePath)).toEqual([
       "spec.md",
+      "intent.md",
       "decisions.md",
       "issues/01-first.md",
     ]);
@@ -367,5 +381,232 @@ describe("planExport: decisions.md", () => {
     expect(decisionsFile([keptRepo("repo-stack", "AGENTS.md:12")])).toBeUndefined();
     expect(decisionsFile([openQuestion("question")])).toBeUndefined();
     expect(decisionsFile([])).toBeUndefined();
+  });
+});
+
+const IDEA = "Export an intent.md alongside the spec so a reader understands why the feature exists.";
+
+function readinessJudgment(
+  ideaJudged: string,
+  overrides: Partial<StoredReadiness["result"]> = {},
+): StoredReadiness {
+  return {
+    ideaJudged,
+    result: {
+      evidence: [],
+      objective: "Write intent.md into every export bundle.",
+      objectiveIsProcess: false,
+      expectedOutcome: "A reader of the repo can see why the feature exists without opening Grill Room.",
+      unknowns: [],
+      verdict: "ready",
+      missing: [],
+      ...overrides,
+    },
+    judgedAt: "2026-09-01T00:00:00.000Z",
+    scoutReportId: null,
+  };
+}
+
+function scoutReportFixture(
+  overrides: Partial<{
+    currentState: ScoutReportWithStaleness["result"]["currentState"];
+    commitRead: string | null;
+    stale: boolean;
+  }> = {},
+): ScoutReportWithStaleness {
+  const commitRead = overrides.commitRead === undefined ? "abc123" : overrides.commitRead;
+  return {
+    id: "report-1",
+    sessionId: "session-1",
+    projectId: "project-1",
+    facts: {
+      headCommit: commitRead,
+      headBranch: "main",
+      remotes: [],
+      dirty: false,
+      recentCommitSubjects: [],
+      hasAgentInstructions: false,
+      decisionsFolder: null,
+      hasRulesFolder: false,
+      decisionFiles: [],
+    },
+    result: {
+      currentState: overrides.currentState ?? [
+        {
+          status: "built",
+          summary: "The export bundle already writes decisions.md.",
+          citations: ["server/export.ts:17"],
+        },
+        {
+          status: "gap",
+          summary: "Nothing records why a bundle exists.",
+          citations: ["server/export-bundle.ts:1"],
+        },
+      ],
+      proposedDecisions: [],
+      previousDecisions: [],
+    },
+    commitRead,
+    ideaRead: IDEA,
+    model: "sonnet",
+    ranAt: "2026-09-01T00:00:00.000Z",
+    turnId: null,
+    dispositions: {},
+    stale: overrides.stale ?? false,
+  };
+}
+
+function intentFile(
+  input: {
+    idea?: string;
+    readiness?: StoredReadiness | null;
+    scoutReport?: ScoutReportWithStaleness | null;
+  } = {},
+): string {
+  const plan = planExport({
+    sessionTitle: "Grill Room",
+    idea: input.idea ?? IDEA,
+    specMarkdown: "## Problem\n\nA spec.",
+    tickets: [],
+    decisions: [],
+    readiness: input.readiness ?? null,
+    scoutReport: input.scoutReport ?? null,
+  });
+  return plan.files.find((file) => file.relativePath === "intent.md")!.content;
+}
+
+describe("planExport: intent.md", () => {
+  it("renders the idea, readiness and project state when both are current — user evidence with no citation, repo evidence with one", () => {
+    const content = intentFile({
+      readiness: readinessJudgment(IDEA, {
+        evidence: [
+          { text: "The user said re-exports were silently destroying edits.", source: "idea", citation: null },
+          {
+            text: "The export bundle already writes decisions.md next to spec.md.",
+            source: "repo",
+            citation: "server/export.ts:17",
+          },
+        ],
+        unknowns: ["Whether readers want a machine-readable format too."],
+      }),
+      scoutReport: scoutReportFixture(),
+    });
+
+    expect(content).toBe(
+      [
+        "# Intent: Grill Room",
+        "",
+        IDEA,
+        "",
+        "## Readiness",
+        "",
+        "- **Objective:** Write intent.md into every export bundle.",
+        "- **Expected outcome:** A reader of the repo can see why the feature exists without opening Grill Room.",
+        "- **Verdict:** ready",
+        "",
+        "**Evidence**",
+        "",
+        "- The user said re-exports were silently destroying edits. · the user's statement",
+        "- The export bundle already writes decisions.md next to spec.md. · the repo's statement (server/export.ts:17)",
+        "",
+        "**Unknowns**",
+        "",
+        "- Whether readers want a machine-readable format too.",
+        "",
+        "## Project state",
+        "",
+        "- **Built:** The export bundle already writes decisions.md. (server/export.ts:17)",
+        "- **Gap:** Nothing records why a bundle exists. (server/export-bundle.ts:1)",
+        "",
+        "- **Commit read:** abc123",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("reads exactly 'Not judged for this version of the idea.' when there is no readiness judgment", () => {
+    const content = intentFile({ readiness: null, scoutReport: scoutReportFixture() });
+
+    expect(content).toBe(
+      [
+        "# Intent: Grill Room",
+        "",
+        IDEA,
+        "",
+        "## Readiness",
+        "",
+        "Not judged for this version of the idea.",
+        "",
+        "## Project state",
+        "",
+        "- **Built:** The export bundle already writes decisions.md. (server/export.ts:17)",
+        "- **Gap:** Nothing records why a bundle exists. (server/export-bundle.ts:1)",
+        "",
+        "- **Commit read:** abc123",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("reads exactly 'Not judged for this version of the idea.' when the judgment was made for an earlier idea", () => {
+    const content = intentFile({
+      readiness: readinessJudgment("An earlier version of the idea.", { verdict: "not-ready" }),
+      scoutReport: null,
+    });
+
+    expect(content).toBe(
+      ["# Intent: Grill Room", "", IDEA, "", "## Readiness", "", "Not judged for this version of the idea.", ""].join(
+        "\n",
+      ),
+    );
+  });
+
+  it("notes that the project has changed since when the scout report is stale", () => {
+    const content = intentFile({
+      readiness: null,
+      scoutReport: scoutReportFixture({ stale: true }),
+    });
+
+    expect(content).toBe(
+      [
+        "# Intent: Grill Room",
+        "",
+        IDEA,
+        "",
+        "## Readiness",
+        "",
+        "Not judged for this version of the idea.",
+        "",
+        "## Project state",
+        "",
+        "- **Built:** The export bundle already writes decisions.md. (server/export.ts:17)",
+        "- **Gap:** Nothing records why a bundle exists. (server/export-bundle.ts:1)",
+        "",
+        "- **Commit read:** abc123",
+        "",
+        "The project has changed since this report was read.",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("has no 'Project state' section when the session has never been scouted", () => {
+    const content = intentFile({ readiness: readinessJudgment(IDEA), scoutReport: null });
+
+    expect(content).toBe(
+      [
+        "# Intent: Grill Room",
+        "",
+        IDEA,
+        "",
+        "## Readiness",
+        "",
+        "- **Objective:** Write intent.md into every export bundle.",
+        "- **Expected outcome:** A reader of the repo can see why the feature exists without opening Grill Room.",
+        "- **Verdict:** ready",
+        "",
+      ].join("\n"),
+    );
+    expect(content).not.toContain("## Project state");
   });
 });
