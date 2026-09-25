@@ -17,9 +17,9 @@ const ROOT = "/repos/target";
 
 /** The local-merge recipe must never tell a building session to push, use `gh`, or open a pull request. */
 function expectNoDeliveryMentions(text: string): void {
-  expect(text).not.toMatch(/\bpush\b/i);
+  expect(text).not.toMatch(/\bpush(es|ed|ing)?\b/i);
   expect(text).not.toMatch(/\bgh\b/i);
-  expect(text).not.toMatch(/pull request/i);
+  expect(text).not.toMatch(/pull[ -]request/i);
   expect(text).not.toMatch(/\bPR\b/);
   expect(text).not.toMatch(/\borigin\b/i);
 }
@@ -208,8 +208,10 @@ describe("delivery recipe and the review gate", () => {
     const { markdown } = renderHandoff(aSource({ deliveryRecipe: "local-merge", adversarialReview: true }));
     expect(markdown).toMatchSnapshot();
     expect(markdown).toContain(
-      'Set `{"worktree": {"baseRef": "head"}}` in this repository\'s `.claude/settings.json`',
+      'Add the `worktree.baseRef` key, set to `"head"`, to this repository\'s `.claude/settings.json`',
     );
+    expect(markdown).toContain("merge it into whatever settings are already there, never replace the file");
+    expect(markdown).toContain(".claude/settings.local.json` instead when this setting should stay personal");
     expect(markdown).toContain("keep `main` checked out in this session");
     expect(markdown).toContain("Commit again whenever the bundle is re-exported.");
     expect(markdown).toContain(
@@ -220,10 +222,12 @@ describe("delivery recipe and the review gate", () => {
     expect(markdown).toContain('2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below)');
     expect(markdown).toContain("Merge only approved, verified work, locally: `git merge --no-ff <branch>`.");
     expect(markdown).toContain("Re-run `just verify` on `main` after merging.");
-    expect(markdown).toContain("done (merged)`, noting the reviewer's verdict.");
+    expect(markdown).toContain(
+      "done (merged)` (the ticket's `## Review` section already carries the reviewer's verdict).",
+    );
     expect(markdown).toContain("## Reviewing a ticket");
     expect(markdown).toContain("it writes to neither the tracker nor the bundle");
-    expect(markdown).toContain("as the ticket's `Status:` line in this file.");
+    expect(markdown).toContain("append a `## Review` section to the ticket file with the verdict and any findings");
     expect(markdown.toLowerCase()).not.toContain("no remote");
     expect(markdown.toLowerCase()).not.toContain("remote");
     expectNoDeliveryMentions(markdown);
@@ -233,8 +237,9 @@ describe("delivery recipe and the review gate", () => {
     const { markdown } = renderHandoff(aSource({ deliveryRecipe: "local-merge", adversarialReview: false }));
     expect(markdown).toMatchSnapshot();
     expect(markdown).toContain(
-      'Set `{"worktree": {"baseRef": "head"}}` in this repository\'s `.claude/settings.json`',
+      'Add the `worktree.baseRef` key, set to `"head"`, to this repository\'s `.claude/settings.json`',
     );
+    expect(markdown).toContain(".claude/settings.local.json` instead when this setting should stay personal");
     expect(markdown).toContain(
       "Local `main` holds every change you want the next worktree to start from — commit it before delegating.",
     );

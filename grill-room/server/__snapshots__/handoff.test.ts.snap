@@ -73,7 +73,7 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`) an
 2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below) and wait for its verdict comment on the pull request.
 3. Once the reviewer approves and marks the pull request ready, re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
 4. If it fails, run \`gh pr ready --undo <n>\` to put the pull request back in draft, then send the failure back to the same agent on its branch; the fix lands as a new commit on the same PR, and goes back to the reviewer.
-5. Merge only a ready, approved pull request: \`gh pr merge <n> --merge --delete-branch\`. Never merge a draft.
+5. Merge only a ready, approved pull request whose re-verification in step 3 has passed: \`gh pr merge <n> --merge --delete-branch\`. Never merge a draft.
 6. \`git pull\` on local \`main\` and re-run \`just verify\` on the merged result.
 7. Set the ticket's \`Status:\` line in this file to \`done (PR #<n>)\`.
 8. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
@@ -190,7 +190,7 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`) an
 2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below) and wait for its verdict comment on the pull request.
 3. Once the reviewer approves and marks the pull request ready, re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
 4. If it fails, run \`gh pr ready --undo <n>\` to put the pull request back in draft, then send the failure back to the same agent on its branch; the fix lands as a new commit on the same PR, and goes back to the reviewer.
-5. Merge only a ready, approved pull request: \`gh pr merge <n> --merge --delete-branch\`. Never merge a draft.
+5. Merge only a ready, approved pull request whose re-verification in step 3 has passed: \`gh pr merge <n> --merge --delete-branch\`. Never merge a draft.
 6. \`git pull\` on local \`main\` and re-run \`just verify\` on the merged result.
 7. Set the ticket's \`Status:\` line in this file to \`done (PR #<n>)\`.
 8. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
@@ -577,7 +577,7 @@ Run from the repository root: once by the subagent before it hands the ticket ba
 
 ## Before delegating the first ticket
 
-Set \`{"worktree": {"baseRef": "head"}}\` in this repository's \`.claude/settings.json\` before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far.
+Add the \`worktree.baseRef\` key, set to \`"head"\`, to this repository's \`.claude/settings.json\` — merge it into whatever settings are already there, never replace the file — before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far. Use \`.claude/settings.local.json\` instead when this setting should stay personal rather than shared with the repository.
 
 Grill Room never commits in this repository; commit the bundle yourself, once, before delegating, so the first worktree contains it:
 
@@ -694,7 +694,7 @@ Run from the repository root: once by the subagent before it hands the ticket ba
 
 ## Before delegating the first ticket
 
-Set \`{"worktree": {"baseRef": "head"}}\` in this repository's \`.claude/settings.json\` before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far.
+Add the \`worktree.baseRef\` key, set to \`"head"\`, to this repository's \`.claude/settings.json\` — merge it into whatever settings are already there, never replace the file — before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far. Use \`.claude/settings.local.json\` instead when this setting should stay personal rather than shared with the repository.
 
 Grill Room never commits in this repository; commit the bundle yourself, once, before delegating, so the first worktree contains it:
 
@@ -795,7 +795,7 @@ Run from the repository root: once by the subagent before it hands the ticket ba
 
 ## Before delegating the first ticket
 
-Set \`{"worktree": {"baseRef": "head"}}\` in this repository's \`.claude/settings.json\` before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far.
+Add the \`worktree.baseRef\` key, set to \`"head"\`, to this repository's \`.claude/settings.json\` — merge it into whatever settings are already there, never replace the file — before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far. Use \`.claude/settings.local.json\` instead when this setting should stay personal rather than shared with the repository.
 
 Grill Room never commits in this repository; commit the bundle yourself, once, before delegating, so the first worktree contains it:
 
@@ -851,7 +851,7 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`), o
 4. Send failures back to the same agent on its branch; the fix lands as a new commit there, and goes back to the reviewer.
 5. Merge only approved, verified work, locally: \`git merge --no-ff <branch>\`.
 6. Re-run \`just verify\` on \`main\` after merging.
-7. Set the ticket's \`Status:\` line in this file to \`done (merged)\`, noting the reviewer's verdict.
+7. Set the ticket's \`Status:\` line in this file to \`done (merged)\` (the ticket's \`## Review\` section already carries the reviewer's verdict).
 8. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).
 
 ## Reviewing a ticket
@@ -862,7 +862,7 @@ Every ticket is reviewed by a second, fresh-context agent before it can be merge
 
 **What to try to break.** Unmet acceptance criteria, changes outside the file boundaries, untested edge cases, seams with the tickets this one builds on, and claims the diff does not support.
 
-**Verdict.** It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it through the project's tracker, the same way you record the merge: as the ticket's \`Status:\` line in this file.
+**Verdict.** It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it yourself: append a \`## Review\` section to the ticket file with the verdict and any findings — the one-line \`Status:\` line has no room for them — then set \`Status:\` once the ticket actually closes.
 
 **Changes requested.** They go back to the builder on the same branch, and the same reviewer reviews again. After two rejected rounds, the operator decides.
 
@@ -1068,7 +1068,7 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`) an
 2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below) and wait for its verdict comment on the pull request.
 3. Once the reviewer approves and marks the pull request ready, re-run \`just verify\` yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
 4. If it fails, run \`gh pr ready --undo <n>\` to put the pull request back in draft, then send the failure back to the same agent on its branch; the fix lands as a new commit on the same PR, and goes back to the reviewer.
-5. Merge only a ready, approved pull request: \`gh pr merge <n> --merge --delete-branch\`. Never merge a draft.
+5. Merge only a ready, approved pull request whose re-verification in step 3 has passed: \`gh pr merge <n> --merge --delete-branch\`. Never merge a draft.
 6. \`git pull\` on local \`main\` and re-run \`just verify\` on the merged result.
 7. Set the ticket's \`Status:\` line in this file to \`done (PR #<n>)\`.
 8. Prune merged worktrees (\`git worktree remove <path>\`, then \`git worktree prune\`).

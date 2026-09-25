@@ -294,7 +294,7 @@ function beforeDelegatingSection(source: HandoffSource): string {
 
   if (deliveryRecipe === "local-merge") {
     lines.push(
-      `Set \`{"worktree": {"baseRef": "head"}}\` in this repository's \`.claude/settings.json\` before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far.`,
+      `Add the \`worktree.baseRef\` key, set to \`"head"\`, to this repository's \`.claude/settings.json\` — merge it into whatever settings are already there, never replace the file — before delegating the first ticket, and keep \`main\` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local \`main\`, so each one needs it to already hold everything merged so far. Use \`.claude/settings.local.json\` instead when this setting should stay personal rather than shared with the repository.`,
       "",
     );
   }
@@ -399,7 +399,7 @@ function pullRequestLifecycle(source: HandoffSource, groundingCurrent: boolean):
         '2. Send the ticket to a second, fresh-context reviewer (see "Reviewing a ticket" below) and wait for its verdict comment on the pull request.',
         `3. Once the reviewer approves and marks the pull request ready, re-run ${verify} yourself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.`,
         "4. If it fails, run `gh pr ready --undo <n>` to put the pull request back in draft, then send the failure back to the same agent on its branch; the fix lands as a new commit on the same PR, and goes back to the reviewer.",
-        "5. Merge only a ready, approved pull request: `gh pr merge <n> --merge --delete-branch`. Never merge a draft.",
+        "5. Merge only a ready, approved pull request whose re-verification in step 3 has passed: `gh pr merge <n> --merge --delete-branch`. Never merge a draft.",
         `6. \`git pull\` on local \`main\` and re-run ${verify} on the merged result.`,
         `7. ${closeStep}`,
         "8. Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).",
@@ -453,7 +453,7 @@ function localMergeLifecycle(source: HandoffSource, groundingCurrent: boolean): 
   const closeStep =
     source.project.trackerKind === "beads"
       ? `Close the ticket's bead with a comment naming the merge commit${review ? " and the reviewer's verdict" : ""}.`
-      : `Set the ticket's \`Status:\` line in this file to \`done (merged)\`${review ? ", noting the reviewer's verdict" : ""}.`;
+      : `Set the ticket's \`Status:\` line in this file to \`done (merged)\`${review ? " (the ticket's \`## Review\` section already carries the reviewer's verdict)" : ""}.`;
 
   const mainSessionSteps = review
     ? [
@@ -509,9 +509,11 @@ function lifecycleSection(source: HandoffSource, groundingCurrent: boolean): str
  * adversarial review switch is on. Its verdict paragraph is the one part
  * that varies: a pull-request comment and `gh pr ready`, or, for local
  * merge, the reviewer only reports its verdict — it writes to neither the
- * tracker nor the bundle — and the main session is the one who records it,
- * through the project's tracker, the same way the close step already does
- * (a bead comment, or the ticket's `Status:` line in this file).
+ * tracker nor the bundle — and the main session is the one who records it: a
+ * bead comment naming the merge commit and the verdict together (the close
+ * step already does), or, for a markdown tracker, a `## Review` section
+ * appended to the ticket file, since the one-line `Status:` line has no room
+ * for a rejected round's findings.
  */
 function reviewingSection(source: HandoffSource): string {
   let verdict: string;
@@ -519,11 +521,10 @@ function reviewingSection(source: HandoffSource): string {
     verdict =
       'It posts its verdict as a pull request comment, starting "Review verdict: approved" or "Review verdict: changes requested" with each finding, then runs `gh pr ready <n>` on approval.';
   } else {
-    const recordedAs =
+    verdict =
       source.project.trackerKind === "beads"
-        ? "a comment on the ticket's bead"
-        : "the ticket's `Status:` line in this file";
-    verdict = `It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it through the project's tracker, the same way you record the merge: as ${recordedAs}.`;
+        ? 'It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it through the project\'s tracker, the same way you record the merge: as a comment on the ticket\'s bead.'
+        : 'It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it yourself: append a `## Review` section to the ticket file with the verdict and any findings — the one-line `Status:` line has no room for them — then set `Status:` once the ticket actually closes.';
   }
   return [
     "## Reviewing a ticket",

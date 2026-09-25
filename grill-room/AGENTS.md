@@ -447,9 +447,11 @@ session, and is readable and editable in the output page's Handoff block.
   brief and diff, never the builder's report), what to try to break, how
   the verdict is recorded per recipe (a pull-request comment plus
   `gh pr ready`; or, for local merge, reported to the main session, which
-  writes it through the project's tracker the same way it records the
-  merge — a bead comment, or the ticket's `Status:` line in this file, the
-  reviewer itself never touching the tracker or the bundle), and the
+  records it itself — a bead comment naming the merge commit and the
+  verdict together, or, for a markdown tracker, a `## Review` section
+  appended to the ticket file, since the one-line `Status:` line has no room
+  for a rejected round's findings — the reviewer itself never touching the
+  tracker or the bundle), and the
   same-branch fix loop with its two-round cap. With the switch off, the
   section is absent and the lifecycle text has no review step. Beads
   projects get bead commands (the declared tracker's stored commands when
