@@ -902,13 +902,14 @@ describe("what the adapter sends for a handoff scout", () => {
         "- `provedBy`: the `testPath` of the test file to add or extend,",
         "  relative to the project root, or null when the spec rules out",
         "  tests for this ticket's kind of change (see below). `command`",
-        "  is the shell command that proves the ticket.",
+        "  is the shell command that proves the ticket, in the form the",
+        "  project already runs its tests.",
       ].join("\n"),
     );
     expect(prompt.indexOf("or null when the spec rules out")).toBeLessThan(
       prompt.indexOf("The test file is one of this ticket's"),
     );
-    expect(prompt).not.toContain("runs it, in the form the project already runs its tests.");
+    expect(prompt).not.toContain("The `command` runs it,");
   });
 
   it("says the proving test is one of the ticket's own files, unless it changes none", async () => {
@@ -985,13 +986,15 @@ describe("what the adapter sends for a handoff scout", () => {
         "  runner's default pattern in the fact's text. When no file",
         "  invokes the runner either, state the runner's default",
         "  discovery rule in the fact and cite an existing test file the",
-        "  same runner already collects under the same pattern; never",
-        "  cite a line that does not show collection. This fact may cite",
-        "  a config or recipe file the ticket does not change, an",
-        "  exception to facts being about the code the ticket touches.",
-        "  A path the runner does not collect — a file under `scripts/`",
-        "  when the runner only globs `src/**/*.test.ts` — is not a",
-        "  proof: pick a path the runner collects.",
+        "  same runner already collects under the same pattern, as",
+        "  evidence of that pattern. Never cite a line that neither",
+        "  invokes the runner, configures what it collects, nor is such",
+        "  a test file. This fact may cite a config, recipe, or existing",
+        "  test file the ticket does not change, an exception to facts",
+        "  being about the code the ticket touches. A path the runner",
+        "  does not collect — a file under `scripts/` when the runner",
+        "  only globs `src/**/*.test.ts` — is not a proof: pick a path",
+        "  the runner collects.",
       ].join("\n"),
     );
     expect(prompt).not.toContain("The scout confirms this and states it in a");
@@ -1009,17 +1012,33 @@ describe("what the adapter sends for a handoff scout", () => {
     );
   });
 
-  it("tells the scout that when no file invokes the runner either, it must state the default discovery rule and cite an existing collected test file", async () => {
+  it("tells the scout that when no file invokes the runner either, the cited existing test file is evidence of the pattern, not a self-contradictory ban on citing it", async () => {
     const { prompt } = await handoffInvocation();
 
     expect(prompt).toContain(
       [
         "  invokes the runner either, state the runner's default",
         "  discovery rule in the fact and cite an existing test file the",
-        "  same runner already collects under the same pattern; never",
-        "  cite a line that does not show collection. This fact may cite",
+        "  same runner already collects under the same pattern, as",
+        "  evidence of that pattern. Never cite a line that neither",
+        "  invokes the runner, configures what it collects, nor is such",
+        "  a test file.",
       ].join("\n"),
     );
+    expect(prompt).not.toContain("cite a line that does not show collection");
+  });
+
+  it("lets the collection fact cite a config, recipe, or existing test file the ticket does not change", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  a test file. This fact may cite a config, recipe, or existing",
+        "  test file the ticket does not change, an exception to facts",
+        "  being about the code the ticket touches. A path the runner",
+      ].join("\n"),
+    );
+    expect(prompt).not.toContain("This fact may cite a config or recipe file the ticket");
   });
 
   it("says checks and commands run from the repository root, and paths after a cd are relative to it", async () => {
