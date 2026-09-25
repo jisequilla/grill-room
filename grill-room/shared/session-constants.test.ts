@@ -40,3 +40,20 @@ describe("session constants", () => {
     }
   });
 });
+
+describe("handoff scout caps", () => {
+  it("defines MAX_HANDOFF_SCOUT_TICKETS and MAX_HANDOFF_SCOUT_BUILDS_ON as positive numbers", () => {
+    expect(relative.MAX_HANDOFF_SCOUT_TICKETS).toBeGreaterThan(0);
+    expect(relative.MAX_HANDOFF_SCOUT_BUILDS_ON).toBeGreaterThan(0);
+  });
+
+  it("re-exports both caps from schemas.ts unchanged", async () => {
+    const schemas = await import("../server/interviewer/schemas.js");
+    expect(schemas.MAX_HANDOFF_SCOUT_TICKETS).toBe(
+      relative.MAX_HANDOFF_SCOUT_TICKETS,
+    );
+    expect(schemas.MAX_HANDOFF_SCOUT_BUILDS_ON).toBe(
+      relative.MAX_HANDOFF_SCOUT_BUILDS_ON,
+    );
+  });
+});
