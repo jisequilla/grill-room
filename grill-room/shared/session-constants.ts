@@ -126,3 +126,9 @@ export const ATTEMPT_KINDS = [
   "success",
 ] as const;
 export type AttemptKind = (typeof ATTEMPT_KINDS)[number];
+
+/** A handoff scout grounds at most this many tickets in one turn. */
+export const MAX_HANDOFF_SCOUT_TICKETS = 40;
+
+/** A grounded ticket names at most this many dependencies: one per blocker. */
+export const MAX_HANDOFF_SCOUT_BUILDS_ON = 15;

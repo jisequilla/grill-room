@@ -1,5 +1,18 @@
 import { z } from "zod";
 
+import {
+  MAX_HANDOFF_SCOUT_BUILDS_ON,
+  MAX_HANDOFF_SCOUT_TICKETS,
+} from "../../shared/session-constants.js";
+
+/**
+ * Re-exported so every server import of these two caps keeps working from
+ * this module; they are defined in `shared/` because
+ * `ground-briefs-control.tsx` needs them without pulling zod and this whole
+ * schemas module into the output page's browser bundle.
+ */
+export { MAX_HANDOFF_SCOUT_BUILDS_ON, MAX_HANDOFF_SCOUT_TICKETS };
+
 /**
  * The output schemas of the request kinds. Each one is both the contract
  * the model is constrained by (converted to JSON Schema for the command line)
@@ -268,9 +281,6 @@ export const scoutProjectResultSchema = z.strictObject({
   ),
 });
 
-/** A handoff scout grounds at most this many tickets in one turn. */
-export const MAX_HANDOFF_SCOUT_TICKETS = 40;
-
 /** A grounded ticket creates or edits at most this many files. */
 export const MAX_HANDOFF_SCOUT_FILES_TO_CHANGE = 20;
 
@@ -279,9 +289,6 @@ export const MAX_HANDOFF_SCOUT_BUILDS_ON_FILES = 20;
 
 /** A grounded ticket carries at most this many cited facts. */
 export const MAX_HANDOFF_SCOUT_FACTS = 15;
-
-/** A grounded ticket names at most this many dependencies: one per blocker. */
-export const MAX_HANDOFF_SCOUT_BUILDS_ON = 15;
 
 /*
  * The handoff scout's result has two schemas.

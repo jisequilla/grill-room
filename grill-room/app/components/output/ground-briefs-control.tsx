@@ -13,7 +13,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { TurnAttemptLog, type Turn } from "@/components/workspace/turn-attempt-log";
 import { actionErrorCode } from "@/lib/decisions";
 
-import { MAX_HANDOFF_SCOUT_BUILDS_ON, MAX_HANDOFF_SCOUT_TICKETS } from "../../../server/interviewer/schemas.js";
+import {
+  MAX_HANDOFF_SCOUT_BUILDS_ON,
+  MAX_HANDOFF_SCOUT_TICKETS,
+} from "@shared/session-constants";
 
 /** A turn takes a minute or more; the default 60 s client timeout cancels one about to succeed. */
 const TURN_TIMEOUT_MS = 10 * 60 * 1000;
