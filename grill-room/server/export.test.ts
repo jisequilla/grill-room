@@ -506,7 +506,9 @@ describe("planExport: intent.md", () => {
         "",
         IDEA,
         "",
-        "## Readiness",
+        "## Readiness before the interview",
+        "",
+        "Judged at 2026-09-01T00:00:00.000Z, on the idea as first written, before any question was asked.",
         "",
         "- **Objective:** Write intent.md into every export bundle.",
         "- **Expected outcome:** A reader of the repo can see why the feature exists without opening Grill Room.",
@@ -532,6 +534,37 @@ describe("planExport: intent.md", () => {
     );
   });
 
+  it("a not-ready verdict says the interview worked through what it lacked", () => {
+    const notReadyContent = intentFile({
+      readiness: readinessJudgment(IDEA, { verdict: "not-ready" }),
+      scoutReport: null,
+    });
+
+    expect(notReadyContent).toBe(
+      [
+        "# Intent: Grill Room",
+        "",
+        IDEA,
+        "",
+        "## Readiness before the interview",
+        "",
+        "Judged at 2026-09-01T00:00:00.000Z, on the idea as first written, before any question was asked.",
+        "",
+        "- **Objective:** Write intent.md into every export bundle.",
+        "- **Expected outcome:** A reader of the repo can see why the feature exists without opening Grill Room.",
+        "- **Verdict:** not-ready",
+        "",
+        "The interview that followed worked through what this judgment lacked; decisions.md and spec.md hold the result.",
+        "",
+      ].join("\n"),
+    );
+
+    const readyContent = intentFile({ readiness: readinessJudgment(IDEA), scoutReport: null });
+    expect(readyContent).not.toContain(
+      "The interview that followed worked through what this judgment lacked; decisions.md and spec.md hold the result.",
+    );
+  });
+
   it("reads exactly 'Not judged for this version of the idea.' when there is no readiness judgment", () => {
     const content = intentFile({ readiness: null, scoutReport: scoutReportFixture() });
 
@@ -541,7 +574,7 @@ describe("planExport: intent.md", () => {
         "",
         IDEA,
         "",
-        "## Readiness",
+        "## Readiness before the interview",
         "",
         "Not judged for this version of the idea.",
         "",
@@ -563,9 +596,16 @@ describe("planExport: intent.md", () => {
     });
 
     expect(content).toBe(
-      ["# Intent: Grill Room", "", IDEA, "", "## Readiness", "", "Not judged for this version of the idea.", ""].join(
-        "\n",
-      ),
+      [
+        "# Intent: Grill Room",
+        "",
+        IDEA,
+        "",
+        "## Readiness before the interview",
+        "",
+        "Not judged for this version of the idea.",
+        "",
+      ].join("\n"),
     );
   });
 
@@ -581,7 +621,7 @@ describe("planExport: intent.md", () => {
         "",
         IDEA,
         "",
-        "## Readiness",
+        "## Readiness before the interview",
         "",
         "Not judged for this version of the idea.",
         "",
@@ -607,7 +647,9 @@ describe("planExport: intent.md", () => {
         "",
         IDEA,
         "",
-        "## Readiness",
+        "## Readiness before the interview",
+        "",
+        "Judged at 2026-09-01T00:00:00.000Z, on the idea as first written, before any question was asked.",
         "",
         "- **Objective:** Write intent.md into every export bundle.",
         "- **Expected outcome:** A reader of the repo can see why the feature exists without opening Grill Room.",

@@ -322,7 +322,7 @@ describe("preview-export and export-session", () => {
         "",
         "A local app that grills me about an idea until it is decided.",
         "",
-        "## Readiness",
+        "## Readiness before the interview",
         "",
         "Not judged for this version of the idea.",
         "",

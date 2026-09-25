@@ -641,25 +641,38 @@ function evidenceLine(item: ReadinessEvidenceItem): string {
 }
 
 /**
- * `intent.md`'s "Readiness" section: the objective, expected outcome and
- * verdict, then the evidence (each item marked as the user's or the repo's,
- * a repo item with its citation), then the unknowns. Exactly "Not judged for
- * this version of the idea." when `readiness` is null or was judged for a
- * different idea than `idea`.
+ * `intent.md`'s "Readiness before the interview" section: the readiness
+ * judgment made on the idea before the first question was asked, labeled as
+ * that snapshot with the time it was judged (`readiness.judgedAt`) — never a
+ * re-judgment. Then the objective, expected outcome and verdict; for a
+ * not-ready verdict, a line pointing at decisions.md and spec.md for what the
+ * interview worked through; then the evidence (each item marked as the
+ * user's or the repo's, a repo item with its citation), then the unknowns.
+ * Exactly "Not judged for this version of the idea." when `readiness` is
+ * null or was judged for a different idea than `idea`.
  */
 function renderReadinessSection(idea: string, readiness: StoredReadiness | null): string {
   if (readiness === null || readiness.ideaJudged !== idea) {
-    return "## Readiness\n\nNot judged for this version of the idea.";
+    return "## Readiness before the interview\n\nNot judged for this version of the idea.";
   }
 
   const { result } = readiness;
   const lines = [
-    "## Readiness",
+    "## Readiness before the interview",
+    "",
+    `Judged at ${readiness.judgedAt}, on the idea as first written, before any question was asked.`,
     "",
     field("Objective", result.objective ?? "None stated."),
     field("Expected outcome", result.expectedOutcome ?? "None stated."),
     field("Verdict", result.verdict),
   ];
+
+  if (result.verdict === "not-ready") {
+    lines.push(
+      "",
+      "The interview that followed worked through what this judgment lacked; decisions.md and spec.md hold the result.",
+    );
+  }
 
   if (result.evidence.length > 0) {
     lines.push("", "**Evidence**", "", ...result.evidence.map(evidenceLine));
