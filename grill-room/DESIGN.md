@@ -457,8 +457,8 @@ understanding confirmed" and the primary action to **Open the output**.
 
 ### Turn attempt log and batch progress
 
-- Attempt kinds: `tree-rule-refusal` and `rate-limit` are Ochre, `schema-invalid` and `error` are Crimson, and each kind's own label and icon, not its colour, tell `schema-invalid` from `error`.
-- A running batch is a neutral `muted` panel with the 2px Ember working hairline at its top edge, the same treatment as a running interviewer turn, and no fill colour.
+- Attempt kinds: `tree-rule-refusal` and `rate-limit` are Ochre, `schema-invalid` and `error` are Crimson, and each kind's label, not its colour, tells `schema-invalid` apart from `error`.
+- A running batch is a neutral `muted` panel with the 2px Ember working hairline at its top edge, the same treatment as a running interviewer turn, and no fill colour. Each processed segment of its track takes its own outcome: Tempered when answered and settled, Ochre when answered as a loose end, Smoke when skipped, Crimson when failed.
 
 ### State stamp (`Badge` restyled)
 

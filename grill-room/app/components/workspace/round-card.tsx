@@ -222,8 +222,8 @@ export function RoundCard({
           className={cn(
             "mx-5 mb-4 rounded-lg border px-3.5 py-3",
             leavesOpen
-              ? "border-owed/30 bg-owed/[0.08]"
-              : "border-settled/25 bg-settled/[0.07]",
+              ? "border-owed/30 bg-owed/8"
+              : "border-settled/25 bg-settled/7",
           )}
         >
           <div className="flex items-start gap-3">

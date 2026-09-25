@@ -6,6 +6,8 @@ import {
   BATCH_STATUS_LABEL_KEY,
   parseStoredBatchProgress,
   type BatchOutcome,
+  type BatchOutcomeStatus,
+  type StoredBatchProgress,
 } from "@/components/workspace/batch/batch-result";
 
 /** How often the panel re-reads the session while a batch is running. */
@@ -38,10 +40,6 @@ export function BatchProgressPanel({ sessionId }: { sessionId: string }) {
 
   const progress = parseStoredBatchProgress(session?.batchProgressJson ?? null);
   if (!progress) return null;
-
-  const done = progress.outcomes.filter(
-    (outcome: BatchOutcome) => outcome.status !== "failed",
-  ).length;
 
   return (
     <div
@@ -78,27 +76,57 @@ export function BatchProgressPanel({ sessionId }: { sessionId: string }) {
         </ul>
       ) : null}
 
-      <div
-        className="mt-3 flex gap-1"
-        role="img"
-        aria-label={t("workspace.batchRunning", {
-          completed: progress.completed,
-          total: progress.total,
-        })}
-      >
-        {Array.from({ length: progress.total }, (_, index) => (
+      <BatchProgressTrack progress={progress} />
+    </div>
+  );
+}
+
+/**
+ * Each processed item's segment takes the colour of what happened to it, so a
+ * batch that skipped items or left loose ends never reads as all settled.
+ */
+const SEGMENT_CLASS_BY_STATUS: Record<BatchOutcomeStatus, string> = {
+  reopened: "bg-settled",
+  "answered-as-card": "bg-settled",
+  "answered-as-loose-end": "bg-owed",
+  "not-reopenable": "bg-unplaced",
+  failed: "bg-destructive",
+};
+
+const PENDING_SEGMENT_CLASS = "bg-muted-foreground/25";
+
+/** One segment per item: its outcome's colour once processed, the neutral track until then. */
+export function BatchProgressTrack({
+  progress,
+}: {
+  progress: StoredBatchProgress;
+}) {
+  const t = useT();
+
+  return (
+    <div
+      className="mt-3 flex gap-1"
+      role="img"
+      aria-label={t("workspace.batchRunning", {
+        completed: progress.completed,
+        total: progress.total,
+      })}
+    >
+      {Array.from({ length: progress.total }, (_, index) => {
+        const outcome: BatchOutcome | undefined = progress.outcomes[index];
+        return (
           <span
             key={index}
+            data-testid="batch-segment"
+            data-status={outcome?.status ?? "pending"}
             className={`h-1.5 flex-1 rounded-full ${
-              index < done
-                ? "bg-settled"
-                : index < progress.completed
-                  ? "bg-destructive"
-                  : "bg-muted-foreground/25"
+              outcome
+                ? SEGMENT_CLASS_BY_STATUS[outcome.status]
+                : PENDING_SEGMENT_CLASS
             }`}
           />
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
