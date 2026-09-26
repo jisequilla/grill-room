@@ -11,9 +11,11 @@
  * the export preview, and `{seq}`/`{date}` depend on the day and on what is
  * already on disk). The stored markdown therefore writes every bundle path as
  * {@link BUNDLE_TOKEN}, and export fills it in with {@link fillBundlePath}:
- * the path relative to the repository root when the project's visibility is
- * `tracked`, or the absolute path into the main checkout when it is `ignored`.
- * The visibility flag decides; git is not consulted again.
+ * the path relative to the repository root when the bundle is `tracked`, or
+ * the absolute path into the main checkout when it is `ignored`. At export,
+ * that visibility (and whether the repository has any commits yet) is
+ * measured fresh from git and passed to the templates as {@link ExportFacts};
+ * anywhere else the stored visibility flag decides.
  *
  * ## Staleness
  *
@@ -90,6 +92,22 @@ export interface HandoffBrief {
   /** Relative to the bundle: `briefs/NN-slug.md`, the same `NN-slug` as the ticket's file. */
   relativePath: string;
   markdown: string;
+}
+
+/**
+ * What git reported about the project when the bundle was exported: whether
+ * the bundle folder is ignored, and whether the repository has no commits
+ * yet. Measured at export only; they never enter {@link handoffFingerprint},
+ * so a changed answer from git never makes a handoff stale.
+ */
+export interface ExportFacts {
+  visibility: ProjectVisibility;
+  greenfield: boolean;
+}
+
+/** The facts a render uses: the export's when given, otherwise the stored flag and not greenfield. */
+function factsFor(source: HandoffSource, exportFacts?: ExportFacts): ExportFacts {
+  return exportFacts ?? { visibility: source.project.visibility, greenfield: false };
 }
 
 /** Why a brief grounding no longer describes the session's handoff and project. */
@@ -290,9 +308,15 @@ function inlineCode(value: string): string {
   return `${fence}${padded}${fence}`;
 }
 
-function pathsNote(source: HandoffSource): string {
+function pathsNote(source: HandoffSource, facts: ExportFacts): string {
   const { project } = source;
-  if (project.visibility === "tracked") {
+  if (facts.visibility === "tracked" && facts.greenfield) {
+    return [
+      `Paths below are relative to the repository root (\`${project.rootPath}\`).`,
+      `The bundle lives in \`${project.workingExportFolder}\`, which git will track once it is committed; this repository has no commits yet.`,
+    ].join(" ");
+  }
+  if (facts.visibility === "tracked") {
     return [
       `Paths below are relative to the repository root (\`${project.rootPath}\`).`,
       `The bundle lives in \`${project.workingExportFolder}\`, which git tracks.`,
@@ -304,9 +328,17 @@ function pathsNote(source: HandoffSource): string {
   ].join(" ");
 }
 
-function beforeDelegatingSection(source: HandoffSource): string {
+function beforeDelegatingSection(source: HandoffSource, facts: ExportFacts): string {
   const lines = ["## Before delegating the first ticket", ""];
-  const { visibility, deliveryRecipe } = source.project;
+  const { deliveryRecipe } = source.project;
+  const { visibility } = facts;
+
+  if (facts.greenfield) {
+    lines.push(
+      "This repository has no commits yet (greenfield). A worktree branches from a commit, so make the first commit before delegating the first ticket.",
+      "",
+    );
+  }
 
   if (deliveryRecipe === "local-merge") {
     lines.push(
@@ -631,12 +663,17 @@ function buildRecordSection(source: HandoffSource): string {
   ].join("\n");
 }
 
-export function renderHandoffMarkdown(source: HandoffSource, groundingCurrent = false): string {
+export function renderHandoffMarkdown(
+  source: HandoffSource,
+  groundingCurrent = false,
+  exportFacts?: ExportFacts,
+): string {
+  const facts = factsFor(source, exportFacts);
   const sections = [
     `# Handoff: ${source.session.title}`,
     source.session.idea,
     "This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.",
-    pathsNote(source),
+    pathsNote(source, facts),
     [
       "## Where things are",
       "",
@@ -654,7 +691,7 @@ export function renderHandoffMarkdown(source: HandoffSource, groundingCurrent = 
       "",
       "Run from the repository root: once by the subagent before it hands the ticket back, and again by you before you merge it in.",
     ].join("\n"),
-    beforeDelegatingSection(source),
+    beforeDelegatingSection(source, facts),
     wavesSection(source),
     lifecycleSection(source, groundingCurrent),
   ];
@@ -664,16 +701,19 @@ export function renderHandoffMarkdown(source: HandoffSource, groundingCurrent = 
   return `${sections.join("\n\n")}\n`;
 }
 
-function bundleAccess(source: HandoffSource, fileStem: string): string {
+function bundleAccess(facts: ExportFacts, fileStem: string): string {
   const specPath = `\`${BUNDLE_TOKEN}/spec.md\``;
   const ticketPath = `\`${BUNDLE_TOKEN}/issues/${fileStem}.md\``;
-  if (source.project.visibility === "tracked") {
+  if (facts.visibility === "tracked" && facts.greenfield) {
+    return `This repository had no commits when the bundle was exported. HANDOFF.md has the operator commit the bundle before delegating, so your worktree should have it: read the spec at ${specPath} and your ticket at ${ticketPath}, relative to the repository root in your worktree. If they are missing, stop and report.`;
+  }
+  if (facts.visibility === "tracked") {
     return `The bundle is committed in this repository, so your worktree has it. Read the spec at ${specPath} and your ticket at ${ticketPath}, relative to the repository root in your worktree.`;
   }
   return `The bundle is ignored by git, so it is NOT in your worktree. Read it by absolute path from the main checkout: the spec at ${specPath} and your ticket at ${ticketPath}. Never write to it.`;
 }
 
-function briefStepZero(source: HandoffSource, fileStem: string): string {
+function briefStepZero(source: HandoffSource, fileStem: string, facts: ExportFacts): string {
   const base =
     source.project.deliveryRecipe === "pull-request"
       ? "`origin/main`"
@@ -683,7 +723,7 @@ function briefStepZero(source: HandoffSource, fileStem: string): string {
     "",
     `Your worktree was created from ${base}. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.`,
     "",
-    bundleAccess(source, fileStem),
+    bundleAccess(facts, fileStem),
   ].join("\n");
 }
 
@@ -910,7 +950,9 @@ export function renderBrief(
   source: HandoffSource,
   ticket: HandoffTicket,
   options: RenderBriefOptions = {},
+  exportFacts?: ExportFacts,
 ): string {
+  const facts = factsFor(source, exportFacts);
   const grounding = options.grounding ?? null;
   const total = source.tickets.length;
   const { label, fileStem } = ticketNames(ticket, total);
@@ -924,7 +966,7 @@ export function renderBrief(
   const sections: (string | null)[] = [
     `# Brief ${label}: ${ticket.title}`,
     `You are implementing ticket ${label} of "${source.session.title}". You work only inside the git worktree you were started in.`,
-    briefStepZero(source, fileStem),
+    briefStepZero(source, fileStem, facts),
     [
       "## The ticket",
       "",

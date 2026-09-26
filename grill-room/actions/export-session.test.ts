@@ -8,6 +8,7 @@ import { eq } from "@agent-native/core/db/schema";
 import { describe, expect, it } from "vitest";
 
 import { storeBriefGrounding } from "../server/brief-grounding.js";
+import { planExportBundle } from "../server/export-bundle.js";
 import { EXPORT_MANIFEST_FILE, formatLocalDate, hashExportContent } from "../server/export.js";
 import {
   bundlePathFor,
@@ -18,6 +19,8 @@ import {
   renderBrief,
 } from "../server/handoff.js";
 import { aHandoffScoutResult } from "../server/interviewer/test-fixtures.js";
+import { getProject } from "../server/projects.js";
+import type { ProjectVisibility } from "../shared/session-constants.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 import createSession from "./create-session.js";
@@ -42,14 +45,22 @@ const SPEC_MARKDOWN = [
 ].join("\n");
 
 async function aProject(
-  options: { workingExportFolder?: string; slugPattern?: string; files?: Record<string, string> } = {},
+  options: {
+    workingExportFolder?: string;
+    slugPattern?: string;
+    files?: Record<string, string>;
+    gitignore?: string;
+    commit?: boolean;
+    visibility?: ProjectVisibility;
+  } = {},
 ) {
-  const root = repos.create({ files: options.files });
+  const root = repos.create({ files: options.files, gitignore: options.gitignore, commit: options.commit });
   const project = await registerProject.run({
     root,
     verifyCommand: "pnpm test",
     workingExportFolder: options.workingExportFolder ?? ".scratch",
     slugPattern: options.slugPattern,
+    visibility: options.visibility,
   });
   return { root, project };
 }
@@ -117,6 +128,9 @@ async function aReadySession(
     workingExportFolder?: string;
     slugPattern?: string;
     files?: Record<string, string>;
+    gitignore?: string;
+    commit?: boolean;
+    visibility?: ProjectVisibility;
   } = {},
 ) {
   const { root, project } = await aProject(options);
@@ -1451,5 +1465,174 @@ describe("export writes grounded briefs", () => {
     expect(handoffMarkdown).toContain("Fill the brief's **File boundaries** slot");
     expect(handoffMarkdown).toContain("Fill the **Codebase facts** slot");
     expect(handoffMarkdown).not.toContain("grounded and current");
+  });
+});
+
+describe("export-time facts: visibility and greenfield measured from git", () => {
+  useTestDatabase();
+
+  const GREENFIELD_PARAGRAPH =
+    "This repository has no commits yet (greenfield). A worktree branches from a commit, so make the first commit before delegating the first ticket.";
+
+  /** A ready session with a generated handoff. */
+  async function aHandoffSession(options: {
+    gitignore?: string;
+    commit?: boolean;
+    visibility: ProjectVisibility;
+  }) {
+    const ready = await aReadySession(options);
+    await generateHandoff.run({ sessionId: ready.session.id });
+    return ready;
+  }
+
+  async function exportedFiles(bundleDir: string): Promise<Record<string, string>> {
+    const contents: Record<string, string> = {};
+    for (const file of await listFiles(bundleDir)) contents[file] = await fs.readFile(file, "utf8");
+    return contents;
+  }
+
+  it.each([
+    { name: ".scratch/* rule, stored tracked (stale)", gitignore: ".scratch/*\n", commit: true, stored: "tracked", effective: "ignored", greenfield: false },
+    { name: ".scratch/ rule, stored ignored", gitignore: ".scratch/\n", commit: true, stored: "ignored", effective: "ignored", greenfield: false },
+    { name: "no rule, stored ignored (stale)", gitignore: undefined, commit: true, stored: "ignored", effective: "tracked", greenfield: false },
+    { name: "no rule, no commit, stored tracked", gitignore: undefined, commit: false, stored: "tracked", effective: "tracked", greenfield: true },
+    { name: ".scratch/* rule, no commit, stored tracked", gitignore: ".scratch/*\n", commit: false, stored: "tracked", effective: "ignored", greenfield: true },
+  ] as const)("$name: effective $effective, greenfield $greenfield", async (row) => {
+    const { root, session } = await aHandoffSession({
+      gitignore: row.gitignore,
+      commit: row.commit,
+      visibility: row.stored,
+    });
+
+    const plan = await planExportBundle({ sessionId: session.id, slug: "grill-room" });
+
+    expect(plan.project.visibility).toBe(row.stored);
+    expect(plan.effectiveVisibility).toBe(row.effective);
+    expect(plan.greenfield).toBe(row.greenfield);
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    const expectedBundlePath = row.effective === "ignored" ? bundleDir : ".scratch/grill-room";
+    const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
+    expect(handoff.content).toContain(`- Spec: \`${expectedBundlePath}/spec.md\``);
+    const brief = plan.files.find((file) => file.relativePath === "briefs/01-build-the-workspace.md")!;
+    expect(brief.content).toContain(`\`${expectedBundlePath}/spec.md\``);
+  });
+
+  it("root no longer a git repository, stored tracked: falls back to the stored flag, greenfield", async () => {
+    const { root, session } = await aHandoffSession({ visibility: "tracked" });
+    await fs.rm(path.join(root, ".git"), { recursive: true, force: true });
+
+    const plan = await planExportBundle({ sessionId: session.id, slug: "grill-room" });
+
+    expect(plan.project.visibility).toBe("tracked");
+    expect(plan.effectiveVisibility).toBe("tracked");
+    expect(plan.greenfield).toBe(true);
+    const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
+    expect(handoff.content).toContain("- Spec: `.scratch/grill-room/spec.md`");
+  });
+
+  it("never writes the stored flag, still reports it, and keeps the fingerprint independent of git's answer", async () => {
+    const { root, project, session } = await aHandoffSession({ visibility: "tracked" });
+    const fingerprintOf = async () => {
+      const loaded = await loadHandoffSource(session.id);
+      if (!("source" in loaded)) throw new Error("expected a handoff source");
+      return handoffFingerprint(loaded.source);
+    };
+    const before = await fingerprintOf();
+
+    // git's answer changes after registration: the stored "tracked" goes stale.
+    await fs.writeFile(path.join(root, ".gitignore"), ".scratch/*\n");
+
+    const plan = await planExportBundle({ sessionId: session.id, slug: "grill-room" });
+    expect(plan.effectiveVisibility).toBe("ignored");
+    expect(plan.project.visibility).toBe("tracked");
+    expect(await fingerprintOf()).toBe(before);
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(result.written.length).toBeGreaterThan(0);
+    expect((await getProject(project.id))!.visibility).toBe("tracked");
+    expect(await fingerprintOf()).toBe(before);
+    // The stored flag still reaches the mismatch warning.
+    expect(result.visibility.mismatchWarning).toContain("tracked");
+  });
+
+  it("the review's worked case: greenfield, .scratch/* and a stored tracked flag", async () => {
+    const { root, session } = await aHandoffSession({
+      gitignore: ".scratch/*\n",
+      commit: false,
+      visibility: "tracked",
+    });
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    const files = await exportedFiles(bundleDir);
+    for (const [file, content] of Object.entries(files)) {
+      expect(content, file).not.toContain("which git tracks");
+      expect(content, file).not.toContain("The bundle is committed in this repository");
+    }
+    const handoff = files[path.join(bundleDir, "HANDOFF.md")]!;
+    expect(handoff).toContain(
+      `Paths below are absolute, into the main checkout at \`${root}\`. The bundle lives in \`.scratch\`, which git ignores`,
+    );
+    // No remote, so the recipe is local-merge: greenfield first, then its settings paragraph, then the ignored text.
+    const section = handoff.slice(handoff.indexOf("## Before delegating the first ticket"));
+    expect(section.startsWith(`## Before delegating the first ticket\n\n${GREENFIELD_PARAGRAPH}\n\n`)).toBe(true);
+    const ignoredText = section.indexOf("The bundle is ignored by git, so no worktree will ever contain it.");
+    expect(section.indexOf("worktree.baseRef")).toBeGreaterThan(section.indexOf(GREENFIELD_PARAGRAPH));
+    expect(ignoredText).toBeGreaterThan(section.indexOf("worktree.baseRef"));
+    expect(handoff).toContain(`- Spec: \`${bundleDir}/spec.md\``);
+    for (const brief of ["01-build-the-workspace.md", "02-store-on-disk.md"]) {
+      expect(files[path.join(bundleDir, "briefs", brief)]).toContain(
+        "The bundle is ignored by git, so it is NOT in your worktree.",
+      );
+    }
+  });
+
+  it("keeps an owner-edited HANDOFF.md word for word even when the fresh facts differ", async () => {
+    const { root, session } = await aHandoffSession({
+      gitignore: ".scratch/*\n",
+      commit: false,
+      visibility: "tracked",
+    });
+    const [row] = await getDb()
+      .select()
+      .from(schema.handoffs)
+      .where(eq(schema.handoffs.sessionId, session.id))
+      .limit(1);
+    const edited = `${row!.markdown}\nOwner note: commit the bundle first.\n`;
+    await updateHandoff.run({ sessionId: session.id, markdown: edited });
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    const handoff = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoff).toBe(fillBundlePath(edited, bundleDir));
+    expect(handoff).toContain("which git tracks");
+    expect(handoff).not.toContain(GREENFIELD_PARAGRAPH);
+  });
+
+  it("still re-renders an unedited HANDOFF.md with the fresh facts when only a brief was edited", async () => {
+    const { root, session } = await aHandoffSession({
+      gitignore: ".scratch/*\n",
+      commit: false,
+      visibility: "tracked",
+    });
+    await updateHandoff.run({
+      sessionId: session.id,
+      briefs: [{ ticketNumber: 1, markdown: "# Brief 01: hand-edited\n" }],
+    });
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    const handoff = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoff).toContain(GREENFIELD_PARAGRAPH);
+    expect(handoff).not.toContain("which git tracks");
+    expect(await fs.readFile(path.join(bundleDir, "briefs", "01-build-the-workspace.md"), "utf8")).toBe(
+      "# Brief 01: hand-edited\n",
+    );
+    expect(await fs.readFile(path.join(bundleDir, "briefs", "02-store-on-disk.md"), "utf8")).toContain(
+      "The bundle is ignored by git, so it is NOT in your worktree.",
+    );
   });
 });

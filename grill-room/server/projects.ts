@@ -268,7 +268,7 @@ export async function seedVisibility(
  * `check-ignore` exits 0 (ignored) or 1 (not ignored); anything else, or a
  * root git cannot run in, is no answer rather than `tracked`.
  */
-async function measuredVisibility(
+export async function measuredVisibility(
   root: string,
   workingExportFolder: string,
 ): Promise<ProjectVisibility | null> {
