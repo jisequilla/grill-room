@@ -93,9 +93,10 @@ async function aReadySession(
     visibility?: "tracked" | "ignored";
     trackerKind?: "beads" | "markdown";
     tickets?: TicketSpec[];
+    gitignore?: string;
   } = {},
 ) {
-  const root = repos.create();
+  const root = repos.create({ gitignore: options.gitignore });
   const project = await registerProject.run({
     root,
     verifyCommand: "pnpm test",
@@ -339,7 +340,7 @@ describe("handoff export", () => {
   });
 
   it("writes absolute paths into the main checkout for an ignored project", async () => {
-    const { session, bundleDir } = await aReadySession({ visibility: "ignored" });
+    const { session, bundleDir } = await aReadySession({ visibility: "ignored", gitignore: ".scratch/\n" });
     await generateHandoff.run({ sessionId: session.id });
     await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
