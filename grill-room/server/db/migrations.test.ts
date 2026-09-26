@@ -51,13 +51,15 @@ describe("projects-rename-export-folder migration", () => {
 describe("projects-durable-export-folder migration", () => {
   beforeEach(dropSchema);
 
-  const cases: Array<{ stored: string; working: string; durable: string }> = [
-    { stored: "docs/specs", working: ".grill-room", durable: "docs/specs" },
-    { stored: "docs", working: ".grill-room", durable: "docs" },
-    { stored: ".grill-room", working: ".grill-room", durable: "docs/specs" },
-    { stored: ".scratch", working: ".scratch", durable: "docs/specs" },
-    { stored: "docs-site", working: "docs-site", durable: "docs/specs" },
-    { stored: ".docs", working: ".docs", durable: "docs/specs" },
+  // `recheck`: a moved row's visibility was measured for its old folder, so
+  // it is flagged to be re-seeded on next read; an unmoved row is not.
+  const cases: Array<{ stored: string; working: string; durable: string; recheck: boolean }> = [
+    { stored: "docs/specs", working: ".grill-room", durable: "docs/specs", recheck: true },
+    { stored: "docs", working: ".grill-room", durable: "docs", recheck: true },
+    { stored: ".grill-room", working: ".grill-room", durable: "docs/specs", recheck: false },
+    { stored: ".scratch", working: ".scratch", durable: "docs/specs", recheck: false },
+    { stored: "docs-site", working: "docs-site", durable: "docs/specs", recheck: false },
+    { stored: ".docs", working: ".docs", durable: "docs/specs", recheck: false },
   ];
 
   it("maps each stored working folder to a working and a durable root by where it points", async () => {
@@ -78,14 +80,18 @@ describe("projects-durable-export-folder migration", () => {
 
     await applyMigrations(appMigrations, MIGRATIONS_TABLE);
 
-    for (const { stored, working, durable } of cases) {
+    for (const { stored, working, durable, recheck } of cases) {
       const { rows } = await getDbExec().execute({
-        sql: `SELECT working_export_folder, durable_export_folder FROM gr_projects WHERE id = ?`,
+        sql: `SELECT working_export_folder, durable_export_folder, visibility_recheck FROM gr_projects WHERE id = ?`,
         args: [ids.get(stored) as string],
       });
       expect({ stored, row: rows[0] }).toEqual({
         stored,
-        row: { working_export_folder: working, durable_export_folder: durable },
+        row: {
+          working_export_folder: working,
+          durable_export_folder: durable,
+          visibility_recheck: recheck,
+        },
       });
     }
   });

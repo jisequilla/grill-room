@@ -102,6 +102,13 @@ export const projects = table("gr_projects", {
   buildRecordLogging: boolean("build_record_logging").notNull().default(false),
   visibility: text("visibility", { enum: PROJECT_VISIBILITIES }).notNull(),
   /**
+   * Set by a migration that moved `workingExportFolder`, so `visibility`
+   * describes a folder the export no longer writes to. The registry re-seeds
+   * the flag's row the next time it reads it, then clears it. Internal: never
+   * part of `Project` or any action's result.
+   */
+  visibilityRecheck: boolean("visibility_recheck").notNull().default(false),
+  /**
    * How a ticket built for this project reaches its main branch. Guessed
    * from the repository's remotes at registration unless given explicitly;
    * editable afterwards. See `DELIVERY_RECIPES`.

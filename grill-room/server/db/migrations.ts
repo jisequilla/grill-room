@@ -515,6 +515,7 @@ ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS settled_by_id TEXT`,
     version: 66,
     name: "projects-durable-export-folder",
     sql: `ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS durable_export_folder TEXT NOT NULL DEFAULT 'docs/specs';
-UPDATE gr_projects SET durable_export_folder = working_export_folder, working_export_folder = '.grill-room' WHERE working_export_folder = 'docs' OR substr(working_export_folder, 1, 5) = 'docs/'`,
+ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS visibility_recheck BOOLEAN NOT NULL DEFAULT false;
+UPDATE gr_projects SET durable_export_folder = working_export_folder, working_export_folder = '.grill-room', visibility_recheck = true WHERE working_export_folder = 'docs' OR substr(working_export_folder, 1, 5) = 'docs/'`,
   },
 ];

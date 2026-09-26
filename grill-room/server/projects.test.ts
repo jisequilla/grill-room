@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, symlinkSync } from "node:fs";
 import path from "node:path";
 
+import { eq } from "@agent-native/core/db/schema";
 import { describe, expect, it } from "vitest";
 
 import { useTestDatabase } from "../test/db.js";
@@ -9,6 +10,7 @@ import { useTempGitRepos } from "../test/git-repos.js";
 import { getDb, schema } from "./db/index.js";
 import { runGit } from "./git.js";
 import {
+  getProject,
   guessDeliveryRecipe,
   inspectProjectFolder,
   listProjects,
@@ -655,6 +657,117 @@ describe("updateProject", () => {
 
   it("refuses an unknown project", async () => {
     expect(refusalCode(await updateProject("missing", { name: "x" }))).toBe("project-not-found");
+  });
+});
+
+describe("visibility re-check after a migration moved the working folder", () => {
+  useTestDatabase();
+
+  /** What v66 does to a `docs/...` project: working moves to `.grill-room`, visibility is left as measured before, and the row is flagged. */
+  async function aMovedProject(options: { gitignore?: string; staleVisibility: "tracked" | "ignored" }) {
+    const root = repos.create({ gitignore: options.gitignore });
+    const project = registered(
+      await registerProject({ root, verifyCommand: "pnpm test", workingExportFolder: ".scratch" }),
+    );
+    await getDb()
+      .update(schema.projects)
+      .set({
+        workingExportFolder: ".grill-room",
+        durableExportFolder: "docs/specs",
+        visibility: options.staleVisibility,
+        visibilityRecheck: true,
+      })
+      .where(eq(schema.projects.id, project.id));
+    return project;
+  }
+
+  async function storedRow(id: string) {
+    const [row] = await getDb()
+      .select({
+        visibility: schema.projects.visibility,
+        visibilityRecheck: schema.projects.visibilityRecheck,
+      })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, id));
+    return row;
+  }
+
+  it("re-seeds ignored for a moved row whose repository ignores the new working folder, and clears the flag", async () => {
+    const project = await aMovedProject({ gitignore: ".grill-room/\n", staleVisibility: "tracked" });
+
+    const read = await getProject(project.id);
+
+    expect(read?.visibility).toBe("ignored");
+    expect(read).not.toHaveProperty("visibilityRecheck");
+    expect(await storedRow(project.id)).toEqual({ visibility: "ignored", visibilityRecheck: false });
+  });
+
+  it("re-seeds tracked for a moved row whose repository does not ignore it, through listProjects too", async () => {
+    const project = await aMovedProject({ gitignore: "node_modules/\n", staleVisibility: "ignored" });
+
+    const [listed] = await listProjects();
+
+    expect(listed).toMatchObject({ id: project.id, visibility: "tracked" });
+    expect(listed).not.toHaveProperty("visibilityRecheck");
+    expect(await storedRow(project.id)).toEqual({ visibility: "tracked", visibilityRecheck: false });
+  });
+
+  it("leaves an unflagged row as stored, even when its visibility disagrees with git", async () => {
+    const root = repos.create({ gitignore: ".grill-room/\n" });
+    const project = registered(
+      await registerProject({
+        root,
+        verifyCommand: "pnpm test",
+        workingExportFolder: ".grill-room",
+        visibility: "tracked",
+      }),
+    );
+
+    expect((await getProject(project.id))?.visibility).toBe("tracked");
+    expect(await storedRow(project.id)).toEqual({ visibility: "tracked", visibilityRecheck: false });
+  });
+
+  it("leaves a moved row unchanged, flag included, when its root is gone or not a repository", async () => {
+    const project = await aMovedProject({ gitignore: ".grill-room/\n", staleVisibility: "tracked" });
+    const missing = path.join(repos.plainFolder(), "gone");
+    await getDb()
+      .update(schema.projects)
+      .set({ rootPath: missing })
+      .where(eq(schema.projects.id, project.id));
+
+    expect(await getProject(project.id)).toMatchObject({ rootPath: missing, visibility: "tracked" });
+    expect(await storedRow(project.id)).toEqual({ visibility: "tracked", visibilityRecheck: true });
+
+    const notARepo = repos.plainFolder();
+    await getDb()
+      .update(schema.projects)
+      .set({ rootPath: notARepo })
+      .where(eq(schema.projects.id, project.id));
+
+    expect(await listProjects()).toMatchObject([{ rootPath: notARepo, visibility: "tracked" }]);
+    expect(await storedRow(project.id)).toEqual({ visibility: "tracked", visibilityRecheck: true });
+  });
+
+  it("an explicit visibility on update clears the flag; an edit without one keeps it", async () => {
+    // `git check-ignore` refuses a path beyond a symbolic link (exit 128), so
+    // the re-check cannot answer here and the flag survives the read that
+    // `updateProject` starts with.
+    const project = await aMovedProject({ staleVisibility: "tracked" });
+    mkdirSync(path.join(project.rootPath, "real"));
+    symlinkSync(path.join(project.rootPath, "real"), path.join(project.rootPath, "link"));
+    await getDb()
+      .update(schema.projects)
+      .set({ workingExportFolder: "link/tickets" })
+      .where(eq(schema.projects.id, project.id));
+
+    registered(await updateProject(project.id, { name: "Renamed" }));
+    expect(await storedRow(project.id)).toEqual({ visibility: "tracked", visibilityRecheck: true });
+
+    const updated = registered(await updateProject(project.id, { visibility: "ignored" }));
+
+    expect(updated.visibility).toBe("ignored");
+    expect(updated).not.toHaveProperty("visibilityRecheck");
+    expect(await storedRow(project.id)).toEqual({ visibility: "ignored", visibilityRecheck: false });
   });
 });
 

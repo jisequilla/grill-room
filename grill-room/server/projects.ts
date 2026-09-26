@@ -37,7 +37,15 @@ import { getDb, schema } from "./db/index.js";
 import { GitUnavailableError, runGit } from "./git.js";
 import { readProjectTracker } from "./tracker.js";
 
-export type Project = typeof schema.projects.$inferSelect;
+type ProjectRow = typeof schema.projects.$inferSelect;
+
+/** A registered project. The row's internal `visibilityRecheck` flag is never part of it. */
+export type Project = Omit<ProjectRow, "visibilityRecheck">;
+
+function toProject(row: ProjectRow): Project {
+  const { visibilityRecheck: _recheck, ...project } = row;
+  return project;
+}
 
 export type ProjectErrorCode =
   | "root-required"
@@ -253,6 +261,44 @@ export async function seedVisibility(
 ): Promise<ProjectVisibility> {
   const result = await runGit(root, ["check-ignore", "-q", "--", `${workingExportFolder}/`]);
   return result.exitCode === 0 ? "ignored" : "tracked";
+}
+
+/**
+ * Like {@link seedVisibility}, but null unless git actually answered:
+ * `check-ignore` exits 0 (ignored) or 1 (not ignored); anything else, or a
+ * root git cannot run in, is no answer rather than `tracked`.
+ */
+async function measuredVisibility(
+  root: string,
+  workingExportFolder: string,
+): Promise<ProjectVisibility | null> {
+  try {
+    const result = await runGit(root, ["check-ignore", "-q", "--", `${workingExportFolder}/`]);
+    if (result.exitCode === 0) return "ignored";
+    if (result.exitCode === 1) return "tracked";
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Re-seed the visibility of a row a migration flagged (v66 moved its working
+ * folder, so the stored flag described the old one), store it and clear the
+ * flag. When git cannot answer (the root is gone or no longer a repository)
+ * the row is left exactly as stored, flag included, to be tried on a later
+ * read.
+ */
+async function recheckVisibility(row: ProjectRow): Promise<ProjectRow> {
+  if (!row.visibilityRecheck) return row;
+  const visibility = await measuredVisibility(row.rootPath, row.workingExportFolder);
+  if (visibility === null) return row;
+  const [updated] = await getDb()
+    .update(schema.projects)
+    .set({ visibility, visibilityRecheck: false })
+    .where(eq(schema.projects.id, row.id))
+    .returning();
+  return updated ?? row;
 }
 
 /**
@@ -481,24 +527,28 @@ async function findByRoot(root: string): Promise<Project | undefined> {
     .from(schema.projects)
     .where(eq(schema.projects.rootPath, root))
     .limit(1);
-  return row;
+  return row ? toProject(row) : undefined;
 }
 
+/** One project by id; a row flagged for a visibility re-check is re-seeded first. */
 export async function getProject(id: string): Promise<Project | undefined> {
   const [row] = await getDb()
     .select()
     .from(schema.projects)
     .where(eq(schema.projects.id, id))
     .limit(1);
-  return row;
+  return row ? toProject(await recheckVisibility(row)) : undefined;
 }
 
-/** Every registered project, by name. */
+/** Every registered project, by name; rows flagged for a visibility re-check are re-seeded first. */
 export async function listProjects(): Promise<Project[]> {
-  return getDb()
+  const rows = await getDb()
     .select()
     .from(schema.projects)
     .orderBy(schema.projects.name, schema.projects.id);
+  const checked: Project[] = [];
+  for (const row of rows) checked.push(toProject(await recheckVisibility(row)));
+  return checked;
 }
 
 type ProjectValues = Omit<Project, "id" | "createdAt" | "updatedAt">;
@@ -654,11 +704,11 @@ export async function registerProject(
   if ("refusal" in outcome) return outcome;
 
   const now = new Date().toISOString();
-  const [project] = await getDb()
+  const [row] = await getDb()
     .insert(schema.projects)
     .values({ id: randomUUID(), ...outcome.values, createdAt: now, updatedAt: now })
     .returning();
-  return { project };
+  return { project: toProject(row) };
 }
 
 /**
@@ -693,12 +743,18 @@ export async function updateProject(
   const outcome = await validate(merged, existing, { readTracker: false });
   if ("refusal" in outcome) return outcome;
 
-  const [project] = await getDb()
+  // An explicit visibility is the operator's own value, so it settles any
+  // pending re-check.
+  const [row] = await getDb()
     .update(schema.projects)
-    .set({ ...outcome.values, updatedAt: new Date().toISOString() })
+    .set({
+      ...outcome.values,
+      ...(blank(patch.visibility) ? {} : { visibilityRecheck: false }),
+      updatedAt: new Date().toISOString(),
+    })
     .where(eq(schema.projects.id, id))
     .returning();
-  return { project };
+  return { project: toProject(row) };
 }
 
 /**
@@ -743,10 +799,10 @@ export async function refreshProjectTracker(
     if (!slugRefusal) patch.slugPattern = tracker.tracker.ticketFormat;
   }
 
-  const [project] = await getDb()
+  const [row] = await getDb()
     .update(schema.projects)
     .set({ ...patch, updatedAt: new Date().toISOString() })
     .where(eq(schema.projects.id, id))
     .returning();
-  return { project };
+  return { project: toProject(row) };
 }
