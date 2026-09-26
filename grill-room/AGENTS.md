@@ -432,7 +432,8 @@ session, and is readable and editable in the output page's Handoff block.
 
 - `HANDOFF.md` is the entry point for a fresh orchestrating session: the
   session title and idea, the spec path, the waves (each ticket with its
-  ticket file and brief), the verify command, the worktree lifecycle
+  ticket file and brief; separated by file at export when the brief
+  grounding is current — see "Grounding the briefs"), the verify command, the worktree lifecycle
   (embedded whole, so the target repo needs no rules file), an optional
   "Reviewing a ticket" section, and what to record per ticket. The lifecycle
   is selected by the project's **delivery recipe**: `pull-request` pushes
@@ -641,6 +642,19 @@ today's fill-the-slots wording, since it would otherwise tell the
 orchestrator slots are filled that are not. Whether a brief is kept is
 worked out before HANDOFF.md's wording is decided, not after, so a kept
 brief can never slip through as "grounded".
+
+HANDOFF.md's waves are separated by file at export when the grounding is
+current (its `current` flag alone, whatever the briefs' wording):
+`separateOverlaps` (`server/tickets.ts`) moves a ticket whose grounded files
+to change (`create` and `edit`, compared by `collisionKey`) overlap an earlier
+ticket in its wave to a later wave, and the Waves section names each such
+pair and the files it shares, under a line saying tickets in one wave may run
+in parallel. With no grounding, or a stale one, the waves come from
+Blocked-by and the section says instead that overlaps were not checked: run
+one ticket at a time, or ground the briefs first. That is also what
+`get-handoff` shows, since the stored text is rendered with no grounding.
+The stored tickets' Blocked-by never changes; the added orderings exist only
+in the exported HANDOFF.md.
 
 **Where grounding is applied: at export, not at generation.** `generate-handoff`
 and `update-handoff` are unchanged: the handoff row always stores the plain,

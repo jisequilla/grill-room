@@ -1096,3 +1096,140 @@ describe("export-time facts", () => {
     });
   });
 });
+
+describe("the waves section at export", () => {
+  const CHECKED_LINE =
+    "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.";
+  const NOT_CHECKED_LINE =
+    "Tickets in one wave have no Blocked-by between them. Whether they change the same files was not checked, because the briefs are not grounded against the current code: run them one at a time, or ground the briefs first. Start a wave only once every ticket of the previous wave is merged and verified.";
+
+  /** The "Waves" section alone, up to the next top-level heading. */
+  function wavesOf(markdown: string): string {
+    const start = markdown.indexOf("## Waves");
+    expect(start).toBeGreaterThan(-1);
+    return markdown.slice(start, markdown.indexOf("\n## ", start + 1));
+  }
+
+  /** The ticket labels of each `### Wave N`, in order. */
+  function labelsByWave(section: string): string[][] {
+    return section
+      .split("### Wave ")
+      .slice(1)
+      .map((wave) => [...wave.matchAll(/^- \*\*(\d+) /gm)].map((match) => match[1]!));
+  }
+
+  const plain = { visibility: "tracked" as const, greenfield: false };
+
+  describe("current grounding", () => {
+    it("keeps the whole parallel line, puts one line per implicit edge under it, and lays out the separated waves", () => {
+      const section = wavesOf(
+        renderHandoffMarkdown(aSource(), false, {
+          ...plain,
+          waves: [[1], [2, 3]],
+          implicitEdges: [{ ticket: 3, waitsFor: 1, sharedPaths: ["server/export.ts"] }],
+        }),
+      );
+
+      expect(section.startsWith(
+        `## Waves\n\n${CHECKED_LINE}\n\nTicket 03 waits for ticket 01: both change \`server/export.ts\`.\n\n### Wave 1\n`,
+      )).toBe(true);
+      expect(labelsByWave(section)).toEqual([["01"], ["02", "03"]]);
+      expect(section).not.toContain("was not checked");
+    });
+
+    it.each([
+      [["a"], "`a`"],
+      [["a", "b"], "`a` and `b`"],
+      [["a", "b", "c"], "`a`, `b` and `c`"],
+      [["a", "b", "c", "d"], "`a`, `b`, `c` and `d`"],
+    ])("names shared paths %j as %s", (sharedPaths, named) => {
+      const section = wavesOf(
+        renderHandoffMarkdown(aSource(), false, {
+          ...plain,
+          waves: [[1], [2, 3]],
+          implicitEdges: [{ ticket: 3, waitsFor: 1, sharedPaths }],
+        }),
+      );
+      expect(section).toContain(`\nTicket 03 waits for ticket 01: both change ${named}.\n`);
+    });
+
+    it("writes the edge lines in wave order, not ticket order", () => {
+      const section = wavesOf(
+        renderHandoffMarkdown(aSource(), false, {
+          ...plain,
+          waves: [[2], [3], [1]],
+          implicitEdges: [
+            { ticket: 1, waitsFor: 3, sharedPaths: ["a"] },
+            { ticket: 3, waitsFor: 2, sharedPaths: ["b"] },
+          ],
+        }),
+      );
+      expect(section).toContain(
+        `${CHECKED_LINE}\n\nTicket 03 waits for ticket 02: both change \`b\`.\nTicket 01 waits for ticket 03: both change \`a\`.\n\n### Wave 1`,
+      );
+      expect(labelsByWave(section)).toEqual([["02"], ["03"], ["01"]]);
+    });
+
+    it("pads ticket numbers as every other ticket reference: 005 and 004 in a set of 100", () => {
+      const tickets = Array.from({ length: 100 }, (_, index) => ({
+        id: `t${index + 1}`,
+        number: index + 1,
+        slug: `ticket-${index + 1}`,
+        title: `Ticket ${index + 1}`,
+        body: "Do it.",
+        blockedBy: [],
+      }));
+      const source: HandoffSource = {
+        ...aSource(),
+        tickets,
+        waves: [tickets.map((ticket) => ticket.number)],
+      };
+      const numbers = tickets.map((ticket) => ticket.number).filter((number) => number !== 5);
+
+      const markdown = renderHandoffMarkdown(source, false, {
+        ...plain,
+        waves: [numbers, [5]],
+        implicitEdges: [{ ticket: 5, waitsFor: 4, sharedPaths: ["server/export.ts"] }],
+      });
+
+      expect(markdown).toContain("\nTicket 005 waits for ticket 004: both change `server/export.ts`.\n");
+    });
+
+    it("with no overlaps: the Blocked-by waves and today's text, with no added lines", () => {
+      const source = aSource();
+      const section = wavesOf(
+        renderHandoffMarkdown(source, false, { ...plain, waves: source.waves, implicitEdges: [] }),
+      );
+
+      expect(section).toBe(
+        wavesOf(renderHandoffMarkdown(source)).replace(NOT_CHECKED_LINE, CHECKED_LINE),
+      );
+      expect(section).not.toContain("waits for");
+      expect(labelsByWave(section)).toEqual([["01", "03"], ["02"]]);
+    });
+  });
+
+  describe("absent or stale grounding", () => {
+    it("replaces the whole parallel line with the not-checked line, and keeps the Blocked-by waves", () => {
+      const section = wavesOf(renderHandoffMarkdown(aSource(), false, plain));
+
+      expect(section.startsWith(`## Waves\n\n${NOT_CHECKED_LINE}\n\n### Wave 1\n`)).toBe(true);
+      expect(section).not.toContain("do not block each other");
+      expect(section).not.toContain("at most two at a time");
+      expect(section).not.toContain("waits for");
+      expect(labelsByWave(section)).toEqual([["01", "03"], ["02"]]);
+    });
+
+    it("keys off exportFacts.waves, never the grounded wording", () => {
+      const groundedWording = wavesOf(renderHandoffMarkdown(aSource(), true, plain));
+      expect(groundedWording).toContain(NOT_CHECKED_LINE);
+      expect(groundedWording).not.toContain(CHECKED_LINE);
+
+      const source = aSource();
+      const checkedWithoutGroundedWording = wavesOf(
+        renderHandoffMarkdown(source, false, { ...plain, waves: source.waves, implicitEdges: [] }),
+      );
+      expect(checkedWithoutGroundedWording).toContain(CHECKED_LINE);
+    });
+  });
+});

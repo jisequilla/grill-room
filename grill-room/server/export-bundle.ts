@@ -156,7 +156,11 @@ import { fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 
 import type { ProjectVisibility } from "../shared/session-constants.js";
-import { currentBriefGrounding, type BriefGroundingStaleReason } from "./brief-grounding.js";
+import {
+  collisionKey,
+  currentBriefGrounding,
+  type BriefGroundingStaleReason,
+} from "./brief-grounding.js";
 import { getDb, schema } from "./db/index.js";
 import {
   applySlugPattern,
@@ -192,7 +196,7 @@ import {
 import { getProject, measuredVisibility } from "./projects.js";
 import { currentReadiness } from "./readiness.js";
 import { currentScoutReport } from "./scout-report.js";
-import { describeTickets, ticketsAreCurrent } from "./tickets.js";
+import { describeTickets, separateOverlaps, ticketsAreCurrent } from "./tickets.js";
 import { describeDecisions } from "./tree.js";
 
 const NO_TICKETS_REASON = "This session has no tickets to export.";
@@ -730,6 +734,28 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     const briefSource = "source" in loadedSource ? loadedSource.source : null;
     const wasEdited = handoff.editedAt !== null;
 
+    // Only a current grounding says which files each ticket changes today, so
+    // only then may HANDOFF.md separate overlapping tickets and say that
+    // tickets in one wave may run in parallel. This keys off the raw
+    // `current` flag, not `useGroundedWording` below.
+    const separated =
+      grounding?.current && briefSource
+        ? separateOverlaps(
+            briefSource.tickets.map((ticket) => ({
+              number: ticket.number,
+              blockedBy: ticket.blockedBy,
+              files: (
+                grounding.result.tickets.find((entry) => entry.number === ticket.number)
+                  ?.filesToChange ?? []
+              ).map((file) => file.path),
+            })),
+            collisionKey,
+          )
+        : null;
+    const handoffExportFacts: ExportFacts = separated?.ok
+      ? { ...exportFacts, waves: separated.waves, implicitEdges: separated.implicitEdges }
+      : exportFacts;
+
     const briefEntries = parseBriefs(handoff.briefsJson);
     const briefFiles: { relativePath: string; content: string }[] = [];
 
@@ -781,7 +807,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       briefSource !== null && (!wasEdited || handoff.markdown === renderHandoffMarkdown(briefSource));
     const headerMarkdown =
       headerEligible && briefSource !== null
-        ? renderHandoffMarkdown(briefSource, useGroundedWording, exportFacts)
+        ? renderHandoffMarkdown(briefSource, useGroundedWording, handoffExportFacts)
         : handoff.markdown;
     handoffFiles.push({
       relativePath: HANDOFF_FILE,

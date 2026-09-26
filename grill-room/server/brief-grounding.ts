@@ -497,7 +497,7 @@ function buildsOnCitationSyntaxReason(
 }
 
 /** A path as a case-insensitive, normalising file system such as APFS compares it. */
-function collisionKey(filePath: string): string {
+export function collisionKey(filePath: string): string {
   return path.posix
     .normalize(filePath.normalize("NFC"))
     .toLowerCase()

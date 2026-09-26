@@ -285,6 +285,120 @@ export function computeWaves(
   return { ok: true, waves };
 }
 
+/** A ticket as `separateOverlaps` needs it: its blockers and the files it may create or edit. */
+export interface TicketForSeparation extends TicketForWaves {
+  /** Every file the ticket may create or edit. Empty when it has no grounded entry. */
+  files: readonly string[];
+}
+
+/**
+ * An ordering the export adds between two tickets that change the same file:
+ * `ticket` waits for `waitsFor`. `waitsFor` may have the higher number, when
+ * Blocked-by put it first.
+ */
+export interface ImplicitEdge {
+  ticket: number;
+  waitsFor: number;
+  /** The files both tickets change, as `ticket` names them, sorted. */
+  sharedPaths: string[];
+}
+
+export interface SeparatedWaves {
+  ok: true;
+  /** Wave 1 first. Each wave is sorted by ticket number. */
+  waves: number[][];
+  /** Ordered by `ticket`, then by `waitsFor`. */
+  implicitEdges: ImplicitEdge[];
+}
+
+/**
+ * Waves in which no two tickets change the same file. Tickets are visited in
+ * dependency order, the lowest-numbered ready ticket first. Each starts in
+ * the first wave after all its blockers' waves and moves one wave later while
+ * that wave already holds a ticket sharing a file with it. A ticket that
+ * moved waits for every ticket it shares a file with in the wave just before
+ * the one it lands in. Blockers are always placed first, so a moved ticket's
+ * dependents move with it. Files are compared by `keyOf`.
+ *
+ * A cycle returns every ticket number on it, as `computeWaves` does.
+ */
+export function separateOverlaps(
+  tickets: readonly TicketForSeparation[],
+  keyOf: (filePath: string) => string,
+): SeparatedWaves | WavesCycleError {
+  const byNumber = new Map(tickets.map((ticket) => [ticket.number, ticket]));
+
+  const cyclic = numbersOnCycles(byNumber);
+  if (cyclic.length > 0) {
+    return { ok: false, cycle: cyclic.sort((a, b) => a - b) };
+  }
+
+  const blockersOf = new Map(
+    [...byNumber.values()].map((ticket) => [
+      ticket.number,
+      [...new Set(ticket.blockedBy)].filter((blocker) => byNumber.has(blocker)),
+    ]),
+  );
+  const filesOf = new Map(
+    [...byNumber.values()].map((ticket) => {
+      const byKey = new Map<string, string>();
+      for (const file of ticket.files) {
+        const key = keyOf(file);
+        if (!byKey.has(key)) byKey.set(key, file);
+      }
+      return [ticket.number, byKey];
+    }),
+  );
+  const sharedPaths = (ticket: number, other: number): string[] => {
+    const theirs = filesOf.get(other)!;
+    return [...filesOf.get(ticket)!]
+      .filter(([key]) => theirs.has(key))
+      .map(([, file]) => file)
+      .sort();
+  };
+
+  const waveOf = new Map<number, number>();
+  const members: number[][] = [];
+  const implicitEdges: ImplicitEdge[] = [];
+
+  const waiting = new Map([...blockersOf].map(([number, blockers]) => [number, blockers.length]));
+  const ready = [...waiting].filter(([, count]) => count === 0).map(([number]) => number);
+  while (ready.length > 0) {
+    ready.sort((a, b) => a - b);
+    const number = ready.shift()!;
+
+    const blockers = blockersOf.get(number)!;
+    const start = blockers.length === 0 ? 1 : 1 + Math.max(...blockers.map((b) => waveOf.get(b)!));
+    let wave = start;
+    while ((members[wave - 1] ?? []).some((other) => sharedPaths(number, other).length > 0)) {
+      wave += 1;
+    }
+    if (wave > start) {
+      for (const other of members[wave - 2]!) {
+        const shared = sharedPaths(number, other);
+        if (shared.length > 0) implicitEdges.push({ ticket: number, waitsFor: other, sharedPaths: shared });
+      }
+    }
+    waveOf.set(number, wave);
+    while (members.length < wave) members.push([]);
+    members[wave - 1]!.push(number);
+
+    for (const [dependent, blockersOfDependent] of blockersOf) {
+      if (!blockersOfDependent.includes(number)) continue;
+      const left = waiting.get(dependent)! - 1;
+      waiting.set(dependent, left);
+      if (left === 0) ready.push(dependent);
+    }
+  }
+
+  implicitEdges.sort((a, b) => a.ticket - b.ticket || a.waitsFor - b.waitsFor);
+  return {
+    ok: true,
+    waves: members.map((wave) => [...wave].sort((a, b) => a - b)),
+    implicitEdges,
+  };
+}
+
 /** A stored ticket row, exactly as `get-spec`, `list-tickets` and `break-into-tickets` need it. */
 export interface StoredTicket {
   id: string;
