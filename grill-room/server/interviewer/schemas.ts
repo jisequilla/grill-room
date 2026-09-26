@@ -151,7 +151,8 @@ export const reviewStaleResultSchema = z.strictObject({
 
 /**
  * Loose ends a later settled decision turns out to have answered, settled
- * decisions a later one replaced, and own answers that defer rather than decide.
+ * decisions a later one replaced, own answers that defer rather than decide,
+ * and own answers that hold more than the decision.
  *
  * Any list may be absent from a recorded result, and reads as empty. At
  * most one entry per loose end or replaced decision, and only when genuine:
@@ -201,6 +202,25 @@ export const findSupersededResultSchema = z.strictObject({
         /** The decision, by key. One of the deferrable keys the request listed. */
         key: decisionKey,
         /** What the answer waits on. */
+        reason: z.string().min(1),
+      }),
+    )
+    .default([]),
+  /**
+   * The user's own answers that hold more than the decision: an instruction
+   * or question to the AI, a note to self, an obvious typo. Proposals too: the
+   * answer stays as written until the user accepts the clean statement.
+   */
+  restatements: z
+    .array(
+      z.strictObject({
+        /** The decision, by key. One of the restatable keys the request listed. */
+        key: decisionKey,
+        /** The decision in the owner's words, typos fixed, nothing added. */
+        statement: z.string().trim().min(1),
+        /** The text removed, verbatim, or "" when only typos were fixed. */
+        operatorNotes: z.string(),
+        /** What was removed or fixed. */
         reason: z.string().min(1),
       }),
     )

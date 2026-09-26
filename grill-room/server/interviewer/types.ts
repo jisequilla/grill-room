@@ -197,10 +197,17 @@ export interface FindSupersededRequest extends RequestBase {
   /**
    * The settled decisions whose answer is the user's own, by key, in tree
    * order, to check for answers that postpone the question rather than decide
-   * it: not replaced, and with no supersession or deferral already pending.
+   * it: not replaced, and with no supersession, deferral or restatement
+   * already pending.
    * Empty when there is nothing to check.
    */
   deferrableKeys: string[];
+  /**
+   * The own answers to check for text that is not part of the decision (an
+   * instruction to the AI, a note to self, a typo), by key, in tree order.
+   * Always the same list as `deferrableKeys`: both come from one selection.
+   */
+  restatableKeys: string[];
 }
 
 export interface SynthesizeSpecRequest extends RequestBase {

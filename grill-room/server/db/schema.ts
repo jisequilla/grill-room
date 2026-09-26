@@ -293,6 +293,24 @@ export const decisions = table(
      */
     deferralReason: text("deferral_reason"),
     /**
+     * On a settled own answer, the clean decision statement the interviewer
+     * proposes in its place: the owner's words with typos fixed and anything
+     * that is not part of the decision (an instruction to the AI, a note to
+     * self) taken out. A *proposal*, like the deferral: the answer stays as it
+     * was until the user accepts, which moves the original text to history
+     * and makes this the answer. Dismissing it, or any write that changes or
+     * clears the answer, clears all three restatement columns.
+     */
+    restatementText: text("restatement_text"),
+    /**
+     * The text the proposed statement removes, verbatim, or `""` when it only
+     * fixes typos. Kept in the app only: on acceptance it goes to history as
+     * the entry's `operatorNotes`, never into an exported file or a prompt.
+     */
+    restatementNotes: text("restatement_notes"),
+    /** The interviewer's reason for the restatement: what it removed or fixed. */
+    restatementReason: text("restatement_reason"),
+    /**
      * The settled decision that replaced this one, once the user accepted the
      * replacement. The answer stays as it was; this is the lasting link that
      * marks it out of date. Cleared when this decision's own answer changes,
@@ -354,6 +372,13 @@ export const decisionHistory = table(
      * own doing, which is every reopen and every deferral.
      */
     interviewerReason: text("interviewer_reason"),
+    /**
+     * What an accepted restatement took out of this answer: instructions to
+     * the AI, notes to self. Kept for the owner on the session page only; no
+     * exported file and no prompt reads it. Null for every other entry, and
+     * for a restatement that only fixed typos.
+     */
+    operatorNotes: text("operator_notes"),
     recordedAt: text("recorded_at").notNull(),
   },
   (decisionHistoryTable) => ({

@@ -4,6 +4,23 @@ import { getDb, schema } from "./db/index.js";
 import { CLEARED_SUPERSESSION } from "./tree.js";
 
 /**
+ * Withdraws every pending supersession on another row that names
+ * `decisionId`: the claim that this decision, as it reads now, answers or
+ * replaces that row. The proposal may quote this decision's text, so it goes
+ * whenever that text stops standing as it was — a reopen, an accepted
+ * deferral, or an accepted restatement.
+ */
+export async function withdrawSupersessionsNaming(
+  decisionId: string,
+  now: string,
+): Promise<void> {
+  await getDb()
+    .update(schema.decisions)
+    .set({ ...CLEARED_SUPERSESSION, updatedAt: now })
+    .where(eq(schema.decisions.supersededById, decisionId));
+}
+
+/**
  * Drops the claims other decisions make about `decisionId`'s settled answer,
  * once that answer no longer stands (a reopen, or an accepted deferral).
  *
@@ -17,14 +34,9 @@ export async function withdrawClaimsOn(
   decisionId: string,
   now: string,
 ): Promise<void> {
-  const db = getDb();
+  await withdrawSupersessionsNaming(decisionId, now);
 
-  await db
-    .update(schema.decisions)
-    .set({ ...CLEARED_SUPERSESSION, updatedAt: now })
-    .where(eq(schema.decisions.supersededById, decisionId));
-
-  await db
+  await getDb()
     .update(schema.decisions)
     .set({ replacedById: null, replacedReason: null, updatedAt: now })
     .where(eq(schema.decisions.replacedById, decisionId));

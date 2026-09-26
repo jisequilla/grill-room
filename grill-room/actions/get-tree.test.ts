@@ -289,6 +289,7 @@ describe("get-tree", () => {
         text: "A workspace",
         kind: "own-answer",
         interviewerReason: "the question needed sharpening",
+        operatorNotes: null,
         recordedAt: "2026-01-01T12:00:00.000Z",
         questionTitle: "What shape should this take?",
         questionBody: "The original body.",

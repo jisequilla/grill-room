@@ -308,6 +308,11 @@ export async function decisionSnapshots(
         answer: kind ? { kind, text: row.currentAnswer ?? "" } : null,
         previousAnswers: history
           .filter((entry) => entry.decisionId === row.id)
+          // An accepted restatement's entry holds the original text, and the
+          // operator notes it took out are part of that text. Its meaning is
+          // the current answer's, so leaving it out loses nothing and keeps
+          // the notes out of every prompt.
+          .filter((entry) => entry.operatorNotes == null)
           .flatMap((entry) =>
             entry.answerKind
               ? [

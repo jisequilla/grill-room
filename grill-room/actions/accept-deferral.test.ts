@@ -256,6 +256,7 @@ describe("accept-deferral", () => {
         replacements: [
           { replacedKey: "hold", byKey: "disputes", reason: "Disputes decide it." },
         ],
+        restatements: [],
         deferrals: [],
       },
     };
@@ -438,12 +439,15 @@ describe("accept-deferral: the claims other decisions make about its answer", ()
 });
 
 describe("the proposal a changed answer clears", () => {
-  it("CLEARED_PROPOSAL clears the deferral beside the supersession; CLEARED_SUPERSESSION does not", () => {
+  it("CLEARED_PROPOSAL clears the deferral and the restatement beside the supersession; CLEARED_SUPERSESSION does not", () => {
     expect(CLEARED_PROPOSAL).toEqual({
       supersededById: null,
       supersessionAnswer: null,
       supersessionReason: null,
       deferralReason: null,
+      restatementText: null,
+      restatementNotes: null,
+      restatementReason: null,
     });
     expect(CLEARED_SUPERSESSION).toEqual({
       supersededById: null,

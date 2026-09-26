@@ -136,3 +136,68 @@ describe("decisions-deferral-reason-column migration", () => {
     expect(updated.rows).toEqual([{ deferral_reason: "It waits on dispute handling." }]);
   });
 });
+
+describe("decisions-restatement-columns migration", () => {
+  beforeEach(dropSchema);
+
+  it("adds nullable restatement columns to decisions and operator_notes to history, on a database at v67", async () => {
+    const before = appMigrations.filter((migration) => migration.version <= 67);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    const decisionId = randomUUID();
+    const historyId = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [sessionId, "Grill Room", "An idea.", now, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_decisions (id, session_id, question_title, question_body, offered_choices_json, depends_on_json, introduced_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [decisionId, sessionId, "Which payment provider?", "", "[]", "[]", "interviewer", now, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_decision_history (id, decision_id, question_title, answer, answer_kind, recorded_at)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [historyId, decisionId, "Which payment provider?", "Stripe.", "own-answer", now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const decision = await getDbExec().execute({
+      sql: `SELECT restatement_text, restatement_notes, restatement_reason FROM gr_decisions WHERE id = ?`,
+      args: [decisionId],
+    });
+    expect(decision.rows).toEqual([
+      { restatement_text: null, restatement_notes: null, restatement_reason: null },
+    ]);
+    const history = await getDbExec().execute({
+      sql: `SELECT operator_notes FROM gr_decision_history WHERE id = ?`,
+      args: [historyId],
+    });
+    expect(history.rows).toEqual([{ operator_notes: null }]);
+
+    await getDbExec().execute({
+      sql: `UPDATE gr_decisions SET restatement_text = ?, restatement_notes = ?, restatement_reason = ? WHERE id = ?`,
+      args: ["Stripe.", "Claude, double-check the fee table.", "Removed a note to the AI.", decisionId],
+    });
+    await getDbExec().execute({
+      sql: `UPDATE gr_decision_history SET operator_notes = ? WHERE id = ?`,
+      args: ["Claude, double-check the fee table.", historyId],
+    });
+    const updated = await getDbExec().execute({
+      sql: `SELECT d.restatement_text, d.restatement_notes, d.restatement_reason, h.operator_notes
+            FROM gr_decisions d JOIN gr_decision_history h ON h.decision_id = d.id WHERE d.id = ?`,
+      args: [decisionId],
+    });
+    expect(updated.rows).toEqual([
+      {
+        restatement_text: "Stripe.",
+        restatement_notes: "Claude, double-check the fee table.",
+        restatement_reason: "Removed a note to the AI.",
+        operator_notes: "Claude, double-check the fee table.",
+      },
+    ]);
+  });
+});

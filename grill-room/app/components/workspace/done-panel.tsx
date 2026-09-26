@@ -18,6 +18,7 @@ import { DeferralProposals } from "@/components/workspace/deferral-proposals";
 import { LooseEndList } from "@/components/workspace/loose-end-list";
 import { Markdown } from "@/components/workspace/markdown";
 import { ReplacedDecisions } from "@/components/workspace/replaced-decisions";
+import { RestatementProposals } from "@/components/workspace/restatement-proposals";
 import { TurnAttemptLog, type Turn } from "@/components/workspace/turn-attempt-log";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -190,6 +191,11 @@ export function DoneProposedPanel({
       <ReplacedDecisions decisions={decisions} onOpenDecision={onOpenDecision} />
 
       <DeferralProposals decisions={decisions} onOpenDecision={onOpenDecision} />
+
+      <RestatementProposals
+        decisions={decisions}
+        onOpenDecision={onOpenDecision}
+      />
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
         <p className="min-w-0 flex-1 text-sm text-muted-foreground">

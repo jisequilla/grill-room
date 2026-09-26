@@ -1,7 +1,11 @@
+import { eq } from "@agent-native/core/db/schema";
 import { describe, expect, it } from "vitest";
 
 import { createHash } from "node:crypto";
 
+import acceptRestatement from "../actions/accept-restatement.js";
+import createSession from "../actions/create-session.js";
+import { getDb, schema, useTestDatabase } from "../test/db.js";
 import {
   buildExportManifest,
   hashExportContent,
@@ -11,7 +15,7 @@ import {
 } from "./export.js";
 import type { StoredReadiness } from "./readiness.js";
 import type { ScoutReportWithStaleness } from "./scout-report.js";
-import type { DecisionView } from "./tree.js";
+import { describeDecisions, type DecisionView } from "./tree.js";
 
 let counter = 0;
 
@@ -34,6 +38,9 @@ function decision(key: string, overrides: Partial<DecisionView> = {}): DecisionV
     answer: { text: `Answer of ${key}`, kind: "accepted-recommendation" },
     supersession: null,
     deferralReason: null,
+    restatementText: null,
+    restatementNotes: null,
+    restatementReason: null,
     replacedBy: null,
     settledBy: null,
     dispositionTarget: null,
@@ -904,5 +911,87 @@ describe("the export manifest", () => {
     ]) {
       expect(parseExportManifest(malformed)).toBeNull();
     }
+  });
+});
+
+describe("planExport: an own answer restated", () => {
+  useTestDatabase();
+
+  const ORIGINAL = "Stirpe. Claude, double-check the fee table.";
+  const NOTES = "Claude, double-check the fee table.";
+
+  async function aSessionWithARestatement() {
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A marketplace for local services.",
+    });
+    const now = new Date().toISOString();
+    await getDb().insert(schema.decisions).values({
+      id: "d-provider",
+      sessionId: session.id,
+      key: "provider",
+      questionTitle: "Which payment provider handles payouts?",
+      questionBody: "",
+      offeredChoicesJson: "[]",
+      dependsOnJson: "[]",
+      introducedBy: "interviewer",
+      answerKind: "own-answer",
+      currentAnswer: ORIGINAL,
+      settledAt: "2026-09-01T00:00:01.000Z",
+      restatementText: "Stripe.",
+      restatementNotes: NOTES,
+      restatementReason: "Took out a note to the AI.",
+      createdAt: now,
+      updatedAt: now,
+    });
+    return session;
+  }
+
+  async function exportedFiles(sessionId: string) {
+    const rows = await getDb()
+      .select()
+      .from(schema.decisions)
+      .where(eq(schema.decisions.sessionId, sessionId));
+    return planExport({
+      sessionTitle: "Grill Room",
+      idea: "A marketplace for local services.",
+      specMarkdown: "## Problem\n\nA spec.",
+      tickets: [],
+      decisions: describeDecisions(rows),
+      readiness: null,
+      scoutReport: null,
+    }).files;
+  }
+
+  it("changes nothing in decisions.md while the restatement is only proposed", async () => {
+    const session = await aSessionWithARestatement();
+
+    const decisions = (await exportedFiles(session.id)).find(
+      (file) => file.relativePath === "decisions.md",
+    )!;
+
+    expect(decisions.content).toContain(ORIGINAL);
+    expect(decisions.content).not.toContain("Took out a note");
+  });
+
+  it("shows the accepted statement, and no exported file carries the operator notes", async () => {
+    const session = await aSessionWithARestatement();
+
+    await acceptRestatement.run({ decisionId: "d-provider" });
+    const files = await exportedFiles(session.id);
+
+    const decisions = files.find((file) => file.relativePath === "decisions.md")!;
+    expect(decisions.content).toContain("Which payment provider handles payouts?");
+    expect(decisions.content).toContain("Stripe.");
+    expect(decisions.content).not.toContain("Stirpe");
+    for (const file of files) {
+      expect(file.content, file.relativePath).not.toContain(NOTES);
+    }
+    // The notes are kept, in the app's own history.
+    const [entry] = await getDb()
+      .select()
+      .from(schema.decisionHistory)
+      .where(eq(schema.decisionHistory.decisionId, "d-provider"));
+    expect(entry).toMatchObject({ answer: ORIGINAL, operatorNotes: NOTES });
   });
 });

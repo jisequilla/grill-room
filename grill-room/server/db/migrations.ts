@@ -523,4 +523,12 @@ UPDATE gr_projects SET durable_export_folder = working_export_folder, working_ex
     name: "decisions-deferral-reason-column",
     sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS deferral_reason TEXT`,
   },
+  {
+    version: 68,
+    name: "decisions-restatement-columns",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS restatement_text TEXT;
+ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS restatement_notes TEXT;
+ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS restatement_reason TEXT;
+ALTER TABLE gr_decision_history ADD COLUMN IF NOT EXISTS operator_notes TEXT`,
+  },
 ];

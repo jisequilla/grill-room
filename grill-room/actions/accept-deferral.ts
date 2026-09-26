@@ -7,7 +7,7 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import {
   CLEARED_ANSWER_LINKS,
-  CLEARED_SUPERSESSION,
+  CLEARED_PROPOSAL,
   describeDecisions,
 } from "../server/tree.js";
 import { withdrawClaimsOn } from "../server/withdraw-claims.js";
@@ -60,9 +60,8 @@ export default defineAction({
       .set({
         answerKind: "deferred",
         settledAt: null,
-        deferralReason: null,
         ...CLEARED_ANSWER_LINKS,
-        ...CLEARED_SUPERSESSION,
+        ...CLEARED_PROPOSAL,
         updatedAt: now,
       })
       .where(eq(schema.decisions.id, decisionId))

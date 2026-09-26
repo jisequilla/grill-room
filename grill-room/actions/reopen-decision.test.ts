@@ -150,6 +150,7 @@ describe("reopen-decision", () => {
         kind: "own-answer",
         // The user reopened it; the interviewer had nothing to say about that.
         interviewerReason: null,
+        operatorNotes: null,
         recordedAt: expect.stringMatching(/^\d{4}-/),
         questionTitle: "Question shape",
         questionBody: "The body of shape",

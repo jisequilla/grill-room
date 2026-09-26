@@ -85,6 +85,7 @@ export function aFindSupersededRequest(
     replaceableKeys: [],
     laterKeys: {},
     deferrableKeys: [],
+    restatableKeys: [],
     rejectionReason: null,
     ...overrides,
   };
@@ -143,6 +144,7 @@ export function aFindSupersededResult(
       },
     ],
     replacements: [],
+    restatements: [],
     deferrals: [],
     ...overrides,
   };

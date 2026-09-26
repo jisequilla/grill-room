@@ -160,6 +160,7 @@ describe("the scripted fake interviewer", () => {
     expect(checked.result).toEqual({
       supersessions: [],
       replacements: [],
+      restatements: [],
       deferrals: [],
     });
     expect(interviewer.remaining).toBe(1);
@@ -178,6 +179,7 @@ describe("the scripted fake interviewer", () => {
     expect(checked.result).toEqual({
       supersessions: [],
       replacements: [],
+      restatements: [],
       deferrals: [],
     });
     expect(interviewer.requests).toHaveLength(1);

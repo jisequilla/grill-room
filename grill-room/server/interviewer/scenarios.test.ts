@@ -450,6 +450,52 @@ describe("named scenarios for every request kind", () => {
     expect(interviewer.remainingFor(session.id)).toBe(0);
   });
 
+  it("restatement scripts a round, its done proposal, and a check that proposes a clean statement for one own answer", async () => {
+    const session = await aSession();
+    const interviewer = useScenario(session.id, "restatement");
+
+    const done = await answerOpenRoundByKey(session.id, {
+      "payment-provider": {
+        answerKind: "own-answer",
+        answer: "Stirpe. Claude, double-check the fee table.",
+      },
+      "first-service": { answerKind: "own-answer", answer: "Dog walking." },
+    });
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "propose-round",
+      "propose-round",
+      "find-superseded",
+    ]);
+    expect(interviewer.requests[2]).toMatchObject({
+      kind: "find-superseded",
+      looseEndKeys: [],
+      replaceableKeys: [],
+      deferrableKeys: ["payment-provider", "first-service"],
+      restatableKeys: ["payment-provider", "first-service"],
+    });
+    expect(done.state).toBe("done-proposed");
+
+    const tree = await getTree.run({ sessionId: session.id });
+    expect(
+      tree.decisions.find((decision) => decision.key === "payment-provider"),
+    ).toMatchObject({
+      state: "settled",
+      answer: {
+        kind: "own-answer",
+        text: "Stirpe. Claude, double-check the fee table.",
+      },
+      restatementText: "Stripe.",
+      restatementNotes: "Claude, double-check the fee table.",
+      restatementReason: expect.stringContaining("note addressed to the AI"),
+      deferralReason: null,
+    });
+    expect(
+      tree.decisions.find((decision) => decision.key === "first-service"),
+    ).toMatchObject({ restatementText: null });
+    expect(interviewer.remainingFor(session.id)).toBe(0);
+  });
+
   it("refusal-then-success scripts one refused attempt and the accepted retry, in the same turn", async () => {
     const session = await aSession();
     const interviewer = useScenario(session.id, "refusal-then-success");
