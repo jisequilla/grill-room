@@ -159,7 +159,7 @@ describe("accept-restatement", () => {
     ]);
   });
 
-  it("records no operator notes when the restatement only fixed typos", async () => {
+  it("records empty operator notes when the restatement only fixed typos", async () => {
     await aPendingRestatement({
       currentAnswer: "Postgress with a read replca",
       restatementText: "Postgres with a read replica",
@@ -170,7 +170,9 @@ describe("accept-restatement", () => {
     await acceptRestatement.run({ decisionId: "d-provider" });
 
     expect(await historyOf("d-provider")).toMatchObject([
-      { answer: "Postgress with a read replca", operatorNotes: null },
+      // "", not null: every accepted restatement's entry is marked, so the
+      // interviewer's context can leave it out whatever its notes.
+      { answer: "Postgress with a read replca", operatorNotes: "" },
     ]);
   });
 
@@ -371,15 +373,18 @@ describe("accept-restatement: the spec", () => {
     expect(await readSession(session.id)).toMatchObject({ state: "confirmed" });
   });
 
-  it("accepts with no spec, changing no session", async () => {
+  it("accepts on a confirmed session with no spec, leaving the session confirmed", async () => {
     const session = await aPendingRestatement();
-    const before = await readSession(session.id);
+    await getDb()
+      .update(schema.sessions)
+      .set({ state: "confirmed", doneSummary: "Everything is settled." })
+      .where(eq(schema.sessions.id, session.id));
 
     await acceptRestatement.run({ decisionId: "d-provider" });
 
     expect(await readSession(session.id)).toMatchObject({
-      state: before!.state,
-      doneSummary: before!.doneSummary,
+      state: "confirmed",
+      doneSummary: "Everything is settled.",
     });
     expect(await getDb().select().from(schema.specs)).toEqual([]);
   });
@@ -434,6 +439,58 @@ describe("accept-restatement: what reaches the interviewer", () => {
     expect(
       tree.decisions.find((d) => d.key === "provider")?.previousAnswers,
     ).toMatchObject([{ text: ORIGINAL, operatorNotes: NOTES }]);
+  });
+
+  /** Accepts, then returns the prompt text of the next find-superseded request. */
+  async function nextPromptAfterAccepting(
+    sessionId: string,
+    statement?: string,
+  ) {
+    await acceptRestatement.run({ decisionId: "d-provider", statement });
+    const interviewer = scriptInterviewer([
+      {
+        kind: "find-superseded",
+        result: {
+          supersessions: [],
+          replacements: [],
+          deferrals: [],
+          restatements: [],
+        },
+      },
+    ]);
+    await findSuperseded.run({ sessionId });
+    return buildPrompt(interviewer.requests[0]!);
+  }
+
+  it("keeps the original text out of a later prompt when a typo-only proposal was edited to remove notes", async () => {
+    // The model proposed only a typo fix, with empty notes; the owner's edit
+    // is what takes the note to the AI out.
+    const session = await aPendingRestatement({
+      restatementText: "Stripe. Claude, double-check the fee table.",
+      restatementNotes: "",
+      restatementReason: "Fixed the spelling of Stripe.",
+    });
+
+    const prompt = await nextPromptAfterAccepting(session.id, "Stripe.");
+
+    expect(prompt).toContain("answer (own-answer): Stripe.");
+    expect(prompt).not.toContain("Stirpe");
+    expect(prompt).not.toContain("double-check the fee table");
+  });
+
+  it("keeps a typo-only restatement's original text out of a later prompt", async () => {
+    const session = await aPendingRestatement({
+      currentAnswer: "Postgress with a read replca",
+      restatementText: "Postgres with a read replica",
+      restatementNotes: "",
+      restatementReason: "Fixed two typos.",
+    });
+
+    const prompt = await nextPromptAfterAccepting(session.id);
+
+    expect(prompt).toContain("answer (own-answer): Postgres with a read replica");
+    expect(prompt).not.toContain("Postgress");
+    expect(prompt).not.toContain("replca");
   });
 });
 

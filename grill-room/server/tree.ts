@@ -628,7 +628,10 @@ export interface PreviousAnswerView {
   text: string | null;
   kind: DecisionAnswerKind | null;
   interviewerReason: string | null;
-  /** What an accepted restatement took out of this answer, or null. App only. */
+  /**
+   * What an accepted restatement took out of this answer (`""` when nothing),
+   * or null for every other entry. App only.
+   */
   operatorNotes: string | null;
   recordedAt: string;
   questionTitle: string;

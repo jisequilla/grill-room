@@ -375,8 +375,10 @@ export const decisionHistory = table(
     /**
      * What an accepted restatement took out of this answer: instructions to
      * the AI, notes to self. Kept for the owner on the session page only; no
-     * exported file and no prompt reads it. Null for every other entry, and
-     * for a restatement that only fixed typos.
+     * exported file and no prompt reads it. `""` for a restatement that
+     * removed nothing, and null for every other entry: non-null marks an
+     * accepted restatement's entry, which the interviewer's context leaves
+     * out, since its text is the original answer.
      */
     operatorNotes: text("operator_notes"),
     recordedAt: text("recorded_at").notNull(),

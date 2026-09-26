@@ -1858,6 +1858,58 @@ describe("find-superseded", () => {
       });
     });
 
+    /** provider, an own answer, and payouts, settled after it: provider is replaceable, deferrable and restatable. */
+    async function aTreeWhereProviderIsEverything(sessionId: string) {
+      await aSettledDecision(sessionId, "provider", T1, {
+        currentAnswer: PROVIDER_ANSWER,
+      });
+      await aSettledDecision(sessionId, "payouts", T2);
+    }
+
+    it("after the last retry, drops a restatement of a decision whose replacement, as sent, is itself dropped", async () => {
+      const session = await aSession();
+      await aTreeWhereProviderIsEverything(session.id);
+
+      const last = await closingLineOf(session.id, {
+        replacements: [
+          { replacedKey: "provider", byKey: "provider", reason: "Itself." },
+        ],
+        restatements: [valid],
+      });
+
+      expect(await readDecision("d-provider")).toMatchObject({
+        supersededById: null,
+        restatementText: null,
+      });
+      expect(last).toMatchObject({
+        reason:
+          'Kept the valid entries after the last retry. Dropped this replacement: "provider" by "provider" ("provider" cannot replace itself.); and this restatement: "provider" ("provider" is both replaced and restated. Give it one or the other.)',
+      });
+    });
+
+    it("after the last retry, drops a restatement of a decision whose deferral and replacement, as sent, are both dropped", async () => {
+      const session = await aSession();
+      await aTreeWhereProviderIsEverything(session.id);
+
+      const last = await closingLineOf(session.id, {
+        replacements: [
+          { replacedKey: "provider", byKey: "provider", reason: "Itself." },
+        ],
+        deferrals: [{ key: "provider", reason: DEFERRAL_REASON }],
+        restatements: [valid],
+      });
+
+      expect(await readDecision("d-provider")).toMatchObject({
+        supersededById: null,
+        deferralReason: null,
+        restatementText: null,
+      });
+      expect(last).toMatchObject({
+        reason:
+          'Kept the valid entries after the last retry. Dropped this replacement: "provider" by "provider" ("provider" cannot replace itself.); and this deferral: "provider" ("provider" is both replaced and flagged as a deferral. Give it one or the other.); and this restatement: "provider" ("provider" is both flagged as a deferral and restated. Give it one or the other. "provider" is both replaced and restated. Give it one or the other.)',
+      });
+    });
+
     it("after the last retry, names two dropped restatements as these restatements", async () => {
       const session = await aSession();
       await aTreeWithANoisyOwnAnswer(session.id);

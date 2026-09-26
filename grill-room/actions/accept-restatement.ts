@@ -48,7 +48,11 @@ export default defineAction({
     }
 
     const now = new Date().toISOString();
-    const notes = row.restatementNotes?.trim() ? row.restatementNotes : null;
+    // Never null: a non-null `operatorNotes` is what marks an accepted
+    // restatement's entry, and the interviewer's context leaves every such
+    // entry out. Its text is the original answer, which may hold notes even
+    // when these are empty (an owner's edit took them out).
+    const notes = row.restatementNotes?.trim() ? row.restatementNotes : "";
 
     await db.insert(schema.decisionHistory).values({
       id: randomUUID(),
