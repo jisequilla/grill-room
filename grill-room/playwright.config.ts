@@ -96,8 +96,10 @@ export default defineConfig({
     // already be drained by other work.
     reuseExistingServer: false,
     // The dev server itself binds the port in a few seconds, but the first
-    // real page request compiles the route on demand — measured close to 20 s
-    // cold. This timeout covers the bind; `timeout` above covers the test.
+    // real page request compiles the route on demand — measured at about
+    // 4-5 s cold, most of it the startup gate answering 503 while the Nitro
+    // worker comes up. This timeout covers the bind; `timeout` above covers
+    // the test.
     // `globalSetup` pays that compile before any spec runs, and gives each of
     // its warm-up steps this same limit (`WARM_UP_LIMIT_MS` there).
     timeout: 180_000,
