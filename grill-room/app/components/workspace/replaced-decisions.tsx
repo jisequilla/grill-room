@@ -133,7 +133,7 @@ export function ReplacedDecisions({
 
   return (
     <section className="space-y-2.5" data-testid="replaced-decisions">
-      <h3 className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+      <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
         {t("workspace.replacedDecisionsHeading")}
       </h3>
       <ul className="flex flex-col divide-y divide-border/60">
