@@ -6,6 +6,7 @@ import type { RequestKind, ResultFor } from "./schemas.js";
 import type {
   AssessReadinessRequest,
   BreakIntoTicketsRequest,
+  CliMetrics,
   FindSupersededRequest,
   HandoffScoutRequest,
   Interviewer,
@@ -21,6 +22,29 @@ import { isProjectScoutRequest } from "./types.js";
 
 /** The conversation id the fake hands back when the session has none yet. */
 export const FAKE_CONVERSATION_ID = "fake-conversation";
+
+/**
+ * The usage the fake reports for every call that produced a result, whatever
+ * the scenario, so tests can assert on how it is stored. It never reads a
+ * transcript.
+ */
+export const FAKE_CLI_METRICS: Readonly<CliMetrics> = Object.freeze({
+  inputTokens: 100,
+  outputTokens: 20,
+  cacheReadTokens: 0,
+  cacheCreationTokens: 0,
+  costUsd: 0,
+  cliTurns: 1,
+  cliDurationMs: 10,
+  cliApiDurationMs: 10,
+  sessionId: FAKE_CONVERSATION_ID,
+  toolCalls: {},
+});
+
+/** A fresh copy of {@link FAKE_CLI_METRICS}, so no caller can change the constant. */
+function fakeMetrics(): CliMetrics {
+  return { ...FAKE_CLI_METRICS, toolCalls: {} };
+}
 
 interface ScriptedTurnBase {
   /**
@@ -417,7 +441,11 @@ function createScriptedInterviewer(
         "malformed-output",
         "The interviewer returned a result that does not match the expected shape.",
         JSON.stringify(parsed.error.issues).slice(0, 2000),
-        { rawOutput, reason: schemaIssuesReason(parsed.error.issues) },
+        {
+          rawOutput,
+          reason: schemaIssuesReason(parsed.error.issues),
+          metrics: fakeMetrics(),
+        },
       );
     }
 
@@ -431,6 +459,7 @@ function createScriptedInterviewer(
           FAKE_CONVERSATION_ID,
       },
       rawOutput,
+      metrics: fakeMetrics(),
     };
   }
 
@@ -456,6 +485,7 @@ function createScriptedInterviewer(
             conversationId: conversationOf(request) ?? FAKE_CONVERSATION_ID,
           },
           rawOutput: JSON.stringify(result),
+          metrics: fakeMetrics(),
         }),
       );
     }

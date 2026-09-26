@@ -1,3 +1,5 @@
+import type { CliMetrics } from "./types.js";
+
 /**
  * The failure vocabulary of the interviewer port. Callers distinguish these to
  * decide what the user is told: a rate limit is not a defect, a missing or
@@ -20,6 +22,8 @@ export interface InterviewerErrorExtras {
   rawOutput?: string;
   /** The failure in one line. Defaults to the message, flattened. */
   reason?: string;
+  /** What the call cost and did, when it produced a parseable result before failing. */
+  metrics?: CliMetrics;
 }
 
 export class InterviewerError extends Error {
@@ -30,6 +34,8 @@ export class InterviewerError extends Error {
   readonly rawOutput: string | null;
   /** The failure in one line, short enough to show beside an attempt. */
   readonly reason: string;
+  /** The call's usage and tool calls. Null when it produced no parseable result. */
+  readonly metrics: CliMetrics | null;
 
   constructor(
     code: InterviewerErrorCode,
@@ -43,6 +49,7 @@ export class InterviewerError extends Error {
     this.detail = detail;
     this.rawOutput = extras.rawOutput ?? null;
     this.reason = oneLine(extras.reason ?? message);
+    this.metrics = extras.metrics ?? null;
   }
 }
 

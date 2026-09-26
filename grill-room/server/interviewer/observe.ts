@@ -1,5 +1,6 @@
 import { InterviewerError, oneLine } from "./errors.js";
 import type {
+  CliMetrics,
   InterviewerTurn,
   ModelCallObserver,
   ModelCallOutcome,
@@ -37,6 +38,13 @@ export function outcomeOfFailure(
   }
 }
 
+/** The metrics a failed model call carries, if it produced a parseable result. */
+function metricsOfFailure(error: unknown): CliMetrics | undefined {
+  return error instanceof InterviewerError
+    ? (error.metrics ?? undefined)
+    : undefined;
+}
+
 /**
  * Schema issues as one line: the first issue's path and message, and how many
  * more there were.
@@ -51,10 +59,14 @@ export function schemaIssuesReason(
   return oneLine(`Schema mismatch at ${path}: ${first.message}${more}`);
 }
 
-/** What one successful model call produced: the turn, and the output it came from. */
+/**
+ * What one successful model call produced: the turn, the output it came from,
+ * and what the call cost and did.
+ */
 export interface CallResult<Result> {
   turn: InterviewerTurn<Result>;
   rawOutput: string;
+  metrics?: CliMetrics;
 }
 
 /**
@@ -71,7 +83,10 @@ export async function observeCall<Result>(
   const started: ModelCallStart = { ...start, startedAt: new Date() };
   await observer?.callStarted?.(started);
 
-  const end = async (outcome: ModelCallOutcome): Promise<void> => {
+  const end = async (
+    outcome: ModelCallOutcome,
+    metrics: CliMetrics | undefined,
+  ): Promise<void> => {
     if (!observer?.callEnded) return;
     const endedAt = new Date();
     await observer.callEnded({
@@ -79,6 +94,7 @@ export async function observeCall<Result>(
       endedAt,
       durationMs: endedAt.getTime() - started.startedAt.getTime(),
       outcome,
+      ...(metrics ? { metrics } : {}),
     });
   };
 
@@ -86,9 +102,9 @@ export async function observeCall<Result>(
   try {
     result = await run();
   } catch (error) {
-    await end(outcomeOfFailure(error, fallsBack(error)));
+    await end(outcomeOfFailure(error, fallsBack(error)), metricsOfFailure(error));
     throw error;
   }
-  await end({ kind: "success", rawOutput: result.rawOutput });
+  await end({ kind: "success", rawOutput: result.rawOutput }, result.metrics);
   return result.turn;
 }

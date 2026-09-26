@@ -7,9 +7,15 @@ import { observeCall, schemaIssuesReason, type CallResult } from "./observe.js";
 import { buildPrompt } from "./prompt.js";
 import { jsonSchemaFor, resultSchemas } from "./schemas.js";
 import type { RequestKind, ResultFor } from "./schemas.js";
+import {
+  claudeConfigDir,
+  readToolCalls as readTranscriptToolCalls,
+  type ToolCallReader,
+} from "./transcript-tools.js";
 import type {
   AssessReadinessRequest,
   BreakIntoTicketsRequest,
+  CliMetrics,
   FindSupersededRequest,
   HandoffScoutRequest,
   Interviewer,
@@ -60,6 +66,11 @@ export interface ClaudeCliOptions {
   cwd?: string;
   /** The environment to derive the child's from. Defaults to the server's own. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * Counts an attempt's tool calls from its session transcript. Defaults to
+   * reading the command line's own transcript file.
+   */
+  readToolCalls?: ToolCallReader;
 }
 
 /**
@@ -275,15 +286,24 @@ async function recordTurn(
   await appendFile(file, `${JSON.stringify({ kind, result })}\n`, "utf8");
 }
 
-/** Turns a failed invocation into the most specific error code it supports. */
-function classifyFailure(outcome: CliOutcome, summary: string): InterviewerError {
+/**
+ * Turns a failed invocation into the most specific error code it supports,
+ * carrying the call's metrics when it produced a parseable result.
+ */
+function classifyFailure(
+  outcome: CliOutcome,
+  summary: string,
+  metrics?: CliMetrics,
+): InterviewerError {
   const detail = `${outcome.stderr}\n${outcome.stdout}`.trim();
+  const extras = metrics ? { metrics } : {};
 
   if (outcome.spawnError?.code === "ENOENT") {
     return new InterviewerError(
       "cli-missing",
       "The Claude Code command line could not be found. Install it and make sure `claude` is on the PATH.",
       outcome.spawnError.message,
+      extras,
     );
   }
   if (outcome.spawnError) {
@@ -291,6 +311,7 @@ function classifyFailure(outcome: CliOutcome, summary: string): InterviewerError
       "failed",
       `The Claude Code command line could not be started: ${outcome.spawnError.message}`,
       detail,
+      extras,
     );
   }
   if (outcome.exitCode === 127 || MISSING_CLI_PATTERN.test(detail)) {
@@ -298,6 +319,7 @@ function classifyFailure(outcome: CliOutcome, summary: string): InterviewerError
       "cli-missing",
       "The Claude Code command line could not be found. Install it and make sure `claude` is on the PATH.",
       detail,
+      extras,
     );
   }
   if (RATE_LIMIT_PATTERN.test(detail)) {
@@ -305,6 +327,7 @@ function classifyFailure(outcome: CliOutcome, summary: string): InterviewerError
       "rate-limited",
       "The Claude subscription is rate limited right now. This is not an interviewer failure: wait and retry the turn.",
       detail,
+      extras,
     );
   }
   if (LOGGED_OUT_PATTERN.test(detail)) {
@@ -312,9 +335,10 @@ function classifyFailure(outcome: CliOutcome, summary: string): InterviewerError
       "not-logged-in",
       "The Claude Code command line is not logged in. Run `claude` once and sign in, then retry.",
       detail,
+      extras,
     );
   }
-  return new InterviewerError("failed", summary, detail);
+  return new InterviewerError("failed", summary, detail, extras);
 }
 
 interface CliEnvelope {
@@ -322,6 +346,56 @@ interface CliEnvelope {
   session_id?: unknown;
   is_error?: unknown;
   result?: unknown;
+  usage?: unknown;
+  total_cost_usd?: unknown;
+  num_turns?: unknown;
+  duration_ms?: unknown;
+  duration_api_ms?: unknown;
+}
+
+/** Stdout parsed as JSON, or null when it is not JSON. */
+function parsedOrNull(stdout: string): unknown {
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+
+/** A whole number JavaScript represents exactly, or null. */
+function integerOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The usage an envelope reports, each field null when it is missing or of the
+ * wrong type. Null when the output parsed as JSON but is not an object.
+ */
+function usageOf(envelope: unknown): Omit<CliMetrics, "toolCalls"> | null {
+  if (typeof envelope !== "object" || envelope === null) return null;
+  const fields = envelope as CliEnvelope;
+  const usage =
+    typeof fields.usage === "object" && fields.usage !== null
+      ? (fields.usage as Record<string, unknown>)
+      : {};
+  return {
+    inputTokens: integerOrNull(usage.input_tokens),
+    outputTokens: integerOrNull(usage.output_tokens),
+    cacheReadTokens: integerOrNull(usage.cache_read_input_tokens),
+    cacheCreationTokens: integerOrNull(usage.cache_creation_input_tokens),
+    costUsd: numberOrNull(fields.total_cost_usd),
+    cliTurns: integerOrNull(fields.num_turns),
+    cliDurationMs: integerOrNull(fields.duration_ms),
+    cliApiDurationMs: integerOrNull(fields.duration_api_ms),
+    sessionId:
+      typeof fields.session_id === "string" && fields.session_id
+        ? fields.session_id
+        : null,
+  };
 }
 
 /**
@@ -336,25 +410,68 @@ export function createClaudeCliInterviewer(
   const cwd = options.cwd ?? tmpdir();
   const sourceEnv = options.env ?? process.env;
   const recordingFile = sourceEnv[RECORD_TURNS_ENV_VAR];
+  const readToolCalls = options.readToolCalls ?? readTranscriptToolCalls;
+
+  /**
+   * One attempt's metrics: the envelope's usage, and the tool calls its
+   * transcript lines from `since` on hold. A reader that throws reads as null:
+   * instrumentation never fails a turn.
+   */
+  function measure(
+    envelope: unknown,
+    child: { cwd: string; env: NodeJS.ProcessEnv; since: Date },
+  ): CliMetrics | undefined {
+    const usage = usageOf(envelope);
+    if (!usage) return undefined;
+    let toolCalls: CliMetrics["toolCalls"] = null;
+    if (usage.sessionId) {
+      try {
+        toolCalls = readToolCalls({
+          configDir: claudeConfigDir(child.env),
+          cwd: child.cwd,
+          sessionId: usage.sessionId,
+          since: child.since,
+        });
+      } catch {
+        toolCalls = null;
+      }
+    }
+    return { ...usage, toolCalls };
+  }
 
   async function attempt(
     request: InterviewerRequest,
     { resume, primed = false }: { resume: string | null; primed?: boolean },
   ): Promise<CallResult<unknown>> {
     const prompt = buildPrompt(request, { primed });
+    // A docs folder is the child's working directory, which is what makes it
+    // the directory `--restricted` confines the file tools to.
+    const childCwd = readableFolder(request) ?? cwd;
+    const childEnv = childEnvironment(sourceEnv);
+    // Taken immediately before the child starts: a resumed conversation's
+    // transcript holds every earlier turn, and only this attempt's lines count.
+    const attemptStartedAt = new Date();
     const outcome = await runCli({
       command,
       args: buildCliArgs(request, { prompt, resume }),
-      // A docs folder is the child's working directory, which is what makes it
-      // the directory `--restricted` confines the file tools to.
-      cwd: readableFolder(request) ?? cwd,
-      env: childEnvironment(sourceEnv),
+      cwd: childCwd,
+      env: childEnv,
     });
 
     if (outcome.spawnError || outcome.exitCode !== 0) {
+      // The command line prints its full result and exits 1 whenever the
+      // result is an error (`error_max_turns`, `error_during_execution`, …),
+      // so a failed process can still say what the call cost.
       throw classifyFailure(
         outcome,
         `The interviewer turn failed (exit code ${outcome.exitCode ?? "none"}).`,
+        outcome.spawnError
+          ? undefined
+          : measure(parsedOrNull(outcome.stdout), {
+              cwd: childCwd,
+              env: childEnv,
+              since: attemptStartedAt,
+            }),
       );
     }
 
@@ -370,10 +487,18 @@ export function createClaudeCliInterviewer(
       );
     }
 
+    const metrics = measure(envelope, {
+      cwd: childCwd,
+      env: childEnv,
+      since: attemptStartedAt,
+    });
+    const withMetrics = metrics ? { metrics } : {};
+
     if (envelope.is_error === true) {
       throw classifyFailure(
         outcome,
         "The interviewer reported an error for this turn.",
+        metrics,
       );
     }
 
@@ -385,6 +510,7 @@ export function createClaudeCliInterviewer(
         {
           rawOutput: outcome.stdout,
           reason: "The output carries no conversation id.",
+          ...withMetrics,
         },
       );
     }
@@ -400,7 +526,11 @@ export function createClaudeCliInterviewer(
         "malformed-output",
         "The interviewer returned a result that does not match the expected shape.",
         JSON.stringify(parsed.error.issues).slice(0, 2000),
-        { rawOutput, reason: schemaIssuesReason(parsed.error.issues) },
+        {
+          rawOutput,
+          reason: schemaIssuesReason(parsed.error.issues),
+          ...withMetrics,
+        },
       );
     }
 
@@ -411,6 +541,7 @@ export function createClaudeCliInterviewer(
     return {
       turn: { result: parsed.data, conversationId: envelope.session_id },
       rawOutput,
+      ...withMetrics,
     };
   }
 

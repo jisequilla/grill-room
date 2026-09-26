@@ -19,6 +19,7 @@ import { and, desc, eq, inArray, isNull } from "@agent-native/core/db/schema";
 
 import { getDb, schema } from "./db/index.js";
 import type { AttemptKind } from "./db/schema.js";
+import type { CliMetrics, ToolCallCounts } from "./interviewer/types.js";
 
 /** A turn record's first run, created together with the turn. */
 export interface CreatedTurn {
@@ -151,6 +152,8 @@ export async function completeAttempt(input: {
   kind: AttemptKind;
   reason?: string | null;
   rawOutput?: string | null;
+  /** What the call cost and did. Absent or null stores every usage column as null. */
+  metrics?: CliMetrics | null;
 }): Promise<void> {
   const db = getDb();
   const [attempt] = await db
@@ -173,6 +176,51 @@ export async function completeAttempt(input: {
       durationMs,
     })
     .where(eq(schema.turnAttempts.id, input.attemptId));
+
+  if (!input.metrics) return;
+  // Written apart from the attempt's outcome, so usage the database refuses
+  // never costs the attempt its kind, reason and raw output, or the turn.
+  try {
+    await db
+      .update(schema.turnAttempts)
+      .set(usageColumns(input.metrics))
+      .where(eq(schema.turnAttempts.id, input.attemptId));
+  } catch (error) {
+    console.warn(
+      `[turn-records] could not store attempt ${input.attemptId}'s usage: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+/** An attempt's usage columns, every one null when there are no metrics. */
+function usageColumns(metrics: CliMetrics | null) {
+  return {
+    inputTokens: metrics?.inputTokens ?? null,
+    outputTokens: metrics?.outputTokens ?? null,
+    cacheReadTokens: metrics?.cacheReadTokens ?? null,
+    cacheCreationTokens: metrics?.cacheCreationTokens ?? null,
+    costUsd: metrics?.costUsd ?? null,
+    cliTurns: metrics?.cliTurns ?? null,
+    cliDurationMs: metrics?.cliDurationMs ?? null,
+    cliApiDurationMs: metrics?.cliApiDurationMs ?? null,
+    sessionId: metrics?.sessionId ?? null,
+    toolCallsJson: metrics?.toolCalls ? JSON.stringify(metrics.toolCalls) : null,
+  };
+}
+
+/** A stored `tool_calls_json` read back; null when absent or unreadable. */
+function toolCallsOf(json: string | null): ToolCallCounts | null {
+  if (json == null) return null;
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as ToolCallCounts)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -312,6 +360,21 @@ export interface TurnAttemptView {
   kind: AttemptKind | null;
   reason: string | null;
   rawOutput: string | null;
+  /*
+   * What the call cost and did: see `CliMetrics`. {@link getTurnWithRuns}
+   * always sets every one, null when unknown; they are optional here only so
+   * an attempt built by hand for the attempt log need not name them.
+   */
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheCreationTokens?: number | null;
+  costUsd?: number | null;
+  cliTurns?: number | null;
+  cliDurationMs?: number | null;
+  cliApiDurationMs?: number | null;
+  sessionId?: string | null;
+  toolCalls?: ToolCallCounts | null;
 }
 
 /** One run and its attempts in order, as {@link getTurnWithRuns} returns it. */
@@ -397,6 +460,16 @@ export async function getTurnWithRuns(
           kind: attempt.kind,
           reason: attempt.reason,
           rawOutput: attempt.rawOutput,
+          inputTokens: attempt.inputTokens,
+          outputTokens: attempt.outputTokens,
+          cacheReadTokens: attempt.cacheReadTokens,
+          cacheCreationTokens: attempt.cacheCreationTokens,
+          costUsd: attempt.costUsd,
+          cliTurns: attempt.cliTurns,
+          cliDurationMs: attempt.cliDurationMs,
+          cliApiDurationMs: attempt.cliApiDurationMs,
+          sessionId: attempt.sessionId,
+          toolCalls: toolCallsOf(attempt.toolCallsJson),
         })),
     })),
   };

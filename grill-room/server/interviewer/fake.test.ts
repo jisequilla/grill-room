@@ -6,6 +6,7 @@ import {
   cannedInterviewTurns,
   createFakeInterviewer,
   createScenarioInterviewer,
+  FAKE_CLI_METRICS,
   handoffScoutTurns,
   rateLimitedTurn,
   schemaInvalidTurn,
@@ -167,6 +168,19 @@ describe("the scripted fake interviewer", () => {
     expect((await interviewer.proposeRound(aProposeRoundRequest())).result).toEqual(
       round,
     );
+  });
+
+  it("reports its canned usage for an unscripted find-superseded answer", async () => {
+    const interviewer = createFakeInterviewer([]);
+    const { observer, ended } = recordingObserver();
+
+    await interviewer.findSuperseded(
+      aFindSupersededRequest({ looseEndKeys: [], replaceableKeys: ["shape"] }),
+      observer,
+    );
+
+    expect(ended).toHaveLength(1);
+    expect(ended[0].metrics).toEqual(FAKE_CLI_METRICS);
   });
 
   it("answers a find-superseded request with no loose ends empty when nothing is left to take", async () => {
