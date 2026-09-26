@@ -66,7 +66,7 @@ function ReplacedDecision({
 
       <div
         className="mt-2.5 w-full space-y-2 rounded-lg border bg-muted/30 p-3"
-        data-testid="supersession"
+        data-testid="replacement-band"
       >
         <p className="flex items-start gap-1.5 text-xs font-medium">
           <IconLink className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />

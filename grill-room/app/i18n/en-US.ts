@@ -345,7 +345,7 @@ const messages = {
     checkSuperseded: "Check for answered or replaced decisions",
     checkingSuperseded: "Checking…",
     checkSupersededFailed:
-      "Could not check which loose ends a later decision already answered.",
+      "Could not check which loose ends or settled decisions a later decision already answered or replaced.",
     supersededBy: "Answered by: {{title}}",
     supersededByUnknown: "another settled decision",
     acceptSupersession: "Accept",
