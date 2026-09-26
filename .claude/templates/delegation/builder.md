@@ -24,7 +24,7 @@ Rules (from `.claude/rules/worktrees.md`):
 - Before each gh call, run `gh auth switch -u jisequilla && gh api user --jq .login` in the same command. It must print `jisequilla`.
 - Avoid a colon followed by quotes in gh arguments.
 - If any command is blocked by a hook or the permission classifier, stop. Report the exact command and message, and never work around the block.
-- Stop only processes you started, by their recorded PID. Never use `pgrep`, `pkill`, `killall`, `just stop` or `just restart`. Never use port 8082 or the claude-in-chrome tools.
+- Stop only processes you started, by their recorded PID. Never use `pgrep`, `pkill`, `killall`, `just stop` or `just restart`. Never use port 8082 or the claude-in-chrome tools. Other builders run their own servers at the same time. A server you did not record when you started it is theirs, not an orphan: report it, and never stop it.
 - If `node_modules` is missing, run `pnpm install --frozen-lockfile` in `grill-room/` first.
 
 Report the PR number and branch, then stop.
