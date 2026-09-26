@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -98,10 +98,32 @@ describe("where a transcript lives", () => {
     expect(projectFolderName(cwd)).toBe(cwd.replace(/[^A-Za-z0-9]/g, "-"));
   });
 
+  it("keeps a name of exactly 200 characters whole", () => {
+    const cwd200 = `/${"b".repeat(199)}`;
+    expect(projectFolderName(cwd200)).toBe(`-${"b".repeat(199)}`);
+  });
+
+  it("cuts a name over 200 characters to 200 and suffixes a hash of the directory", () => {
+    const long = `/no/such/${"a".repeat(250)}`;
+    expect(projectFolderName(long)).toBe(
+      `${`-no-such-${"a".repeat(250)}`.slice(0, 200)}-g7n155`,
+    );
+  });
+
   it("files it under the config directory's projects folder, by session id", () => {
     expect(transcriptPath({ configDir, cwd, sessionId: SESSION_ID })).toBe(
       path.join(configDir, "projects", projectFolderName(cwd), `${SESSION_ID}.jsonl`),
     );
+  });
+
+  it("resolves the default config directory under the suite's temp home, never the real one", () => {
+    // The account's home from the user database, which `HOME` does not change.
+    const realHome = userInfo().homedir;
+    const resolved = claudeConfigDir(process.env);
+
+    expect(resolved.startsWith(`${realHome}${path.sep}`)).toBe(false);
+    expect(path.basename(path.dirname(resolved))).toMatch(/^grill-room-test-home-/);
+    expect(resolved.startsWith(tmpdir())).toBe(true);
   });
 
   it("uses CLAUDE_CONFIG_DIR when the child runs with it, otherwise ~/.claude", () => {
@@ -123,6 +145,25 @@ describe("counting one attempt's tool calls", () => {
     ]);
 
     expect(read()).toEqual({ Glob: 2, Grep: 1, Read: 3 });
+  });
+
+  it("returns the counts with their tool names in sorted order", async () => {
+    await writeTranscript([
+      assistant(AFTER, toolUse("Read"), toolUse("Grep"), toolUse("Glob")),
+      assistant(AFTER, toolUse("Read")),
+    ]);
+
+    expect(JSON.stringify(read())).toBe('{"Glob":1,"Grep":1,"Read":2}');
+  });
+
+  it("counts a tool_use block written twice with the same id once", async () => {
+    const repeated = toolUse("Read");
+    await writeTranscript([
+      assistant(AFTER, repeated),
+      assistant(AFTER, repeated, toolUse("Read")),
+    ]);
+
+    expect(read()).toEqual({ Read: 2 });
   });
 
   it("counts only the lines written at or after the attempt started, in a resumed conversation", async () => {

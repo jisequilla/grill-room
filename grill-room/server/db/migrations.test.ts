@@ -267,7 +267,7 @@ describe("turn-attempts-usage-columns migration", () => {
 
     await getDbExec().execute({
       sql: `UPDATE gr_turn_attempts SET input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_creation_tokens = ?, cost_usd = ?, cli_turns = ?, cli_duration_ms = ?, cli_api_duration_ms = ?, session_id = ?, tool_calls_json = ? WHERE id = ?`,
-      args: [10, 165, 13856, 33442, 0.0691046, 3, 4188, 3601, "session-7", '{"Read":2}', attemptId],
+      args: [10, 165, 9_000_000_000_000, 33442, 0.0691046, 3, 4188, 3601, "session-7", '{"Read":2}', attemptId],
     });
     const updated = await getDbExec().execute({
       sql: `SELECT ${usageColumns} FROM gr_turn_attempts WHERE id = ?`,
@@ -277,7 +277,7 @@ describe("turn-attempts-usage-columns migration", () => {
       {
         input_tokens: 10,
         output_tokens: 165,
-        cache_read_tokens: 13856,
+        cache_read_tokens: 9_000_000_000_000,
         cache_creation_tokens: 33442,
         cost_usd: 0.0691046,
         cli_turns: 3,

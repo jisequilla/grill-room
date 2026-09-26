@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -643,15 +644,15 @@ export const turnAttempts = table(
      * What the call cost and did, from the command line's JSON result. Null
      * when the call produced no parseable result, or the value was missing.
      */
-    inputTokens: integer("input_tokens"),
-    outputTokens: integer("output_tokens"),
-    cacheReadTokens: integer("cache_read_tokens"),
-    cacheCreationTokens: integer("cache_creation_tokens"),
+    inputTokens: bigint("input_tokens", { mode: "number" }),
+    outputTokens: bigint("output_tokens", { mode: "number" }),
+    cacheReadTokens: bigint("cache_read_tokens", { mode: "number" }),
+    cacheCreationTokens: bigint("cache_creation_tokens", { mode: "number" }),
     costUsd: real("cost_usd"),
     /** The command line's own turn count (`num_turns`). */
-    cliTurns: integer("cli_turns"),
-    cliDurationMs: integer("cli_duration_ms"),
-    cliApiDurationMs: integer("cli_api_duration_ms"),
+    cliTurns: bigint("cli_turns", { mode: "number" }),
+    cliDurationMs: bigint("cli_duration_ms", { mode: "number" }),
+    cliApiDurationMs: bigint("cli_api_duration_ms", { mode: "number" }),
     /** The command line's session id: its transcript file's name. */
     sessionId: text("session_id"),
     /**

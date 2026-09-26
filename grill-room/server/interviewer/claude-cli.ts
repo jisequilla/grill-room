@@ -353,8 +353,18 @@ interface CliEnvelope {
   duration_api_ms?: unknown;
 }
 
+/** Stdout parsed as JSON, or null when it is not JSON. */
+function parsedOrNull(stdout: string): unknown {
+  try {
+    return JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+}
+
+/** A whole number JavaScript represents exactly, or null. */
 function integerOrNull(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) ? value : null;
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : null;
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -449,9 +459,19 @@ export function createClaudeCliInterviewer(
     });
 
     if (outcome.spawnError || outcome.exitCode !== 0) {
+      // The command line prints its full result and exits 1 whenever the
+      // result is an error (`error_max_turns`, `error_during_execution`, …),
+      // so a failed process can still say what the call cost.
       throw classifyFailure(
         outcome,
         `The interviewer turn failed (exit code ${outcome.exitCode ?? "none"}).`,
+        outcome.spawnError
+          ? undefined
+          : measure(parsedOrNull(outcome.stdout), {
+              cwd: childCwd,
+              env: childEnv,
+              since: attemptStartedAt,
+            }),
       );
     }
 

@@ -1,5 +1,5 @@
 import { eq } from "@agent-native/core/db/schema";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import createSession from "../actions/create-session.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
@@ -588,6 +588,53 @@ describe("what each attempt stores of its usage", () => {
         ...metrics,
         costUsd: null,
         toolCalls: {},
+      }),
+    ]);
+  });
+
+  it("stores counts past 32 bits", async () => {
+    const recorder = await startTurnRecorder({
+      sessionId: await aSession(),
+      turnKind: "propose-round",
+      model: "sonnet",
+    });
+    const large = {
+      ...metrics,
+      inputTokens: 3_000_000_000,
+      cacheReadTokens: 9_000_000_000_000,
+      cliApiDurationMs: 4_000_000_000,
+    };
+
+    await aCall(recorder, { kind: "success", rawOutput: "{}" }, large);
+
+    expect(await attemptsOf(recorder)).toEqual([
+      expect.objectContaining({ kind: "success", ...large }),
+    ]);
+  });
+
+  it("completes the attempt and the turn goes on when its usage cannot be stored", async () => {
+    const recorder = await startTurnRecorder({
+      sessionId: await aSession(),
+      turnKind: "propose-round",
+      model: "sonnet",
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Past what any integer column holds: the database refuses the write.
+    await aCall(
+      recorder,
+      { kind: "schema-invalid", rawOutput: '{"bad":true}', reason: "Bad output." },
+      { ...metrics, inputTokens: 1e20 },
+    );
+    warn.mockRestore();
+
+    expect(await attemptsOf(recorder)).toEqual([
+      expect.objectContaining({
+        kind: "schema-invalid",
+        reason: "Bad output.",
+        rawOutput: '{"bad":true}',
+        durationMs: expect.any(Number),
+        ...noUsage,
       }),
     ]);
   });

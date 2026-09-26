@@ -174,9 +174,24 @@ export async function completeAttempt(input: {
       reason: input.reason ?? null,
       rawOutput: input.rawOutput ?? null,
       durationMs,
-      ...usageColumns(input.metrics ?? null),
     })
     .where(eq(schema.turnAttempts.id, input.attemptId));
+
+  if (!input.metrics) return;
+  // Written apart from the attempt's outcome, so usage the database refuses
+  // never costs the attempt its kind, reason and raw output, or the turn.
+  try {
+    await db
+      .update(schema.turnAttempts)
+      .set(usageColumns(input.metrics))
+      .where(eq(schema.turnAttempts.id, input.attemptId));
+  } catch (error) {
+    console.warn(
+      `[turn-records] could not store attempt ${input.attemptId}'s usage: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 /** An attempt's usage columns, every one null when there are no metrics. */

@@ -37,6 +37,10 @@ export function claudeConfigDir(env: NodeJS.ProcessEnv): string {
  * ASCII letter or digit replaced by `-`. So `/Users/me/repos/app/.claude/x`
  * becomes `-Users-me-repos-app--claude-x`, and on macOS `/tmp/x` becomes
  * `-private-tmp-x`, since `/tmp` links to `/private/tmp`.
+ *
+ * A name longer than {@link MAX_FOLDER_NAME_LENGTH} is cut to that length and
+ * suffixed with `-` and a hash of the unreplaced directory: the 32-bit string
+ * hash `h = h * 31 + charCode`, made non-negative, in base 36.
  */
 export function projectFolderName(cwd: string): string {
   let resolved = cwd;
@@ -45,7 +49,21 @@ export function projectFolderName(cwd: string): string {
   } catch {
     // A directory that no longer exists is named as given.
   }
-  return resolved.replace(/[^A-Za-z0-9]/g, "-");
+  const name = resolved.replace(/[^A-Za-z0-9]/g, "-");
+  if (name.length <= MAX_FOLDER_NAME_LENGTH) return name;
+  return `${name.slice(0, MAX_FOLDER_NAME_LENGTH)}-${Math.abs(stringHash(resolved)).toString(36)}`;
+}
+
+/** The longest folder name the command line uses before it cuts and hashes. */
+export const MAX_FOLDER_NAME_LENGTH = 200;
+
+/** The command line's 32-bit string hash: `h = (h << 5) - h + charCode`, kept to 32 bits. */
+function stringHash(text: string): number {
+  let hash = 0;
+  for (let index = 0; index < text.length; index++) {
+    hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+  }
+  return hash;
 }
 
 export function transcriptPath(

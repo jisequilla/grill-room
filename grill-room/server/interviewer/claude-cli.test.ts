@@ -2392,6 +2392,63 @@ describe("what each attempt costs and does", () => {
     expect(ended[0]!.metrics).toEqual(allMetrics);
   });
 
+  it("carries the usage and tool calls of an error result the command line exits 1 on", async () => {
+    // What the command line prints for `error_max_turns` and its kin: the
+    // whole metered result, then exit code 1.
+    const runner = recordingRunner([
+      {
+        stdout: aMeteredEnvelope({
+          is_error: true,
+          subtype: "error_max_turns",
+          structured_output: undefined,
+        }),
+        stderr: "",
+        exitCode: 1,
+      },
+    ]);
+    const reader = aReader();
+    const { observer, ended } = recordingObserver();
+
+    const error = await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+      readToolCalls: reader.readToolCalls,
+    })
+      .proposeRound(aProposeRoundRequest(), observer)
+      .catch((caught: unknown) => caught);
+
+    expect((error as InterviewerError).code).toBe("failed");
+    expect((error as InterviewerError).metrics).toEqual(allMetrics);
+    expect(ended[0]!.outcome.kind).toBe("error");
+    expect(ended[0]!.metrics).toEqual(allMetrics);
+    expect(reader.queries).toHaveLength(1);
+  });
+
+  it("keeps a count past 32 bits and nulls one JavaScript cannot represent exactly", async () => {
+    const runner = recordingRunner([
+      ok(
+        aMeteredEnvelope({
+          usage: {
+            input_tokens: 3_000_000_000,
+            output_tokens: 2 ** 60,
+            cache_read_input_tokens: 13856,
+            cache_creation_input_tokens: 33442,
+          },
+        }),
+      ),
+    ]);
+    const { observer, ended } = recordingObserver();
+
+    await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+      readToolCalls: aReader().readToolCalls,
+    }).proposeRound(aProposeRoundRequest(), observer);
+
+    expect(ended[0]!.metrics).toMatchObject({
+      inputTokens: 3_000_000_000,
+      outputTokens: null,
+    });
+  });
+
   it("carries no usage and reads no transcript when the output is not JSON", async () => {
     const runner = recordingRunner([ok("this is not json")]);
     const reader = aReader();
