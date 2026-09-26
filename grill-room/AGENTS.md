@@ -102,9 +102,9 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file the export will write as an absolute path (spec.md, intent.md, decisions.md when the tree holds decisions or out-of-scope items, HANDOFF.md and briefs/NN-slug.md when a handoff exists, and the manifest), `handoffIncluded`, the files the previous manifest lists that the plan drops, the project's tracker diagnostic, and the export gate as `exportBlocked`/`exportBlockedReason` (`handoff-missing` or `handoff-stale`, null once clear) — the same gate `export-session` refuses on, reported here without refusing so the UI can explain it first. `plannedWrites` and `plannedRemovals` repeat every planned write and removal as `{ path, relativePath, edited }`: `edited` is true when the file on disk no longer matches the hash the previous manifest recorded for it, or was never written by Grill Room at all — see "Exporting a session" below for the guard. Also reports the session's brief grounding as `groundingState` (`absent`, `current` or `stale`) and `groundingStaleReason` (`head-moved` or `handoff-changed`, null while current or absent) — informational, like the other gate: it never blocks export — plus `groundedBriefs` (ticket numbers this plan actually writes grounded) and `ungroundedBriefs` (every other brief, as `{ ticket, reason }` — `edited`, `no-grounding`, `not-covered`, or `kept` — see "Grounding the briefs" below). Built by the same plan `export-session` writes, so the two cannot disagree; export-session checks for edits again when it writes, so this preview is not a lock. |
 | `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<workingExportFolder>/<folderName>/spec.md`, `intent.md`, `decisions.md` (when the tree holds decisions or out-of-scope items), `issues/NN-slug.md` per ticket (tickets only when current), and `HANDOFF.md` plus `briefs/NN-slug.md` from the session's generated handoff, re-rendered fresh with the session's current brief grounding wherever the text is eligible (recording that export on the handoff), creating missing folders. Also writes a provenance manifest (`.grill-room-export.json`: session id, export revision, scout commit, HEAD at export, and a CRLF-insensitive sha256 of every file written). Re-export removes files the previous manifest lists that the new export no longer writes. Edited files are kept: a planned write or removal already on disk that no longer matches the hash the previous manifest recorded, or that the previous manifest never listed, is neither overwritten nor removed unless its bundle-relative path is in `overridePaths` (a version-1 manifest's files are trusted as unedited once). The check is repeated from disk at write time, so a file edited after `preview-export` is kept unless overridden. An override resolving outside the bundle is refused with `override-outside-bundle`. Refuses, writing nothing, with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, `export-outside-root` when any path resolves (through symlinks) outside the real project root, `handoff-missing` when the session has no handoff, or `handoff-stale` when its handoff no longer matches today's spec, tickets or project; `preview-export` reports the same gate as `exportBlocked`/`exportBlockedReason` without refusing, and marks each edited file, so the UI can explain both before the operator tries. Returns `written`, `removed` and `kept` as absolute paths, `groundedBriefs` (ticket numbers actually written grounded) and `ungroundedBriefs` (every other brief written, as `{ ticket, reason }` — `edited`, `no-grounding`, `not-covered`, or `kept` when the hash guard left an already-edited copy on disk instead of writing the grounded text), plus a post-export visibility report — see "Exporting a session" below and "Grounding the briefs" below. |
 | `get-export-visibility` | Classify every file a session's export wrote (or would write) as `tracked`, `ignored`, `untracked`, or `unchecked` ("could not check": git could not tell) in the project's repository, given the same `sessionId` and `slug` as `preview-export`/`export-session`. Read-only and side-effect-free, so the UI can re-check without exporting again. See "Exporting a session" below. |
-| `generate-handoff` | Generate or regenerate a session's handoff from deterministic templates (no model call): `HANDOFF.md` plus one brief per ticket. Refuses with `no-project`, `project-not-found`, `spec-missing`, `no-tickets` or `ticket-cycle`, and with `handoff-edited` when the stored handoff carries UI edits unless `overwriteEdits` is true. See "Handoff" below. |
-| `get-handoff` | A session's handoff (HANDOFF.md, briefs by ticket number, timestamps) or null, with `stale` (its inputs changed since generation), `exportStale` (edited or regenerated after the last export that included it), `canGenerate`, and `cannotGenerateReason`. |
-| `update-handoff` | Edit a generated handoff: replace HANDOFF.md's `markdown` and/or `briefs` by `ticketNumber`. Marks it edited, so regenerating needs `overwriteEdits`. Refuses with `handoff-missing` or `brief-not-found`. |
+| `generate-handoff` | Generate or regenerate a session's handoff from deterministic templates (no model call): `HANDOFF.md` plus one brief per ticket. Regenerating rewrites every unedited text and keeps each hand-edited brief whose ticket still exists, word for word. Refuses with `no-project`, `project-not-found`, `spec-missing`, `no-tickets` or `ticket-cycle`, and with `handoff-edited` when keeping an edit is impossible (HANDOFF.md was edited, an edited brief's ticket is gone, or a legacy handoff carries edits) unless `overwriteEdits` is true, which rewrites everything. See "Handoff" below. |
+| `get-handoff` | A session's handoff (HANDOFF.md, briefs by ticket number, timestamps) or null, with `stale` (its inputs changed since generation), `exportStale` (edited or regenerated after the last export that included it), `handoffEdited`, `editedBriefs`, `outdatedBriefs` (see "Handoff" below), `canGenerate`, and `cannotGenerateReason`. |
+| `update-handoff` | Edit a generated handoff: replace HANDOFF.md's `markdown` and/or `briefs` by `ticketNumber`. Marks it edited. Saving an edited brief while the handoff is current marks it reviewed, dropping it from `outdatedBriefs`. Refuses with `handoff-missing` or `brief-not-found`. |
 | `ground-briefs` | Ground a session's handoff briefs in its project's code: one handoff scout turn (turn kind `handoff-scout`, always on sonnet, read-only over the project root, a conversation of its own) covering every ticket at once, reporting per ticket the files to create or edit, the existing files it builds on, cited codebase facts, what it needs from each blocker with the check that proves it, and the test and command that prove it. The result is checked against the handoff and the working tree before it is stored, replacing any earlier grounding. Refused with `no-project`, `not-a-repo`, `handoff-missing`, `handoff-stale`, `turn-working`, `too-many-tickets` or `too-many-blockers` (the last two before any turn is spent); a grounding refused three times fails the turn with `invalid-brief-grounding`. See "Grounding the briefs" below. |
 | `get-brief-grounding` | A session's brief grounding or null: the scout's result per ticket, the commit and handoff fingerprint it was made for, the model, when it ran, its turn record, `current`, and `staleReason` (`handoff-changed` or `head-moved`, null while current). |
 | `set-build-record` | Create or edit a ticket's build record — model, whether the first attempt passed, whether it was escalated, what the prompt was missing, and free notes — identifying the ticket by `ticketId` or by `sessionId` + `ticketNumber`. Optionally updates the ticket's `status` in the same call. See "Logging a build from an agent" below. |
@@ -507,7 +507,36 @@ slug, title, body and `blockedBy`, and the project's root, export folder,
 verify command, tracker kind, tracker commands, build-record toggle and
 visibility. That is what catches a `set-ticket-blocked-by` edit, which does
 not touch `ticketsGeneratedAt`. An edit is not a change of inputs: an edited
-handoff stays current, but regenerating over it needs `overwriteEdits`.
+handoff stays current.
+
+**Edits and regeneration.** Each stored text carries a **baseline**, the
+CRLF-insensitive sha256 of the text Grill Room generated for it (the
+ungrounded render): `markdownGeneratedSha256` for HANDOFF.md, and
+`generatedSha256` on each entry of `briefsJson`. A text is **edited** when it
+no longer hashes to its baseline, so a text saved back to exactly what was
+generated is not an edit. An edited brief is **outdated** when its ticket is
+gone, or when what Grill Room would generate for it today (its ticket, the
+project, the template) differs from what it was baselined on; nothing is
+outdated while today's inputs cannot be read. `get-handoff` reports these as
+`handoffEdited`, `editedBriefs` and `outdatedBriefs`.
+
+Regenerating without `overwriteEdits` never loses an edit. Every unedited text
+is rewritten with a new baseline; every edited brief whose ticket still exists
+is kept word for word, at today's path, with its old baseline, so it is named
+outdated when its ticket changed. `editedAt` stays set while a brief is kept
+(so export writes it as stored) and is cleared otherwise. It refuses with
+`handoff-edited` when keeping is impossible: HANDOFF.md was edited (it is
+never kept: it lists every ticket and brief), or an edited brief's ticket is
+gone. `overwriteEdits` rewrites everything with fresh baselines. Saving an
+edited brief through `update-handoff` while the handoff is current marks it
+reviewed: its baseline moves to today's render. A **legacy** handoff, stored
+before baselines existed (`markdownGeneratedSha256` null), reports no edits,
+refuses to regenerate while `editedAt` is set unless confirmed, and gains
+baselines on its first successful regeneration. In the Handoff block,
+`regenerate-handoff` always tries the keeping regeneration and opens the
+overwrite dialog only on `handoff-edited`; `regenerate-handoff-replace`, shown
+while `editedAt` is set, opens it directly; and `handoff-outdated-edits` names
+the outdated briefs while the handoff is current.
 
 When a handoff exists, `preview-export`/`export-session` plan `HANDOFF.md`
 and the briefs like any other bundle file (listed, contained, recorded in the
@@ -524,9 +553,10 @@ The output page's **Generate everything** button (`GenerateAllAction`, next to
 Export) is a secondary shortcut, not a new action: it calls `break-into-tickets`
 only when the session has none or they are out of date, then `generate-handoff`,
 then scrolls to the export preview. It writes nothing to disk — export stays
-its own explicit, confirmed step — and if the stored handoff carries edits it
-pauses on the same overwrite confirmation `generate-handoff`'s `handoff-edited`
-refusal always requires, rather than discarding them. The individual actions
+its own explicit, confirmed step. Generating keeps hand-edited briefs as
+above; when it would lose an edit it pauses on the same overwrite confirmation
+`generate-handoff`'s `handoff-edited` refusal always requires, rather than
+discarding it. The individual actions
 (write the spec, break into tickets, generate the handoff, export) remain the
 primary, always-visible controls; regenerating the handoff alone stays
 available from the Handoff block regardless.
@@ -694,7 +724,8 @@ though, the equality check decides eligibility for **every** text, not only
 the one actually edited: a brief nobody touched, still sitting under that
 older template, becomes ineligible too, the moment anything else in the
 handoff is edited, and stays that way until the handoff is regenerated (which
-clears `editedAt`). An eligible text is re-rendered fresh, with the session's
+rewrites it from today's template, and clears `editedAt` unless it keeps an
+edited brief). An eligible text is re-rendered fresh, with the session's
 grounding; an ineligible one is written exactly as stored, grounding never
 touching it.
 

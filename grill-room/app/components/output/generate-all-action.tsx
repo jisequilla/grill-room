@@ -50,9 +50,10 @@ function scrollToExportPreview() {
  * individual actions (break into tickets, generate the handoff, export) stay
  * the primary controls in their own sections; this only chains them.
  *
- * When the stored handoff carries edits, generating over them needs the same
- * confirmation `HandoffSection`'s regenerate button asks for: this pauses
- * here rather than overwriting silently.
+ * Generating keeps each hand-edited brief. When it would lose an edit (an
+ * edited HANDOFF.md, or an edited brief whose ticket is gone), it needs the
+ * same confirmation `HandoffSection`'s regenerate button asks for: this
+ * pauses here rather than overwriting silently.
  */
 export function GenerateAllAction({
   sessionId,

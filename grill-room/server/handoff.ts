@@ -44,7 +44,7 @@ import type {
   ProjectVisibility,
 } from "../shared/session-constants.js";
 import { getDb, schema } from "./db/index.js";
-import { openingSections, padTicketNumber, sanitizeTicketSlug } from "./export.js";
+import { hashExportContent, openingSections, padTicketNumber, sanitizeTicketSlug } from "./export.js";
 // Type-only: erased at compile time, so this never becomes a runtime import.
 // `server/brief-grounding.ts` already imports this module at runtime, and a
 // runtime import back into it would be a cycle.
@@ -1240,8 +1240,18 @@ export async function getHandoffRow(sessionId: string): Promise<HandoffRow | und
   return row;
 }
 
-/** Stored briefs; malformed entries are dropped rather than trusted. */
-export function parseBriefs(json: string): HandoffBrief[] {
+/**
+ * A brief as stored. `generatedSha256` is its baseline: the
+ * {@link hashExportContent} of the text Grill Room generated for it (the
+ * ungrounded render with no export facts). The brief is edited exactly when
+ * its text no longer hashes to it. A legacy row's briefs have none.
+ */
+export interface StoredHandoffBrief extends HandoffBrief {
+  generatedSha256?: string;
+}
+
+/** Stored briefs; malformed entries are dropped rather than trusted, and a non-string baseline is dropped. */
+export function parseBriefs(json: string): StoredHandoffBrief[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -1251,7 +1261,7 @@ export function parseBriefs(json: string): HandoffBrief[] {
   if (!Array.isArray(parsed)) return [];
   return parsed.flatMap((entry) => {
     if (typeof entry !== "object" || entry === null) return [];
-    const { ticketNumber, relativePath, markdown } = entry as Record<string, unknown>;
+    const { ticketNumber, relativePath, markdown, generatedSha256 } = entry as Record<string, unknown>;
     if (
       typeof ticketNumber !== "number" ||
       typeof relativePath !== "string" ||
@@ -1259,48 +1269,203 @@ export function parseBriefs(json: string): HandoffBrief[] {
     ) {
       return [];
     }
-    return [{ ticketNumber, relativePath, markdown }];
+    return typeof generatedSha256 === "string"
+      ? [{ ticketNumber, relativePath, markdown, generatedSha256 }]
+      : [{ ticketNumber, relativePath, markdown }];
   });
 }
 
-/** Writes a freshly rendered handoff over the session's row, clearing any edits. */
+/**
+ * The stored texts, their baselines and `editedAt`: everything the edit
+ * report and a regeneration read from a handoff row. A **legacy** handoff,
+ * stored before baselines existed, has `markdownGeneratedSha256` null.
+ */
+export interface StoredHandoffText {
+  markdown: string;
+  markdownGeneratedSha256: string | null;
+  briefs: readonly StoredHandoffBrief[];
+  editedAt: string | null;
+}
+
+export function storedHandoffText(row: HandoffRow): StoredHandoffText {
+  return {
+    markdown: row.markdown,
+    markdownGeneratedSha256: row.markdownGeneratedSha256,
+    briefs: parseBriefs(row.briefsJson),
+    editedAt: row.editedAt,
+  };
+}
+
+function isBriefEdited(brief: StoredHandoffBrief): boolean {
+  return brief.generatedSha256 !== undefined && hashExportContent(brief.markdown) !== brief.generatedSha256;
+}
+
+function byTicketNumber(a: StoredHandoffBrief, b: StoredHandoffBrief): number {
+  return a.ticketNumber - b.ticketNumber;
+}
+
+/** Which texts carry a hand edit, and which edited briefs Grill Room would now generate differently. */
+export interface HandoffEdits {
+  handoffEdited: boolean;
+  /** Ticket numbers, ascending. */
+  editedBriefs: number[];
+  /**
+   * Edited briefs whose ticket is gone, or whose fresh render today differs
+   * from the one they were baselined on (their ticket, the project or the
+   * template changed). Empty when today's inputs cannot be read.
+   */
+  outdatedBriefs: number[];
+}
+
+export function describeHandoffEdits(stored: StoredHandoffText, source: HandoffSource | null): HandoffEdits {
+  if (stored.markdownGeneratedSha256 === null) {
+    return { handoffEdited: false, editedBriefs: [], outdatedBriefs: [] };
+  }
+  const edited = stored.briefs.filter(isBriefEdited).sort(byTicketNumber);
+  const outdated =
+    source === null
+      ? []
+      : edited.filter((brief) => {
+          const ticket = source.tickets.find((candidate) => candidate.number === brief.ticketNumber);
+          return !ticket || hashExportContent(renderBrief(source, ticket)) !== brief.generatedSha256;
+        });
+  return {
+    handoffEdited: hashExportContent(stored.markdown) !== stored.markdownGeneratedSha256,
+    editedBriefs: edited.map((brief) => brief.ticketNumber),
+    outdatedBriefs: outdated.map((brief) => brief.ticketNumber),
+  };
+}
+
+/** What a regeneration stores: the texts, their baselines, and `editedAt`. */
+export interface RegeneratedHandoff {
+  markdown: string;
+  markdownGeneratedSha256: string;
+  briefs: StoredHandoffBrief[];
+  editedAt: string | null;
+}
+
+export const HANDOFF_EDITED_MESSAGE =
+  "The handoff was edited since it was generated. Confirm to overwrite the edits.";
+export const HANDOFF_MARKDOWN_EDITED_MESSAGE =
+  "HANDOFF.md was edited since it was generated, and regenerating rewrites it. Confirm to overwrite the edits.";
+
+function removedEditedBriefsMessage(paths: readonly string[]): string {
+  return paths.length === 1
+    ? `The edited brief ${paths[0]} has no ticket any more, so regenerating removes it. Confirm to overwrite the edits.`
+    : `The edited briefs ${joinList(paths)} have no ticket any more, so regenerating removes them. Confirm to overwrite the edits.`;
+}
+
+function freshlyGenerated(rendered: RenderedHandoff): RegeneratedHandoff {
+  return {
+    markdown: rendered.markdown,
+    markdownGeneratedSha256: hashExportContent(rendered.markdown),
+    briefs: rendered.briefs.map((brief) => ({ ...brief, generatedSha256: hashExportContent(brief.markdown) })),
+    editedAt: null,
+  };
+}
+
+/**
+ * Merges today's render into a stored handoff. Without `overwriteEdits` it
+ * never loses an edit: every unedited text is rewritten with a new baseline,
+ * and every edited brief whose ticket still exists is kept word for word, at
+ * today's path, with its old baseline (so it still reads as edited, and as
+ * outdated when its render changed). It refuses when keeping an edit is
+ * impossible, the first match winning: a legacy handoff that carries edits
+ * (it has no baselines to tell which), an edited HANDOFF.md (it is never
+ * kept: it lists every ticket and brief, so a kept copy would be an
+ * out-of-date entry point), or an edited brief whose ticket is gone.
+ * `editedAt` stays as it was while a brief is kept, and is cleared otherwise.
+ */
+export function regenerateHandoff(
+  stored: StoredHandoffText | null,
+  rendered: RenderedHandoff,
+  overwriteEdits: boolean,
+): { refusal: string } | { handoff: RegeneratedHandoff } {
+  const fresh = freshlyGenerated(rendered);
+  if (stored === null || overwriteEdits) return { handoff: fresh };
+
+  if (stored.markdownGeneratedSha256 === null) {
+    return stored.editedAt ? { refusal: HANDOFF_EDITED_MESSAGE } : { handoff: fresh };
+  }
+  if (hashExportContent(stored.markdown) !== stored.markdownGeneratedSha256) {
+    return { refusal: HANDOFF_MARKDOWN_EDITED_MESSAGE };
+  }
+
+  const edited = stored.briefs.filter(isBriefEdited).sort(byTicketNumber);
+  const renderedNumbers = new Set(rendered.briefs.map((brief) => brief.ticketNumber));
+  const removed = edited.filter((brief) => !renderedNumbers.has(brief.ticketNumber));
+  if (removed.length > 0) {
+    return { refusal: removedEditedBriefsMessage(removed.map((brief) => brief.relativePath)) };
+  }
+
+  const kept = new Map(edited.map((brief) => [brief.ticketNumber, brief]));
+  return {
+    handoff: {
+      ...fresh,
+      briefs: fresh.briefs.map((brief) => {
+        const keep = kept.get(brief.ticketNumber);
+        return keep
+          ? {
+              ticketNumber: brief.ticketNumber,
+              relativePath: brief.relativePath,
+              markdown: keep.markdown,
+              generatedSha256: keep.generatedSha256,
+            }
+          : brief;
+      }),
+      editedAt: kept.size > 0 ? stored.editedAt : null,
+    },
+  };
+}
+
+/**
+ * The baseline a brief carries after `update-handoff` replaces its text.
+ * Saving an edited brief while the handoff is current marks it reviewed: its
+ * baseline moves to today's render, so it stays edited but is no longer
+ * outdated. Anything else (a legacy row, a text back to its generated one, a
+ * stale handoff, no source, a ticket that is gone) leaves the baseline alone.
+ */
+export function baselineAfterEdit(
+  brief: StoredHandoffBrief,
+  markdown: string,
+  context: { legacy: boolean; current: boolean; source: HandoffSource | null },
+): string | undefined {
+  const old = brief.generatedSha256;
+  if (context.legacy || old === undefined || !context.current || context.source === null) return old;
+  if (hashExportContent(markdown) === old) return old;
+  const ticket = context.source.tickets.find((candidate) => candidate.number === brief.ticketNumber);
+  return ticket ? hashExportContent(renderBrief(context.source, ticket)) : old;
+}
+
+/** Writes a regenerated handoff over the session's row (or creates it), with today's fingerprint. */
 export async function saveGeneratedHandoff(
   sessionId: string,
-  rendered: RenderedHandoff,
+  regenerated: RegeneratedHandoff,
   fingerprint: string,
 ): Promise<HandoffRow> {
   const db = getDb();
   const now = new Date().toISOString();
   const existing = await getHandoffRow(sessionId);
+  const texts = {
+    markdown: regenerated.markdown,
+    markdownGeneratedSha256: regenerated.markdownGeneratedSha256,
+    briefsJson: JSON.stringify(regenerated.briefs),
+    fingerprint,
+    generatedAt: now,
+    editedAt: regenerated.editedAt,
+    updatedAt: now,
+  };
   if (existing) {
     const [row] = await db
       .update(schema.handoffs)
-      .set({
-        markdown: rendered.markdown,
-        briefsJson: JSON.stringify(rendered.briefs),
-        fingerprint,
-        revision: existing.revision + 1,
-        generatedAt: now,
-        editedAt: null,
-        updatedAt: now,
-      })
+      .set({ ...texts, revision: existing.revision + 1 })
       .where(eq(schema.handoffs.id, existing.id))
       .returning();
     return row!;
   }
   const [row] = await db
     .insert(schema.handoffs)
-    .values({
-      id: randomUUID(),
-      sessionId,
-      markdown: rendered.markdown,
-      briefsJson: JSON.stringify(rendered.briefs),
-      fingerprint,
-      revision: 1,
-      generatedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    })
+    .values({ ...texts, id: randomUUID(), sessionId, revision: 1, createdAt: now })
     .returning();
   return row!;
 }
@@ -1318,8 +1483,9 @@ export async function recordHandoffExport(row: HandoffRow): Promise<void> {
     .where(eq(schema.handoffs.id, row.id));
 }
 
-export interface HandoffView {
+export interface HandoffView extends HandoffEdits {
   markdown: string;
+  /** Exactly `{ ticketNumber, relativePath, markdown }`: baselines never reach the API. */
   briefs: HandoffBrief[];
   fingerprint: string;
   /** The fingerprint over today's inputs, or null when they cannot be read (no project, no tickets…). */
@@ -1333,10 +1499,18 @@ export interface HandoffView {
   exportStale: boolean;
 }
 
-export function describeHandoff(row: HandoffRow, currentFingerprint: string | null): HandoffView {
+/** A stored handoff as the actions return it, against today's inputs (null when they cannot be read). */
+export function describeHandoff(row: HandoffRow, source: HandoffSource | null): HandoffView {
+  const currentFingerprint = source === null ? null : handoffFingerprint(source);
+  const stored = storedHandoffText(row);
   return {
     markdown: row.markdown,
-    briefs: parseBriefs(row.briefsJson),
+    briefs: stored.briefs.map(({ ticketNumber, relativePath, markdown }) => ({
+      ticketNumber,
+      relativePath,
+      markdown,
+    })),
+    ...describeHandoffEdits(stored, source),
     fingerprint: row.fingerprint,
     currentFingerprint,
     stale: currentFingerprint !== row.fingerprint,

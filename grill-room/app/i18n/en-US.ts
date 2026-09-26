@@ -704,6 +704,11 @@ const messages = {
     regenerateHandoffDescription:
       "The handoff was edited since it was generated. Regenerating replaces HANDOFF.md and every brief, and your edits are lost.",
     regenerateHandoffConfirm: "Regenerate anyway",
+    regenerateHandoffReplaceEdits: "Regenerate, replacing edits",
+    handoffOutdatedEdits_one:
+      "{{briefs}} was edited by hand, and what Grill Room generates for it has changed since: its ticket, the project or the template. Your edit is kept. Review it against its ticket, then save it to mark it reviewed.",
+    handoffOutdatedEdits_other:
+      "{{briefs}} were edited by hand, and what Grill Room generates for them has changed since: their tickets, the project or the template. Your edits are kept. Review each against its ticket, then save it to mark it reviewed.",
     handoffCurrent: "Current",
     handoffStale: "Stale",
     handoffStaleHint:

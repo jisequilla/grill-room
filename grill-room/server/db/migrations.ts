@@ -545,4 +545,9 @@ ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS cli_api_duration_ms BIGINT
 ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS session_id TEXT;
 ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS tool_calls_json TEXT`,
   },
+  {
+    version: 70,
+    name: "handoffs-markdown-generated-sha256",
+    sql: `ALTER TABLE gr_handoffs ADD COLUMN IF NOT EXISTS markdown_generated_sha256 TEXT`,
+  },
 ];

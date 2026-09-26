@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import {
+  baselineAfterEdit,
   describeHandoff,
   getHandoffRow,
   handoffFingerprint,
@@ -13,7 +14,7 @@ import {
 
 export default defineAction({
   description:
-    "Edit a session's generated handoff: replace HANDOFF.md's markdown and/or individual briefs by ticket number. Marks the handoff edited (so regenerating asks for confirmation) and, when it was exported before, export-stale. Refuses with `handoff-missing` when none has been generated and `brief-not-found` for a ticket number without a brief. Returns the same shape as get-handoff's `handoff`.",
+    "Edit a session's generated handoff: replace HANDOFF.md's markdown and/or individual briefs by ticket number. Marks the handoff edited and, when it was exported before, export-stale. Regenerating later keeps each edited brief whose ticket still exists and refuses over an edited HANDOFF.md unless confirmed. Saving an edited brief while the handoff is current marks it reviewed: it drops out of `outdatedBriefs`. Refuses with `handoff-missing` when none has been generated and `brief-not-found` for a ticket number without a brief. Returns the same shape as get-handoff's `handoff`.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
     markdown: z.string().optional().describe("New HANDOFF.md markdown"),
@@ -36,6 +37,14 @@ export default defineAction({
       });
     }
 
+    const loaded = await loadHandoffSource(sessionId);
+    const source = "source" in loaded ? loaded.source : null;
+    const context = {
+      legacy: row.markdownGeneratedSha256 === null,
+      current: source !== null && handoffFingerprint(source) === row.fingerprint,
+      source,
+    };
+
     const stored = parseBriefs(row.briefsJson);
     for (const edit of briefs ?? []) {
       const brief = stored.find((candidate) => candidate.ticketNumber === edit.ticketNumber);
@@ -45,7 +54,9 @@ export default defineAction({
           statusCode: 404,
         });
       }
+      const baseline = baselineAfterEdit(brief, edit.markdown, context);
       brief.markdown = edit.markdown;
+      if (baseline !== undefined) brief.generatedSha256 = baseline;
     }
 
     const now = new Date().toISOString();
@@ -61,7 +72,6 @@ export default defineAction({
       .where(eq(schema.handoffs.id, row.id))
       .returning();
 
-    const loaded = await loadHandoffSource(sessionId);
-    return describeHandoff(updated!, "source" in loaded ? handoffFingerprint(loaded.source) : null);
+    return describeHandoff(updated!, source);
   },
 });
