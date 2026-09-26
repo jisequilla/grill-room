@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  CONNECTION_RETRY_DELAY_MS,
   navigateStep,
   retryTransient,
   runWarmUp,
+  STARTING_RETRY_DELAY_MS,
   STARTING_STATUS,
+  WARM_UP_LIMIT_MS,
   warm,
+  WarmUpError,
   WarmUpStepFailure,
 } from "./e2e-warm-up.js";
 
@@ -105,7 +109,7 @@ describe("wording", () => {
     const goto = vi.fn(async () => null);
 
     await expect(
-      runWarmUp({ goto, post: vi.fn(), get: vi.fn(), log: vi.fn() }),
+      runWarmUp({ goto, post: vi.fn(), get: vi.fn(), log: vi.fn(), logError: vi.fn() }),
     ).rejects.toThrow(/gave no response/);
     expect(goto).toHaveBeenCalledTimes(1);
   });
@@ -115,6 +119,7 @@ type Site = "root" | "create-session" | "session-page" | "preview-export" | "del
 
 function buildDeps(failingSite: Site) {
   const log = vi.fn();
+  const logError = vi.fn();
   const seen = new Map<string, number>();
 
   function shouldFail(site: Site, path: string): boolean {
@@ -152,14 +157,14 @@ function buildDeps(failingSite: Site) {
     return { status: () => 409 };
   });
 
-  return { goto, post, get, log };
+  return { goto, post, get, log, logError };
 }
 
 describe("runWarmUp", () => {
   it("prints exactly three warm-up lines, none retried, when nothing fails", async () => {
-    const { goto, post, get, log } = buildDeps("none");
+    const { goto, post, get, log, logError } = buildDeps("none");
 
-    await runWarmUp({ goto, post, get, log });
+    await runWarmUp({ goto, post, get, log, logError });
 
     expect(log).toHaveBeenCalledTimes(3);
     for (const [message] of log.mock.calls) {
@@ -168,9 +173,9 @@ describe("runWarmUp", () => {
   });
 
   it("retries a dropped connection warming '/' and reports it, without changing the line count", async () => {
-    const { goto, post, get, log } = buildDeps("root");
+    const { goto, post, get, log, logError } = buildDeps("root");
 
-    await runWarmUp({ goto, post, get, log });
+    await runWarmUp({ goto, post, get, log, logError });
 
     expect(log).toHaveBeenCalledTimes(3);
     const line = log.mock.calls.map((c) => c[0] as string).find((m) => m.startsWith("e2e warm-up: / "));
@@ -179,9 +184,9 @@ describe("runWarmUp", () => {
   });
 
   it("retries a dropped connection creating the session, silently (no line, no site count change)", async () => {
-    const { goto, post, get, log } = buildDeps("create-session");
+    const { goto, post, get, log, logError } = buildDeps("create-session");
 
-    await runWarmUp({ goto, post, get, log });
+    await runWarmUp({ goto, post, get, log, logError });
 
     const createCalls = post.mock.calls.filter((c) => c[0] === CREATE_SESSION_PATH);
     expect(createCalls).toHaveLength(2);
@@ -192,9 +197,9 @@ describe("runWarmUp", () => {
   });
 
   it("retries a dropped connection warming the session page and reports it", async () => {
-    const { goto, post, get, log } = buildDeps("session-page");
+    const { goto, post, get, log, logError } = buildDeps("session-page");
 
-    await runWarmUp({ goto, post, get, log });
+    await runWarmUp({ goto, post, get, log, logError });
 
     expect(log).toHaveBeenCalledTimes(3);
     const line = log.mock.calls
@@ -204,9 +209,9 @@ describe("runWarmUp", () => {
   });
 
   it("retries a dropped connection warming preview-export and reports it", async () => {
-    const { goto, post, get, log } = buildDeps("preview-export");
+    const { goto, post, get, log, logError } = buildDeps("preview-export");
 
-    await runWarmUp({ goto, post, get, log });
+    await runWarmUp({ goto, post, get, log, logError });
 
     expect(log).toHaveBeenCalledTimes(3);
     const line = log.mock.calls
@@ -216,9 +221,9 @@ describe("runWarmUp", () => {
   });
 
   it("retries the cleanup delete-session without ever printing a line for it", async () => {
-    const { goto, post, get, log } = buildDeps("delete-session");
+    const { goto, post, get, log, logError } = buildDeps("delete-session");
 
-    await expect(runWarmUp({ goto, post, get, log })).resolves.toBeUndefined();
+    await expect(runWarmUp({ goto, post, get, log, logError })).resolves.toBeUndefined();
 
     const deleteCalls = post.mock.calls.filter((c) => c[0] === DELETE_SESSION_PATH);
     expect(deleteCalls).toHaveLength(2);
@@ -228,4 +233,257 @@ describe("runWarmUp", () => {
       expect(message as string).not.toContain("connection retr");
     }
   });
+});
+
+describe("uses plural wording for two or more connection retries", () => {
+  it("says '(2 connection retries)', not '(2 connection retry)'", async () => {
+    let calls = 0;
+    const answer = async () => {
+      calls += 1;
+      if (calls <= 2) throw new Error("read ECONNRESET");
+      return 200;
+    };
+    const log = vi.fn();
+
+    await warm("/", answer, log);
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("(2 connection retries)"));
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("(2 connection retry)"));
+  });
+});
+
+describe("a dropped connection inside the 503 poll loop", () => {
+  it("restarts the loop from its first page.goto, not from wherever it was interrupted", async () => {
+    vi.useFakeTimers();
+    try {
+      let call = 0;
+      const goto = vi.fn(async () => {
+        call += 1;
+        if (call === 1) return { status: () => STARTING_STATUS }; // first poll: still starting
+        if (call === 2) throw new Error("read ECONNRESET"); // dropped mid-loop, on the second poll
+        return { status: () => 200 }; // the restarted loop's own first call succeeds
+      });
+      const log = vi.fn();
+
+      const promise = warm(SESSION_PATH, navigateStep(goto, SESSION_PATH), log);
+
+      await vi.advanceTimersByTimeAsync(STARTING_RETRY_DELAY_MS); // the 503 poll's own wait
+      await vi.advanceTimersByTimeAsync(CONNECTION_RETRY_DELAY_MS); // the connection-retry wait
+
+      await promise;
+
+      expect(goto).toHaveBeenCalledTimes(3);
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log.mock.calls[0]?.[0] as string).toContain("(1 connection retry)");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("deadline exhaustion during a persistently dropped connection", () => {
+  // A refused/reset connection fails almost instantly, so a deadline check made
+  // only after a failure — right before the 500 ms wait — nearly always finds
+  // time left, and the *wait itself* is what runs the clock out. These drive
+  // the real `warm()` + step shapes through fake timers across the full
+  // `WARM_UP_LIMIT_MS`, so they exercise exactly the call sites production
+  // uses, not a shortened stand-in deadline.
+
+  it("warm() + navigateStep report 'kept dropping the connection', never a bogus 503, for a persistently refused page navigation", async () => {
+    vi.useFakeTimers();
+    try {
+      const goto = vi.fn(async () => {
+        throw new Error("connect ECONNREFUSED 127.0.0.1:1234");
+      });
+      const log = vi.fn();
+
+      const promise = warm(SESSION_PATH, navigateStep(goto, SESSION_PATH), log);
+      const settled = promise.then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
+      await vi.advanceTimersByTimeAsync(WARM_UP_LIMIT_MS + 10_000);
+
+      const result = await settled;
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        const message = (result.error as Error).message;
+        expect(message).toContain("the server kept dropping the connection");
+        expect(message).not.toContain("still starting");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
+
+  it("warm() + a preview-export-shaped step report 'kept dropping the connection', not a clamped-timeout error", async () => {
+    vi.useFakeTimers();
+    try {
+      const get = vi.fn(async (_path: string, opts: { timeout: number }): Promise<{ status(): number }> => {
+        if (opts.timeout <= 1) throw new Error("Timeout 1ms exceeded");
+        throw new Error("connect ECONNREFUSED 127.0.0.1:1234");
+      });
+      const log = vi.fn();
+      const path = "/_agent-native/actions/preview-export?sessionId=demo";
+
+      const promise = warm(
+        path,
+        async (deadline) => {
+          const response = await get(path, { timeout: Math.max(deadline - Date.now(), 1) });
+          return response.status();
+        },
+        log,
+      );
+      const settled = promise.then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
+      await vi.advanceTimersByTimeAsync(WARM_UP_LIMIT_MS + 10_000);
+
+      const result = await settled;
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        const message = (result.error as Error).message;
+        expect(message).toContain("the server kept dropping the connection");
+        expect(message).not.toContain("Timeout 1ms exceeded");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
+
+  it("wraps a persistently dropped connection creating the session in a full WarmUpError (URL, elapsed time, reason)", async () => {
+    vi.useFakeTimers();
+    try {
+      const goto = vi.fn(async () => ({ status: () => 200 }));
+      const post = vi.fn(async (path: string) => {
+        if (path === CREATE_SESSION_PATH) {
+          throw new Error("connect ECONNREFUSED 127.0.0.1:1234");
+        }
+        throw new Error(`unexpected post path ${path}`);
+      });
+      const get = vi.fn(async () => ({ status: () => 409 }));
+      const log = vi.fn();
+      const logError = vi.fn();
+
+      const promise = runWarmUp({ goto, post, get, log, logError });
+      const settled = promise.then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
+      await vi.advanceTimersByTimeAsync(WARM_UP_LIMIT_MS + 10_000);
+
+      const result = await settled;
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toBeInstanceOf(WarmUpError);
+        const message = (result.error as Error).message;
+        expect(message).toContain(CREATE_SESSION_PATH);
+        expect(message).toContain("the server kept dropping the connection");
+        expect(message).toMatch(/after \d+ ms \(limit 180000 ms\)/);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
+
+  it("wraps a persistently dropped connection during cleanup in a full WarmUpError when nothing else failed", async () => {
+    vi.useFakeTimers();
+    try {
+      const goto = vi.fn(async () => ({ status: () => 200 }));
+      const post = vi.fn(async (path: string) => {
+        if (path === CREATE_SESSION_PATH) {
+          return {
+            ok: () => true,
+            status: () => 200,
+            text: async () => "",
+            json: async () => ({ id: "session-1" }),
+          };
+        }
+        if (path === DELETE_SESSION_PATH) {
+          throw new Error("connect ECONNREFUSED 127.0.0.1:1234");
+        }
+        throw new Error(`unexpected post path ${path}`);
+      });
+      const get = vi.fn(async () => ({ status: () => 409 }));
+      const log = vi.fn();
+      const logError = vi.fn();
+
+      const promise = runWarmUp({ goto, post, get, log, logError });
+      const settled = promise.then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
+      await vi.advanceTimersByTimeAsync(WARM_UP_LIMIT_MS + 10_000);
+
+      const result = await settled;
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toBeInstanceOf(WarmUpError);
+        const message = (result.error as Error).message;
+        expect(message).toContain(DELETE_SESSION_PATH);
+        expect(message).toContain("the server kept dropping the connection");
+      }
+      // Nothing else failed, so this cleanup failure is the whole story: it
+      // escapes rather than being swallowed and logged.
+      expect(logError).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
+
+  it("logs a cleanup failure through logError with a full message, not through log, once the main sequence already failed", async () => {
+    vi.useFakeTimers();
+    try {
+      const goto = vi.fn(async (path: string) => {
+        if (path === "/") return { status: () => 200 };
+        return null; // session page: an instant, non-transient failure — no retry, no wait
+      });
+      const post = vi.fn(async (path: string) => {
+        if (path === CREATE_SESSION_PATH) {
+          return {
+            ok: () => true,
+            status: () => 200,
+            text: async () => "",
+            json: async () => ({ id: "session-1" }),
+          };
+        }
+        if (path === DELETE_SESSION_PATH) {
+          throw new Error("connect ECONNREFUSED 127.0.0.1:1234");
+        }
+        throw new Error(`unexpected post path ${path}`);
+      });
+      const get = vi.fn(async () => ({ status: () => 409 }));
+      const log = vi.fn();
+      const logError = vi.fn();
+
+      const promise = runWarmUp({ goto, post, get, log, logError });
+      const settled = promise.then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
+      await vi.advanceTimersByTimeAsync(WARM_UP_LIMIT_MS + 10_000);
+
+      const result = await settled;
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect((result.error as Error).message).toContain("gave no response");
+      }
+
+      expect(logError).toHaveBeenCalledTimes(1);
+      const cleanupMessage = logError.mock.calls[0]?.[0] as string;
+      expect(cleanupMessage).toContain(DELETE_SESSION_PATH);
+      expect(cleanupMessage).toContain("the server kept dropping the connection");
+      for (const [loggedMessage] of log.mock.calls) {
+        expect(loggedMessage as string).not.toContain(DELETE_SESSION_PATH);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
 });

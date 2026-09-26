@@ -20,7 +20,7 @@ export const WARM_UP_LIMIT_MS = 180_000;
  * not the route, so it does not count as warm: the step navigates again.
  */
 export const STARTING_STATUS = 503;
-const STARTING_RETRY_DELAY_MS = 500;
+export const STARTING_RETRY_DELAY_MS = 500;
 
 /**
  * A connection can be reset or refused before the startup gate is even
@@ -35,7 +35,7 @@ const TRANSIENT_ERROR_PATTERNS = [
   "ERR_CONNECTION_RESET",
   "ERR_CONNECTION_REFUSED",
 ];
-const CONNECTION_RETRY_DELAY_MS = 500;
+export const CONNECTION_RETRY_DELAY_MS = 500;
 
 const NOOP_RETRY = (): void => {};
 
@@ -82,6 +82,15 @@ export class WarmUpError extends Error {
  * `attempt` again re-runs it from its own start — for a step with an inner
  * loop (the 503 poll in `navigateStep`), that means the loop's first request,
  * not wherever it was interrupted.
+ *
+ * A refused or reset connection fails almost at once, so a deadline check
+ * made only *after* a failure — right before waiting — nearly always finds
+ * time still left, then the wait itself runs the clock out. The attempt that
+ * follows then sees a deadline already gone and reports whatever that
+ * particular step does for "no time left" (a bogus 503, or a `preview-export`
+ * timeout clamped to 1 ms) instead of "kept dropping the connection". So the
+ * wait itself is never started once it would end past the deadline: this
+ * throws the real reason immediately instead.
  */
 export async function retryTransient<T>(
   attempt: () => Promise<T>,
@@ -94,7 +103,7 @@ export async function retryTransient<T>(
       return await attempt();
     } catch (error) {
       if (!isTransientConnectionError(error)) throw error;
-      if (Date.now() >= deadline) {
+      if (Date.now() + CONNECTION_RETRY_DELAY_MS >= deadline) {
         throw new WarmUpStepFailure("the server kept dropping the connection", describe(error));
       }
       retries += 1;
@@ -122,14 +131,37 @@ export interface WarmUpDeps {
   ) => Promise<WarmUpApiResponse>;
   get: (path: string, opts: { timeout: number }) => Promise<WarmUpResponse>;
   log: (message: string) => void;
+  /** For a failure that never reaches the caller (the cleanup diagnostic below) — never for a normal warm-up line. */
+  logError: (message: string) => void;
 }
 
 /**
- * Times one step, retrying a transient connection error through
- * `retryTransient`, and prints its line. `answer` returns the HTTP status;
- * any status counts as warm — a 4xx refusal still means the route compiled.
- * No response at all (a non-transient error, or the step's own limit running
- * out) stops the suite with the URL and the elapsed time.
+ * Runs one warm-up step's network call against its own `WARM_UP_LIMIT_MS`
+ * deadline, retrying a transient connection error through `retryTransient`.
+ * Whatever escapes — a non-transient error, or the step's own limit running
+ * out — is always a `WarmUpError` naming `path`, the elapsed time and the
+ * reason, never a bare `WarmUpStepFailure` (whose `.reason` only this
+ * function reads) or an un-annotated cause.
+ */
+async function retryStep<T>(
+  path: string,
+  attempt: (deadline: number) => Promise<T>,
+  onRetry: (retryCount: number) => void,
+): Promise<T> {
+  const startedAt = Date.now();
+  const deadline = startedAt + WARM_UP_LIMIT_MS;
+  try {
+    return await retryTransient(() => attempt(deadline), deadline, onRetry);
+  } catch (error) {
+    const reason = error instanceof WarmUpStepFailure ? error.reason : "gave no response";
+    const cause = error instanceof WarmUpStepFailure ? error.message : describe(error);
+    throw new WarmUpError(path, Date.now() - startedAt, reason, cause);
+  }
+}
+
+/**
+ * Times one step and prints its line. `answer` returns the HTTP status; any
+ * status counts as warm — a 4xx refusal still means the route compiled.
  */
 export async function warm(
   path: string,
@@ -137,22 +169,10 @@ export async function warm(
   log: (message: string) => void,
 ): Promise<void> {
   const startedAt = Date.now();
-  const deadline = startedAt + WARM_UP_LIMIT_MS;
   let retries = 0;
-  let status: number;
-  try {
-    status = await retryTransient(
-      () => answer(deadline),
-      deadline,
-      (count) => {
-        retries = count;
-      },
-    );
-  } catch (error) {
-    const reason = error instanceof WarmUpStepFailure ? error.reason : "gave no response";
-    const cause = error instanceof WarmUpStepFailure ? error.message : describe(error);
-    throw new WarmUpError(path, Date.now() - startedAt, reason, cause);
-  }
+  const status = await retryStep(path, answer, (count) => {
+    retries = count;
+  });
   const suffix =
     retries === 0 ? "" : ` (${retries} connection retr${retries === 1 ? "y" : "ies"})`;
   log(`e2e warm-up: ${path} ${status} ${Date.now() - startedAt} ms${suffix}`);
@@ -218,22 +238,20 @@ async function deleteSession(post: WarmUpDeps["post"], id: string): Promise<void
  * line of its own, and never has), a session page, and the `preview-export`
  * action — then always deletes the throwaway session in cleanup, itself
  * retried the same way with its own deadline, and printing no line either.
- * A cleanup failure never hides the warm-up's own failure: it is reported
- * only when nothing else already failed.
+ * A cleanup failure never hides the warm-up's own failure: when the main
+ * sequence already failed, the cleanup failure is reported through
+ * `logError` (never `log`, which is only ever a normal warm-up line) instead
+ * of escaping; when nothing else failed, it escapes as its own `WarmUpError`.
  */
 export async function runWarmUp(deps: WarmUpDeps): Promise<void> {
-  const { goto, post, get, log } = deps;
+  const { goto, post, get, log, logError } = deps;
   let sessionId: string | undefined;
   let failure: unknown;
 
   try {
     await warm("/", navigateStep(goto, "/"), log);
 
-    sessionId = await retryTransient(
-      () => createThrowawaySession(post),
-      Date.now() + WARM_UP_LIMIT_MS,
-      NOOP_RETRY,
-    );
+    sessionId = await retryStep(CREATE_SESSION_PATH, () => createThrowawaySession(post), NOOP_RETRY);
 
     const sessionPath = `/sessions/${sessionId}`;
     await warm(sessionPath, navigateStep(goto, sessionPath), log);
@@ -258,15 +276,11 @@ export async function runWarmUp(deps: WarmUpDeps): Promise<void> {
     if (sessionId) {
       const id = sessionId;
       try {
-        await retryTransient(
-          () => deleteSession(post, id),
-          Date.now() + WARM_UP_LIMIT_MS,
-          NOOP_RETRY,
-        );
+        await retryStep(DELETE_SESSION_PATH, () => deleteSession(post, id), NOOP_RETRY);
       } catch (error) {
         // Never hide the warm-up's own failure behind a cleanup failure.
         if (!failure) throw error;
-        log(describe(error));
+        logError(describe(error));
       }
     }
   }

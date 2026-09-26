@@ -11,7 +11,8 @@ import { describe, runWarmUp } from "../server/e2e-warm-up.js";
  * the `preview-export` action, retrying a connection that drops while the
  * server is still starting — see `server/e2e-warm-up.ts` for that sequence
  * and its retry behaviour. This file is a thin Playwright adapter over it:
- * Playwright's own `page.goto`, `api.post`, `api.get` and `console.log`.
+ * Playwright's own `page.goto`, `api.post`, `api.get`, `console.log` and
+ * `console.error`.
  */
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0]?.use.baseURL;
@@ -28,6 +29,7 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
       post: (path, opts) => api.post(path, opts),
       get: (path, opts) => api.get(path, opts),
       log: (message) => console.log(message),
+      logError: (message) => console.error(message),
     });
   } finally {
     // A throwing close must never stop the session (already deleted inside
