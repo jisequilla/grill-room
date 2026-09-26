@@ -23,6 +23,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AddDecisionDialog } from "@/components/workspace/add-decision-dialog";
 import { AnsweringModeSwitch } from "@/components/workspace/answering-mode-switch";
 import { ApplyBatchDialog } from "@/components/workspace/batch/apply-batch-dialog";
+import { BriefStrip } from "@/components/workspace/brief-strip";
 import { DecisionDetailSheet } from "@/components/workspace/decision-detail-sheet";
 import { DesignTree } from "@/components/workspace/design-tree";
 import { DocsFolderChip } from "@/components/workspace/docs-folder-chip";
@@ -309,6 +310,24 @@ export default function SessionWorkspaceRoute() {
     decisions.length === 0 &&
     rounds !== undefined &&
     rounds.rounds.length === 0;
+
+  // The Brief strip's readiness half reads the session's stored judgment
+  // (persisted across rounds while the idea is unchanged), independent of
+  // `showReadiness` — which only gates the invitation panel's own presence.
+  const readiness = round?.readiness ?? null;
+
+  // Whether the currently working turn (if any) is this session's scout run
+  // or its readiness judgment, so the Brief strip's summary can show
+  // "Scout: reading…" / "Readiness · judging…" for the right one — this
+  // tab's own request is known immediately through the mutation's own
+  // pending state, another tab's through polling once `activeTurn` catches
+  // up.
+  const scoutTurnWorking =
+    scoutProject.isPending || (working && activeTurn?.turnKind === "scout-project");
+  const readinessTurnWorking =
+    assessReadiness.isPending ||
+    (working && activeTurn?.turnKind === "assess-readiness");
+
   const selected =
     decisions.find((decision) => decision.id === selectedId) ?? null;
 
@@ -390,31 +409,36 @@ export default function SessionWorkspaceRoute() {
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_24rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]">
           <div className="min-w-0 space-y-8">
-            {hasProject ? (
-              <ScoutReportPanel
-                report={scoutReport}
-                busy={
-                  working ||
-                  scoutProject.isPending ||
-                  keepRepoDecision.isPending ||
-                  dropRepoDecision.isPending
-                }
-                isScouting={scoutProject.isPending}
-                onRescout={() => scoutProject.mutate({ sessionId: id })}
-                onKeep={(key) =>
-                  keepRepoDecision.mutate({ sessionId: id, key })
-                }
-                onDrop={(key) =>
-                  dropRepoDecision.mutate({ sessionId: id, key })
-                }
-                turn={scoutTurn ?? null}
-              />
-            ) : null}
-
-            <section>
-              <h3 className="pb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                {t(PANEL_HEADING_KEY[session.state as SessionState])}
-              </h3>
+            <BriefStrip
+              key={id}
+              hasProject={hasProject}
+              scoutReport={scoutReport}
+              scoutWorking={scoutTurnWorking}
+              readiness={readiness}
+              readinessWorking={readinessTurnWorking}
+              showReadiness={showReadiness}
+              roundsCount={rounds?.rounds.length}
+            >
+              {hasProject ? (
+                <ScoutReportPanel
+                  report={scoutReport}
+                  busy={
+                    working ||
+                    scoutProject.isPending ||
+                    keepRepoDecision.isPending ||
+                    dropRepoDecision.isPending
+                  }
+                  isScouting={scoutProject.isPending}
+                  onRescout={() => scoutProject.mutate({ sessionId: id })}
+                  onKeep={(key) =>
+                    keepRepoDecision.mutate({ sessionId: id, key })
+                  }
+                  onDrop={(key) =>
+                    dropRepoDecision.mutate({ sessionId: id, key })
+                  }
+                  turn={scoutTurn ?? null}
+                />
+              ) : null}
               {showReadiness ? (
                 <ReadinessPanel
                   readiness={round.readiness}
@@ -424,6 +448,12 @@ export default function SessionWorkspaceRoute() {
                   turn={readinessTurn ?? null}
                 />
               ) : null}
+            </BriefStrip>
+
+            <section>
+              <h3 className="pb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                {t(PANEL_HEADING_KEY[session.state as SessionState])}
+              </h3>
               <RoundPanel
                 round={round}
                 isLoading={roundLoading}
