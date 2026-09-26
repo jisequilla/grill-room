@@ -19,8 +19,13 @@
  *
  * ## Staleness
  *
+ * HANDOFF.md opens with the spec's Problem Statement and Solution, then the
+ * session's idea as first written, labelled (`openingSections` in
+ * `./export.ts`, which `intent.md` shares).
+ *
  * {@link handoffFingerprint} hashes everything the templates render from:
- * the session's title and idea, the spec's `updatedAt` and
+ * the session's title and idea, the spec's `updatedAt` (every write of its
+ * text sets it, so the text itself is not hashed) and
  * `ticketsGeneratedAt`, each ticket's id, number, slug, title, body and
  * `blockedBy` (ids change whenever tickets are regenerated), and the project
  * fields the templates read. A stored handoff is stale when the fingerprint
@@ -39,7 +44,7 @@ import type {
   ProjectVisibility,
 } from "../shared/session-constants.js";
 import { getDb, schema } from "./db/index.js";
-import { padTicketNumber, sanitizeTicketSlug } from "./export.js";
+import { openingSections, padTicketNumber, sanitizeTicketSlug } from "./export.js";
 // Type-only: erased at compile time, so this never becomes a runtime import.
 // `server/brief-grounding.ts` already imports this module at runtime, and a
 // runtime import back into it would be a cycle.
@@ -69,7 +74,11 @@ export interface HandoffTicket {
 /** Everything the templates render from, and nothing else. */
 export interface HandoffSource {
   session: { id: string; title: string; idea: string };
-  spec: { updatedAt: string; ticketsGeneratedAt: string | null };
+  /**
+   * `markdown` feeds HANDOFF.md's opening but never the fingerprint: every
+   * write of the spec's text also sets `updatedAt`, which it already hashes.
+   */
+  spec: { updatedAt: string; ticketsGeneratedAt: string | null; markdown: string };
   /** In number order. */
   tickets: readonly HandoffTicket[];
   /** Ticket numbers grouped by wave, wave 1 first. */
@@ -710,11 +719,13 @@ export function renderHandoffMarkdown(
   const facts = factsFor(source, exportFacts);
   const sections = [
     `# Handoff: ${source.session.title}`,
-    source.session.idea,
-    "This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.",
-    pathsNote(source, facts),
+    ...openingSections(source.spec.markdown, source.session.idea),
     [
       "## Where things are",
+      "",
+      "This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.",
+      "",
+      pathsNote(source, facts),
       "",
       `- Spec: \`${BUNDLE_TOKEN}/spec.md\``,
       `- Tickets: \`${BUNDLE_TOKEN}/issues/\``,
@@ -1189,7 +1200,11 @@ export async function loadHandoffSource(
   return {
     source: {
       session: { id: session.id, title: session.title, idea: session.idea },
-      spec: { updatedAt: spec.updatedAt, ticketsGeneratedAt: spec.ticketsGeneratedAt },
+      spec: {
+        updatedAt: spec.updatedAt,
+        ticketsGeneratedAt: spec.ticketsGeneratedAt,
+        markdown: spec.markdown,
+      },
       tickets: tickets.map((ticket) => ({
         id: ticket.id,
         number: ticket.number,

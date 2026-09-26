@@ -3,13 +3,23 @@
 exports[`HANDOFF.md > renders the ignored variant 1`] = `
 "# Handoff: Export anywhere
 
+## Problem Statement
+
+Sessions end in a spec nobody can find from the repository.
+
+## Solution
+
+Export each grilled session into the repository it builds.
+
+## The original idea, before the interview
+
 Export a grilled session into any repository.
+
+## Where things are
 
 This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
 
 Paths below are absolute, into the main checkout at \`/repos/target\`. The bundle lives in \`.scratch\`, which git ignores: it never reaches a worktree through git.
-
-## Where things are
 
 - Spec: \`{{BUNDLE}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
@@ -112,13 +122,23 @@ This repository tracks tickets as plain markdown. Each ticket above carries a \`
 exports[`HANDOFF.md > renders the tracked variant 1`] = `
 "# Handoff: Export anywhere
 
+## Problem Statement
+
+Sessions end in a spec nobody can find from the repository.
+
+## Solution
+
+Export each grilled session into the repository it builds.
+
+## The original idea, before the interview
+
 Export a grilled session into any repository.
+
+## Where things are
 
 This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
-
-## Where things are
 
 - Spec: \`{{BUNDLE}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
@@ -554,13 +574,23 @@ Then stop. Do no further work of any kind.
 exports[`delivery recipe and the review gate > renders the local-merge recipe with beads and review on: verdict recorded as a bead comment 1`] = `
 "# Handoff: Export anywhere
 
+## Problem Statement
+
+Sessions end in a spec nobody can find from the repository.
+
+## Solution
+
+Export each grilled session into the repository it builds.
+
+## The original idea, before the interview
+
 Export a grilled session into any repository.
+
+## Where things are
 
 This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
-
-## Where things are
 
 - Spec: \`{{BUNDLE}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
@@ -671,13 +701,23 @@ Create one bead per ticket. Claim a bead before delegating its ticket, and close
 exports[`delivery recipe and the review gate > renders the local-merge recipe with review off: baseRef head, no reviewer, never a push/gh/PR/origin 1`] = `
 "# Handoff: Export anywhere
 
+## Problem Statement
+
+Sessions end in a spec nobody can find from the repository.
+
+## Solution
+
+Export each grilled session into the repository it builds.
+
+## The original idea, before the interview
+
 Export a grilled session into any repository.
+
+## Where things are
 
 This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
-
-## Where things are
 
 - Spec: \`{{BUNDLE}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
@@ -772,13 +812,23 @@ This repository tracks tickets as plain markdown. Each ticket above carries a \`
 exports[`delivery recipe and the review gate > renders the local-merge recipe with review on: baseRef head, verdict recorded through the tracker, never a push/gh/PR/origin 1`] = `
 "# Handoff: Export anywhere
 
+## Problem Statement
+
+Sessions end in a spec nobody can find from the repository.
+
+## Solution
+
+Export each grilled session into the repository it builds.
+
+## The original idea, before the interview
+
 Export a grilled session into any repository.
+
+## Where things are
 
 This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
-
-## Where things are
 
 - Spec: \`{{BUNDLE}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
@@ -888,13 +938,23 @@ This repository tracks tickets as plain markdown. Each ticket above carries a \`
 exports[`delivery recipe and the review gate > renders the pull-request recipe with review off: draft PR, no reviewer anywhere 1`] = `
 "# Handoff: Export anywhere
 
+## Problem Statement
+
+Sessions end in a spec nobody can find from the repository.
+
+## Solution
+
+Export each grilled session into the repository it builds.
+
+## The original idea, before the interview
+
 Export a grilled session into any repository.
+
+## Where things are
 
 This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
-
-## Where things are
 
 - Spec: \`{{BUNDLE}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
@@ -990,13 +1050,23 @@ This repository tracks tickets as plain markdown. Each ticket above carries a \`
 exports[`delivery recipe and the review gate > renders the pull-request recipe with review on: draft PR, reviewer section, undo ready on a failed re-verify 1`] = `
 "# Handoff: Export anywhere
 
+## Problem Statement
+
+Sessions end in a spec nobody can find from the repository.
+
+## Solution
+
+Export each grilled session into the repository it builds.
+
+## The original idea, before the interview
+
 Export a grilled session into any repository.
+
+## Where things are
 
 This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
-
-## Where things are
 
 - Spec: \`{{BUNDLE}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`

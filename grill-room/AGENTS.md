@@ -353,7 +353,12 @@ The bundle is one directory per session:
 
 `intent.md` is the why, for people: rendered from stored data alone, no model
 call, so it states exactly what the session holds and nothing it does not.
-It opens with the idea verbatim, then the readiness objective, expected
+It opens with the spec's `## Problem Statement` and `## Solution` sections,
+taken by heading from the synthesized spec (each only when the spec has it,
+always in that order), then the idea as first written under "The original
+idea, before the interview" — the idea alone when the spec has neither
+heading. HANDOFF.md opens the same way (`openingSections` in
+`server/export.ts`). Then come the readiness objective, expected
 outcome, verdict, each evidence item marked as the user's statement or the
 repo's (with its citation for repo evidence), and the unknowns — "Not judged
 for this version of the idea" when the judgment is missing or was made for an
@@ -431,7 +436,9 @@ inputs render the same text. It is stored in `gr_handoffs`, one row per
 session, and is readable and editable in the output page's Handoff block.
 
 - `HANDOFF.md` is the entry point for a fresh orchestrating session: the
-  session title and idea, the spec path, the waves (each ticket with its
+  session title, the spec's Problem Statement and Solution followed by the
+  idea as first written, labelled (the same opening as `intent.md`), the
+  spec path, the waves (each ticket with its
   ticket file and brief; separated by file at export when the brief
   grounding is current — see "Grounding the briefs"), the verify command, the worktree lifecycle
   (embedded whole, so the target repo needs no rules file), an optional

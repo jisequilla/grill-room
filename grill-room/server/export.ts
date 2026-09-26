@@ -208,7 +208,7 @@ export function parseExportManifest(content: string): ParsedExportManifest | nul
 
 export interface PlanExportInput {
   sessionTitle: string;
-  /** The session's idea, verbatim — `intent.md` opens with it unchanged. */
+  /** The session's idea as first written — `intent.md` renders it, trimmed, under {@link ORIGINAL_IDEA_HEADING}, after the spec's opening. */
   idea: string;
   specMarkdown: string;
   /** Tickets to export, already in ascending number order. Empty when tickets are not being exported. */
@@ -741,21 +741,67 @@ function renderProjectStateSection(scoutReport: ScoutReportWithStaleness | null)
   return lines.join("\n");
 }
 
+/** Labels the raw idea wherever it follows the spec's own opening. */
+export const ORIGINAL_IDEA_HEADING = "## The original idea, before the interview";
+
+export type SpecOpeningSection = "Problem Statement" | "Solution";
+
+const SECTION_END = /^\s*#{1,2}(\s|$)/;
+
+/**
+ * The body of the spec's `## <name>` section, or null when the section is
+ * missing or blank. The heading line is the first whose trimmed text is
+ * exactly `## <name>` (the rule `synthesize-spec` enforces); the body runs to
+ * the next level-1 or level-2 heading, with blank lines dropped from both
+ * ends. Fenced code blocks are not tracked.
+ */
+export function extractSpecSection(specMarkdown: string, name: SpecOpeningSection): string | null {
+  const lines = specMarkdown.replace(/\r\n/g, "\n").split("\n");
+  const headingIndex = lines.findIndex((line) => line.trim() === `## ${name}`);
+  if (headingIndex === -1) return null;
+  const rest = lines.slice(headingIndex + 1);
+  const endOffset = rest.findIndex((line) => SECTION_END.test(line));
+  const body = endOffset === -1 ? rest : rest.slice(0, endOffset);
+  let start = 0;
+  let end = body.length;
+  while (start < end && body[start].trim() === "") start++;
+  while (end > start && body[end - 1].trim() === "") end--;
+  return start === end ? null : body.slice(start, end).join("\n");
+}
+
+/**
+ * How `HANDOFF.md` and `intent.md` open: the spec's Problem Statement and
+ * Solution, in that order and under canonical headings, each only when the
+ * spec has it, then the idea as first written under
+ * {@link ORIGINAL_IDEA_HEADING}.
+ */
+export function openingSections(specMarkdown: string, idea: string): string[] {
+  const sections: string[] = [];
+  for (const name of ["Problem Statement", "Solution"] as const) {
+    const body = extractSpecSection(specMarkdown, name);
+    if (body !== null) sections.push(`## ${name}\n\n${body}`);
+  }
+  sections.push(`${ORIGINAL_IDEA_HEADING}\n\n${idea.trim()}`);
+  return sections;
+}
+
 /**
  * `intent.md`'s content: the why, for people, rendered from stored data with
- * no model call — the idea verbatim, the readiness judgment (or its "not
- * judged" fallback), and the scout report's current project state (omitted
- * entirely when the session has never been scouted).
+ * no model call — the spec's Problem Statement and Solution followed by the
+ * idea as first written (see {@link openingSections}), the readiness judgment
+ * (or its "not judged" fallback), and the scout report's current project
+ * state (omitted entirely when the session has never been scouted).
  */
 export function renderIntentFile(
   sessionTitle: string,
+  specMarkdown: string,
   idea: string,
   readiness: StoredReadiness | null,
   scoutReport: ScoutReportWithStaleness | null,
 ): string {
   const sections = [
     `# Intent: ${oneLine(sessionTitle)}`,
-    idea.trim(),
+    ...openingSections(specMarkdown, idea),
     renderReadinessSection(idea, readiness),
   ];
 
@@ -779,7 +825,13 @@ export function planExport(input: PlanExportInput): ExportPlan {
     { relativePath: "spec.md", content: renderSpecFile(input.sessionTitle, input.specMarkdown) },
     {
       relativePath: INTENT_FILE,
-      content: renderIntentFile(input.sessionTitle, input.idea, input.readiness, input.scoutReport),
+      content: renderIntentFile(
+        input.sessionTitle,
+        input.specMarkdown,
+        input.idea,
+        input.readiness,
+        input.scoutReport,
+      ),
     },
   ];
 

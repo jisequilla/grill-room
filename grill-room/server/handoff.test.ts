@@ -30,6 +30,21 @@ function expectNoReviewerMention(text: string): void {
   expect(text).not.toMatch(/reviewer/i);
 }
 
+const FIXTURE_SPEC = [
+  "## Problem Statement",
+  "",
+  "Sessions end in a spec nobody can find from the repository.",
+  "",
+  "## Solution",
+  "",
+  "Export each grilled session into the repository it builds.",
+  "",
+  "## User Stories",
+  "",
+  "1. As an operator, I want the bundle in my repository, so that agents can read it.",
+  "",
+].join("\n");
+
 /**
  * Three tickets: 01 and 03 have no blockers, 02 is blocked by 01. Waves are
  * given out of number order on purpose (wave 1 = [1, 3], wave 2 = [2]) so the
@@ -42,7 +57,11 @@ function aSource(overrides: Partial<HandoffSource["project"]> = {}): HandoffSour
       title: "Export anywhere",
       idea: "Export a grilled session into any repository.",
     },
-    spec: { updatedAt: "2026-09-01T10:00:00.000Z", ticketsGeneratedAt: "2026-09-01T10:05:00.000Z" },
+    spec: {
+      updatedAt: "2026-09-01T10:00:00.000Z",
+      ticketsGeneratedAt: "2026-09-01T10:05:00.000Z",
+      markdown: FIXTURE_SPEC,
+    },
     tickets: [
       { id: "t1", number: 1, slug: "register-projects", title: "Register projects", body: "Build the registry.", blockedBy: [] },
       { id: "t2", number: 2, slug: "export-bundle", title: "Export the bundle", body: "Write the bundle.", blockedBy: [1] },
@@ -80,6 +99,53 @@ describe("HANDOFF.md", () => {
     expect(markdown).toContain(`Paths below are absolute, into the main checkout at \`${ROOT}\``);
     expect(markdown).toContain("must read the spec, their ticket and their brief by absolute path");
     expect(markdown).not.toContain("git add");
+  });
+
+  it("opens with the spec's Problem Statement and Solution, then the labelled idea, then where things are", () => {
+    const opening = [
+      "# Handoff: Export anywhere",
+      "",
+      "## Problem Statement",
+      "",
+      "Sessions end in a spec nobody can find from the repository.",
+      "",
+      "## Solution",
+      "",
+      "Export each grilled session into the repository it builds.",
+      "",
+      "## The original idea, before the interview",
+      "",
+      "Export a grilled session into any repository.",
+      "",
+      "## Where things are",
+      "",
+      "This is the entry point for the orchestrating session that builds this feature. Everything needed to run the tickets is here or linked from here.",
+      "",
+      "Paths below are relative to the repository root (`/repos/target`). The bundle lives in `.scratch`, which git tracks.",
+      "",
+      `- Spec: \`${BUNDLE_TOKEN}/spec.md\``,
+      "",
+    ].join("\n");
+    const withSpec = renderHandoff(aSource()).markdown;
+    expect(withSpec.startsWith(opening)).toBe(true);
+
+    const noHeadings = { ...aSource(), spec: { ...aSource().spec, markdown: "## Problem\n\nA spec." } };
+    const withoutSpec = renderHandoff(noHeadings).markdown;
+    const specSections = [
+      "## Problem Statement",
+      "",
+      "Sessions end in a spec nobody can find from the repository.",
+      "",
+      "## Solution",
+      "",
+      "Export each grilled session into the repository it builds.",
+      "",
+      "",
+    ].join("\n");
+    expect(withSpec.replace(specSections, "")).toBe(withoutSpec);
+    expect(withoutSpec.startsWith(
+      "# Handoff: Export anywhere\n\n## The original idea, before the interview\n\nExport a grilled session into any repository.\n\n## Where things are\n\n",
+    )).toBe(true);
   });
 
   it("carries the session title and idea, the spec path, and the verify command", () => {
@@ -388,6 +454,11 @@ describe("bundle paths", () => {
 describe("handoffFingerprint", () => {
   it("is stable for the same inputs", () => {
     expect(handoffFingerprint(aSource())).toBe(handoffFingerprint(aSource()));
+  });
+
+  it("ignores the spec's text, since every write of it also moves updatedAt", () => {
+    const otherText = { ...aSource(), spec: { ...aSource().spec, markdown: "## Problem Statement\n\nOther." } };
+    expect(handoffFingerprint(otherText)).toBe(handoffFingerprint(aSource()));
   });
 
   it("hashes a project on the delivery-recipe/review defaults exactly as it did before those fields existed", () => {
