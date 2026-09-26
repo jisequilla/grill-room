@@ -6,7 +6,7 @@ import {
 import { useT } from "@agent-native/core/client/i18n";
 import { IconAlertTriangle, IconStack2 } from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { toast } from "sonner";
 
 import { DecisionStateBadge } from "@/components/workspace/decision-state-badge";
@@ -170,11 +170,30 @@ function Summary({ result }: { result: BatchResult }) {
  * shown and has to be fixed; a row naming a decision that is not settled is
  * applied anyway, because by the time the batch reaches it an earlier item's
  * review may well have re-asked it — but it says so first.
+ *
+ * Uncontrolled, it renders its own trigger button. Given `open` and
+ * `onOpenChange` (the header's overflow menu), it renders only the dialog, and
+ * `returnFocusTo` names where focus goes on close, since there is no trigger
+ * of its own to return to.
  */
-export function ApplyBatchDialog({ sessionId }: { sessionId: string }) {
+export function ApplyBatchDialog({
+  sessionId,
+  open: controlledOpen,
+  onOpenChange,
+  returnFocusTo,
+}: {
+  sessionId: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  returnFocusTo?: RefObject<HTMLElement | null>;
+}) {
   const t = useT();
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const controlled = controlledOpen !== undefined;
+  const open = controlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (next: boolean) =>
+    controlled ? onOpenChange?.(next) : setUncontrolledOpen(next);
   const [text, setText] = useState("");
   const [rows, setRows] = useState<ResolvedBatchRow[] | null>(null);
   const [parseError, setParseError] = useState<BatchParseError | null>(null);
@@ -239,13 +258,22 @@ export function ApplyBatchDialog({ sessionId }: { sessionId: string }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="sm">
-          <IconStack2 className="size-4" />
-          {t("workspace.batchAction")}
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">
+      {controlled ? null : (
+        <DialogTrigger asChild>
+          <Button type="button" variant="outline" size="sm">
+            <IconStack2 className="size-4" />
+            {t("workspace.batchAction")}
+          </Button>
+        </DialogTrigger>
+      )}
+      <DialogContent
+        className="sm:max-w-2xl"
+        onCloseAutoFocus={(event) => {
+          if (!returnFocusTo?.current) return;
+          event.preventDefault();
+          returnFocusTo.current.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t("workspace.batchAction")}</DialogTitle>
           <DialogDescription>
