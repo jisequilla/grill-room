@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
-# Exercises scripts/prune-worktrees.sh against a throwaway repository, one
-# worktree per row of the behaviour table, and asserts the exact output and
-# the worktrees/branches left behind.
+# Exercises scripts/prune-worktrees.sh against throwaway repositories, one
+# worktree per row of the behaviour table plus the edge cases the round-1
+# review found, and asserts the exact output and the worktrees/branches left
+# behind.
 set -uo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 prune_script="$script_dir/prune-worktrees.sh"
 
-tmp="$(mktemp -d)"
-cleanup() { rm -rf "$tmp"; }
-trap cleanup EXIT
-
 fail=0
+
+# ---------------------------------------------------------------------------
+# Main matrix: one worktree per behaviour-table row, plus a detached-HEAD
+# worktree. The repository root itself lives under a path containing a
+# space, so every row exercises the space-in-path fix too.
+# ---------------------------------------------------------------------------
+
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/gr rsi test.XXXXXXXX")"
+cleanup_main() { rm -rf "$tmp"; }
+trap cleanup_main EXIT
 
 origin="$tmp/origin.git"
 work="$tmp/work"
@@ -69,12 +76,19 @@ commit_in_worktree agent-dirty "dirty work"
 merge_branch agent-dirty-branch
 echo "uncommitted change" >>"$work/.claude/worktrees/agent-dirty/note.txt"
 
+# Row: detached HEAD with an unmerged commit -> kept, never resolved as main's own HEAD
+git -C "$work" worktree add -q --detach ".claude/worktrees/agent-detached" main
+echo "detached work" >"$work/.claude/worktrees/agent-detached/note.txt"
+git -C "$work/.claude/worktrees/agent-detached" add note.txt
+git -C "$work/.claude/worktrees/agent-detached" commit -q -m "detached unmerged work"
+
 git -C "$work" push -q origin main
 
 output="$(bash "$prune_script" "$work")"
 rc=$?
 
-expected="kept    .claude/worktrees/agent-dirty (uncommitted changes)
+expected="kept    .claude/worktrees/agent-detached (detached HEAD)
+kept    .claude/worktrees/agent-dirty (uncommitted changes)
 kept    .claude/worktrees/agent-fresh (agent-fresh-branch has no commits of its own)
 kept    .claude/worktrees/agent-locked (locked)
 removed .claude/worktrees/agent-merged (agent-merged-branch)
@@ -109,6 +123,7 @@ assert_dir() {
 
 assert_branch() {
   # assert_branch <branch-name> <should-exist: yes|no>
+  local exists
   if git -C "$work" show-ref --verify --quiet "refs/heads/$1"; then
     exists=yes
   else
@@ -125,12 +140,141 @@ assert_dir agent-fresh yes
 assert_dir agent-locked yes
 assert_dir agent-merged no
 assert_dir agent-dirty yes
+assert_dir agent-detached yes
 
 assert_branch agent-unmerged-branch yes
 assert_branch agent-fresh-branch yes
 assert_branch agent-locked-branch yes
 assert_branch agent-merged-branch no
 assert_branch agent-dirty-branch yes
+
+cleanup_main
+trap - EXIT
+
+# ---------------------------------------------------------------------------
+# Long history: the fresh branch's tip is the very first line of
+# `git rev-list --first-parent`, so an unbuffered `printf | grep -qx` pipe
+# breaks once history outgrows the pipe buffer (~1,600+ first-parent
+# commits). Build the commits with commit-tree (same tree every time) so it
+# stays fast.
+# ---------------------------------------------------------------------------
+
+test_long_history() {
+  local d work tree parent i out
+  d="$(mktemp -d)"
+  work="$d/work"
+
+  git init -q "$work"
+  git -C "$work" config user.email "test@example.com"
+  git -C "$work" config user.name "Test"
+  echo "root" >"$work/README.md"
+  git -C "$work" add README.md
+  git -C "$work" commit -q -m "root"
+  git -C "$work" branch -M main
+
+  git -C "$work" worktree add -q ".claude/worktrees/agent-fresh" -b agent-fresh-branch main
+
+  tree="$(git -C "$work" rev-parse HEAD^{tree})"
+  parent="$(git -C "$work" rev-parse HEAD)"
+  for i in $(seq 1 2000); do
+    parent="$(git -C "$work" commit-tree -p "$parent" -m "filler $i" "$tree")"
+  done
+  git -C "$work" update-ref refs/heads/main "$parent"
+
+  out="$(bash "$prune_script" "$work")"
+
+  if ! grep -qxF "kept    .claude/worktrees/agent-fresh (agent-fresh-branch has no commits of its own)" <<<"$out"; then
+    echo "FAIL: long-history case did not keep the fresh worktree"
+    echo "$out"
+    fail=1
+  fi
+  if [ ! -d "$work/.claude/worktrees/agent-fresh" ]; then
+    echo "FAIL: long-history case removed the fresh worktree"
+    fail=1
+  fi
+
+  rm -rf "$d"
+}
+
+# ---------------------------------------------------------------------------
+# No remote configured at all: the script must still prune using local main.
+# ---------------------------------------------------------------------------
+
+test_no_remote() {
+  local d work out rc
+  d="$(mktemp -d)"
+  work="$d/work"
+
+  git init -q "$work"
+  git -C "$work" config user.email "test@example.com"
+  git -C "$work" config user.name "Test"
+  echo "root" >"$work/README.md"
+  git -C "$work" add README.md
+  git -C "$work" commit -q -m "root"
+  git -C "$work" branch -M main
+
+  git -C "$work" worktree add -q ".claude/worktrees/agent-merged" -b agent-merged-branch main
+  echo "merged" >"$work/.claude/worktrees/agent-merged/note.txt"
+  git -C "$work/.claude/worktrees/agent-merged" add note.txt
+  git -C "$work/.claude/worktrees/agent-merged" commit -q -m "merged work"
+  git -C "$work" merge -q --no-ff --no-edit agent-merged-branch -m "merge agent-merged-branch"
+
+  out="$(bash "$prune_script" "$work" 2>&1)"
+  rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL: no-remote case exited $rc"
+    echo "$out"
+    fail=1
+  fi
+  if [ -d "$work/.claude/worktrees/agent-merged" ]; then
+    echo "FAIL: no-remote case did not remove the merged worktree"
+    echo "$out"
+    fail=1
+  fi
+
+  rm -rf "$d"
+}
+
+# ---------------------------------------------------------------------------
+# Neither main nor origin/main resolves: the script reports it and exits 0,
+# removing nothing.
+# ---------------------------------------------------------------------------
+
+test_no_main_ref() {
+  local d work out rc
+  d="$(mktemp -d)"
+  work="$d/work"
+
+  git init -q "$work"
+  git -C "$work" config user.email "test@example.com"
+  git -C "$work" config user.name "Test"
+  echo "root" >"$work/README.md"
+  git -C "$work" add README.md
+  git -C "$work" commit -q -m "root"
+  git -C "$work" branch -M trunk
+
+  mkdir -p "$work/.claude/worktrees"
+
+  out="$(bash "$prune_script" "$work" 2>&1)"
+  rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL: no-main-ref case exited $rc"
+    echo "$out"
+    fail=1
+  fi
+  if [ -z "$out" ]; then
+    echo "FAIL: no-main-ref case printed nothing"
+    fail=1
+  fi
+
+  rm -rf "$d"
+}
+
+test_long_history
+test_no_remote
+test_no_main_ref
 
 if [ "$fail" -ne 0 ]; then
   echo "FAILED"
