@@ -13,7 +13,7 @@ You are implementing bead {{bead}} in the Grill Room app (`grill-room/` in this 
 
 ## Delivery
 
-Push with exactly `git push -u origin <your branch>`, where the branch is the worktree branch you are on (it starts with `worktree-`); that form is pre-approved, other forms may be blocked. Then open a DRAFT PR against main with `gh pr create --draft --title "{{title}}" --body-file <file>`. The body lists:
+Push with exactly `git push -u origin <your branch>`, where the branch is the worktree branch you are on (it starts with `worktree-`); that form is pre-approved, other forms may be blocked. Then open a DRAFT PR against main with `gh pr create --draft --title "{{title}}" --body-file <file>`, where the file's name carries the bead id (for example `pr-body-{{bead}}.md`): builders share the scratchpad, and a generic name has overwritten another builder's body. The body lists:
 - the bead;
 - the files changed, with any file outside the ticket's Files named and justified;
 - the per-acceptance proof;
