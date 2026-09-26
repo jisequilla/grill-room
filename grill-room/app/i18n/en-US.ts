@@ -40,10 +40,13 @@ const messages = {
     verifyCommandLabel: "Verify command",
     verifyCommandPlaceholder: "pnpm test",
     verifyCommandSuggested: "Suggested from the repository's build files.",
-    workingExportFolderLabel: "Export folder",
+    durableExportFolderLabel: "Durable folder",
+    durableExportFolderHint:
+      "Specs, decisions and intent, kept after the build. Relative to the repository root.",
+    workingExportFolderLabel: "Working folder",
     workingExportFolderPlaceholder: ".grill-room",
     workingExportFolderHint:
-      "Relative to the repository root. It does not need to exist yet.",
+      "Tickets, handoff and briefs, deletable after the build. Relative to the repository root.",
     workingExportFolderSuggested: "Suggested from the repository's declared tracker.",
     slugPatternLabel: "Slug pattern",
     slugPatternHint:
@@ -80,7 +83,7 @@ const messages = {
     saveFailed: "Could not save the project.",
     rootRequired: "Enter a folder inside the repository.",
     verifyCommandRequired: "Enter the command that verifies a change.",
-    workingExportFolderRequired: "Enter the folder exports land in.",
+    workingExportFolderRequired: "Enter the folder working files land in.",
     folderNotAbsolute: "The folder must be an absolute path.",
     folderNotFound: "That folder does not exist.",
     folderNotDirectory: "That path is not a directory.",
@@ -90,6 +93,12 @@ const messages = {
     workingExportFolderOutsideRoot: "The export folder must be inside the repository.",
     workingExportFolderIsRoot:
       "The export folder must be a folder inside the repository, not its root.",
+    durableExportFolderRequired: "Enter the folder durable files land in.",
+    durableExportFolderOutsideRoot: "The durable folder must be inside the repository.",
+    durableExportFolderIsRoot:
+      "The durable folder must be a folder inside the repository, not its root.",
+    exportRootsOverlap:
+      "The durable and working folders must be separate: neither may be the other or lie inside it.",
     invalidSlugPattern: "The slug pattern names one folder: no / or ..",
     selectLabel: "Project",
     selectOptionalLabel: "Project (optional)",

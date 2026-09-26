@@ -24,6 +24,7 @@ import path from "node:path";
 import { eq } from "@agent-native/core/db/schema";
 
 import {
+  DEFAULT_DURABLE_EXPORT_FOLDER,
   DEFAULT_PROJECT_SLUG_PATTERN,
   DELIVERY_RECIPES,
   PROJECT_TRACKER_KINDS,
@@ -36,7 +37,15 @@ import { getDb, schema } from "./db/index.js";
 import { GitUnavailableError, runGit } from "./git.js";
 import { readProjectTracker } from "./tracker.js";
 
-export type Project = typeof schema.projects.$inferSelect;
+type ProjectRow = typeof schema.projects.$inferSelect;
+
+/** A registered project. The row's internal `visibilityRecheck` flag is never part of it. */
+export type Project = Omit<ProjectRow, "visibilityRecheck">;
+
+function toProject(row: ProjectRow): Project {
+  const { visibilityRecheck: _recheck, ...project } = row;
+  return project;
+}
 
 export type ProjectErrorCode =
   | "root-required"
@@ -49,6 +58,10 @@ export type ProjectErrorCode =
   | "git-unavailable"
   | "export-folder-outside-root"
   | "export-folder-is-root"
+  | "durable-folder-required"
+  | "durable-folder-outside-root"
+  | "durable-folder-is-root"
+  | "export-roots-overlap"
   | "invalid-slug-pattern"
   | "invalid-tracker-kind"
   | "invalid-visibility"
@@ -80,6 +93,11 @@ export interface ProjectInput {
   verifyCommand?: string | null;
   /** Relative to the root, or an absolute path inside it. */
   workingExportFolder?: string | null;
+  /**
+   * Relative to the root, or an absolute path inside it. Defaults to
+   * {@link DEFAULT_DURABLE_EXPORT_FOLDER} at registration; required on edit.
+   */
+  durableExportFolder?: string | null;
   /** Defaults to {@link DEFAULT_PROJECT_SLUG_PATTERN}. */
   slugPattern?: string | null;
   /** `beads` or `markdown`; defaults to `markdown`. */
@@ -162,16 +180,38 @@ export async function resolveGitRoot(
   return { root: path.resolve(root) };
 }
 
+/** A project's two export roots: durable files outlive the build, working files do not. */
+export type ExportRoot = "working" | "durable";
+
+const EXPORT_ROOT_REFUSALS: Record<
+  ExportRoot,
+  { label: string; isRoot: ProjectErrorCode; outsideRoot: ProjectErrorCode }
+> = {
+  working: {
+    label: "export folder",
+    isRoot: "export-folder-is-root",
+    outsideRoot: "export-folder-outside-root",
+  },
+  durable: {
+    label: "durable folder",
+    isRoot: "durable-folder-is-root",
+    outsideRoot: "durable-folder-outside-root",
+  },
+};
+
 /**
  * Normalise an export folder to a path relative to `root`, in forward-slash
  * form. An absolute path is accepted when it lies inside the root. The folder
- * does not need to exist: export creates it.
+ * does not need to exist: export creates it. `which` picks the refusal codes:
+ * the working root keeps its historical `export-folder-*` codes.
  */
 export function normalizeExportFolder(
   root: string,
-  workingExportFolder: string,
-): { workingExportFolder: string } | Refused {
-  const trimmed = workingExportFolder.trim();
+  folder: string,
+  which: ExportRoot = "working",
+): { folder: string } | Refused {
+  const { label, isRoot, outsideRoot } = EXPORT_ROOT_REFUSALS[which];
+  const trimmed = folder.trim();
   const absolute = path.isAbsolute(trimmed)
     ? path.resolve(trimmed)
     : path.resolve(root, trimmed);
@@ -179,17 +219,34 @@ export function normalizeExportFolder(
 
   if (relative === "") {
     return refuse(
-      "export-folder-is-root",
-      "The export folder must be a folder inside the repository, not its root.",
+      isRoot,
+      `The ${label} must be a folder inside the repository, not its root.`,
     );
   }
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    return refuse(
-      "export-folder-outside-root",
-      `The export folder must be inside the project root: ${workingExportFolder}`,
-    );
+    return refuse(outsideRoot, `The ${label} must be inside the project root: ${folder}`);
   }
-  return { workingExportFolder: relative.split(path.sep).join("/") };
+  return { folder: relative.split(path.sep).join("/") };
+}
+
+/**
+ * Whether two normalised export folders are the same folder or one lies
+ * inside the other. Compared by path segment, so siblings sharing a prefix
+ * (`docs` and `docs-specs`) do not overlap.
+ */
+export function exportRootsOverlap(a: string, b: string): boolean {
+  const left = a.split("/");
+  const right = b.split("/");
+  const shorter = left.length <= right.length ? left : right;
+  const longer = shorter === left ? right : left;
+  return shorter.every((segment, index) => segment === longer[index]);
+}
+
+function refuseOverlap(working: string, durable: string): Refused {
+  return refuse(
+    "export-roots-overlap",
+    `The working folder (${working}) and the durable folder (${durable}) must be separate: neither may be the other or lie inside it.`,
+  );
 }
 
 /**
@@ -204,6 +261,44 @@ export async function seedVisibility(
 ): Promise<ProjectVisibility> {
   const result = await runGit(root, ["check-ignore", "-q", "--", `${workingExportFolder}/`]);
   return result.exitCode === 0 ? "ignored" : "tracked";
+}
+
+/**
+ * Like {@link seedVisibility}, but null unless git actually answered:
+ * `check-ignore` exits 0 (ignored) or 1 (not ignored); anything else, or a
+ * root git cannot run in, is no answer rather than `tracked`.
+ */
+async function measuredVisibility(
+  root: string,
+  workingExportFolder: string,
+): Promise<ProjectVisibility | null> {
+  try {
+    const result = await runGit(root, ["check-ignore", "-q", "--", `${workingExportFolder}/`]);
+    if (result.exitCode === 0) return "ignored";
+    if (result.exitCode === 1) return "tracked";
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Re-seed the visibility of a row a migration flagged (v66 moved its working
+ * folder, so the stored flag described the old one), store it and clear the
+ * flag. When git cannot answer (the root is gone or no longer a repository)
+ * the row is left exactly as stored, flag included, to be tried on a later
+ * read.
+ */
+async function recheckVisibility(row: ProjectRow): Promise<ProjectRow> {
+  if (!row.visibilityRecheck) return row;
+  const visibility = await measuredVisibility(row.rootPath, row.workingExportFolder);
+  if (visibility === null) return row;
+  const [updated] = await getDb()
+    .update(schema.projects)
+    .set({ visibility, visibilityRecheck: false })
+    .where(eq(schema.projects.id, row.id))
+    .returning();
+  return updated ?? row;
 }
 
 /**
@@ -350,7 +445,7 @@ export async function inspectProjectFolder(
   if (!blank(workingExportFolder)) {
     const normalized = normalizeExportFolder(root, workingExportFolder as string);
     if ("refusal" in normalized) return normalized;
-    normalizedExport = normalized.workingExportFolder;
+    normalizedExport = normalized.folder;
     visibility = await seedVisibility(root, normalizedExport);
   }
 
@@ -432,24 +527,28 @@ async function findByRoot(root: string): Promise<Project | undefined> {
     .from(schema.projects)
     .where(eq(schema.projects.rootPath, root))
     .limit(1);
-  return row;
+  return row ? toProject(row) : undefined;
 }
 
+/** One project by id; a row flagged for a visibility re-check is re-seeded first. */
 export async function getProject(id: string): Promise<Project | undefined> {
   const [row] = await getDb()
     .select()
     .from(schema.projects)
     .where(eq(schema.projects.id, id))
     .limit(1);
-  return row;
+  return row ? toProject(await recheckVisibility(row)) : undefined;
 }
 
-/** Every registered project, by name. */
+/** Every registered project, by name; rows flagged for a visibility re-check are re-seeded first. */
 export async function listProjects(): Promise<Project[]> {
-  return getDb()
+  const rows = await getDb()
     .select()
     .from(schema.projects)
     .orderBy(schema.projects.name, schema.projects.id);
+  const checked: Project[] = [];
+  for (const row of rows) checked.push(toProject(await recheckVisibility(row)));
+  return checked;
 }
 
 type ProjectValues = Omit<Project, "id" | "createdAt" | "updatedAt">;
@@ -508,7 +607,27 @@ async function validate(
 
   const normalized = normalizeExportFolder(root, workingExportFolderInput as string);
   if ("refusal" in normalized) return normalized;
-  const { workingExportFolder } = normalized;
+  const workingExportFolder = normalized.folder;
+
+  // A new project gets the default durable root; an edit must keep one.
+  let durableExportFolderInput = input.durableExportFolder;
+  if (blank(durableExportFolderInput)) {
+    if (existing) {
+      return refuse("durable-folder-required", "A project needs a durable folder.");
+    }
+    durableExportFolderInput = DEFAULT_DURABLE_EXPORT_FOLDER;
+  }
+  const normalizedDurable = normalizeExportFolder(
+    root,
+    durableExportFolderInput as string,
+    "durable",
+  );
+  if ("refusal" in normalizedDurable) return normalizedDurable;
+  const durableExportFolder = normalizedDurable.folder;
+
+  if (exportRootsOverlap(workingExportFolder, durableExportFolder)) {
+    return refuseOverlap(workingExportFolder, durableExportFolder);
+  }
 
   const slugPatternInput = blank(input.slugPattern) ? trackerSlugPattern : input.slugPattern;
   const slugPattern = blank(slugPatternInput)
@@ -557,6 +676,7 @@ async function validate(
       rootPath: root,
       verifyCommand: (input.verifyCommand as string).trim(),
       workingExportFolder,
+      durableExportFolder,
       slugPattern,
       trackerKind,
       buildRecordLogging: input.buildRecordLogging ?? false,
@@ -570,8 +690,9 @@ async function validate(
 }
 
 /**
- * Register a project. Root, verify command and export folder are required;
- * the rest default. The root is resolved to its git top-level, the visibility
+ * Register a project. Root, verify command and working export folder are
+ * required; the rest default (the durable folder to
+ * {@link DEFAULT_DURABLE_EXPORT_FOLDER}). The two folders may not overlap. The root is resolved to its git top-level, the visibility
  * flag is seeded from `git check-ignore` unless given, and the repo's
  * declared tracker (if any) is read once to pre-fill a blank export folder or
  * slug pattern and to store its commands and diagnostic.
@@ -583,11 +704,11 @@ export async function registerProject(
   if ("refusal" in outcome) return outcome;
 
   const now = new Date().toISOString();
-  const [project] = await getDb()
+  const [row] = await getDb()
     .insert(schema.projects)
     .values({ id: randomUUID(), ...outcome.values, createdAt: now, updatedAt: now })
     .returning();
-  return { project };
+  return { project: toProject(row) };
 }
 
 /**
@@ -610,6 +731,7 @@ export async function updateProject(
     name: patch.name ?? existing.name,
     verifyCommand: patch.verifyCommand ?? existing.verifyCommand,
     workingExportFolder: patch.workingExportFolder ?? existing.workingExportFolder,
+    durableExportFolder: patch.durableExportFolder ?? existing.durableExportFolder,
     slugPattern: patch.slugPattern ?? existing.slugPattern,
     trackerKind: patch.trackerKind ?? existing.trackerKind,
     buildRecordLogging: patch.buildRecordLogging ?? existing.buildRecordLogging,
@@ -621,18 +743,26 @@ export async function updateProject(
   const outcome = await validate(merged, existing, { readTracker: false });
   if ("refusal" in outcome) return outcome;
 
-  const [project] = await getDb()
+  // An explicit visibility is the operator's own value, so it settles any
+  // pending re-check.
+  const [row] = await getDb()
     .update(schema.projects)
-    .set({ ...outcome.values, updatedAt: new Date().toISOString() })
+    .set({
+      ...outcome.values,
+      ...(blank(patch.visibility) ? {} : { visibilityRecheck: false }),
+      updatedAt: new Date().toISOString(),
+    })
     .where(eq(schema.projects.id, id))
     .returning();
-  return { project };
+  return { project: toProject(row) };
 }
 
 /**
  * Re-read a project's declared tracker and update only what it governs: the
  * stored commands and diagnostic always, and the export folder and slug
- * pattern only when the tracker is valid. Nothing else about the project
+ * pattern only when the tracker is valid. A `tickets_dir` that overlaps the
+ * durable folder is not applied; the overlap becomes the stored diagnostic
+ * instead. Nothing else about the project
  * changes, and nothing else in this module re-reads the tracker file — every
  * other edit carries the stored tracker fields over untouched.
  */
@@ -652,16 +782,27 @@ export async function refreshProjectTracker(
 
   if (tracker.kind === "valid") {
     const normalized = normalizeExportFolder(existing.rootPath, tracker.tracker.ticketsDir);
-    if (!("refusal" in normalized)) patch.workingExportFolder = normalized.workingExportFolder;
+    if (!("refusal" in normalized)) {
+      // A tickets_dir that would overlap the durable root is not applied: the
+      // working folder stays as it was and the overlap is the diagnostic.
+      if (exportRootsOverlap(normalized.folder, existing.durableExportFolder)) {
+        patch.trackerDiagnostic = refuseOverlap(
+          normalized.folder,
+          existing.durableExportFolder,
+        ).refusal.message;
+      } else {
+        patch.workingExportFolder = normalized.folder;
+      }
+    }
 
     const slugRefusal = checkSlugPattern(tracker.tracker.ticketFormat);
     if (!slugRefusal) patch.slugPattern = tracker.tracker.ticketFormat;
   }
 
-  const [project] = await getDb()
+  const [row] = await getDb()
     .update(schema.projects)
     .set({ ...patch, updatedAt: new Date().toISOString() })
     .where(eq(schema.projects.id, id))
     .returning();
-  return { project };
+  return { project: toProject(row) };
 }

@@ -23,7 +23,13 @@ export default defineAction({
     workingExportFolder: z
       .string()
       .optional()
-      .describe("Where exports land, relative to the repository root"),
+      .describe("Where the working files land (tickets, handoff, briefs), relative to the repository root"),
+    durableExportFolder: z
+      .string()
+      .optional()
+      .describe(
+        "Where the durable files land (spec, decisions, intent), relative to the repository root; must not overlap the working export folder",
+      ),
     name: z.string().optional().describe("Display name"),
     slugPattern: z.string().optional().describe("Folder name pattern with placeholders"),
     trackerKind: z

@@ -25,7 +25,13 @@ export default defineAction({
       .string()
       .optional()
       .describe(
-        "Where exports land, relative to the repository root, e.g. '.scratch'. Omit it to fall back to the repository's declared tracker block when it has a valid one; required otherwise.",
+        "Where the working files land (tickets, handoff, briefs; deletable after the build), relative to the repository root, e.g. '.grill-room'. Omit it to fall back to the repository's declared tracker block when it has a valid one; required otherwise.",
+      ),
+    durableExportFolder: z
+      .string()
+      .optional()
+      .describe(
+        "Where the durable files land (spec, decisions, intent; kept after the build), relative to the repository root; defaults to 'docs/specs'. Must not be, contain, or lie inside the working export folder.",
       ),
     name: z
       .string()
