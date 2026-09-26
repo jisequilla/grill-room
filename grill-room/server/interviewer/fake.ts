@@ -229,6 +229,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   supersession: { turns: supersessionTurns() },
   replacement: { turns: replacementTurns() },
   deferral: { turns: deferralTurns() },
+  restatement: { turns: restatementTurns() },
   "refusal-then-success": { turns: refusalThenSuccessTurns() },
   // Long enough to see the turn running before it fails, and again before the
   // manual retry succeeds — with enough margin that a slow machine (several
@@ -441,7 +442,7 @@ function createScriptedInterviewer(
 
     if (answersWithoutScript(request, source.peek(request))) {
       const resumes = conversationOf(request) != null;
-      const result = { supersessions: [], replacements: [], deferrals: [] };
+      const result = { supersessions: [], replacements: [], deferrals: [], restatements: [] };
       return observeCall(
         observer,
         {
@@ -749,6 +750,7 @@ export function supersessionTurns(): ScriptedTurn[] {
           },
         ],
         replacements: [],
+        restatements: [],
         deferrals: [],
       },
     },
@@ -810,6 +812,7 @@ export function replacementTurns(): ScriptedTurn[] {
               "The data lives in a synced cloud folder, not only on the local disk.",
           },
         ],
+        restatements: [],
         deferrals: [],
       },
     },
@@ -855,6 +858,7 @@ export function deferralTurns(): ScriptedTurn[] {
       result: {
         supersessions: [],
         replacements: [],
+        restatements: [],
         deferrals: [
           {
             key: "hold-period",
@@ -865,6 +869,58 @@ export function deferralTurns(): ScriptedTurn[] {
       },
     },
     { kind: "propose-round", result: aRound([]) },
+  ];
+}
+
+/**
+ * An own answer that holds more than the decision. Round 1 asks two
+ * independent decisions; the user answers `payment-provider` with a typo and a
+ * note to the AI, and `first-service` cleanly. Then the done proposal, and the
+ * check that follows it, which proposes a clean statement for
+ * `payment-provider` and keeps the note aside. What `restatement` schedules.
+ */
+export function restatementTurns(): ScriptedTurn[] {
+  return [
+    {
+      kind: "propose-round",
+      result: aRound([
+        aProposedDecision("payment-provider", {
+          title: "Which payment provider handles payouts?",
+          body: "The provider sets the fees and how fast sellers are paid.",
+          recommendedAnswer: "Stripe.",
+        }),
+        aProposedDecision("first-service", {
+          title: "Which service launches first?",
+          body: "One service first keeps the launch small.",
+          recommendedAnswer: "Dog walking.",
+        }),
+      ]),
+    },
+    {
+      kind: "propose-round",
+      result: aRound([], {
+        done: {
+          summary: "The payment provider and the first service are settled.",
+        },
+      }),
+    },
+    {
+      kind: "find-superseded",
+      result: {
+        supersessions: [],
+        replacements: [],
+        deferrals: [],
+        restatements: [
+          {
+            key: "payment-provider",
+            statement: "Stripe.",
+            operatorNotes: "Claude, double-check the fee table.",
+            reason:
+              "Fixed the spelling of Stripe and took out a note addressed to the AI.",
+          },
+        ],
+      },
+    },
   ];
 }
 
@@ -1168,7 +1224,7 @@ export function cannedInterviewTurns(): ScriptedTurn[] {
       // not answered anywhere else in the tree, so nothing is superseded and
       // the user resolves it by hand, exactly as before this turn existed.
       kind: "find-superseded",
-      result: { supersessions: [], replacements: [], deferrals: [] },
+      result: { supersessions: [], replacements: [], deferrals: [], restatements: [] },
     },
     {
       kind: "synthesize-spec",

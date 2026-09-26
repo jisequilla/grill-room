@@ -375,10 +375,34 @@ function renderTask(
         "\"48 h hold; revisit after launch\" decides 48 h. Be conservative: an empty list is",
         "the right answer when every own answer decides its question.",
       ];
+      const restatementSection = [
+        request.looseEndKeys.length > 0 ||
+        request.replaceableKeys.length > 0 ||
+        request.deferrableKeys.length > 0
+          ? "## Also: own answers that hold more than the decision"
+          : "## Your task: find own answers that hold more than the decision",
+        "",
+        `Own answers to check: ${request.restatableKeys.join(", ")}`,
+        "",
+        "Each decision above was settled with the user's own words, and its answer is",
+        "exported as the decision for build agents to read. Return one entry in",
+        "`restatements` for each answer that holds text that is not part of the",
+        "decision: an instruction or question addressed to the AI or the interviewer,",
+        "a note to self, or an obvious typo. Name the decision in `key`.",
+        "",
+        "`statement` is the decision in the owner's words, with typos fixed, nothing",
+        "added and the meaning unchanged. `operatorNotes` is the text you removed,",
+        "verbatim, or `\"\"` when you only fixed typos. Say in `reason` what you removed",
+        "or fixed.",
+        "",
+        "Be conservative: an answer that is already a clean decision gets no entry,",
+        "and an empty list is the right answer when every own answer is one.",
+      ];
       const sections: string[][] = [];
       if (request.looseEndKeys.length > 0) sections.push(looseEndSection);
       if (request.replaceableKeys.length > 0) sections.push(replacementSection);
       if (request.deferrableKeys.length > 0) sections.push(deferralSection);
+      if (request.restatableKeys.length > 0) sections.push(restatementSection);
       return sections.map((lines) => lines.join("\n")).join("\n\n");
     }
 

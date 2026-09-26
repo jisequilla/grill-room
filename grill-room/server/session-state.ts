@@ -38,9 +38,22 @@ export async function returnSessionToInterviewing(
     .where(eq(schema.sessions.id, session.id));
 
   if (session.state === "confirmed") {
-    await db
-      .update(schema.specs)
-      .set({ current: false, updatedAt: now })
-      .where(eq(schema.specs.sessionId, session.id));
+    await markSpecNotCurrent(session.id, now);
   }
+}
+
+/**
+ * Mark the session's spec, if it has one, not current: it no longer describes
+ * the tree it was synthesized from, so export refuses it (`spec-not-current`)
+ * until it is synthesized again. The session's own state is untouched. A
+ * session with no spec is left as it is.
+ */
+export async function markSpecNotCurrent(
+  sessionId: string,
+  now: string,
+): Promise<void> {
+  await getDb()
+    .update(schema.specs)
+    .set({ current: false, updatedAt: now })
+    .where(eq(schema.specs.sessionId, sessionId));
 }

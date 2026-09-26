@@ -20,7 +20,15 @@ function history(
   questionTitle = "Question",
   questionBody = "",
 ): HistoryEntry {
-  return { text, kind, interviewerReason, recordedAt, questionTitle, questionBody };
+  return {
+    text,
+    kind,
+    interviewerReason,
+    operatorNotes: null,
+    recordedAt,
+    questionTitle,
+    questionBody,
+  };
 }
 
 function decision(overrides: Partial<TreeDecision> = {}): TreeDecision {
@@ -46,6 +54,9 @@ function decision(overrides: Partial<TreeDecision> = {}): TreeDecision {
     awaitingPlacementSince: null,
     supersession: null,
     deferralReason: null,
+    restatementText: null,
+    restatementNotes: null,
+    restatementReason: null,
     replacedBy: null,
     settledBy: null,
     createdAt: "2026-01-01T00:00:00.000Z",

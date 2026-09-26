@@ -17,10 +17,15 @@
  * dispute handling is settled" is a deferral written as an answer, and it
  * would export as a decision.
  *
+ * Or it can decide and hold more besides: "Stirpe. Claude, double-check the
+ * fee table." exports its typo and its note to the AI verbatim, and build
+ * agents read it as the decision. A restatement proposes the clean statement.
+ *
  * What comes back is stored as a **proposal** and nothing else. The decision
  * keeps its answer, its kind and its place in the tree until the user accepts;
  * the proposal columns (`supersededById`, `supersessionAnswer`,
- * `supersessionReason`, `deferralReason`) are the whole of what this writes. An interviewer that
+ * `supersessionReason`, `deferralReason`, `restatementText`,
+ * `restatementNotes`, `restatementReason`) are the whole of what this writes. An interviewer that
  * is wrong here costs one dismissal, not a decision recorded in the user's
  * name. A pending proposal never blocks confirmation.
  *
@@ -117,11 +122,12 @@ function settledAfter(
 
 /**
  * Rows of the settled decisions this turn would check for replacement, in tree
- * order: answered for real, not already replaced, with no deferral pending, and
- * followed by at least one other decision answered for real that settled
- * strictly later — whether or not that later one was itself replaced. A pending
- * deferral and a pending replacement never sit on the same decision: this skips
- * the one, and {@link deferrableDecisions} skips the other.
+ * order: answered for real, not already replaced, with no deferral or
+ * restatement pending, and followed by at least one other decision answered
+ * for real that settled strictly later — whether or not that later one was
+ * itself replaced. A pending deferral or restatement and a pending replacement
+ * never sit on the same decision: this skips the one, and
+ * {@link deferrableDecisions} skips the other.
  */
 export function replaceableDecisions(
   rows: readonly DecisionRow[],
@@ -131,6 +137,7 @@ export function replaceableDecisions(
     (row) =>
       row.replacedById == null &&
       row.deferralReason == null &&
+      row.restatementText == null &&
       settledAfter(row, answered).length > 0,
   );
 }
@@ -154,11 +161,12 @@ export function laterKeysOf(
 }
 
 /**
- * Rows of the settled decisions this turn would check for a deferral, in the
- * order given: the user's own answer, settled, not replaced, and with no
- * supersession or deferral already pending on it. An accepted recommendation
- * is the interviewer's own answer and never a deferral; a disposition, a kept
- * repo decision and a loose end are not own answers.
+ * Rows of the settled decisions this turn would check for a deferral, and for
+ * a restatement, in the order given: the user's own answer, settled, not
+ * replaced, and with no supersession, deferral or restatement already pending
+ * on it. An accepted recommendation is the interviewer's own answer and never
+ * a deferral or a note to self; a disposition, a kept repo decision and a
+ * loose end are not own answers.
  */
 export function deferrableDecisions(
   rows: readonly DecisionRow[],
@@ -170,19 +178,23 @@ export function deferrableDecisions(
       row.answerKind === "own-answer" &&
       row.replacedById == null &&
       row.supersededById == null &&
-      row.deferralReason == null,
+      row.deferralReason == null &&
+      row.restatementText == null,
   );
 }
 
 /**
  * Whether a turn has anything to ask about: a loose end, a replaceable
- * decision, or a deferrable own answer.
+ * decision, or an own answer to check for a deferral or a restatement (one
+ * list, since both come from {@link deferrableDecisions}).
  */
 function hasAnythingToCheck(rows: readonly DecisionRow[]): boolean {
+  // The deferrable and the restatable own answers are one list.
+  const ownAnswersToCheck = deferrableDecisions(rows);
   return (
     supersedableLooseEnds(rows).length > 0 ||
     replaceableDecisions(rows).length > 0 ||
-    deferrableDecisions(rows).length > 0
+    ownAnswersToCheck.length > 0
   );
 }
 
@@ -196,6 +208,13 @@ export interface SupersessionCheck {
   laterKeys: Readonly<Record<string, readonly string[]>>;
   /** The deferrable keys the request listed. */
   deferrableKeys: readonly string[];
+  /** The restatable keys the request listed. */
+  restatableKeys: readonly string[];
+  /**
+   * The current answer of each restatable decision, by key: what a
+   * restatement's statement must differ from.
+   */
+  restatableAnswers: Readonly<Record<string, string>>;
   /** The keys of every decision currently derived settled. */
   settledKeys: readonly string[];
   /**
@@ -340,12 +359,65 @@ function deferralRejectionReasons(
 }
 
 /**
+ * Why each of the result's restatements cannot be stored, one list per entry
+ * in the result's order: empty for an entry that can be. A second entry for
+ * the same decision is the one refused. Judged against the deferrals and
+ * replacements as the interviewer sent them.
+ */
+function restatementRejectionReasons(
+  check: SupersessionCheck,
+  result: FindSupersededResult,
+): string[][] {
+  const restatable = new Set(check.restatableKeys);
+  const deferred = new Set(result.deferrals.map((entry) => entry.key));
+  const replaced = new Set(result.replacements.map((entry) => entry.replacedKey));
+  const seen = new Set<string>();
+
+  return result.restatements.map((entry) => {
+    const reasons: string[] = [];
+    if (seen.has(entry.key)) {
+      reasons.push(
+        `Decision "${entry.key}" was restated twice. Give at most one restatement per decision.`,
+      );
+    }
+    seen.add(entry.key);
+
+    if (!restatable.has(entry.key)) {
+      reasons.push(
+        `"${entry.key}" is not one of the own answers to check for a restatement. Rule only on the ones listed.`,
+      );
+    }
+
+    if (deferred.has(entry.key)) {
+      reasons.push(
+        `"${entry.key}" is both flagged as a deferral and restated. Give it one or the other.`,
+      );
+    }
+
+    if (replaced.has(entry.key)) {
+      reasons.push(
+        `"${entry.key}" is both replaced and restated. Give it one or the other.`,
+      );
+    }
+
+    const current = check.restatableAnswers[entry.key];
+    if (current != null && entry.statement.trim() === current.trim()) {
+      reasons.push(
+        `The statement for "${entry.key}" is its answer unchanged, so it removes nothing. Restate an answer only when the statement differs from it.`,
+      );
+    }
+    return reasons;
+  });
+}
+
+/**
  * Why a result cannot be stored, written for the interviewer: it is sent back
  * verbatim. Empty when every supersession names a loose end that was asked
  * about and a decision that really is settled, every replacement names a
  * decision that was asked about and one listed after it, every deferral names
- * an own answer that was asked about and is not also replaced, and nothing
- * appears twice.
+ * an own answer that was asked about and is not also replaced, every
+ * restatement names an own answer that was asked about, is neither deferred
+ * nor replaced, and changes its text, and nothing appears twice.
  */
 export function supersessionRejectionReasons(
   input: SupersessionCheck & { result: FindSupersededResult },
@@ -354,17 +426,18 @@ export function supersessionRejectionReasons(
     ...looseEndRejectionReasons(input, input.result),
     ...replacementRejectionReasons(input, input.result).flat(),
     ...deferralRejectionReasons(input, input.result).flat(),
+    ...restatementRejectionReasons(input, input.result).flat(),
   ];
 }
 
 /**
- * The result with its invalid replacements and deferrals dropped, and a line
- * for the attempt log naming each dropped entry and why; null when nothing
- * was dropped.
+ * The result with its invalid replacements, deferrals and restatements
+ * dropped, and a line for the attempt log naming each dropped entry and why;
+ * null when nothing was dropped.
  *
  * Deferrals are judged against the replacements as the interviewer sent them,
- * so a decision named in both loses its deferral even when its replacement is
- * the one dropped.
+ * and restatements against both as sent, so a decision named in two lists
+ * loses the later list's entry even when the earlier one is itself dropped.
  */
 function keepValidEntries(
   check: SupersessionCheck,
@@ -372,11 +445,15 @@ function keepValidEntries(
 ): { result: FindSupersededResult; dropped: string | null } {
   const replacementReasons = replacementRejectionReasons(check, result);
   const deferralReasons = deferralRejectionReasons(check, result);
+  const restatementReasons = restatementRejectionReasons(check, result);
   const keptReplacements = result.replacements.filter(
     (_, index) => replacementReasons[index]!.length === 0,
   );
   const keptDeferrals = result.deferrals.filter(
     (_, index) => deferralReasons[index]!.length === 0,
+  );
+  const keptRestatements = result.restatements.filter(
+    (_, index) => restatementReasons[index]!.length === 0,
   );
   const droppedReplacements = result.replacements.flatMap((entry, index) =>
     replacementReasons[index]!.length === 0
@@ -390,6 +467,11 @@ function keepValidEntries(
       ? []
       : [`"${entry.key}" (${deferralReasons[index]!.join(" ")})`],
   );
+  const droppedRestatements = result.restatements.flatMap((entry, index) =>
+    restatementReasons[index]!.length === 0
+      ? []
+      : [`"${entry.key}" (${restatementReasons[index]!.join(" ")})`],
+  );
   const parts = [
     droppedReplacements.length === 0
       ? null
@@ -397,12 +479,16 @@ function keepValidEntries(
     droppedDeferrals.length === 0
       ? null
       : `${droppedDeferrals.length === 1 ? "this deferral" : "these deferrals"}: ${droppedDeferrals.join("; ")}`,
+    droppedRestatements.length === 0
+      ? null
+      : `${droppedRestatements.length === 1 ? "this restatement" : "these restatements"}: ${droppedRestatements.join("; ")}`,
   ].filter((part): part is string => part != null);
   return {
     result: {
       ...result,
       replacements: keptReplacements,
       deferrals: keptDeferrals,
+      restatements: keptRestatements,
     },
     dropped:
       parts.length === 0
@@ -451,6 +537,9 @@ async function scan(
   const replaceableKeys = replaceable.map(portKey);
   const laterKeys = laterKeysOf(rows);
   const deferrableKeys = deferrable.map(portKey);
+  // The same own answers are checked for a restatement: one selection, so the
+  // two lists can never disagree.
+  const restatableKeys = deferrable.map(portKey);
   const states = deriveTreeStates(treeFacts(rows));
   const settledRows = rows.filter((row) => states.get(row.id) === "settled");
   const check: SupersessionCheck = {
@@ -458,6 +547,10 @@ async function scan(
     replaceableKeys,
     laterKeys,
     deferrableKeys,
+    restatableKeys,
+    restatableAnswers: Object.fromEntries(
+      deferrable.map((row) => [portKey(row), row.currentAnswer ?? ""]),
+    ),
     settledKeys: settledRows.map(portKey),
     dispositionedKeys: settledRows
       .filter((row) => row.answerKind === "dispositioned")
@@ -493,6 +586,7 @@ async function scan(
           replaceableKeys,
           laterKeys,
           deferrableKeys,
+          restatableKeys,
           rejectionReason: attempt.rejectionReason,
         },
         attempt.observer,
@@ -500,9 +594,9 @@ async function scan(
     },
     reasonsToRefuse: (result) => {
       const reasons = supersessionRejectionReasons({ ...check, result });
-      // On the last attempt, invalid replacements and deferrals alone no
-      // longer fail the scan: the valid entries are kept and the invalid ones
-      // dropped below. Invalid loose-end entries still do.
+      // On the last attempt, invalid replacements, deferrals and restatements
+      // alone no longer fail the scan: the valid entries are kept and the
+      // invalid ones dropped below. Invalid loose-end entries still do.
       const lastAttempt = attemptsAsked > MAX_TURN_RETRIES;
       if (lastAttempt && looseEndRejectionReasons(check, result).length === 0) {
         return [];
@@ -563,6 +657,21 @@ async function scan(
       .update(schema.decisions)
       .set({ deferralReason: entry.reason, updatedAt: now })
       .where(eq(schema.decisions.id, deferredId));
+  }
+
+  for (const entry of turn.result.restatements) {
+    const restatedId = idByKey.get(entry.key);
+    if (!restatedId) continue;
+
+    await db
+      .update(schema.decisions)
+      .set({
+        restatementText: entry.statement,
+        restatementNotes: entry.operatorNotes,
+        restatementReason: entry.reason,
+        updatedAt: now,
+      })
+      .where(eq(schema.decisions.id, restatedId));
   }
 
   return turn.conversationId;

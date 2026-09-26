@@ -10,6 +10,7 @@ import {
 } from "../server/interviewer/index.js";
 import {
   deferrableDecisions,
+  replaceableDecisions,
   supersessionRejectionReasons,
 } from "../server/supersession.js";
 import { describeDecisions } from "../server/tree.js";
@@ -155,6 +156,7 @@ function replacements(
         reason: "The later decision moves the data off the local disk.",
         ...entry,
       })),
+      restatements: [],
       deferrals: [],
     },
   };
@@ -169,7 +171,27 @@ function deferrals(...entries: { key: string; reason?: string }[]) {
     result: {
       supersessions: [],
       replacements: [],
+      restatements: [],
       deferrals: entries.map((entry) => ({ reason: DEFERRAL_REASON, ...entry })),
+    },
+  };
+}
+
+function restatements(
+  ...entries: {
+    key: string;
+    statement: string;
+    operatorNotes: string;
+    reason: string;
+  }[]
+) {
+  return {
+    kind: "find-superseded" as const,
+    result: {
+      supersessions: [],
+      replacements: [],
+      deferrals: [],
+      restatements: entries,
     },
   };
 }
@@ -191,6 +213,7 @@ function supersessions(
         ...entry,
       })),
       replacements: [],
+      restatements: [],
       deferrals: [],
     },
   };
@@ -747,6 +770,7 @@ describe("find-superseded", () => {
             },
             { replacedKey: "early", byKey: "early", reason: "Itself." },
           ],
+          restatements: [],
           deferrals: [],
         },
       };
@@ -816,6 +840,7 @@ describe("find-superseded", () => {
               reason: "The later decision moves the data off the local disk.",
             },
           ],
+          restatements: [],
           deferrals: [],
         },
       };
@@ -895,6 +920,8 @@ describe("find-superseded", () => {
           replaceableKeys: ["storage"],
           laterKeys: { storage: ["storage-location"] },
           deferrableKeys: [],
+          restatableKeys: [],
+          restatableAnswers: {},
           settledKeys: ["storage", "storage-location"],
           dispositionedKeys: [],
           repoEstablishedKeys: [],
@@ -1166,6 +1193,7 @@ describe("find-superseded", () => {
           replacements: [
             { replacedKey: "hold", byKey: "disputes", reason: "Disputes changed it." },
           ],
+          restatements: [],
           deferrals: [{ key: "hold", reason: DEFERRAL_REASON }],
         },
       };
@@ -1236,13 +1264,19 @@ describe("find-superseded", () => {
       result: {
         replacements: { replacedKey: string; byKey: string; reason: string }[];
         deferrals: { key: string; reason: string }[];
+        restatements?: {
+          key: string;
+          statement: string;
+          operatorNotes: string;
+          reason: string;
+        }[];
       },
     ) {
       scriptInterviewer([
         DONE_PROPOSAL,
         ...Array.from({ length: MAX_TURN_RETRIES + 1 }, () => ({
           kind: "find-superseded" as const,
-          result: { supersessions: [], ...result },
+          result: { supersessions: [], restatements: [], ...result },
         })),
       ]);
 
@@ -1350,6 +1384,7 @@ describe("find-superseded", () => {
             },
           ],
           replacements: [],
+          restatements: [],
           deferrals: [{ key: "shape", reason: DEFERRAL_REASON }],
         },
       };
@@ -1396,6 +1431,8 @@ describe("find-superseded", () => {
           replaceableKeys: [],
           laterKeys: {},
           deferrableKeys,
+          restatableKeys: deferrableKeys,
+          restatableAnswers: {},
           settledKeys: rows.map(portKey),
           dispositionedKeys: [],
           repoEstablishedKeys: [],
@@ -1407,6 +1444,584 @@ describe("find-superseded", () => {
       expect(
         findSupersededResultSchema.parse({ supersessions: [], replacements: [] })
           .deferrals,
+      ).toEqual([]);
+    });
+  });
+
+  describe("own answers that hold more than the decision: which are checked", () => {
+    async function sessionRows(sessionId: string) {
+      return getDb()
+        .select()
+        .from(schema.decisions)
+        .where(eq(schema.decisions.sessionId, sessionId))
+        .orderBy(schema.decisions.createdAt, schema.decisions.id);
+    }
+
+    const created = (second: number) =>
+      `2026-08-01T00:00:${String(second).padStart(2, "0")}.000Z`;
+
+    /**
+     * own and late-own: own answers, own settled first. recommended: an
+     * accepted recommendation. restated: an own answer settled before
+     * late-own, with a restatement pending.
+     */
+    async function aTreeWithAPendingRestatement(sessionId: string) {
+      await aSettledDecision(sessionId, "own", T1, { createdAt: created(0) });
+      await aSettledDecision(sessionId, "recommended", T1, {
+        answerKind: "accepted-recommendation",
+        createdAt: created(1),
+      });
+      await aSettledDecision(sessionId, "restated", T1, {
+        currentAnswer: "Stirpe. Claude, double-check the fee table.",
+        restatementText: "Stripe.",
+        restatementNotes: "Claude, double-check the fee table.",
+        restatementReason: "Took out a note to the AI.",
+        createdAt: created(2),
+      });
+      await aSettledDecision(sessionId, "late-own", T2, { createdAt: created(3) });
+    }
+
+    it("skips a pending restatement in the deferrable and the replaceable lists", async () => {
+      const session = await aSession();
+      await aTreeWithAPendingRestatement(session.id);
+      const rows = await sessionRows(session.id);
+
+      expect(deferrableDecisions(rows).map(portKey)).toEqual(["own", "late-own"]);
+      // Settled before late-own, so replaceable but for the restatement.
+      expect(replaceableDecisions(rows).map(portKey)).toEqual([
+        "own",
+        "recommended",
+      ]);
+    });
+
+    it("sends restatableKeys equal to deferrableKeys, in tree order, and leaves a pending restatement out of all three lists", async () => {
+      const session = await aSession();
+      await aTreeWithAPendingRestatement(session.id);
+      const interviewer = scriptInterviewer([DONE_PROPOSAL, restatements()]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      const request = interviewer.requests[1] as FindSupersededRequest;
+      expect(request).toMatchObject({
+        kind: "find-superseded",
+        replaceableKeys: ["own", "recommended"],
+        deferrableKeys: ["own", "late-own"],
+        restatableKeys: ["own", "late-own"],
+      });
+      expect(request.restatableKeys).toEqual(request.deferrableKeys);
+    });
+  });
+
+  describe("own answers that hold more than the decision: what comes back", () => {
+    const PROVIDER_ANSWER = "Stirpe. Claude, double-check the fee table.";
+    const NOTES = "Claude, double-check the fee table.";
+    const REASON = "Fixed the spelling of Stripe and took out a note to the AI.";
+
+    /** Two own answers settled in one round: provider holds a typo and a note, service is clean. */
+    async function aTreeWithANoisyOwnAnswer(sessionId: string) {
+      await aSettledDecision(sessionId, "provider", T1, {
+        currentAnswer: PROVIDER_ANSWER,
+      });
+      await aSettledDecision(sessionId, "service", T1, {
+        currentAnswer: "Dog walking.",
+      });
+    }
+
+    const valid = {
+      key: "provider",
+      statement: "Stripe.",
+      operatorNotes: NOTES,
+      reason: REASON,
+    };
+
+    it("stores a valid restatement in the three columns and changes nothing else", async () => {
+      const session = await aSession();
+      await aTreeWithANoisyOwnAnswer(session.id);
+      scriptInterviewer([DONE_PROPOSAL, restatements(valid)]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(result.state).toBe("done-proposed");
+      expect(await readDecision("d-provider")).toMatchObject({
+        restatementText: "Stripe.",
+        restatementNotes: NOTES,
+        restatementReason: REASON,
+        currentAnswer: PROVIDER_ANSWER,
+        answerKind: "own-answer",
+        settledAt: T1,
+        deferralReason: null,
+        supersededById: null,
+        supersessionAnswer: null,
+        supersessionReason: null,
+        replacedById: null,
+        settledById: null,
+      });
+      expect(await readDecision("d-service")).toMatchObject({
+        restatementText: null,
+        restatementNotes: null,
+        restatementReason: null,
+        currentAnswer: "Dog walking.",
+      });
+      expect(await getDb().select().from(schema.decisionHistory)).toEqual([]);
+      // Still settled: a pending restatement never blocks confirmation.
+      expect(await listLooseEnds.run({ sessionId: session.id })).toEqual([]);
+    });
+
+    it("stores a typo-only restatement with empty notes", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "database", T1, {
+        currentAnswer: "Postgress with a read replca",
+      });
+      scriptInterviewer([
+        DONE_PROPOSAL,
+        restatements({
+          key: "database",
+          statement: "Postgres with a read replica",
+          operatorNotes: "",
+          reason: "Fixed two typos.",
+        }),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(await readDecision("d-database")).toMatchObject({
+        restatementText: "Postgres with a read replica",
+        restatementNotes: "",
+        currentAnswer: "Postgress with a read replca",
+      });
+    });
+
+    interface SentResult {
+      replacements?: { replacedKey: string; byKey: string; reason: string }[];
+      deferrals?: { key: string; reason: string }[];
+      restatements: (typeof valid)[];
+    }
+
+    function aTurnOf(result: SentResult) {
+      return {
+        kind: "find-superseded" as const,
+        result: {
+          supersessions: [],
+          replacements: [],
+          deferrals: [],
+          ...result,
+        },
+      };
+    }
+
+    /**
+     * Sends one result on every attempt, so the last one is judged by the
+     * last-retry drop, and returns the attempt log's closing line.
+     */
+    async function closingLineOf(sessionId: string, result: SentResult) {
+      scriptInterviewer([
+        DONE_PROPOSAL,
+        ...Array.from({ length: MAX_TURN_RETRIES + 1 }, () => aTurnOf(result)),
+      ]);
+
+      const done = await requestNextRound.run({ sessionId });
+
+      expect(done.state).toBe("done-proposed");
+      expect(await getSession.run({ id: sessionId })).toMatchObject({
+        turnErrorCode: null,
+      });
+      const recorded = await findLatestTurn({
+        sessionId,
+        turnKind: "find-superseded",
+      });
+      expect(recorded?.outcome).toBe("succeeded");
+      const attempts = recorded!.runs[0]!.attempts;
+      expect(attempts).toHaveLength(MAX_TURN_RETRIES + 1);
+      return attempts[attempts.length - 1];
+    }
+
+    /**
+     * One invalid kind of restatement: first sent once and answered by a
+     * valid retry, then, in a fresh session over the same tree, sent on every
+     * attempt. Returns the rejection reason the first retry carried, and the
+     * attempt log's closing line once the last retry drops the invalid entry.
+     */
+    async function whenSent(
+      treeFor: (sessionId: string) => Promise<void>,
+      result: SentResult,
+    ) {
+      const first = await aSession();
+      await treeFor(first.id);
+      const asked = scriptInterviewer([
+        DONE_PROPOSAL,
+        aTurnOf(result),
+        restatements(valid),
+      ]);
+      await requestNextRound.run({ sessionId: first.id });
+      expect(asked.requests).toHaveLength(3);
+      const rejectionReason = (asked.requests[2] as FindSupersededRequest)
+        .rejectionReason;
+      resetInterviewer();
+
+      // Decision ids are fixed by key, so the first tree makes way.
+      await getDb()
+        .delete(schema.decisions)
+        .where(eq(schema.decisions.sessionId, first.id));
+      const second = await aSession();
+      await treeFor(second.id);
+      const lastLine = await closingLineOf(second.id, result);
+      return { rejectionReason, lastLine };
+    }
+
+    it("a key the request never listed: rejected and asked again, then dropped with the valid entry kept", async () => {
+      const { rejectionReason, lastLine } = await whenSent(aTreeWithANoisyOwnAnswer, {
+        restatements: [
+          valid,
+          { ...valid, key: "invented", statement: "Something else." },
+        ],
+      });
+
+      expect(rejectionReason).toContain(
+        '"invented" is not one of the own answers to check for a restatement. Rule only on the ones listed.',
+      );
+      expect(await readDecision("d-provider")).toMatchObject({
+        restatementText: "Stripe.",
+        restatementNotes: NOTES,
+        restatementReason: REASON,
+      });
+      expect(lastLine).toMatchObject({
+        kind: "success",
+        reason:
+          'Kept the valid entries after the last retry. Dropped this restatement: "invented" ("invented" is not one of the own answers to check for a restatement. Rule only on the ones listed.)',
+      });
+    });
+
+    it("an accepted recommendation, which is never listed: rejected, then dropped", async () => {
+      const { rejectionReason, lastLine } = await whenSent(
+        async (sessionId) => {
+          await aTreeWithANoisyOwnAnswer(sessionId);
+          await aSettledDecision(sessionId, "tone", T1, {
+            answerKind: "accepted-recommendation",
+            currentAnswer: "Warm, TBD by Claude",
+          });
+        },
+        {
+          restatements: [
+            valid,
+            { ...valid, key: "tone", statement: "Warm" },
+          ],
+        },
+      );
+
+      expect(rejectionReason).toContain(
+        '"tone" is not one of the own answers to check for a restatement.',
+      );
+      expect(await readDecision("d-tone")).toMatchObject({ restatementText: null });
+      expect(await readDecision("d-provider")).toMatchObject({
+        restatementText: "Stripe.",
+      });
+      expect(lastLine).toMatchObject({
+        reason:
+          'Kept the valid entries after the last retry. Dropped this restatement: "tone" ("tone" is not one of the own answers to check for a restatement. Rule only on the ones listed.)',
+      });
+    });
+
+    it("a decision restated twice: rejected, then the first kept and the second dropped", async () => {
+      const { rejectionReason, lastLine } = await whenSent(aTreeWithANoisyOwnAnswer, {
+        restatements: [
+          valid,
+          { ...valid, statement: "Stripe, with Adyen as backup." },
+        ],
+      });
+
+      expect(rejectionReason).toContain(
+        'Decision "provider" was restated twice. Give at most one restatement per decision.',
+      );
+      expect(await readDecision("d-provider")).toMatchObject({
+        restatementText: "Stripe.",
+      });
+      expect(lastLine).toMatchObject({
+        reason:
+          'Kept the valid entries after the last retry. Dropped this restatement: "provider" (Decision "provider" was restated twice. Give at most one restatement per decision.)',
+      });
+    });
+
+    it("a decision also flagged as a deferral: rejected, then the restatement dropped and the deferral kept", async () => {
+      const { rejectionReason, lastLine } = await whenSent(aTreeWithANoisyOwnAnswer, {
+        deferrals: [{ key: "service", reason: DEFERRAL_REASON }],
+        restatements: [
+          valid,
+          { ...valid, key: "service", statement: "Dog walking first." },
+        ],
+      });
+
+      expect(rejectionReason).toContain(
+        '"service" is both flagged as a deferral and restated. Give it one or the other.',
+      );
+      expect(await readDecision("d-service")).toMatchObject({
+        deferralReason: DEFERRAL_REASON,
+        restatementText: null,
+      });
+      expect(await readDecision("d-provider")).toMatchObject({
+        restatementText: "Stripe.",
+      });
+      expect(lastLine).toMatchObject({
+        reason:
+          'Kept the valid entries after the last retry. Dropped this restatement: "service" ("service" is both flagged as a deferral and restated. Give it one or the other.)',
+      });
+    });
+
+    it("a decision also replaced: rejected, then the restatement dropped and the replacement kept", async () => {
+      const { rejectionReason, lastLine } = await whenSent(
+        async (sessionId) => {
+          await aSettledDecision(sessionId, "provider", T1, {
+            currentAnswer: PROVIDER_ANSWER,
+          });
+          await aSettledDecision(sessionId, "payouts", T2, {
+            currentAnswer: "Adyen, for instant payouts.",
+          });
+        },
+        {
+          replacements: [
+            { replacedKey: "provider", byKey: "payouts", reason: "Payouts moved to Adyen." },
+          ],
+          restatements: [
+            valid,
+            {
+              key: "payouts",
+              statement: "Adyen.",
+              operatorNotes: "",
+              reason: "Trimmed to the choice.",
+            },
+          ],
+        },
+      );
+
+      expect(rejectionReason).toContain(
+        '"provider" is both replaced and restated. Give it one or the other.',
+      );
+      expect(await readDecision("d-provider")).toMatchObject({
+        supersededById: "d-payouts",
+        supersessionReason: "Payouts moved to Adyen.",
+        restatementText: null,
+      });
+      expect(await readDecision("d-payouts")).toMatchObject({
+        restatementText: "Adyen.",
+      });
+      expect(lastLine).toMatchObject({
+        reason:
+          'Kept the valid entries after the last retry. Dropped this restatement: "provider" ("provider" is both replaced and restated. Give it one or the other.)',
+      });
+    });
+
+    it("a statement that is the answer unchanged, whatever its notes: rejected, then dropped", async () => {
+      const { rejectionReason, lastLine } = await whenSent(aTreeWithANoisyOwnAnswer, {
+        restatements: [
+          valid,
+          {
+            key: "service",
+            statement: "  Dog walking.  ",
+            operatorNotes: "Claude, check this.",
+            reason: "Took out a note.",
+          },
+        ],
+      });
+
+      expect(rejectionReason).toContain(
+        'The statement for "service" is its answer unchanged, so it removes nothing. Restate an answer only when the statement differs from it.',
+      );
+      expect(await readDecision("d-service")).toMatchObject({
+        restatementText: null,
+        currentAnswer: "Dog walking.",
+      });
+      expect(await readDecision("d-provider")).toMatchObject({
+        restatementText: "Stripe.",
+      });
+      expect(lastLine).toMatchObject({
+        reason:
+          'Kept the valid entries after the last retry. Dropped this restatement: "service" (The statement for "service" is its answer unchanged, so it removes nothing. Restate an answer only when the statement differs from it.)',
+      });
+    });
+
+    it("after the last retry, names a dropped replacement, deferral and restatement in one line", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "provider", T1, {
+        currentAnswer: PROVIDER_ANSWER,
+      });
+      await aSettledDecision(session.id, "payouts", T2);
+
+      const last = await closingLineOf(session.id, {
+        replacements: [{ replacedKey: "provider", byKey: "provider", reason: "Itself." }],
+        deferrals: [{ key: "invented", reason: DEFERRAL_REASON }],
+        restatements: [{ ...valid, key: "ghost" }],
+      });
+
+      expect(last).toMatchObject({
+        kind: "success",
+        reason:
+          'Kept the valid entries after the last retry. Dropped this replacement: "provider" by "provider" ("provider" cannot replace itself.); and this deferral: "invented" ("invented" is not one of the own answers to check for a deferral. Rule only on the ones listed.); and this restatement: "ghost" ("ghost" is not one of the own answers to check for a restatement. Rule only on the ones listed.)',
+      });
+    });
+
+    /** provider, an own answer, and payouts, settled after it: provider is replaceable, deferrable and restatable. */
+    async function aTreeWhereProviderIsEverything(sessionId: string) {
+      await aSettledDecision(sessionId, "provider", T1, {
+        currentAnswer: PROVIDER_ANSWER,
+      });
+      await aSettledDecision(sessionId, "payouts", T2);
+    }
+
+    it("after the last retry, drops a restatement of a decision whose replacement, as sent, is itself dropped", async () => {
+      const session = await aSession();
+      await aTreeWhereProviderIsEverything(session.id);
+
+      const last = await closingLineOf(session.id, {
+        replacements: [
+          { replacedKey: "provider", byKey: "provider", reason: "Itself." },
+        ],
+        restatements: [valid],
+      });
+
+      expect(await readDecision("d-provider")).toMatchObject({
+        supersededById: null,
+        restatementText: null,
+      });
+      expect(last).toMatchObject({
+        reason:
+          'Kept the valid entries after the last retry. Dropped this replacement: "provider" by "provider" ("provider" cannot replace itself.); and this restatement: "provider" ("provider" is both replaced and restated. Give it one or the other.)',
+      });
+    });
+
+    it("after the last retry, drops a restatement of a decision whose deferral and replacement, as sent, are both dropped", async () => {
+      const session = await aSession();
+      await aTreeWhereProviderIsEverything(session.id);
+
+      const last = await closingLineOf(session.id, {
+        replacements: [
+          { replacedKey: "provider", byKey: "provider", reason: "Itself." },
+        ],
+        deferrals: [{ key: "provider", reason: DEFERRAL_REASON }],
+        restatements: [valid],
+      });
+
+      expect(await readDecision("d-provider")).toMatchObject({
+        supersededById: null,
+        deferralReason: null,
+        restatementText: null,
+      });
+      expect(last).toMatchObject({
+        reason:
+          'Kept the valid entries after the last retry. Dropped this replacement: "provider" by "provider" ("provider" cannot replace itself.); and this deferral: "provider" ("provider" is both replaced and flagged as a deferral. Give it one or the other.); and this restatement: "provider" ("provider" is both flagged as a deferral and restated. Give it one or the other. "provider" is both replaced and restated. Give it one or the other.)',
+      });
+    });
+
+    it("after the last retry, names two dropped restatements as these restatements", async () => {
+      const session = await aSession();
+      await aTreeWithANoisyOwnAnswer(session.id);
+
+      const last = await closingLineOf(session.id, {
+        replacements: [],
+        deferrals: [],
+        restatements: [
+          { ...valid, key: "ghost" },
+          { ...valid, key: "phantom" },
+        ],
+      });
+
+      expect(last).toMatchObject({
+        reason:
+          'Kept the valid entries after the last retry. Dropped these restatements: "ghost" ("ghost" is not one of the own answers to check for a restatement. Rule only on the ones listed.); "phantom" ("phantom" is not one of the own answers to check for a restatement. Rule only on the ones listed.)',
+      });
+    });
+
+    it("seam: every restatement shape the prompt describes passes the check for a request built from the same rows", async () => {
+      const session = await aSession();
+      // The example table: one clean answer, and one for each shape.
+      await aSettledDecision(session.id, "clean", T1, {
+        currentAnswer: "Postgres, with a read replica.",
+        createdAt: "2026-08-01T00:00:00.000Z",
+      });
+      await aSettledDecision(session.id, "typo", T1, {
+        currentAnswer: "Postgress with a read replca",
+        createdAt: "2026-08-01T00:00:01.000Z",
+      });
+      await aSettledDecision(session.id, "typo-and-notes", T1, {
+        currentAnswer: "Stirpe. Claude, double-check the fee table.",
+        createdAt: "2026-08-01T00:00:02.000Z",
+      });
+      await aSettledDecision(session.id, "notes", T1, {
+        currentAnswer:
+          "Stripe. Claude, double-check the fee table before you write the ticket.",
+        createdAt: "2026-08-01T00:00:03.000Z",
+      });
+      await aSettledDecision(session.id, "note-to-self", T1, {
+        currentAnswer: "48 h hold (ask me again if legal pushes back)",
+        createdAt: "2026-08-01T00:00:04.000Z",
+      });
+      const rows = await getDb()
+        .select()
+        .from(schema.decisions)
+        .where(eq(schema.decisions.sessionId, session.id))
+        .orderBy(schema.decisions.createdAt, schema.decisions.id);
+      const restatableKeys = deferrableDecisions(rows).map(portKey);
+
+      // What the prompt asks for: the key, the statement with typos fixed and
+      // nothing added, the removed text verbatim or "", and what was removed.
+      const parsed = findSupersededResultSchema.parse({
+        restatements: [
+          {
+            key: "typo",
+            statement: "Postgres with a read replica",
+            operatorNotes: "",
+            reason: "Fixed two typos.",
+          },
+          {
+            key: "typo-and-notes",
+            statement: "Stripe.",
+            operatorNotes: "Claude, double-check the fee table.",
+            reason: "Fixed a typo and took out a note to the AI.",
+          },
+          {
+            key: "notes",
+            statement: "Stripe.",
+            operatorNotes:
+              "Claude, double-check the fee table before you write the ticket.",
+            reason: "Took out an instruction to the AI.",
+          },
+          {
+            key: "note-to-self",
+            statement: "48 h hold",
+            operatorNotes: "ask me again if legal pushes back",
+            reason: "Took out a note to self.",
+          },
+        ],
+      });
+
+      expect(restatableKeys).toEqual([
+        "clean",
+        "typo",
+        "typo-and-notes",
+        "notes",
+        "note-to-self",
+      ]);
+      expect(
+        supersessionRejectionReasons({
+          askedKeys: [],
+          replaceableKeys: [],
+          laterKeys: {},
+          deferrableKeys: restatableKeys,
+          restatableKeys,
+          restatableAnswers: Object.fromEntries(
+            rows.map((row) => [portKey(row), row.currentAnswer ?? ""]),
+          ),
+          settledKeys: rows.map(portKey),
+          dispositionedKeys: [],
+          repoEstablishedKeys: [],
+          result: parsed,
+        }),
+      ).toEqual([]);
+      // A result recorded before restatements existed still parses.
+      expect(
+        findSupersededResultSchema.parse({
+          supersessions: [],
+          replacements: [],
+          deferrals: [],
+        }).restatements,
       ).toEqual([]);
     });
   });

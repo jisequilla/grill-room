@@ -585,7 +585,7 @@ describe("project context on every turn", () => {
       nothingMore,
       {
         kind: "find-superseded",
-        result: { supersessions: [], replacements: [], deferrals: [] },
+        result: { supersessions: [], replacements: [], deferrals: [], restatements: [] },
       },
       {
         kind: "review-stale",

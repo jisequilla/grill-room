@@ -317,6 +317,103 @@ describe("what the adapter sends for a find-superseded check", () => {
     expect(prompt).not.toContain("Decisions to check");
     expect(prompt).not.toContain("## Also:");
   });
+
+  const RESTATEMENT_BODY = [
+    "Own answers to check: vetting, hold",
+    "",
+    "Each decision above was settled with the user's own words, and its answer is",
+    "exported as the decision for build agents to read. Return one entry in",
+    "`restatements` for each answer that holds text that is not part of the",
+    "decision: an instruction or question addressed to the AI or the interviewer,",
+    "a note to self, or an obvious typo. Name the decision in `key`.",
+    "",
+    "`statement` is the decision in the owner's words, with typos fixed, nothing",
+    "added and the meaning unchanged. `operatorNotes` is the text you removed,",
+    "verbatim, or `\"\"` when you only fixed typos. Say in `reason` what you removed",
+    "or fixed.",
+    "",
+    "Be conservative: an answer that is already a clean decision gets no entry,",
+    "and an empty list is the right answer when every own answer is one.",
+  ].join("\n");
+
+  const ALSO_RESTATEMENT = `## Also: own answers that hold more than the decision\n\n${RESTATEMENT_BODY}`;
+
+  async function restatementPromptFor(
+    looseEndKeys: string[],
+    replaceableKeys: string[],
+    deferrableKeys: string[],
+    restatableKeys: string[],
+  ) {
+    const runner = recordingRunner([
+      ok(anEnvelope({ structured_output: aFindSupersededResult() })),
+    ]);
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).findSuperseded(
+      aFindSupersededRequest({
+        looseEndKeys,
+        replaceableKeys,
+        laterKeys: replaceableKeys.length > 0 ? LATER_KEYS : {},
+        deferrableKeys,
+        restatableKeys,
+      }),
+    );
+    return valueOf(runner.invocations[0].args, "-p") as string;
+  }
+
+  it("sends no restatement section when no own answer is restatable", async () => {
+    const prompt = await restatementPromptFor(
+      ["storage", "tone"],
+      ["shape", "storage"],
+      ["vetting", "hold"],
+      [],
+    );
+
+    expect(prompt).not.toContain("restatements");
+    expect(prompt).not.toContain("hold more than the decision");
+  });
+
+  it("appends the restatement section after the other three, leaving their text byte for byte as it was", async () => {
+    const lists: [string[], string[], string[]] = [
+      ["storage", "tone"],
+      ["shape", "storage"],
+      ["vetting", "hold"],
+    ];
+    const without = await restatementPromptFor(...lists, []);
+    const withRestatements = await restatementPromptFor(...lists, [
+      "vetting",
+      "hold",
+    ]);
+
+    expect(withRestatements).toContain(
+      `${LOOSE_END_SECTION}\n\n## Also: settled decisions a later decision replaced\n\n${REPLACEMENT_BODY}\n\n## Also: own answers that defer the question instead of deciding it\n\n${DEFERRAL_BODY}\n\n${ALSO_RESTATEMENT}`,
+    );
+    expect(withRestatements.replace(`\n\n${ALSO_RESTATEMENT}`, "")).toBe(without);
+  });
+
+  it("heads the restatement section 'Also' after any single earlier section", async () => {
+    for (const [looseEnds, replaceable, deferrable] of [
+      [["storage", "tone"], [], []],
+      [[], ["shape", "storage"], []],
+      [[], [], ["vetting", "hold"]],
+    ] as [string[], string[], string[]][]) {
+      const prompt = await restatementPromptFor(looseEnds, replaceable, deferrable, [
+        "vetting",
+        "hold",
+      ]);
+      expect(prompt).toContain(`\n\n${ALSO_RESTATEMENT}`);
+      expect(prompt).not.toContain("## Your task: find own answers that hold more");
+    }
+  });
+
+  it("sends the restatement section alone, as the task, when there is nothing else to check", async () => {
+    const prompt = await restatementPromptFor([], [], [], ["vetting", "hold"]);
+
+    expect(prompt).toContain(
+      `## Your task: find own answers that hold more than the decision\n\n${RESTATEMENT_BODY}`,
+    );
+    expect(prompt).not.toContain("Loose ends to judge");
+    expect(prompt).not.toContain("Decisions to check");
+    expect(prompt).not.toContain("## Also:");
+  });
 });
 
 /**

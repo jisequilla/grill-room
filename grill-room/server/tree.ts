@@ -331,14 +331,25 @@ export const CLEARED_SUPERSESSION = {
 } as const;
 
 /**
- * A decision's own pending proposals: a supersession, and a deferral. Both
- * are claims about the answer the decision holds, so a write that changes or
- * clears that answer drops them in the same update, beside
+ * A decision's own pending restatement: the clean statement proposed for its
+ * own answer, the notes it would take out, and why. Names no other decision.
+ */
+export const CLEARED_RESTATEMENT = {
+  restatementText: null,
+  restatementNotes: null,
+  restatementReason: null,
+} as const;
+
+/**
+ * A decision's own pending proposals: a supersession, a deferral and a
+ * restatement. Each is a claim about the answer the decision holds, so a write
+ * that changes or clears that answer drops them in the same update, beside
  * {@link CLEARED_ANSWER_LINKS}.
  */
 export const CLEARED_PROPOSAL = {
   ...CLEARED_SUPERSESSION,
   deferralReason: null,
+  ...CLEARED_RESTATEMENT,
 } as const;
 
 /** A stored decision, exactly as the table holds it. */
@@ -453,6 +464,16 @@ export interface DecisionView {
    * answer changes while it is pending.
    */
   deferralReason: string | null;
+  /**
+   * The clean decision statement proposed for this settled own answer,
+   * pending the user's acceptance, or null. Nothing about the answer changes
+   * while it is pending.
+   */
+  restatementText: string | null;
+  /** The text that statement takes out of the answer, or `""` for typos only. */
+  restatementNotes: string | null;
+  /** The interviewer's reason for the restatement. */
+  restatementReason: string | null;
   /** The settled decision that replaced this one, once the user accepted it. */
   replacedBy: DecisionReplacedBy | null;
   /** The decision whose answer settled this former loose end. */
@@ -566,6 +587,9 @@ export function describeDecisions(
         }
       : null,
     deferralReason: row.deferralReason,
+    restatementText: row.restatementText,
+    restatementNotes: row.restatementNotes,
+    restatementReason: row.restatementReason,
     replacedBy: row.replacedById
       ? {
           id: row.replacedById,
@@ -604,6 +628,11 @@ export interface PreviousAnswerView {
   text: string | null;
   kind: DecisionAnswerKind | null;
   interviewerReason: string | null;
+  /**
+   * What an accepted restatement took out of this answer (`""` when nothing),
+   * or null for every other entry. App only.
+   */
+  operatorNotes: string | null;
   recordedAt: string;
   questionTitle: string;
   questionBody: string;
@@ -617,6 +646,7 @@ export function describeHistoryEntry(
     text: row.answer,
     kind: row.answerKind,
     interviewerReason: row.interviewerReason,
+    operatorNotes: row.operatorNotes,
     recordedAt: row.recordedAt,
     questionTitle: row.questionTitle,
     questionBody: row.questionBody,

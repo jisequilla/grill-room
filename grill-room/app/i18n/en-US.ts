@@ -386,6 +386,15 @@ const messages = {
     acceptDeferralFailed: "Could not turn that answer into a deferral.",
     dismissDeferralFailed: "Could not dismiss that suggestion.",
 
+    restatementProposalsHeading: "Answers to restate",
+    restatementProposed: "Proposed decision statement",
+    operatorNotesLabel: "Kept for you, not exported",
+    acceptRestatement: "Accept",
+    editRestatement: "Edit",
+    dismissRestatement: "Dismiss",
+    acceptRestatementFailed: "Could not restate that answer.",
+    dismissRestatementFailed: "Could not dismiss that suggestion.",
+
     reasonUnknown: "You said you don't know",
     reasonDeferred: "Deferred",
     reasonPrototypeFlagged: "Waiting for a prototype",

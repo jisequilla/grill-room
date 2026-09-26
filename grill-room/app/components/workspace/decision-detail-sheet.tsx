@@ -173,6 +173,16 @@ export function DecisionDetailSheet({
                         {entry.text}
                       </p>
                     ) : null}
+                    {entry.operatorNotes ? (
+                      <div className="mt-1.5" data-testid="history-operator-notes">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          {t("workspace.operatorNotesLabel")}
+                        </p>
+                        <p className="text-xs break-words whitespace-pre-wrap text-muted-foreground">
+                          {entry.operatorNotes}
+                        </p>
+                      </div>
+                    ) : null}
                     {entry.interviewerReason ? (
                       <p className="mt-1.5 text-xs text-muted-foreground">
                         <span className="font-medium">
