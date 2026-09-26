@@ -149,25 +149,9 @@ check: typecheck test e2e
 doctor:
     pnpm doctor
 
-# Remove Agent-tool worktrees whose branch is merged into main (dirty or unmerged ones are kept and reported)
+# Remove Agent-tool worktrees whose branch is merged into main (dirty, unmerged, locked or fresh ones are kept and reported)
 prune-worktrees:
-    #!/usr/bin/env bash
-    cd "$(git rev-parse --show-toplevel)"
-    git fetch -q origin main
-    shopt -s nullglob
-    for path in .claude/worktrees/agent-*; do
-      branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
-      if ! git merge-base --is-ancestor "$branch" main && ! git merge-base --is-ancestor "$branch" origin/main; then
-        echo "kept    $path ($branch is not merged)"
-        continue
-      fi
-      if [ -n "$(git -C "$path" status --porcelain)" ]; then
-        echo "kept    $path (uncommitted changes)"
-        continue
-      fi
-      git worktree remove "$path" && git branch -D "$branch" >/dev/null && echo "removed $path ($branch)"
-    done
-    git worktree prune
+    bash "$(git rev-parse --show-toplevel)/scripts/prune-worktrees.sh" "$(git rev-parse --show-toplevel)"
 
 # PID of the live process holding the PGlite lock, empty if none
 _owner:
