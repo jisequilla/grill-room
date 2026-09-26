@@ -476,6 +476,15 @@ const messages = {
 
     answeringMode: "Answering mode",
 
+    moreActions: "More actions",
+    batchActionMenu: "Apply a batch of changes…",
+    addDecisionMenu: "Add my own decision…",
+
+    treeSheetTrigger: "Tree · {{owed}} owed",
+    treeSheetTriggerClear: "Tree",
+    treeSheetDescription:
+      "Every decision in this session and what it depends on.",
+
     treeEmpty: "No decisions yet.",
     treeSettled: "{{settled}} of {{total}} settled",
     treeLooseEnds_one: "1 loose end",

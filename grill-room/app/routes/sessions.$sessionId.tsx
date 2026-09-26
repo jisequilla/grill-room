@@ -22,17 +22,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AddDecisionDialog } from "@/components/workspace/add-decision-dialog";
 import { AnsweringModeSwitch } from "@/components/workspace/answering-mode-switch";
-import { ApplyBatchDialog } from "@/components/workspace/batch/apply-batch-dialog";
 import { BriefStrip } from "@/components/workspace/brief-strip";
 import { DecisionDetailSheet } from "@/components/workspace/decision-detail-sheet";
 import { DesignTree } from "@/components/workspace/design-tree";
 import { DocsFolderChip } from "@/components/workspace/docs-folder-chip";
+import { HeaderOverflowMenu } from "@/components/workspace/header-overflow-menu";
 import { ReadinessPanel, ScoutReportPanel } from "@/components/workspace/readiness-panel";
 import { RoundHistory } from "@/components/workspace/round-history";
 import { RoundPanel } from "@/components/workspace/round-panel";
 import { SessionIdea } from "@/components/workspace/session-idea";
 import { SessionModelControl } from "@/components/workspace/session-model-control";
 import { TreeFooter } from "@/components/workspace/tree-footer";
+import { TreeSheet, TreeSheetTrigger } from "@/components/workspace/tree-sheet";
 import { APP_TITLE } from "@/lib/app-config";
 import {
   actionErrorCode,
@@ -113,6 +114,7 @@ export default function SessionWorkspaceRoute() {
   const enabled = id.length > 0;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [treeSheetOpen, setTreeSheetOpen] = useState(false);
 
   const { data: session, isLoading: sessionLoading } = useActionQuery(
     "get-session",
@@ -120,7 +122,18 @@ export default function SessionWorkspaceRoute() {
     { enabled },
   );
 
-  useSetPageTitle(session?.title ?? t("pages.sessionWorkspaceTitle"));
+  // One line whatever the width: the actions take what they need and the title
+  // truncates in the rest, with the whole of it kept in `title`.
+  const pageTitle = session?.title ?? t("pages.sessionWorkspaceTitle");
+  useSetPageTitle(
+    <h1
+      className="min-w-0 truncate text-lg font-semibold tracking-tight"
+      title={pageTitle}
+      data-testid="session-title"
+    >
+      {pageTitle}
+    </h1>,
+  );
 
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: ["action"] });
@@ -363,6 +376,7 @@ export default function SessionWorkspaceRoute() {
       ) ?? null;
 
   function selectDecision(decision: TreeDecision) {
+    setTreeSheetOpen(false);
     openDecision(decision.id);
   }
 
@@ -371,15 +385,31 @@ export default function SessionWorkspaceRoute() {
     setDetailOpen(true);
   }
 
+  const looseEndCount = looseEnds?.length ?? 0;
+
+  // At `lg` and wider: the mode switch and "Add my own decision", then `…`.
+  // Below `lg`: the tree button and `…`, which then holds every action.
+  // Both sets stay mounted and CSS picks one, as the sidebar and its
+  // hamburger do.
   useSetHeaderActions(
     session ? (
-      <div className="flex items-center gap-2">
-        <AnsweringModeSwitch
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="hidden items-center gap-2 lg:flex">
+          <AnsweringModeSwitch
+            sessionId={id}
+            answeringMode={session.answeringMode as SessionAnsweringMode}
+          />
+          <AddDecisionDialog sessionId={id} />
+        </div>
+        <TreeSheetTrigger
+          className="lg:hidden"
+          looseEnds={looseEndCount}
+          onOpen={() => setTreeSheetOpen(true)}
+        />
+        <HeaderOverflowMenu
           sessionId={id}
           answeringMode={session.answeringMode as SessionAnsweringMode}
         />
-        <ApplyBatchDialog sessionId={id} />
-        <AddDecisionDialog sessionId={id} />
       </div>
     ) : null,
   );
@@ -394,6 +424,27 @@ export default function SessionWorkspaceRoute() {
   }
 
   if (!session) return null;
+
+  const treePanel = (
+    <>
+      <DesignTree
+        decisions={decisions}
+        selectedId={selectedId}
+        onSelect={selectDecision}
+      />
+      {decisions.length > 0 ? (
+        <TreeFooter
+          settled={
+            decisions.filter((decision) => decision.state === "settled").length
+          }
+          total={
+            decisions.filter((decision) => decision.withdrawnAt === null).length
+          }
+          looseEnds={looseEndCount}
+        />
+      ) : null}
+    </>
+  );
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -501,34 +552,21 @@ export default function SessionWorkspaceRoute() {
 
           {/* The column is sized to reach the bottom of the viewport from
               where it starts unscrolled, which is the state this page is
-              read in: the centre column is what scrolls. */}
-          <aside className="flex min-w-0 flex-col lg:sticky lg:top-6 lg:h-[calc(100dvh-15rem)] lg:self-start">
+              read in: the centre column is what scrolls. Below `lg` it is
+              hidden and the tree opens as a sheet from the header. */}
+          <aside className="hidden min-w-0 flex-col lg:sticky lg:top-6 lg:flex lg:h-[calc(100dvh-15rem)] lg:self-start">
             <h3 className="pb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
               {t("workspace.treeHeading")}
             </h3>
             <div className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card/50">
-              <DesignTree
-                decisions={decisions}
-                selectedId={selectedId}
-                onSelect={selectDecision}
-              />
-              {decisions.length > 0 ? (
-                <TreeFooter
-                  settled={
-                    decisions.filter((decision) => decision.state === "settled")
-                      .length
-                  }
-                  total={
-                    decisions.filter(
-                      (decision) => decision.withdrawnAt === null,
-                    ).length
-                  }
-                  looseEnds={looseEnds?.length ?? 0}
-                />
-              ) : null}
+              {treePanel}
             </div>
           </aside>
         </div>
+
+        <TreeSheet open={treeSheetOpen} onOpenChange={setTreeSheetOpen}>
+          {treePanel}
+        </TreeSheet>
 
         <DecisionDetailSheet
           decision={selected}

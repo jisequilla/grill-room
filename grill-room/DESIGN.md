@@ -88,8 +88,11 @@ no avatars, no gradient hero, no mascot.
 
 - **Shell.** A persistent left rail (sidebar) and a content canvas. The header
   carries the page title (with a project breadcrumb on a session), the state,
-  and at most two visible actions; everything else collapses into an overflow
-  menu (`…`) below `lg`.
+  and at most two visible actions; everything else goes into an overflow menu
+  (`…`). The session header shows the answering-mode switch and "Add my own
+  decision", then `…` holding "Apply a batch of changes". Below `lg` the
+  visible actions collapse into `…` too, beside the ledger's sheet button, and
+  the title is one truncated line that keeps at least 60% of the header.
 - **Session workspace ("the bench").** Two columns at `lg` and wider: the
   bench (flexible) and the ledger (the design tree, 22rem, 26rem at `2xl`).
   - The bench always opens on the current ask: the round, the done panel, or
@@ -110,9 +113,9 @@ no avatars, no gradient hero, no mascot.
 - **Project page.** A header with the name, git root, branch and HEAD. Then a
   one-line configuration strip (verify command, tracker, delivery recipe,
   review, visibility), then tabs: Sessions, Exports, Settings.
-- **Narrow width (< 768px).** Single column. The sidebar is a sheet. Header
-  actions collapse to one overflow button, so the session title always keeps
-  at least 60% of the header. Choice rows keep full width. Steering moves wrap
+- **Narrow width (< 768px).** Single column. The sidebar is a sheet. The
+  header collapse and the ledger sheet already apply from below `lg` (see
+  Shell and Ledger). Choice rows keep full width. Steering moves wrap
   in a 2×2 grid. The submit bar spans the width, with the progress count above
   the button.
 

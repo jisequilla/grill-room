@@ -22,10 +22,27 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 
-/** A decision the interviewer never asked about, added by the user. */
-export function AddDecisionDialog({ sessionId }: { sessionId: string }) {
+/**
+ * A decision the interviewer never asked about, added by the user.
+ *
+ * Uncontrolled, it renders its own trigger button. Given `open` and
+ * `onOpenChange` (the header's overflow menu), it renders only the dialog.
+ */
+export function AddDecisionDialog({
+  sessionId,
+  open: controlledOpen,
+  onOpenChange,
+}: {
+  sessionId: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const controlled = controlledOpen !== undefined;
+  const open = controlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (next: boolean) =>
+    controlled ? onOpenChange?.(next) : setUncontrolledOpen(next);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
 
@@ -50,12 +67,14 @@ export function AddDecisionDialog({ sessionId }: { sessionId: string }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="sm">
-          <IconPlus className="size-4" />
-          {t("workspace.addDecision")}
-        </Button>
-      </DialogTrigger>
+      {controlled ? null : (
+        <DialogTrigger asChild>
+          <Button type="button" variant="outline" size="sm">
+            <IconPlus className="size-4" />
+            {t("workspace.addDecision")}
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t("workspace.addDecision")}</DialogTitle>

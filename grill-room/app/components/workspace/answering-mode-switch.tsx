@@ -14,6 +14,31 @@ import {
 } from "@shared/session-constants";
 
 /**
+ * Switch a session's answering mode, ignoring a pick of the mode it already
+ * has or one made while the last switch is still saving. Shared by the header
+ * switch and the overflow menu's radio items, so both write the same way.
+ */
+export function useSetAnsweringMode(
+  sessionId: string,
+  answeringMode: SessionAnsweringMode,
+) {
+  const t = useT();
+  const { mutate, isPending } = useActionMutation(
+    "set-session-answering-mode",
+    {
+      onError: (error: unknown) => {
+        toast.error(actionErrorMessage(error) ?? t("workspace.draftFailed"));
+      },
+    },
+  );
+
+  return (value: string) => {
+    if (!value || value === answeringMode || isPending) return;
+    mutate({ id: sessionId, answeringMode: value as SessionAnsweringMode });
+  };
+}
+
+/**
  * Whole round or one question at a time. The switch takes effect on the next
  * round the interviewer opens; the round already on screen is untouched.
  */
@@ -25,14 +50,7 @@ export function AnsweringModeSwitch({
   answeringMode: SessionAnsweringMode;
 }) {
   const t = useT();
-  const { mutate, isPending } = useActionMutation(
-    "set-session-answering-mode",
-    {
-      onError: (error: unknown) => {
-        toast.error(actionErrorMessage(error) ?? t("workspace.draftFailed"));
-      },
-    },
-  );
+  const setAnsweringMode = useSetAnsweringMode(sessionId, answeringMode);
 
   return (
     <ToggleGroup
@@ -41,10 +59,7 @@ export function AnsweringModeSwitch({
       size="sm"
       value={answeringMode}
       aria-label={t("workspace.answeringMode")}
-      onValueChange={(value) => {
-        if (!value || value === answeringMode || isPending) return;
-        mutate({ id: sessionId, answeringMode: value as SessionAnsweringMode });
-      }}
+      onValueChange={setAnsweringMode}
     >
       {SESSION_ANSWERING_MODES.map((value) => (
         <ToggleGroupItem key={value} value={value} className="px-2.5 text-xs">
