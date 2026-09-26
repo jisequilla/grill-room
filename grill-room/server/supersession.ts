@@ -117,16 +117,21 @@ function settledAfter(
 
 /**
  * Rows of the settled decisions this turn would check for replacement, in tree
- * order: answered for real, not already replaced, and followed by at least one
- * other decision answered for real that settled strictly later — whether or not
- * that later one was itself replaced.
+ * order: answered for real, not already replaced, with no deferral pending, and
+ * followed by at least one other decision answered for real that settled
+ * strictly later — whether or not that later one was itself replaced. A pending
+ * deferral and a pending replacement never sit on the same decision: this skips
+ * the one, and {@link deferrableDecisions} skips the other.
  */
 export function replaceableDecisions(
   rows: readonly DecisionRow[],
 ): DecisionRow[] {
   const answered = answeredRows(rows);
   return answered.filter(
-    (row) => row.replacedById == null && settledAfter(row, answered).length > 0,
+    (row) =>
+      row.replacedById == null &&
+      row.deferralReason == null &&
+      settledAfter(row, answered).length > 0,
   );
 }
 

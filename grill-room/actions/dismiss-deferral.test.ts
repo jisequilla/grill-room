@@ -85,4 +85,41 @@ describe("dismiss-deferral", () => {
     ).toEqual([]);
     expect(await listLooseEnds.run({ sessionId: session.id })).toEqual([]);
   });
+
+  it("clears the deferral only, leaving a supersession proposal on the same decision", async () => {
+    const session = await aSettledOwnAnswer("It reads as waiting on launch.");
+    const now = new Date().toISOString();
+    await getDb().insert(schema.decisions).values({
+      id: "d-launch",
+      sessionId: session.id,
+      key: "launch",
+      questionTitle: "When does it launch?",
+      questionBody: "",
+      offeredChoicesJson: "[]",
+      dependsOnJson: "[]",
+      introducedBy: "interviewer",
+      answerKind: "own-answer",
+      currentAnswer: "In March.",
+      settledAt: "2026-09-01T00:00:02.000Z",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await getDb()
+      .update(schema.decisions)
+      .set({
+        supersededById: "d-launch",
+        supersessionAnswer: "Held for 48 hours.",
+        supersessionReason: "Launch decides it.",
+      })
+      .where(eq(schema.decisions.id, "d-hold"));
+
+    await dismissDeferral.run({ decisionId: "d-hold" });
+
+    expect(await readDecision("d-hold")).toMatchObject({
+      deferralReason: null,
+      supersededById: "d-launch",
+      supersessionAnswer: "Held for 48 hours.",
+      supersessionReason: "Launch decides it.",
+    });
+  });
 });

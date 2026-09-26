@@ -5,7 +5,11 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { describeDecisions } from "../server/tree.js";
+import {
+  CLEARED_ANSWER_LINKS,
+  CLEARED_SUPERSESSION,
+  describeDecisions,
+} from "../server/tree.js";
 
 export default defineAction({
   description:
@@ -47,13 +51,17 @@ export default defineAction({
     });
 
     // The text stays for now: it is what the owner wrote, and the round that
-    // asks the decision again records it to history before clearing it.
+    // asks the decision again records it to history before clearing it. The
+    // answer kind changes, so the links and any proposal about the settled
+    // answer go with it, as every other write that changes the answer does.
     const [updated] = await db
       .update(schema.decisions)
       .set({
         answerKind: "deferred",
         settledAt: null,
         deferralReason: null,
+        ...CLEARED_ANSWER_LINKS,
+        ...CLEARED_SUPERSESSION,
         updatedAt: now,
       })
       .where(eq(schema.decisions.id, decisionId))

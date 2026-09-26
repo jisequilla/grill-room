@@ -8,9 +8,12 @@ import {
 } from "../server/interviewer/index.js";
 import { CLEARED_PROPOSAL, CLEARED_SUPERSESSION } from "../server/tree.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
+import { MAX_TURN_RETRIES } from "../server/turn.js";
 import acceptDeferral from "./accept-deferral.js";
+import acceptSupersession from "./accept-supersession.js";
 import confirmSession from "./confirm-session.js";
 import createSession from "./create-session.js";
+import findSuperseded from "./find-superseded.js";
 import getTree from "./get-tree.js";
 import listLooseEnds from "./list-loose-ends.js";
 import requestNextRound from "./request-next-round.js";
@@ -191,6 +194,94 @@ describe("accept-deferral", () => {
         }),
       ]),
     );
+  });
+
+  it("clears every link and supersession column the settled answer carried", async () => {
+    const session = await aPendingDeferral();
+    await insertDecision(session.id, {
+      id: "d-disputes",
+      key: "disputes",
+      questionTitle: "How are disputes handled?",
+      answerKind: "own-answer",
+      currentAnswer: "By the platform, within 48 hours.",
+      settledAt: "2026-09-01T00:00:02.000Z",
+    });
+    await getDb()
+      .update(schema.decisions)
+      .set({
+        supersededById: "d-disputes",
+        supersessionAnswer: "Held for 48 hours.",
+        supersessionReason: "Disputes decide it.",
+        replacedById: "d-disputes",
+        replacedReason: "Disputes changed it.",
+        settledById: "d-disputes",
+      })
+      .where(eq(schema.decisions.id, "d-hold"));
+
+    const view = await acceptDeferral.run({ decisionId: "d-hold" });
+
+    expect(await readDecision("d-hold")).toMatchObject({
+      answerKind: "deferred",
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+      replacedById: null,
+      replacedReason: null,
+      settledById: null,
+    });
+    expect(view).toMatchObject({
+      supersession: null,
+      replacedBy: null,
+      settledBy: null,
+    });
+  });
+
+  it("regression: a replacement proposed after a deferral can never settle the decision as an empty answer", async () => {
+    // The reviewer's scenario: hold carries a pending deferral, disputes
+    // settled later, and the check proposes disputes as replacing hold.
+    const session = await aPendingDeferral();
+    await insertDecision(session.id, {
+      id: "d-disputes",
+      key: "disputes",
+      questionTitle: "How are disputes handled?",
+      answerKind: "own-answer",
+      currentAnswer: "By the platform, within 48 hours.",
+      settledAt: "2026-09-01T00:00:02.000Z",
+    });
+    const replacement: ScriptedTurn = {
+      kind: "find-superseded",
+      result: {
+        supersessions: [],
+        replacements: [
+          { replacedKey: "hold", byKey: "disputes", reason: "Disputes decide it." },
+        ],
+        deferrals: [],
+      },
+    };
+    scriptInterviewer(
+      Array.from({ length: MAX_TURN_RETRIES + 1 }, () => replacement),
+    );
+
+    await findSuperseded.run({ sessionId: session.id });
+
+    expect(await readDecision("d-hold")).toMatchObject({
+      supersededById: null,
+      deferralReason: REASON,
+    });
+
+    await acceptDeferral.run({ decisionId: "d-hold" });
+
+    const [looseEnd] = await listLooseEnds.run({ sessionId: session.id });
+    expect(looseEnd).toMatchObject({ key: "hold", reason: "deferred", supersession: null });
+    await expect(
+      acceptSupersession.run({ decisionId: "d-hold" }),
+    ).rejects.toThrow(/has no supersession to accept/);
+    expect(await readDecision("d-hold")).toMatchObject({
+      answerKind: "deferred",
+      currentAnswer: ANSWER,
+      settledAt: null,
+      settledById: null,
+    });
   });
 
   it("adds no staleness: a settled dependent stays settled, an unanswered one is blocked", async () => {

@@ -1005,6 +1005,40 @@ describe("find-superseded", () => {
       });
     });
 
+    it("never offers a decision with a pending deferral for replacement", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "hold", T1, {
+        currentAnswer: "Wait until dispute handling is settled",
+        deferralReason: DEFERRAL_REASON,
+      });
+      await aSettledDecision(session.id, "disputes", T2);
+      const interviewer = scriptInterviewer([
+        replacements({ replacedKey: "hold", byKey: "disputes" }),
+        deferrals(),
+      ]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(interviewer.requests[0]).toMatchObject({
+        kind: "find-superseded",
+        replaceableKeys: [],
+        deferrableKeys: ["disputes"],
+      });
+      expect((interviewer.requests[0] as FindSupersededRequest).laterKeys).toEqual(
+        {},
+      );
+      // The replacement it was offered anyway is refused, and never stored.
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining(
+          '"hold" is not one of the decisions to check for replacement.',
+        ),
+      });
+      expect(await readDecision("d-hold")).toMatchObject({
+        supersededById: null,
+        deferralReason: DEFERRAL_REASON,
+      });
+    });
+
     it("runs the check when a deferrable own answer is the only thing to check", async () => {
       const session = await aSession();
       await aSettledDecision(session.id, "hold", T1);
@@ -1190,6 +1224,114 @@ describe("find-superseded", () => {
         kind: "success",
         reason:
           'Kept the valid entries after the last retry. Dropped this deferral: "tone" ("tone" is not one of the own answers to check for a deferral. Rule only on the ones listed.)',
+      });
+    });
+
+    /**
+     * Runs one result on every attempt, so the last one is judged by the
+     * last-retry drop, and returns the attempt log's closing line.
+     */
+    async function lastRetryOf(
+      sessionId: string,
+      result: {
+        replacements: { replacedKey: string; byKey: string; reason: string }[];
+        deferrals: { key: string; reason: string }[];
+      },
+    ) {
+      scriptInterviewer([
+        DONE_PROPOSAL,
+        ...Array.from({ length: MAX_TURN_RETRIES + 1 }, () => ({
+          kind: "find-superseded" as const,
+          result: { supersessions: [], ...result },
+        })),
+      ]);
+
+      const done = await requestNextRound.run({ sessionId });
+
+      expect(done.state).toBe("done-proposed");
+      expect(await getSession.run({ id: sessionId })).toMatchObject({
+        turnErrorCode: null,
+      });
+      const turn = await findLatestTurn({
+        sessionId,
+        turnKind: "find-superseded",
+      });
+      expect(turn?.outcome).toBe("succeeded");
+      const attempts = turn!.runs[0]!.attempts;
+      expect(attempts).toHaveLength(MAX_TURN_RETRIES + 1);
+      return attempts[attempts.length - 1];
+    }
+
+    /** hold, an own answer, and disputes, settled after it: hold is replaceable and deferrable. */
+    async function aTreeWhereHoldIsBoth(sessionId: string) {
+      await aSettledDecision(sessionId, "hold", T1, {
+        currentAnswer: "Wait until dispute handling is settled",
+      });
+      await aSettledDecision(sessionId, "disputes", T2);
+    }
+
+    it("after the last retry, keeps the first of two deferrals of one decision and drops the second", async () => {
+      const session = await aSession();
+      await aTreeWithTwoOwnAnswers(session.id);
+
+      const last = await lastRetryOf(session.id, {
+        replacements: [],
+        deferrals: [
+          { key: "hold", reason: "First: it waits on dispute handling." },
+          { key: "hold", reason: "Second: it waits on the payment provider." },
+        ],
+      });
+
+      expect(await readDecision("d-hold")).toMatchObject({
+        deferralReason: "First: it waits on dispute handling.",
+      });
+      expect(last).toMatchObject({
+        kind: "success",
+        reason:
+          'Kept the valid entries after the last retry. Dropped this deferral: "hold" (Decision "hold" was flagged as a deferral twice. Give at most one deferral per decision.)',
+      });
+    });
+
+    it("after the last retry, keeps a valid replacement and drops the deferral of the same decision", async () => {
+      const session = await aSession();
+      await aTreeWhereHoldIsBoth(session.id);
+
+      const last = await lastRetryOf(session.id, {
+        replacements: [
+          { replacedKey: "hold", byKey: "disputes", reason: "Disputes decide it." },
+        ],
+        deferrals: [{ key: "hold", reason: DEFERRAL_REASON }],
+      });
+
+      expect(await readDecision("d-hold")).toMatchObject({
+        supersededById: "d-disputes",
+        supersessionReason: "Disputes decide it.",
+        deferralReason: null,
+      });
+      expect(last).toMatchObject({
+        kind: "success",
+        reason:
+          'Kept the valid entries after the last retry. Dropped this deferral: "hold" ("hold" is both replaced and flagged as a deferral. Give it one or the other.)',
+      });
+    });
+
+    it("after the last retry, drops the deferral of a decision whose replacement is itself dropped", async () => {
+      const session = await aSession();
+      await aTreeWhereHoldIsBoth(session.id);
+
+      const last = await lastRetryOf(session.id, {
+        replacements: [{ replacedKey: "hold", byKey: "hold", reason: "Itself." }],
+        deferrals: [{ key: "hold", reason: DEFERRAL_REASON }],
+      });
+
+      expect(await readDecision("d-hold")).toMatchObject({
+        supersededById: null,
+        deferralReason: null,
+      });
+      expect(last).toMatchObject({
+        kind: "success",
+        reason:
+          'Kept the valid entries after the last retry. Dropped this replacement: "hold" by "hold" ("hold" cannot replace itself.); and this deferral: "hold" ("hold" is both replaced and flagged as a deferral. Give it one or the other.)',
       });
     });
 
