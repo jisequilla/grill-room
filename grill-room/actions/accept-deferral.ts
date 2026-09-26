@@ -10,6 +10,7 @@ import {
   CLEARED_SUPERSESSION,
   describeDecisions,
 } from "../server/tree.js";
+import { withdrawClaimsOn } from "../server/withdraw-claims.js";
 
 export default defineAction({
   description:
@@ -68,6 +69,10 @@ export default defineAction({
       .returning();
 
     if (!updated) fail("Failed to accept the deferral.", { statusCode: 500 });
+
+    // Its answer no longer stands, so what other decisions claim about it
+    // goes with it, exactly as a reopen drops them.
+    await withdrawClaimsOn(decisionId, now);
 
     return describeDecisions([updated])[0];
   },

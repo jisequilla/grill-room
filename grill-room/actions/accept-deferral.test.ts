@@ -16,6 +16,7 @@ import createSession from "./create-session.js";
 import findSuperseded from "./find-superseded.js";
 import getTree from "./get-tree.js";
 import listLooseEnds from "./list-loose-ends.js";
+import reopenDecision from "./reopen-decision.js";
 import requestNextRound from "./request-next-round.js";
 
 const ANSWER = "Wait until dispute handling is settled";
@@ -308,6 +309,131 @@ describe("accept-deferral", () => {
     expect(
       Object.fromEntries(tree.decisions.map((d) => [d.key, d.state])),
     ).toEqual({ hold: "frontier", release: "settled", notice: "blocked" });
+  });
+});
+
+describe("accept-deferral: the claims other decisions make about its answer", () => {
+  useTestDatabase();
+
+  const WAIT = "Wait until launch";
+
+  /**
+   * disputes: a settled own answer with a deferral pending. window: a loose
+   * end with a pending supersession naming disputes as its answer. old: a
+   * settled decision disputes replaced.
+   */
+  async function aDeferralOthersClaimOn() {
+    const session = await aSession();
+    await insertDecision(session.id, {
+      id: "d-disputes",
+      key: "disputes",
+      questionTitle: "How are disputes handled?",
+      answerKind: "own-answer",
+      currentAnswer: WAIT,
+      settledAt: "2026-09-01T00:00:02.000Z",
+      deferralReason: "It waits on launch.",
+    });
+    await insertDecision(session.id, {
+      id: "d-window",
+      key: "window",
+      questionTitle: "How long is the dispute window?",
+      answerKind: "unknown",
+      currentAnswer: "",
+      supersededById: "d-disputes",
+      supersessionAnswer: WAIT,
+      supersessionReason: "Disputes already answers it.",
+    });
+    await insertDecision(session.id, {
+      id: "d-old",
+      key: "old",
+      questionTitle: "Who settles a dispute?",
+      answerKind: "own-answer",
+      currentAnswer: "Support, by hand.",
+      settledAt: "2026-09-01T00:00:01.000Z",
+      replacedById: "d-disputes",
+      replacedReason: "Disputes changed it.",
+    });
+    return session;
+  }
+
+  const WITHDRAWN = {
+    answerKind: "unknown",
+    settledAt: null,
+    settledById: null,
+    supersededById: null,
+    supersessionAnswer: null,
+    supersessionReason: null,
+  };
+  const CURRENT_AGAIN = {
+    answerKind: "own-answer",
+    currentAnswer: "Support, by hand.",
+    settledAt: "2026-09-01T00:00:01.000Z",
+    replacedById: null,
+    replacedReason: null,
+  };
+
+  it("withdraws a pending supersession on another decision that names it", async () => {
+    const session = await aDeferralOthersClaimOn();
+
+    await acceptDeferral.run({ decisionId: "d-disputes" });
+
+    expect(await readDecision("d-window")).toMatchObject(WITHDRAWN);
+    const looseEnds = await listLooseEnds.run({ sessionId: session.id });
+    expect(looseEnds.find((end) => end.key === "window")).toMatchObject({
+      reason: "unknown",
+      supersession: null,
+    });
+  });
+
+  it("clears Replaced by on another decision that points at it", async () => {
+    await aDeferralOthersClaimOn();
+
+    await acceptDeferral.run({ decisionId: "d-disputes" });
+
+    expect(await readDecision("d-old")).toMatchObject(CURRENT_AGAIN);
+  });
+
+  it("regression: the withdrawn supersession can no longer settle the loose end with the deferred answer", async () => {
+    const session = await aDeferralOthersClaimOn();
+
+    await acceptDeferral.run({ decisionId: "d-disputes" });
+
+    await expect(
+      acceptSupersession.run({ decisionId: "d-window" }),
+    ).rejects.toThrow(/has no supersession to accept/);
+    expect(await readDecision("d-window")).toMatchObject(WITHDRAWN);
+    expect(await listLooseEnds.run({ sessionId: session.id })).toMatchObject(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "window", reason: "unknown" }),
+        expect.objectContaining({ key: "disputes", reason: "deferred" }),
+      ]),
+    );
+  });
+
+  it("leaves window and old exactly as reopening the same decision does", async () => {
+    await aDeferralOthersClaimOn();
+    await acceptDeferral.run({ decisionId: "d-disputes" });
+    const afterAccept = {
+      window: await readDecision("d-window"),
+      old: await readDecision("d-old"),
+    };
+
+    await getDb().delete(schema.decisions);
+    await aDeferralOthersClaimOn();
+    await reopenDecision.run({ decisionId: "d-disputes" });
+    const afterReopen = {
+      window: await readDecision("d-window"),
+      old: await readDecision("d-old"),
+    };
+
+    const { updatedAt: _w1, sessionId: _s1, ...windowAccept } = afterAccept.window!;
+    const { updatedAt: _w2, sessionId: _s2, ...windowReopen } = afterReopen.window!;
+    const { updatedAt: _o1, sessionId: _s3, ...oldAccept } = afterAccept.old!;
+    const { updatedAt: _o2, sessionId: _s4, ...oldReopen } = afterReopen.old!;
+    expect(windowAccept).toEqual({ ...windowReopen, createdAt: windowAccept.createdAt });
+    expect(oldAccept).toEqual({ ...oldReopen, createdAt: oldAccept.createdAt });
+    expect(windowAccept).toMatchObject(WITHDRAWN);
+    expect(oldAccept).toMatchObject(CURRENT_AGAIN);
   });
 });
 
