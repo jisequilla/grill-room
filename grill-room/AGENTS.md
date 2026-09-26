@@ -472,12 +472,16 @@ session, and is readable and editable in the output page's Handoff block.
   the ticket, applied at export time — see "Grounding the briefs" below for
   what fills the two more sections it then gains, **Builds on** and
   **Proved by**, and how staleness and hand edits are handled.
-- Bundle paths are stored as `{{BUNDLE}}` and filled in at export from the
-  project's visibility flag, without re-checking git: `tracked` gives paths
+- Bundle paths are stored as `{{BUNDLE}}` and filled in at export from a
+  fresh `git check-ignore` of the bundle folder: `tracked` gives paths
   relative to the repo root plus a commit-before-delegating step (and a
   push, on the pull-request recipe); `ignored` gives absolute paths into
   the main checkout and tells worktree agents to read the bundle by
-  absolute path.
+  absolute path. A repository with no commits is described as greenfield:
+  make the first commit before delegating. The stored visibility flag still
+  decides the wording of the handoff generated and shown in the app, is
+  part of its staleness fingerprint, feeds the settings page and the
+  mismatch warning, and is export's fallback when git gives no answer.
 
 The handoff is **stale** when a fingerprint over everything it renders
 differs from the one it was generated from: the session's title and idea,

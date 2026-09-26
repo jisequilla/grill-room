@@ -11,6 +11,7 @@ import {
   type HandoffSource,
   renderBrief,
   renderHandoff,
+  renderHandoffMarkdown,
 } from "./handoff.js";
 
 const ROOT = "/repos/target";
@@ -859,5 +860,114 @@ describe("grounded briefs", () => {
     const none = renderHandoff(aSource()).markdown;
     expect(none).toContain("Fill the brief's **File boundaries** slot");
     expect(none).toContain("Fill the **Codebase facts** slot");
+  });
+});
+
+describe("export-time facts", () => {
+  const TRACKED_NOTE = `Paths below are relative to the repository root (\`${ROOT}\`). The bundle lives in \`.scratch\`, which git tracks.`;
+  const TRACKED_GREENFIELD_NOTE = `Paths below are relative to the repository root (\`${ROOT}\`). The bundle lives in \`.scratch\`, which git will track once it is committed; this repository has no commits yet.`;
+  const IGNORED_NOTE = `Paths below are absolute, into the main checkout at \`${ROOT}\`. The bundle lives in \`.scratch\`, which git ignores: it never reaches a worktree through git.`;
+  const GREENFIELD_PARAGRAPH =
+    "This repository has no commits yet (greenfield). A worktree branches from a commit, so make the first commit before delegating the first ticket.";
+  const SPEC = `\`${BUNDLE_TOKEN}/spec.md\``;
+  const TICKET = `\`${BUNDLE_TOKEN}/issues/01-register-projects.md\``;
+  const TRACKED_ACCESS = `The bundle is committed in this repository, so your worktree has it. Read the spec at ${SPEC} and your ticket at ${TICKET}, relative to the repository root in your worktree.`;
+  const TRACKED_GREENFIELD_ACCESS = `This repository had no commits when the bundle was exported. HANDOFF.md has the operator commit the bundle before delegating, so your worktree should have it: read the spec at ${SPEC} and your ticket at ${TICKET}, relative to the repository root in your worktree. If they are missing, stop and report.`;
+  const IGNORED_ACCESS = `The bundle is ignored by git, so it is NOT in your worktree. Read it by absolute path from the main checkout: the spec at ${SPEC} and your ticket at ${TICKET}. Never write to it.`;
+
+  /** The "Before delegating" section alone, up to the next top-level heading. */
+  function beforeDelegating(markdown: string): string {
+    const start = markdown.indexOf("## Before delegating the first ticket");
+    expect(start).toBeGreaterThan(-1);
+    return markdown.slice(start, markdown.indexOf("\n## ", start + 1));
+  }
+
+  function firstBrief(source: HandoffSource, facts?: { visibility: "tracked" | "ignored"; greenfield: boolean }) {
+    return renderBrief(source, source.tickets[0]!, {}, facts);
+  }
+
+  describe("pathsNote", () => {
+    it("tracked, not greenfield: unchanged", () => {
+      const markdown = renderHandoffMarkdown(aSource(), false, { visibility: "tracked", greenfield: false });
+      expect(markdown).toContain(TRACKED_NOTE);
+      expect(markdown).toBe(renderHandoffMarkdown(aSource()));
+    });
+
+    it("tracked, greenfield: git will track it once committed", () => {
+      const markdown = renderHandoffMarkdown(aSource(), false, { visibility: "tracked", greenfield: true });
+      expect(markdown).toContain(TRACKED_GREENFIELD_NOTE);
+      expect(markdown).not.toContain("which git tracks");
+    });
+
+    it.each([false, true])("ignored, greenfield %s: the ignored sentence", (greenfield) => {
+      const markdown = renderHandoffMarkdown(aSource(), false, { visibility: "ignored", greenfield });
+      expect(markdown).toContain(IGNORED_NOTE);
+      expect(markdown).not.toContain("which git tracks");
+    });
+  });
+
+  describe("beforeDelegatingSection", () => {
+    it.each([
+      ["tracked", "pull-request"],
+      ["tracked", "local-merge"],
+      ["ignored", "pull-request"],
+      ["ignored", "local-merge"],
+    ] as const)(
+      "greenfield (%s, %s): the greenfield paragraph comes first, then the section for the effective visibility",
+      (visibility, deliveryRecipe) => {
+        const greenfield = beforeDelegating(
+          renderHandoffMarkdown(aSource({ deliveryRecipe, visibility: "tracked" }), false, {
+            visibility,
+            greenfield: true,
+          }),
+        );
+        const plain = beforeDelegating(renderHandoffMarkdown(aSource({ deliveryRecipe, visibility })));
+        expect(greenfield).toBe(
+          plain.replace(
+            "## Before delegating the first ticket\n\n",
+            `## Before delegating the first ticket\n\n${GREENFIELD_PARAGRAPH}\n\n`,
+          ),
+        );
+        if (deliveryRecipe === "local-merge") {
+          expect(greenfield.indexOf(GREENFIELD_PARAGRAPH)).toBeLessThan(greenfield.indexOf("worktree.baseRef"));
+        }
+      },
+    );
+
+    it.each(["tracked", "ignored"] as const)("not greenfield (%s): unchanged", (visibility) => {
+      const markdown = renderHandoffMarkdown(aSource({ visibility }), false, { visibility, greenfield: false });
+      expect(markdown).not.toContain(GREENFIELD_PARAGRAPH);
+      expect(markdown).toBe(renderHandoffMarkdown(aSource({ visibility })));
+    });
+  });
+
+  describe("bundleAccess", () => {
+    it("tracked, not greenfield: unchanged", () => {
+      const brief = firstBrief(aSource(), { visibility: "tracked", greenfield: false });
+      expect(brief).toContain(TRACKED_ACCESS);
+      expect(brief).toBe(firstBrief(aSource()));
+    });
+
+    it("tracked, greenfield: the operator commits the bundle first", () => {
+      const brief = firstBrief(aSource(), { visibility: "tracked", greenfield: true });
+      expect(brief).toContain(TRACKED_GREENFIELD_ACCESS);
+      expect(brief).not.toContain("The bundle is committed in this repository");
+    });
+
+    it.each([false, true])("ignored, greenfield %s: the ignored sentence", (greenfield) => {
+      const brief = firstBrief(aSource(), { visibility: "ignored", greenfield });
+      expect(brief).toContain(IGNORED_ACCESS);
+      expect(brief).not.toContain("The bundle is committed in this repository");
+    });
+  });
+
+  it("the facts override the stored flag, and omitting them renders from the stored flag", () => {
+    const stale = aSource({ visibility: "tracked" });
+    expect(renderHandoffMarkdown(stale, false, { visibility: "ignored", greenfield: false })).toBe(
+      renderHandoffMarkdown(aSource({ visibility: "ignored" })),
+    );
+    expect(firstBrief(stale, { visibility: "ignored", greenfield: false })).toBe(
+      firstBrief(aSource({ visibility: "ignored" })),
+    );
   });
 });

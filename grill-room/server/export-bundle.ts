@@ -183,12 +183,13 @@ import {
   loadHandoffSource,
   renderBrief,
   renderHandoffMarkdown,
+  type ExportFacts,
   type ExportGateReason,
   type HandoffGrounding,
   type HandoffRow,
   parseBriefs,
 } from "./handoff.js";
-import { getProject } from "./projects.js";
+import { getProject, measuredVisibility } from "./projects.js";
 import { currentReadiness } from "./readiness.js";
 import { currentScoutReport } from "./scout-report.js";
 import { describeTickets, ticketsAreCurrent } from "./tickets.js";
@@ -250,8 +251,17 @@ export interface ExportBundlePlan {
     rootPath: string;
     workingExportFolder: string;
     slugPattern: string;
+    /** The stored flag, as registration seeded it or the owner set it; export never writes it. */
     visibility: ProjectVisibility;
   };
+  /**
+   * What this export used for its bundle paths and wording: a fresh `git
+   * check-ignore` of the bundle folder itself, or the stored flag when git
+   * gave no answer.
+   */
+  effectiveVisibility: ProjectVisibility;
+  /** Whether the repository had no commits at export, so HANDOFF.md and the briefs say it is greenfield. */
+  greenfield: boolean;
   /** The slug proposed from the session title. */
   proposedSlug: string;
   /** The slug actually used: the given one sanitized, or the proposal. */
@@ -597,6 +607,16 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   checkFolderName(folderName);
 
   const bundleDir = path.join(exportDir, folderName);
+  const bundleFolder = path.relative(project.rootPath, bundleDir).split(path.sep).join("/");
+
+  // Measured fresh for this export only: the stored flag goes stale when an
+  // ignore rule changes after registration, and nothing else looks at
+  // whether the repository has commits.
+  const head = await headCommit(project.rootPath);
+  const exportFacts: ExportFacts = {
+    visibility: (await measuredVisibility(project.rootPath, bundleFolder)) ?? project.visibility,
+    greenfield: head === null,
+  };
 
   // Hoisted so the handoff block below can work out, per brief, whether the
   // hash guard will keep its file — before deciding whether HANDOFF.md may
@@ -670,7 +690,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   const groundedBriefs: number[] = [];
   const ungroundedBriefs: UngroundedBrief[] = [];
   if (handoff) {
-    const bundlePath = bundlePathFor(project.visibility, project.rootPath, bundleDir);
+    const bundlePath = bundlePathFor(exportFacts.visibility, project.rootPath, bundleDir);
 
     // Export is the one place grounding reaches the handoff's text: it
     // applies here, not at generation time, because grounding happens after
@@ -723,7 +743,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
         groundingForRender?.tickets.some((entry) => entry.number === brief.ticketNumber) ?? false;
       const markdown =
         eligible && briefSource !== null && ticket !== null
-          ? renderBrief(briefSource, ticket, { grounding: groundingForRender })
+          ? renderBrief(briefSource, ticket, { grounding: groundingForRender }, exportFacts)
           : brief.markdown;
 
       if (!eligible) {
@@ -761,7 +781,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       briefSource !== null && (!wasEdited || handoff.markdown === renderHandoffMarkdown(briefSource));
     const headerMarkdown =
       headerEligible && briefSource !== null
-        ? renderHandoffMarkdown(briefSource, useGroundedWording)
+        ? renderHandoffMarkdown(briefSource, useGroundedWording, exportFacts)
         : handoff.markdown;
     handoffFiles.push({
       relativePath: HANDOFF_FILE,
@@ -821,7 +841,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     sessionId: session.id,
     previous,
     scoutCommit: scoutReport?.commitRead ?? null,
-    headCommit: await headCommit(project.rootPath),
+    headCommit: head,
     planned: contentBundleFiles,
     keptRemovals: removals.filter((removal) => removal.kept).map((removal) => removal.relativePath),
   });
@@ -847,11 +867,13 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       slugPattern: project.slugPattern,
       visibility: project.visibility,
     },
+    effectiveVisibility: exportFacts.visibility,
+    greenfield: exportFacts.greenfield,
     proposedSlug,
     slug,
     folderName,
     bundleDir,
-    bundleFolder: path.relative(project.rootPath, bundleDir).split(path.sep).join("/"),
+    bundleFolder,
     bundleExists: await exists(bundleDir),
     files,
     removals,

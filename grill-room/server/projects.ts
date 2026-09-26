@@ -264,16 +264,18 @@ export async function seedVisibility(
 }
 
 /**
- * Like {@link seedVisibility}, but null unless git actually answered:
- * `check-ignore` exits 0 (ignored) or 1 (not ignored); anything else, or a
- * root git cannot run in, is no answer rather than `tracked`.
+ * Whether git ignores `folder` (relative to `root`: a project's working
+ * export folder, or one bundle folder inside it at export), but null unless
+ * git actually answered: `check-ignore` exits 0 (ignored) or 1 (not
+ * ignored); anything else, or a root git cannot run in, is no answer rather
+ * than `tracked`.
  */
-async function measuredVisibility(
+export async function measuredVisibility(
   root: string,
-  workingExportFolder: string,
+  folder: string,
 ): Promise<ProjectVisibility | null> {
   try {
-    const result = await runGit(root, ["check-ignore", "-q", "--", `${workingExportFolder}/`]);
+    const result = await runGit(root, ["check-ignore", "-q", "--", `${folder}/`]);
     if (result.exitCode === 0) return "ignored";
     if (result.exitCode === 1) return "tracked";
     return null;
