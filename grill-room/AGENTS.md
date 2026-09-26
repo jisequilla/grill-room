@@ -513,8 +513,8 @@ handoff stays current.
 CRLF-insensitive sha256 of the text Grill Room generated for it (the
 ungrounded render): `markdownGeneratedSha256` for HANDOFF.md, and
 `generatedSha256` on each entry of `briefsJson`. A text is **edited** when it
-no longer hashes to its baseline, so a text saved back to exactly what was
-generated is not an edit. An edited brief is **outdated** when its ticket is
+no longer hashes to its baseline, so a text saved back to exactly what Grill
+Room generates for it today is not an edit. An edited brief is **outdated** when its ticket is
 gone, or when what Grill Room would generate for it today (its ticket, the
 project, the template) differs from what it was baselined on; nothing is
 outdated while today's inputs cannot be read. `get-handoff` reports these as
@@ -529,7 +529,9 @@ outdated when its ticket changed. `editedAt` stays set while a brief is kept
 never kept: it lists every ticket and brief), or an edited brief's ticket is
 gone. `overwriteEdits` rewrites everything with fresh baselines. Saving an
 edited brief through `update-handoff` while the handoff is current marks it
-reviewed: its baseline moves to today's render. A **legacy** handoff, stored
+reviewed: its baseline moves to today's render. That includes a kept brief
+saved back to the older text it was generated with: it stays edited, since
+it differs from today's render. A **legacy** handoff, stored
 before baselines existed (`markdownGeneratedSha256` null), reports no edits,
 refuses to regenerate while `editedAt` is set unless confirmed, and gains
 baselines on its first successful regeneration. In the Handoff block,

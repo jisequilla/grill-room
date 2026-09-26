@@ -1422,8 +1422,11 @@ export function regenerateHandoff(
  * The baseline a brief carries after `update-handoff` replaces its text.
  * Saving an edited brief while the handoff is current marks it reviewed: its
  * baseline moves to today's render, so it stays edited but is no longer
- * outdated. Anything else (a legacy row, a text back to its generated one, a
- * stale handoff, no source, a ticket that is gone) leaves the baseline alone.
+ * outdated. A text saved back to its baseline keeps it only while that
+ * baseline is still today's render; a brief kept through a regeneration and
+ * saved back to its old generated text is a reviewed edit like any other.
+ * Anything else (a legacy row, a stale handoff, no source, a ticket that is
+ * gone) leaves the baseline alone.
  */
 export function baselineAfterEdit(
   brief: StoredHandoffBrief,
@@ -1432,9 +1435,11 @@ export function baselineAfterEdit(
 ): string | undefined {
   const old = brief.generatedSha256;
   if (context.legacy || old === undefined || !context.current || context.source === null) return old;
-  if (hashExportContent(markdown) === old) return old;
   const ticket = context.source.tickets.find((candidate) => candidate.number === brief.ticketNumber);
-  return ticket ? hashExportContent(renderBrief(context.source, ticket)) : old;
+  if (!ticket) return old;
+  const today = hashExportContent(renderBrief(context.source, ticket));
+  if (hashExportContent(markdown) === old && old === today) return old;
+  return today;
 }
 
 /** Writes a regenerated handoff over the session's row (or creates it), with today's fingerprint. */

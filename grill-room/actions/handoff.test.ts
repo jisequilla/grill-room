@@ -504,6 +504,27 @@ describe("regenerating a handoff with edits", () => {
     expect(await storedHandoff(session.id)).toEqual(before);
   });
 
+  it("M1 wins over M2 when HANDOFF.md is edited and an edited brief's ticket is gone", async () => {
+    const { session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    await updateHandoff.run({
+      sessionId: session.id,
+      markdown: "# My handoff\n",
+      briefs: [{ ticketNumber: 3, markdown: "# My brief 3\n" }],
+    });
+    scriptInterviewer([ticketsTurn(THREE_TICKETS.slice(0, 2))]);
+    await breakIntoTickets.run({ sessionId: session.id });
+    const before = await storedHandoff(session.id);
+
+    await expect(generateHandoff.run({ sessionId: session.id })).rejects.toMatchObject({
+      errorCode: "handoff-edited",
+      statusCode: 409,
+      message:
+        "HANDOFF.md was edited since it was generated, and regenerating rewrites it. Confirm to overwrite the edits.",
+    });
+    expect(await storedHandoff(session.id)).toEqual(before);
+  });
+
   it("row 8: an unedited brief whose ticket is gone is dropped without asking", async () => {
     const { session } = await aReadySession();
     await generateHandoff.run({ sessionId: session.id });
@@ -619,22 +640,39 @@ describe("editing a handoff moves baselines", () => {
     });
   });
 
-  it("U2: a brief saved back to its generated text keeps its baseline, even after its ticket changed", async () => {
+  it("U2: a brief saved back to its generated text, still today's render, keeps its baseline", async () => {
     const { session } = await aReadySession();
     const generated = await generateHandoff.run({ sessionId: session.id });
     const baseline = (await storedHandoff(session.id)).briefs[1]!.generatedSha256;
-
-    await editBrief(session.id, 2, generated.briefs[1]!.markdown);
-    expect((await storedHandoff(session.id)).briefs[1]!.generatedSha256).toBe(baseline);
-
-    // Kept by a row-3 regeneration, then saved back to the text it was generated with.
     await editBrief(session.id, 2, MY_BRIEF_2);
-    await unblockTicket2(session.id);
-    await generateHandoff.run({ sessionId: session.id });
+
     const savedBack = await editBrief(session.id, 2, generated.briefs[1]!.markdown);
 
     expect((await storedHandoff(session.id)).briefs[1]!.generatedSha256).toBe(baseline);
     expect(savedBack).toMatchObject({ editedBriefs: [], outdatedBriefs: [] });
+  });
+
+  it("U2b: a kept brief saved back to its old generated text is a reviewed edit, and export keeps it as edited", async () => {
+    const { session, bundleDir } = await aReadySession();
+    const generated = await generateHandoff.run({ sessionId: session.id });
+    const oldText = generated.briefs[1]!.markdown;
+    await editBrief(session.id, 2, MY_BRIEF_2);
+    await unblockTicket2(session.id);
+    await generateHandoff.run({ sessionId: session.id });
+
+    const savedBack = await editBrief(session.id, 2, oldText);
+
+    const { source } = await renderedToday(session.id);
+    expect((await storedHandoff(session.id)).briefs[1]!.generatedSha256).toBe(
+      hashExportContent(renderBrief(source, source.tickets[1]!)),
+    );
+    expect(savedBack).toMatchObject({ editedBriefs: [2], outdatedBriefs: [] });
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(result.ungroundedBriefs).toEqual(expect.arrayContaining([{ ticket: 2, reason: "edited" }]));
+    expect(await fs.readFile(path.join(bundleDir, "briefs", "02-store-on-disk.md"), "utf8")).toContain(
+      "Blocked by: 01",
+    );
   });
 
   it("U3: an edit saved while stale keeps its baseline, and is named outdated after the next regeneration", async () => {
