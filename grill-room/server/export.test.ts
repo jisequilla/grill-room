@@ -8,6 +8,7 @@ import createSession from "../actions/create-session.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import {
   buildExportManifest,
+  extractSpecSection,
   hashExportContent,
   parseExportManifest,
   planExport,
@@ -566,12 +567,13 @@ function intentFile(
     idea?: string;
     readiness?: StoredReadiness | null;
     scoutReport?: ScoutReportWithStaleness | null;
+    specMarkdown?: string;
   } = {},
 ): string {
   const plan = planExport({
     sessionTitle: "Grill Room",
     idea: input.idea ?? IDEA,
-    specMarkdown: "## Problem\n\nA spec.",
+    specMarkdown: input.specMarkdown ?? "## Problem\n\nA spec.",
     tickets: [],
     decisions: [],
     readiness: input.readiness ?? null,
@@ -600,6 +602,8 @@ describe("planExport: intent.md", () => {
     expect(content).toBe(
       [
         "# Intent: Grill Room",
+        "",
+        "## The original idea, before the interview",
         "",
         IDEA,
         "",
@@ -641,6 +645,8 @@ describe("planExport: intent.md", () => {
       [
         "# Intent: Grill Room",
         "",
+        "## The original idea, before the interview",
+        "",
         IDEA,
         "",
         "## Readiness before the interview",
@@ -669,6 +675,8 @@ describe("planExport: intent.md", () => {
       [
         "# Intent: Grill Room",
         "",
+        "## The original idea, before the interview",
+        "",
         IDEA,
         "",
         "## Readiness before the interview",
@@ -696,6 +704,8 @@ describe("planExport: intent.md", () => {
       [
         "# Intent: Grill Room",
         "",
+        "## The original idea, before the interview",
+        "",
         IDEA,
         "",
         "## Readiness before the interview",
@@ -715,6 +725,8 @@ describe("planExport: intent.md", () => {
     expect(content).toBe(
       [
         "# Intent: Grill Room",
+        "",
+        "## The original idea, before the interview",
         "",
         IDEA,
         "",
@@ -742,6 +754,8 @@ describe("planExport: intent.md", () => {
       [
         "# Intent: Grill Room",
         "",
+        "## The original idea, before the interview",
+        "",
         IDEA,
         "",
         "## Readiness before the interview",
@@ -756,6 +770,180 @@ describe("planExport: intent.md", () => {
     );
     expect(content).not.toContain("## Project state");
   });
+
+  describe("the spec's opening", () => {
+    const GRILL_IDEA = "A local app that grills me about an idea until it is decided.";
+    const notJudged = ["## Readiness before the interview", "", "Not judged for this version of the idea.", ""];
+
+    function withSpec(specMarkdown: string): string {
+      return intentFile({ idea: GRILL_IDEA, specMarkdown, readiness: null, scoutReport: null });
+    }
+
+    it("opens with the Problem Statement and the Solution, then the labelled idea", () => {
+      expect(
+        withSpec("## Problem Statement\n\nA settled idea.\n\n## Solution\n\nA workspace."),
+      ).toBe(
+        [
+          "# Intent: Grill Room",
+          "",
+          "## Problem Statement",
+          "",
+          "A settled idea.",
+          "",
+          "## Solution",
+          "",
+          "A workspace.",
+          "",
+          "## The original idea, before the interview",
+          "",
+          GRILL_IDEA,
+          "",
+          ...notJudged,
+        ].join("\n"),
+      );
+    });
+
+    it("opens with the Problem Statement alone when the spec has no Solution", () => {
+      expect(withSpec("## Problem Statement\n\nA settled idea.\n\n## User Stories\n\n1. U.")).toBe(
+        [
+          "# Intent: Grill Room",
+          "",
+          "## Problem Statement",
+          "",
+          "A settled idea.",
+          "",
+          "## The original idea, before the interview",
+          "",
+          GRILL_IDEA,
+          "",
+          ...notJudged,
+        ].join("\n"),
+      );
+    });
+
+    it("opens with the Solution alone when the spec has no Problem Statement", () => {
+      expect(withSpec("## Solution\n\nA workspace.\n\n## User Stories\n\n1. U.")).toBe(
+        [
+          "# Intent: Grill Room",
+          "",
+          "## Solution",
+          "",
+          "A workspace.",
+          "",
+          "## The original idea, before the interview",
+          "",
+          GRILL_IDEA,
+          "",
+          ...notJudged,
+        ].join("\n"),
+      );
+    });
+
+    it("opens with the labelled idea alone when the spec has neither heading", () => {
+      expect(withSpec("## Problem\n\nA spec.")).toBe(
+        [
+          "# Intent: Grill Room",
+          "",
+          "## The original idea, before the interview",
+          "",
+          GRILL_IDEA,
+          "",
+          ...notJudged,
+        ].join("\n"),
+      );
+    });
+
+    it("puts the Problem Statement first even when the spec has the Solution first", () => {
+      expect(withSpec("## Solution\n\nA workspace.\n\n## Problem Statement\n\nA settled idea.")).toBe(
+        [
+          "# Intent: Grill Room",
+          "",
+          "## Problem Statement",
+          "",
+          "A settled idea.",
+          "",
+          "## Solution",
+          "",
+          "A workspace.",
+          "",
+          "## The original idea, before the interview",
+          "",
+          GRILL_IDEA,
+          "",
+          ...notJudged,
+        ].join("\n"),
+      );
+    });
+  });
+});
+
+describe("extractSpecSection", () => {
+  const cases: { name: string; spec: string[] | string; ps: string | null; sol: string | null }[] = [
+    {
+      name: "both sections, each ended by the next level-2 heading",
+      spec: ["## Problem Statement", "", "P.", "", "## Solution", "", "S.", "", "## User Stories", "", "1. U."],
+      ps: "P.",
+      sol: "S.",
+    },
+    { name: "a heading in the wrong case", spec: ["## problem statement", "", "P."], ps: null, sol: null },
+    { name: "surrounding spaces around the heading", spec: ["   ## Problem Statement   ", "P."], ps: "P.", sol: null },
+    { name: "a heading with a trailing colon", spec: ["## Problem Statement:", "P."], ps: null, sol: null },
+    { name: "no space after ##", spec: ["##Problem Statement", "P."], ps: null, sol: null },
+    { name: "two spaces inside the name", spec: ["## Problem  Statement", "P."], ps: null, sol: null },
+    { name: "a level-3 heading", spec: ["### Problem Statement", "P."], ps: null, sol: null },
+    { name: "a level-1 heading", spec: ["# Problem Statement", "P."], ps: null, sol: null },
+    {
+      name: "a level-3 heading inside the section does not end it",
+      spec: ["## Problem Statement", "P.", "### Detail", "D.", "## Solution", "S."],
+      ps: "P.\n### Detail\nD.",
+      sol: "S.",
+    },
+    {
+      name: "a level-1 heading ends the section too",
+      spec: ["## Problem Statement", "P.", "# Appendix", "A."],
+      ps: "P.",
+      sol: null,
+    },
+    {
+      name: "the last section runs to the end",
+      spec: ["## Solution", "S.", "", "## Problem Statement", "P."],
+      ps: "P.",
+      sol: "S.",
+    },
+    {
+      name: "the first heading wins",
+      spec: ["## Problem Statement", "First.", "## Problem Statement", "Second."],
+      ps: "First.",
+      sol: null,
+    },
+    {
+      name: "a body of only blank lines counts as missing",
+      spec: ["## Problem Statement", "", "   ", "## Solution", "S."],
+      ps: null,
+      sol: "S.",
+    },
+    {
+      name: "CRLF line endings come back as LF",
+      spec: "## Problem Statement\r\n\r\nP line 1.\r\nP line 2.\r\n",
+      ps: "P line 1.\nP line 2.",
+      sol: null,
+    },
+    {
+      name: "inner blank lines and indentation are kept",
+      spec: ["## Problem Statement", "", "    indented", "", "middle", "", ""],
+      ps: "    indented\n\nmiddle",
+      sol: null,
+    },
+    { name: "an empty spec", spec: "", ps: null, sol: null },
+  ];
+
+  for (const { name, spec, ps, sol } of cases) {
+    it(name, () => {
+      const markdown = typeof spec === "string" ? spec : spec.join("\n");
+      expect(extractSpecSection(markdown, "Problem Statement")).toBe(ps);
+      expect(extractSpecSection(markdown, "Solution")).toBe(sol);
+    });
+  }
 });
 
 describe("the export manifest", () => {

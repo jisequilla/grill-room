@@ -26,6 +26,7 @@ import { useTempGitRepos } from "../test/git-repos.js";
 import createSession from "./create-session.js";
 import exportSession from "./export-session.js";
 import generateHandoff from "./generate-handoff.js";
+import getHandoff from "./get-handoff.js";
 import listTickets from "./list-tickets.js";
 import previewExport from "./preview-export.js";
 import registerProject from "./register-project.js";
@@ -334,6 +335,16 @@ describe("preview-export and export-session", () => {
       [
         "# Intent: Grill Room",
         "",
+        "## Problem Statement",
+        "",
+        "A settled idea.",
+        "",
+        "## Solution",
+        "",
+        "A workspace.",
+        "",
+        "## The original idea, before the interview",
+        "",
         "A local app that grills me about an idea until it is decided.",
         "",
         "## Readiness before the interview",
@@ -342,6 +353,12 @@ describe("preview-export and export-session", () => {
         "",
       ].join("\n"),
     );
+    const handoffOpening =
+      "# Handoff: Grill Room\n\n## Problem Statement\n\nA settled idea.\n\n## Solution\n\nA workspace.\n\n## The original idea, before the interview\n\nA local app that grills me about an idea until it is decided.\n\n## Where things are\n\n";
+    const exportedHandoff = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(exportedHandoff.slice(0, handoffOpening.length)).toBe(handoffOpening);
+    const stored = await getHandoff.run({ sessionId: session.id });
+    expect(stored.handoff!.markdown.startsWith(handoffOpening)).toBe(true);
     expect(await manifestPaths(bundleDir)).toEqual([
       "HANDOFF.md",
       "spec.md",
