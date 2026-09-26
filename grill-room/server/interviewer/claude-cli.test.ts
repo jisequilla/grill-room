@@ -1,4 +1,12 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -13,7 +21,9 @@ import {
   type CliInvocation,
   type CliOutcome,
 } from "./claude-cli.js";
+import { InterviewerError } from "./errors.js";
 import { DOCS_FOLDER_ADDENDUM, loadGrillingSkill } from "./instructions.js";
+import { transcriptPath, type TranscriptQuery } from "./transcript-tools.js";
 import { jsonSchemaFor } from "./schemas.js";
 import { SCOUT_MODEL } from "./types.js";
 import type { ModelCallEnd, ModelCallObserver } from "./types.js";
@@ -2247,5 +2257,285 @@ describe("telling each model call's outcome apart", () => {
       ),
     ).rejects.toThrow("could not record the attempt");
     expect(runner.invocations).toHaveLength(0);
+  });
+});
+
+describe("what each attempt costs and does", () => {
+  const SESSION = "65f74ae9-6681-4ca7-89c9-efc3c8821877";
+
+  /** An envelope carrying every usage field, with the counts the spike saw. */
+  function aMeteredEnvelope(overrides: Record<string, unknown> = {}): string {
+    return anEnvelope({
+      usage: {
+        input_tokens: 10,
+        output_tokens: 165,
+        cache_read_input_tokens: 13856,
+        cache_creation_input_tokens: 33442,
+        service_tier: "standard",
+      },
+      total_cost_usd: 0.0691046,
+      num_turns: 3,
+      duration_ms: 4188,
+      duration_api_ms: 3601,
+      ...overrides,
+    });
+  }
+
+  const allMetrics = {
+    inputTokens: 10,
+    outputTokens: 165,
+    cacheReadTokens: 13856,
+    cacheCreationTokens: 33442,
+    costUsd: 0.0691046,
+    cliTurns: 3,
+    cliDurationMs: 4188,
+    cliApiDurationMs: 3601,
+    sessionId: SESSION,
+    toolCalls: { Read: 2 },
+  };
+
+  /** A reader that records what it was asked and answers `{ Read: 2 }`. */
+  function aReader() {
+    const queries: TranscriptQuery[] = [];
+    return {
+      queries,
+      readToolCalls: (query: TranscriptQuery) => {
+        queries.push(query);
+        return { Read: 2 };
+      },
+    };
+  }
+
+  it("stores every field when all are present and numeric", async () => {
+    const runner = recordingRunner([ok(aMeteredEnvelope())]);
+    const reader = aReader();
+    const { observer, ended } = recordingObserver();
+
+    await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+      readToolCalls: reader.readToolCalls,
+    }).proposeRound(aProposeRoundRequest(), observer);
+
+    expect(ended).toHaveLength(1);
+    expect(ended[0]!.outcome.kind).toBe("success");
+    expect(ended[0]!.metrics).toEqual(allMetrics);
+  });
+
+  it("stores a missing or mistyped field as null, keeps the others, and leaves the turn unaffected", async () => {
+    const runner = recordingRunner([
+      ok(
+        aMeteredEnvelope({
+          usage: {
+            input_tokens: "10",
+            output_tokens: 165,
+            cache_read_input_tokens: null,
+          },
+          total_cost_usd: "0.07",
+          num_turns: undefined,
+          duration_api_ms: 12.5,
+        }),
+      ),
+    ]);
+    const { observer, ended } = recordingObserver();
+
+    const turn = await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+      readToolCalls: aReader().readToolCalls,
+    }).proposeRound(aProposeRoundRequest(), observer);
+
+    expect(turn.result).toEqual(aProposeRoundResult());
+    expect(ended[0]!.metrics).toEqual({
+      ...allMetrics,
+      inputTokens: null,
+      cacheReadTokens: null,
+      cacheCreationTokens: null,
+      costUsd: null,
+      cliTurns: null,
+      cliApiDurationMs: null,
+    });
+  });
+
+  it("still carries the usage of a call whose result failed its schema", async () => {
+    const runner = recordingRunner([
+      ok(aMeteredEnvelope({ structured_output: { nope: true } })),
+    ]);
+    const { observer, ended } = recordingObserver();
+
+    const error = await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+      readToolCalls: aReader().readToolCalls,
+    })
+      .proposeRound(aProposeRoundRequest(), observer)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(InterviewerError);
+    expect((error as InterviewerError).code).toBe("malformed-output");
+    expect((error as InterviewerError).metrics).toEqual(allMetrics);
+    expect(ended[0]!.outcome.kind).toBe("schema-invalid");
+    expect(ended[0]!.metrics).toEqual(allMetrics);
+  });
+
+  it("still carries the usage of a call the command line reported as an error", async () => {
+    const runner = recordingRunner([
+      ok(aMeteredEnvelope({ is_error: true, result: "Something broke." })),
+    ]);
+    const { observer, ended } = recordingObserver();
+
+    await expect(
+      createClaudeCliInterviewer({
+        runCli: runner.runCli,
+        readToolCalls: aReader().readToolCalls,
+      }).proposeRound(aProposeRoundRequest(), observer),
+    ).rejects.toThrow(InterviewerError);
+
+    expect(ended[0]!.outcome.kind).toBe("error");
+    expect(ended[0]!.metrics).toEqual(allMetrics);
+  });
+
+  it("carries no usage and reads no transcript when the output is not JSON", async () => {
+    const runner = recordingRunner([ok("this is not json")]);
+    const reader = aReader();
+    const { observer, ended } = recordingObserver();
+
+    const error = await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+      readToolCalls: reader.readToolCalls,
+    })
+      .proposeRound(aProposeRoundRequest(), observer)
+      .catch((caught: unknown) => caught);
+
+    expect((error as InterviewerError).metrics).toBeNull();
+    expect(ended[0]!.outcome.kind).toBe("schema-invalid");
+    expect(ended[0]!.metrics).toBeUndefined();
+    expect(reader.queries).toEqual([]);
+  });
+
+  it("carries no usage and reads no transcript when the process fails", async () => {
+    const runner = recordingRunner([
+      { stdout: "", stderr: "boom", exitCode: 1 },
+    ]);
+    const reader = aReader();
+    const { observer, ended } = recordingObserver();
+
+    await expect(
+      createClaudeCliInterviewer({
+        runCli: runner.runCli,
+        readToolCalls: reader.readToolCalls,
+      }).proposeRound(aProposeRoundRequest(), observer),
+    ).rejects.toThrow(InterviewerError);
+
+    expect(ended[0]!.outcome.kind).toBe("error");
+    expect(ended[0]!.metrics).toBeUndefined();
+    expect(reader.queries).toEqual([]);
+  });
+
+  it("asks the reader for the child's config dir, cwd and session, from just before the child started", async () => {
+    const reader = aReader();
+    let spawnedAt = 0;
+    const before = Date.now();
+
+    await createClaudeCliInterviewer({
+      runCli: () => {
+        spawnedAt = Date.now();
+        return Promise.resolve(ok(aMeteredEnvelope()));
+      },
+      cwd: "/fixture/interview-cwd",
+      env: { PATH: "/usr/bin", CLAUDE_CONFIG_DIR: "/fixture/config" },
+      readToolCalls: reader.readToolCalls,
+    }).proposeRound(aProposeRoundRequest());
+
+    expect(reader.queries).toHaveLength(1);
+    const [query] = reader.queries;
+    expect(query).toMatchObject({
+      configDir: "/fixture/config",
+      cwd: "/fixture/interview-cwd",
+      sessionId: SESSION,
+    });
+    expect(query!.since.getTime()).toBeGreaterThanOrEqual(before);
+    expect(query!.since.getTime()).toBeLessThanOrEqual(spawnedAt);
+  });
+
+  it("reads a scout's transcript from the project root it ran in", async () => {
+    const reader = aReader();
+    const runner = recordingRunner([
+      ok(aMeteredEnvelope({ structured_output: aScoutProjectResult() })),
+    ]);
+
+    await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+      env: { PATH: "/usr/bin", CLAUDE_CONFIG_DIR: "/fixture/config" },
+      readToolCalls: reader.readToolCalls,
+    }).scoutProject(aScoutProjectRequest({ projectRoot: "/fixture/project" }));
+
+    expect(reader.queries[0]).toMatchObject({ cwd: "/fixture/project" });
+    expect(runner.invocations[0]!.cwd).toBe("/fixture/project");
+  });
+
+  it("never fails the turn when the transcript read throws", async () => {
+    const runner = recordingRunner([ok(aMeteredEnvelope())]);
+    const { observer, ended } = recordingObserver();
+
+    const turn = await createClaudeCliInterviewer({
+      runCli: runner.runCli,
+      readToolCalls: () => {
+        throw new Error("EACCES: the transcript folder is locked");
+      },
+    }).proposeRound(aProposeRoundRequest(), observer);
+
+    expect(turn.result).toEqual(aProposeRoundResult());
+    expect(ended[0]!.outcome.kind).toBe("success");
+    expect(ended[0]!.metrics).toEqual({ ...allMetrics, toolCalls: null });
+  });
+
+  it("counts only this attempt's tool calls in a resumed conversation's transcript", async () => {
+    const root = await realpath(
+      await mkdtemp(path.join(tmpdir(), "claude-cli-transcript-")),
+    );
+    try {
+      const configDir = path.join(root, "config");
+      const cwd = path.join(root, "cwd");
+      await mkdir(cwd, { recursive: true });
+      const file = transcriptPath({ configDir, cwd, sessionId: SESSION });
+      await mkdir(path.dirname(file), { recursive: true });
+
+      const line = (timestamp: string, ...names: string[]) =>
+        JSON.stringify({
+          type: "assistant",
+          timestamp,
+          message: {
+            content: names.map((name, index) => ({
+              type: "tool_use",
+              id: `${timestamp}-${index}`,
+              name,
+            })),
+          },
+        });
+      // An earlier turn of the same conversation, long before this attempt.
+      await writeFile(
+        file,
+        `${line("2020-01-01T00:00:00.000Z", "Read", "Read", "Grep")}\n`,
+      );
+
+      const { observer, ended } = recordingObserver();
+      await createClaudeCliInterviewer({
+        runCli: async () => {
+          // What this attempt writes while it runs.
+          const now = new Date().toISOString();
+          await appendFile(file, `${line(now, "Glob", "Read")}\n`);
+          return ok(aMeteredEnvelope());
+        },
+        cwd,
+        env: { PATH: "/usr/bin", CLAUDE_CONFIG_DIR: configDir },
+      }).proposeRound(
+        aProposeRoundRequest({
+          context: { ...aProposeRoundRequest().context, conversationId: SESSION },
+        }),
+        observer,
+      );
+
+      expect(ended[0]!.metrics?.toolCalls).toEqual({ Glob: 1, Read: 1 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

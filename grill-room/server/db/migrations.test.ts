@@ -201,3 +201,91 @@ describe("decisions-restatement-columns migration", () => {
     ]);
   });
 });
+
+describe("turn-attempts-usage-columns migration", () => {
+  beforeEach(dropSchema);
+
+  const usageColumns = [
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_creation_tokens",
+    "cost_usd",
+    "cli_turns",
+    "cli_duration_ms",
+    "cli_api_duration_ms",
+    "session_id",
+    "tool_calls_json",
+  ].join(", ");
+
+  it("adds nullable usage columns to turn attempts on a database at v68, leaving existing attempts without usage", async () => {
+    const before = appMigrations.filter((migration) => migration.version <= 68);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    const turnId = randomUUID();
+    const runId = randomUUID();
+    const attemptId = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [sessionId, "Grill Room", "An idea.", now, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_turns (id, session_id, turn_kind, model, started_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [turnId, sessionId, "propose-round", "sonnet", now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_turn_runs (id, turn_id, run_number, created_at) VALUES (?, ?, ?, ?)`,
+      args: [runId, turnId, 1, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_turn_attempts (id, run_id, attempt_number, started_at, duration_ms, kind) VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [attemptId, runId, 1, now, 1200, "success"],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const { rows } = await getDbExec().execute({
+      sql: `SELECT ${usageColumns} FROM gr_turn_attempts WHERE id = ?`,
+      args: [attemptId],
+    });
+    expect(rows).toEqual([
+      {
+        input_tokens: null,
+        output_tokens: null,
+        cache_read_tokens: null,
+        cache_creation_tokens: null,
+        cost_usd: null,
+        cli_turns: null,
+        cli_duration_ms: null,
+        cli_api_duration_ms: null,
+        session_id: null,
+        tool_calls_json: null,
+      },
+    ]);
+
+    await getDbExec().execute({
+      sql: `UPDATE gr_turn_attempts SET input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_creation_tokens = ?, cost_usd = ?, cli_turns = ?, cli_duration_ms = ?, cli_api_duration_ms = ?, session_id = ?, tool_calls_json = ? WHERE id = ?`,
+      args: [10, 165, 13856, 33442, 0.0691046, 3, 4188, 3601, "session-7", '{"Read":2}', attemptId],
+    });
+    const updated = await getDbExec().execute({
+      sql: `SELECT ${usageColumns} FROM gr_turn_attempts WHERE id = ?`,
+      args: [attemptId],
+    });
+    expect(updated.rows).toEqual([
+      {
+        input_tokens: 10,
+        output_tokens: 165,
+        cache_read_tokens: 13856,
+        cache_creation_tokens: 33442,
+        cost_usd: 0.0691046,
+        cli_turns: 3,
+        cli_duration_ms: 4188,
+        cli_api_duration_ms: 3601,
+        session_id: "session-7",
+        tool_calls_json: '{"Read":2}',
+      },
+    ]);
+  });
+});

@@ -2,6 +2,7 @@ import {
   boolean,
   index,
   integer,
+  real,
   table,
   text,
   uniqueIndex,
@@ -638,6 +639,26 @@ export const turnAttempts = table(
     reason: text("reason"),
     /** The model's raw output, where there is one. */
     rawOutput: text("raw_output"),
+    /*
+     * What the call cost and did, from the command line's JSON result. Null
+     * when the call produced no parseable result, or the value was missing.
+     */
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    cacheReadTokens: integer("cache_read_tokens"),
+    cacheCreationTokens: integer("cache_creation_tokens"),
+    costUsd: real("cost_usd"),
+    /** The command line's own turn count (`num_turns`). */
+    cliTurns: integer("cli_turns"),
+    cliDurationMs: integer("cli_duration_ms"),
+    cliApiDurationMs: integer("cli_api_duration_ms"),
+    /** The command line's session id: its transcript file's name. */
+    sessionId: text("session_id"),
+    /**
+     * JSON: `{ "<tool name>": count }` from the session transcript, `{}` when
+     * no tool was called. Null when the transcript could not be read.
+     */
+    toolCallsJson: text("tool_calls_json"),
   },
   (turnAttemptsTable) => ({
     runIdx: index("gr_idx_turn_attempts_run").on(turnAttemptsTable.runId),

@@ -531,4 +531,18 @@ ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS restatement_notes TEXT;
 ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS restatement_reason TEXT;
 ALTER TABLE gr_decision_history ADD COLUMN IF NOT EXISTS operator_notes TEXT`,
   },
+  {
+    version: 69,
+    name: "turn-attempts-usage-columns",
+    sql: `ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS input_tokens INTEGER;
+ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS output_tokens INTEGER;
+ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS cache_read_tokens INTEGER;
+ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS cache_creation_tokens INTEGER;
+ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION;
+ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS cli_turns INTEGER;
+ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS cli_duration_ms INTEGER;
+ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS cli_api_duration_ms INTEGER;
+ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS session_id TEXT;
+ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS tool_calls_json TEXT`,
+  },
 ];

@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 
 import createSession from "../actions/create-session.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
+import type { CliMetrics, ModelCallOutcome } from "./interviewer/index.js";
 import {
   resumeOrStartTurnRecorder,
   startTurnRecorder,
   TURN_SUCCEEDED,
+  type TurnRecorder,
 } from "./turn-recorder.js";
 import {
   addRun,
@@ -475,5 +477,136 @@ describe("turn-records", () => {
       // still running.
       expect((await findRunningTurn(sessionId))?.id).toBe(outer.turnId);
     });
+  });
+});
+
+describe("what each attempt stores of its usage", () => {
+  useTestDatabase();
+
+  const metrics: CliMetrics = {
+    inputTokens: 10,
+    outputTokens: 165,
+    cacheReadTokens: 13856,
+    cacheCreationTokens: 33442,
+    costUsd: 0.0691046,
+    cliTurns: 3,
+    cliDurationMs: 4188,
+    cliApiDurationMs: 3601,
+    sessionId: "65f74ae9-6681-4ca7-89c9-efc3c8821877",
+    toolCalls: { Glob: 2, Grep: 1, Read: 3 },
+  };
+
+  const noUsage = {
+    inputTokens: null,
+    outputTokens: null,
+    cacheReadTokens: null,
+    cacheCreationTokens: null,
+    costUsd: null,
+    cliTurns: null,
+    cliDurationMs: null,
+    cliApiDurationMs: null,
+    sessionId: null,
+    toolCalls: null,
+  };
+
+  /** Tell the recorder one model call ran and ended this way. */
+  async function aCall(
+    recorder: TurnRecorder,
+    outcome: ModelCallOutcome,
+    callMetrics?: CliMetrics,
+  ) {
+    const start = {
+      requestKind: "propose-round" as const,
+      call: 1,
+      conversation: "new" as const,
+      startedAt: new Date(),
+    };
+    await recorder.observer.callStarted?.(start);
+    await recorder.observer.callEnded?.({
+      ...start,
+      endedAt: new Date(),
+      durationMs: 1,
+      outcome,
+      ...(callMetrics ? { metrics: callMetrics } : {}),
+    });
+  }
+
+  async function attemptsOf(recorder: TurnRecorder) {
+    const turn = await getTurnWithRuns(recorder.turnId);
+    return turn!.runs[0]!.attempts;
+  }
+
+  it("stores every usage field and the tool calls of a successful call", async () => {
+    const recorder = await startTurnRecorder({
+      sessionId: await aSession(),
+      turnKind: "propose-round",
+      model: "sonnet",
+    });
+
+    await aCall(recorder, { kind: "success", rawOutput: "{}" }, metrics);
+
+    expect(await attemptsOf(recorder)).toEqual([
+      expect.objectContaining({ kind: "success", ...metrics }),
+    ]);
+  });
+
+  it("keeps the usage of a call whose result the app refused", async () => {
+    const recorder = await startTurnRecorder({
+      sessionId: await aSession(),
+      turnKind: "propose-round",
+      model: "sonnet",
+    });
+
+    await aCall(recorder, { kind: "success", rawOutput: "{}" }, metrics);
+    await recorder.refused("Duplicate title.");
+
+    expect(await attemptsOf(recorder)).toEqual([
+      expect.objectContaining({
+        kind: "tree-rule-refusal",
+        reason: "Duplicate title.",
+        ...metrics,
+      }),
+    ]);
+  });
+
+  it("stores the usage of a call whose result failed its schema", async () => {
+    const recorder = await startTurnRecorder({
+      sessionId: await aSession(),
+      turnKind: "propose-round",
+      model: "sonnet",
+    });
+
+    await aCall(
+      recorder,
+      { kind: "schema-invalid", rawOutput: "{}", reason: "Bad output." },
+      { ...metrics, costUsd: null, toolCalls: {} },
+    );
+
+    expect(await attemptsOf(recorder)).toEqual([
+      expect.objectContaining({
+        kind: "schema-invalid",
+        ...metrics,
+        costUsd: null,
+        toolCalls: {},
+      }),
+    ]);
+  });
+
+  it("stores every usage column as null for a call with no parseable result", async () => {
+    const recorder = await startTurnRecorder({
+      sessionId: await aSession(),
+      turnKind: "propose-round",
+      model: "sonnet",
+    });
+
+    await aCall(recorder, {
+      kind: "error",
+      code: "failed",
+      reason: "The interviewer turn failed (exit code 1).",
+    });
+
+    expect(await attemptsOf(recorder)).toEqual([
+      expect.objectContaining({ kind: "error", ...noUsage }),
+    ]);
   });
 });
