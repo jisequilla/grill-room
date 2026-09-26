@@ -37,6 +37,7 @@ import {
 } from "@/lib/projects";
 
 import {
+  DEFAULT_DURABLE_EXPORT_FOLDER,
   DEFAULT_PROJECT_SLUG_PATTERN,
   PROJECT_TRACKER_KINDS,
   PROJECT_VISIBILITIES,
@@ -69,6 +70,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
   const [verifyCommand, setVerifyCommand] = useState("");
   const [verifySuggested, setVerifySuggested] = useState(false);
   const [workingExportFolder, setWorkingExportFolder] = useState("");
+  const [durableExportFolder, setDurableExportFolder] = useState("");
   const [slugPattern, setSlugPattern] = useState(DEFAULT_PROJECT_SLUG_PATTERN);
   const [trackerKind, setTrackerKind] = useState<ProjectTrackerKind>("markdown");
   const [buildRecordLogging, setBuildRecordLogging] = useState(false);
@@ -99,6 +101,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
     setVerifySuggested(false);
     setWorkingExportFolder(project?.workingExportFolder ?? "");
     setWorkingExportFolderSuggested(false);
+    setDurableExportFolder(project?.durableExportFolder ?? "");
     setSlugPattern(project?.slugPattern ?? DEFAULT_PROJECT_SLUG_PATTERN);
     setSlugPatternSuggested(false);
     setTrackerKind((project?.trackerKind as ProjectTrackerKind) ?? "markdown");
@@ -162,8 +165,22 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
   function showError(error: unknown): boolean {
     const mapped = PROJECT_ERROR[actionErrorCode(error) ?? ""];
     if (!mapped) return false;
-    setErrors((current) => ({ ...current, [mapped.field]: t(mapped.key) }));
+    const message = t(mapped.key);
+    setErrors((current) => {
+      const next = { ...current };
+      for (const field of mapped.fields) next[field] = message;
+      return next;
+    });
     return true;
+  }
+
+  /** Either folder changing can resolve a refusal shown under both, such as the two overlapping. */
+  function clearFolderErrors() {
+    setErrors((current) => ({
+      ...current,
+      workingExportFolder: undefined,
+      durableExportFolder: undefined,
+    }));
   }
 
   function onSaveError(error: unknown) {
@@ -206,6 +223,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
       root: root.trim(),
       verifyCommand: verifyCommand.trim(),
       workingExportFolder: workingExportFolder.trim(),
+      durableExportFolder: durableExportFolder.trim(),
       name: name.trim(),
       slugPattern: slugPattern.trim(),
       trackerKind,
@@ -305,6 +323,27 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
+              <Label htmlFor="project-durable">{t("projects.durableExportFolderLabel")}</Label>
+              <Input
+                id="project-durable"
+                value={durableExportFolder}
+                onChange={(event) => {
+                  setDurableExportFolder(event.target.value);
+                  clearFolderErrors();
+                }}
+                placeholder={DEFAULT_DURABLE_EXPORT_FOLDER}
+                aria-invalid={errors.durableExportFolder !== undefined}
+                aria-describedby="project-durable-hint"
+                className="font-mono"
+                spellCheck={false}
+              />
+              {hint(
+                "durableExportFolder",
+                t("projects.durableExportFolderHint"),
+                "project-durable-hint",
+              )}
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="project-export">{t("projects.workingExportFolderLabel")}</Label>
               <Input
                 id="project-export"
@@ -313,7 +352,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                   workingExportFolderTouched.current = true;
                   setWorkingExportFolderSuggested(false);
                   setWorkingExportFolder(event.target.value);
-                  setErrors((current) => ({ ...current, workingExportFolder: undefined }));
+                  clearFolderErrors();
                 }}
                 onBlur={() => void detect(root, workingExportFolder)}
                 placeholder={t("projects.workingExportFolderPlaceholder")}
@@ -330,6 +369,9 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                 "project-export-hint",
               )}
             </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="project-slug">{t("projects.slugPatternLabel")}</Label>
               <Input
@@ -353,9 +395,6 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                 "project-slug-hint",
               )}
             </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="project-tracker">{t("projects.trackerKindLabel")}</Label>
               <Select
@@ -374,6 +413,9 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="project-visibility">{t("projects.visibilityLabel")}</Label>
               <Select

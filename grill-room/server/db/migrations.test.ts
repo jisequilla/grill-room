@@ -47,3 +47,46 @@ describe("projects-rename-export-folder migration", () => {
     expect(rows).toEqual([{ working_export_folder: ".scratch" }]);
   });
 });
+
+describe("projects-durable-export-folder migration", () => {
+  beforeEach(dropSchema);
+
+  const cases: Array<{ stored: string; working: string; durable: string }> = [
+    { stored: "docs/specs", working: ".grill-room", durable: "docs/specs" },
+    { stored: "docs", working: ".grill-room", durable: "docs" },
+    { stored: ".grill-room", working: ".grill-room", durable: "docs/specs" },
+    { stored: ".scratch", working: ".scratch", durable: "docs/specs" },
+    { stored: "docs-site", working: "docs-site", durable: "docs/specs" },
+    { stored: ".docs", working: ".docs", durable: "docs/specs" },
+  ];
+
+  it("maps each stored working folder to a working and a durable root by where it points", async () => {
+    const before = appMigrations.filter((migration) => migration.version < 66);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const ids = new Map<string, string>();
+    for (const { stored } of cases) {
+      const id = randomUUID();
+      ids.set(stored, id);
+      await getDbExec().execute({
+        sql: `INSERT INTO gr_projects (id, name, root_path, verify_command, working_export_folder, visibility, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [id, stored, `/repos/${stored}`, "pnpm test", stored, "tracked", now, now],
+      });
+    }
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    for (const { stored, working, durable } of cases) {
+      const { rows } = await getDbExec().execute({
+        sql: `SELECT working_export_folder, durable_export_folder FROM gr_projects WHERE id = ?`,
+        args: [ids.get(stored) as string],
+      });
+      expect({ stored, row: rows[0] }).toEqual({
+        stored,
+        row: { working_export_folder: working, durable_export_folder: durable },
+      });
+    }
+  });
+});

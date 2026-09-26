@@ -107,6 +107,12 @@ export type DeliveryRecipe = (typeof DELIVERY_RECIPES)[number];
 export const DEFAULT_PROJECT_SLUG_PATTERN = "{slug}";
 
 /**
+ * The durable export folder a project gets when none is given: where specs,
+ * decisions and intent live after the build, relative to the project root.
+ */
+export const DEFAULT_DURABLE_EXPORT_FOLDER = "docs/specs";
+
+/**
  * How one model-call attempt within a turn's run resolved. `success` is what
  * a turn's winning attempt gets. `tree-rule-refusal` is the only kind that
  * counts against the rejection budget and retries automatically; the rest

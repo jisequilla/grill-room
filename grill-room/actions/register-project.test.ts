@@ -125,6 +125,44 @@ describe("project actions", () => {
     });
   });
 
+  it("register-project, update-project, get-project and list-projects round-trip the durable folder", async () => {
+    const root = repos.create();
+
+    const defaulted = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".grill-room",
+    });
+    expect(defaulted.durableExportFolder).toBe("docs/specs");
+
+    const other = await registerProject.run({
+      root: repos.create(),
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".grill-room",
+      durableExportFolder: "docs/architecture",
+    });
+    expect(other.durableExportFolder).toBe("docs/architecture");
+
+    const updated = await updateProject.run({ id: defaulted.id, durableExportFolder: "specs" });
+    expect(updated.durableExportFolder).toBe("specs");
+    expect((await getProject.run({ id: defaulted.id })).durableExportFolder).toBe("specs");
+    expect(
+      (await listProjects.run({})).map((p) => [p.id, p.durableExportFolder]).sort(),
+    ).toEqual(
+      [
+        [defaulted.id, "specs"],
+        [other.id, "docs/architecture"],
+      ].sort(),
+    );
+
+    await expect(
+      updateProject.run({ id: defaulted.id, durableExportFolder: ".grill-room/specs" }),
+    ).rejects.toMatchObject({ errorCode: "export-roots-overlap" });
+    await expect(
+      updateProject.run({ id: defaulted.id, durableExportFolder: "" }),
+    ).rejects.toMatchObject({ errorCode: "durable-folder-required" });
+  });
+
   it("suggest-project-defaults detects the root, verify command and visibility", async () => {
     const root = repos.create({
       files: {
@@ -303,6 +341,45 @@ describe("a project's declared tracker", () => {
     });
 
     expect((await getProject.run({ id: project.id })).workingExportFolder).toBe(".scratch/renamed");
+  });
+
+  it("refuses to register when the tracker's tickets_dir would overlap the durable folder", async () => {
+    const root = repos.create({ files: { [TRACKER_PATH]: validTrackerBlock("docs/specs/tickets") } });
+
+    await expect(
+      registerProject.run({ root, verifyCommand: "pnpm test" }),
+    ).rejects.toMatchObject({ errorCode: "export-roots-overlap" });
+
+    // A durable folder clear of the tracker's folder registers.
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      durableExportFolder: "docs/architecture",
+    });
+    expect(project).toMatchObject({
+      workingExportFolder: "docs/specs/tickets",
+      durableExportFolder: "docs/architecture",
+    });
+  });
+
+  it("refresh-project-tracker reports a tickets_dir overlapping the durable folder as the diagnostic, keeping the working folder", async () => {
+    const root = repos.create({ files: { [TRACKER_PATH]: validTrackerBlock() } });
+    const project = await registerProject.run({ root, verifyCommand: "pnpm test" });
+    expect(project).toMatchObject({
+      workingExportFolder: ".scratch/tickets",
+      durableExportFolder: "docs/specs",
+      trackerDiagnostic: null,
+    });
+
+    writeFileSync(path.join(root, TRACKER_PATH), validTrackerBlock("docs"));
+
+    const refreshed = await refreshProjectTracker.run({ id: project.id });
+    expect(refreshed.workingExportFolder).toBe(".scratch/tickets");
+    expect(refreshed.durableExportFolder).toBe("docs/specs");
+    expect(refreshed.trackerDiagnostic).toMatch(/working folder \(docs\).*durable folder \(docs\/specs\)/);
+    expect((await getProject.run({ id: project.id })).trackerDiagnostic).toBe(
+      refreshed.trackerDiagnostic,
+    );
   });
 
   it("surfaces the diagnostic on the project record", async () => {

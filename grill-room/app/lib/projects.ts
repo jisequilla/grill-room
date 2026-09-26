@@ -7,38 +7,60 @@ import type {
 /** One registered project, as `list-projects` returns it. */
 export type Project = AgentNativeActionRegistry["list-projects"]["result"][number];
 
-export type ProjectField = "root" | "verifyCommand" | "workingExportFolder" | "slugPattern";
+export type ProjectField =
+  | "root"
+  | "verifyCommand"
+  | "workingExportFolder"
+  | "durableExportFolder"
+  | "slugPattern";
 
 /**
- * Every code the project registry refuses with, mapped to the field it belongs
+ * Every code the project registry refuses with, mapped to the fields it belongs
  * beside and the sentence shown there, so a refusal lands where it can be fixed.
+ * A code that concerns two fields (the export roots overlapping) lists both.
  */
-export const PROJECT_ERROR: Record<string, { field: ProjectField; key: string }> = {
-  "root-required": { field: "root", key: "projects.rootRequired" },
-  "folder-not-absolute": { field: "root", key: "projects.folderNotAbsolute" },
-  "folder-not-found": { field: "root", key: "projects.folderNotFound" },
-  "folder-not-directory": { field: "root", key: "projects.folderNotDirectory" },
-  "not-a-git-repo": { field: "root", key: "projects.notAGitRepo" },
-  "git-unavailable": { field: "root", key: "projects.gitUnavailable" },
-  "project-exists": { field: "root", key: "projects.projectExists" },
+export const PROJECT_ERROR: Record<string, { fields: ProjectField[]; key: string }> = {
+  "root-required": { fields: ["root"], key: "projects.rootRequired" },
+  "folder-not-absolute": { fields: ["root"], key: "projects.folderNotAbsolute" },
+  "folder-not-found": { fields: ["root"], key: "projects.folderNotFound" },
+  "folder-not-directory": { fields: ["root"], key: "projects.folderNotDirectory" },
+  "not-a-git-repo": { fields: ["root"], key: "projects.notAGitRepo" },
+  "git-unavailable": { fields: ["root"], key: "projects.gitUnavailable" },
+  "project-exists": { fields: ["root"], key: "projects.projectExists" },
   "verify-command-required": {
-    field: "verifyCommand",
+    fields: ["verifyCommand"],
     key: "projects.verifyCommandRequired",
   },
   "export-folder-required": {
-    field: "workingExportFolder",
+    fields: ["workingExportFolder"],
     key: "projects.workingExportFolderRequired",
   },
   "export-folder-outside-root": {
-    field: "workingExportFolder",
+    fields: ["workingExportFolder"],
     key: "projects.workingExportFolderOutsideRoot",
   },
   "export-folder-is-root": {
-    field: "workingExportFolder",
+    fields: ["workingExportFolder"],
     key: "projects.workingExportFolderIsRoot",
   },
+  "durable-folder-required": {
+    fields: ["durableExportFolder"],
+    key: "projects.durableExportFolderRequired",
+  },
+  "durable-folder-outside-root": {
+    fields: ["durableExportFolder"],
+    key: "projects.durableExportFolderOutsideRoot",
+  },
+  "durable-folder-is-root": {
+    fields: ["durableExportFolder"],
+    key: "projects.durableExportFolderIsRoot",
+  },
+  "export-roots-overlap": {
+    fields: ["durableExportFolder", "workingExportFolder"],
+    key: "projects.exportRootsOverlap",
+  },
   "invalid-slug-pattern": {
-    field: "slugPattern",
+    fields: ["slugPattern"],
     key: "projects.invalidSlugPattern",
   },
 };

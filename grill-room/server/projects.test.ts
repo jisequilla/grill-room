@@ -157,6 +157,95 @@ describe("registerProject", () => {
     );
   });
 
+  describe("durable export folder", () => {
+    it("defaults a blank durable folder to docs/specs", async () => {
+      const root = repos.create();
+
+      const omitted = registered(await registerProject({ root, ...required }));
+      expect(omitted.durableExportFolder).toBe("docs/specs");
+
+      const other = repos.create();
+      const blanked = registered(
+        await registerProject({ root: other, ...required, durableExportFolder: "  " }),
+      );
+      expect(blanked.durableExportFolder).toBe("docs/specs");
+    });
+
+    it("stores a given durable folder, normalised against the root", async () => {
+      const root = repos.create();
+
+      const project = registered(
+        await registerProject({
+          root,
+          ...required,
+          durableExportFolder: path.join(root, "architecture", "specs/"),
+        }),
+      );
+
+      expect(project).toMatchObject({
+        workingExportFolder: ".scratch",
+        durableExportFolder: "architecture/specs",
+      });
+    });
+
+    it("refuses a durable folder outside the root, or the root itself", async () => {
+      const root = repos.create();
+
+      expect(
+        refusalCode(
+          await registerProject({ root, ...required, durableExportFolder: "../elsewhere" }),
+        ),
+      ).toBe("durable-folder-outside-root");
+      expect(
+        refusalCode(await registerProject({ root, ...required, durableExportFolder: "." })),
+      ).toBe("durable-folder-is-root");
+      expect(await listProjects()).toEqual([]);
+    });
+
+    it.each([
+      ["docs/specs", "docs/specs"],
+      ["docs", "docs/specs"],
+      ["docs/specs", "docs"],
+      ["./docs/specs/", "docs/specs/tickets"],
+    ])(
+      "refuses working %s with durable %s: the roots overlap",
+      async (workingExportFolder, durableExportFolder) => {
+        const root = repos.create();
+
+        const outcome = await registerProject({
+          root,
+          ...required,
+          workingExportFolder,
+          durableExportFolder,
+        });
+
+        expect(refusalCode(outcome)).toBe("export-roots-overlap");
+        const message = (outcome as { refusal: { message: string } }).refusal.message;
+        expect(message).toContain(path.posix.normalize(workingExportFolder).replace(/\/$/, ""));
+        expect(message).toContain(durableExportFolder);
+        expect(await listProjects()).toEqual([]);
+      },
+    );
+
+    it.each([
+      ["docs", "docs-specs"],
+      ["docs-specs", "docs"],
+      ["specs", "specs2"],
+      [".grill-room", "docs/specs"],
+    ])(
+      "accepts working %s with durable %s: siblings sharing a prefix do not overlap",
+      async (workingExportFolder, durableExportFolder) => {
+        const root = repos.create();
+
+        const project = registered(
+          await registerProject({ root, ...required, workingExportFolder, durableExportFolder }),
+        );
+
+        expect(project).toMatchObject({ workingExportFolder, durableExportFolder });
+      },
+    );
+  });
+
   it("refuses a slug pattern that would nest folders", async () => {
     const root = repos.create();
 
@@ -212,7 +301,7 @@ describe("registerProject", () => {
       const root = repos.create({ gitignore: "node_modules/\n" });
 
       const project = registered(
-        await registerProject({ root, ...required, workingExportFolder: "docs/specs" }),
+        await registerProject({ root, ...required, workingExportFolder: "out/tickets" }),
       );
 
       expect(project.visibility).toBe("tracked");
@@ -432,9 +521,9 @@ describe("updateProject", () => {
   it("does not re-seed visibility when the export folder changes", async () => {
     const project = await aProject();
 
-    const updated = registered(await updateProject(project.id, { workingExportFolder: "docs" }));
+    const updated = registered(await updateProject(project.id, { workingExportFolder: "out" }));
 
-    expect(updated).toMatchObject({ workingExportFolder: "docs", visibility: "ignored" });
+    expect(updated).toMatchObject({ workingExportFolder: "out", visibility: "ignored" });
   });
 
   it("changes the delivery recipe and the review switch, without re-guessing the recipe", async () => {
@@ -484,6 +573,76 @@ describe("updateProject", () => {
     expect(refusalCode(await updateProject(project.id, { verifyCommand: "" }))).toBe(
       "verify-command-required",
     );
+  });
+
+  it("changes the durable folder, keeping it through edits that do not name it", async () => {
+    const project = await aProject();
+    expect(project.durableExportFolder).toBe("docs/specs");
+
+    const updated = registered(
+      await updateProject(project.id, { durableExportFolder: "docs/architecture" }),
+    );
+    expect(updated.durableExportFolder).toBe("docs/architecture");
+
+    const untouched = registered(await updateProject(project.id, { name: "Renamed" }));
+    expect(untouched.durableExportFolder).toBe("docs/architecture");
+  });
+
+  it("refuses to blank the durable folder", async () => {
+    const project = await aProject();
+
+    expect(refusalCode(await updateProject(project.id, { durableExportFolder: " " }))).toBe(
+      "durable-folder-required",
+    );
+  });
+
+  it("refuses a durable folder outside the root, or the root itself", async () => {
+    const project = await aProject();
+
+    expect(
+      refusalCode(await updateProject(project.id, { durableExportFolder: "../elsewhere" })),
+    ).toBe("durable-folder-outside-root");
+    expect(refusalCode(await updateProject(project.id, { durableExportFolder: "." }))).toBe(
+      "durable-folder-is-root",
+    );
+  });
+
+  it("refuses an edit that makes the roots overlap, in either direction", async () => {
+    const project = await aProject();
+
+    // Durable moved inside the working folder.
+    expect(
+      refusalCode(await updateProject(project.id, { durableExportFolder: ".scratch/specs" })),
+    ).toBe("export-roots-overlap");
+    // Working moved to contain the durable folder.
+    expect(refusalCode(await updateProject(project.id, { workingExportFolder: "docs" }))).toBe(
+      "export-roots-overlap",
+    );
+    // Both at once, equal.
+    expect(
+      refusalCode(
+        await updateProject(project.id, {
+          workingExportFolder: "notes",
+          durableExportFolder: "notes",
+        }),
+      ),
+    ).toBe("export-roots-overlap");
+
+    const untouched = registered(await updateProject(project.id, { name: "Renamed" }));
+    expect(untouched).toMatchObject({
+      workingExportFolder: ".scratch",
+      durableExportFolder: "docs/specs",
+    });
+  });
+
+  it("accepts sibling roots that share a prefix", async () => {
+    const project = await aProject();
+
+    const updated = registered(
+      await updateProject(project.id, { workingExportFolder: "docs", durableExportFolder: "docs-specs" }),
+    );
+
+    expect(updated).toMatchObject({ workingExportFolder: "docs", durableExportFolder: "docs-specs" });
   });
 
   it("refuses moving the root out of git", async () => {

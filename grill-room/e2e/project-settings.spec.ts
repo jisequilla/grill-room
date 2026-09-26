@@ -142,4 +142,89 @@ test.describe("project settings", () => {
     expect(reloaded.deliveryRecipe).toBe("pull-request");
     expect(reloaded.adversarialReview).toBe(false);
   });
+
+  test("shows the durable and working folders with their lifetimes, refuses overlapping roots under both, and saves a new durable folder across a reload", async ({
+    page,
+    request,
+  }) => {
+    const root = createFixtureRepo();
+    try {
+      const project = await registerProject(request, {
+        root,
+        verifyCommand: "pnpm test",
+        workingExportFolder: ".scratch",
+        name: "Folders fixture",
+      });
+
+      await page.goto("/settings");
+      const row = page
+        .getByTestId("project-row")
+        .filter({ hasText: "Folders fixture" });
+      await row.getByRole("button", { name: "Edit" }).click();
+
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+
+      const durable = dialog.getByLabel("Durable folder");
+      const working = dialog.getByLabel("Working folder");
+      const durableHint = dialog.locator("#project-durable-hint");
+      const workingHint = dialog.locator("#project-export-hint");
+
+      await expect(durable).toHaveValue("docs/specs");
+      await expect(durable).toHaveAttribute("placeholder", "docs/specs");
+      await expect(working).toHaveValue(".scratch");
+      await expect(durableHint).toHaveText(
+        /Specs, decisions and intent, kept after the build/,
+      );
+      await expect(workingHint).toHaveText(
+        /Tickets, handoff and briefs, deletable after the build/,
+      );
+
+      // A durable folder inside the working one: refused, shown under both.
+      await durable.fill(".scratch/specs");
+      const refusedResponse = page.waitForResponse((response) =>
+        response.url().includes("/_agent-native/actions/update-project"),
+      );
+      await page.getByTestId("project-save").click();
+      await refusedResponse;
+      const overlap = /The durable and working folders must be separate/;
+      await expect(durableHint).toHaveText(overlap);
+      await expect(workingHint).toHaveText(overlap);
+      await expect(durable).toHaveAttribute("aria-invalid", "true");
+      await expect(working).toHaveAttribute("aria-invalid", "true");
+      await expect(dialog).toBeVisible();
+
+      // Changing either folder clears the refusal from both.
+      await durable.fill("docs/architecture");
+      await expect(durableHint).not.toHaveText(overlap);
+      await expect(workingHint).not.toHaveText(overlap);
+
+      const updateResponse = page.waitForResponse(
+        (response) =>
+          response.url().includes("/_agent-native/actions/update-project") &&
+          response.ok(),
+      );
+      await page.getByTestId("project-save").click();
+      await updateResponse;
+      await expect(dialog).toBeHidden();
+
+      const savedResponse = await request.get(
+        `/_agent-native/actions/get-project?id=${project.id}`,
+      );
+      expect(savedResponse.ok()).toBeTruthy();
+      const saved = await savedResponse.json();
+      expect(saved.durableExportFolder).toBe("docs/architecture");
+      expect(saved.workingExportFolder).toBe(".scratch");
+
+      await page.reload();
+      await row.getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByLabel("Durable folder")).toHaveValue(
+        "docs/architecture",
+      );
+      await expect(dialog.getByLabel("Working folder")).toHaveValue(".scratch");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

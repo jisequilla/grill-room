@@ -11,7 +11,7 @@ default:
 setup:
     pnpm install
 
-# Register a project for session exports: flags for every registry field (see grill-room/actions/register-project.ts), root defaults to the current git top-level
+# Register a project for session exports: flags for every registry field (see grill-room/actions/register-project.ts, e.g. --workingExportFolder and --durableExportFolder), root defaults to the current git top-level
 [positional-arguments]
 register-project *args:
     #!/usr/bin/env bash

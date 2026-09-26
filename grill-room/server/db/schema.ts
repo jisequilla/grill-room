@@ -9,6 +9,7 @@ import {
 
 import {
   ATTEMPT_KINDS,
+  DEFAULT_DURABLE_EXPORT_FOLDER,
   DEFAULT_PROJECT_SLUG_PATTERN,
   DECISION_ANSWER_KINDS,
   DECISION_DISPOSITION_TARGETS,
@@ -79,8 +80,19 @@ export const projects = table("gr_projects", {
   /** The absolute git top-level of the repository, as `git rev-parse --show-toplevel` reports it. */
   rootPath: text("root_path").notNull().unique(),
   verifyCommand: text("verify_command").notNull(),
-  /** Where exports land, relative to `rootPath`. */
+  /**
+   * Where the build's working files land (tickets, handoff, briefs), relative
+   * to `rootPath`: deletable once the tickets merge.
+   */
   workingExportFolder: text("working_export_folder").notNull(),
+  /**
+   * Where the durable files land (spec, decisions, intent), relative to
+   * `rootPath`: kept after the build. Never equal to, inside, or containing
+   * `workingExportFolder`.
+   */
+  durableExportFolder: text("durable_export_folder")
+    .notNull()
+    .default(DEFAULT_DURABLE_EXPORT_FOLDER),
   slugPattern: text("slug_pattern")
     .notNull()
     .default(DEFAULT_PROJECT_SLUG_PATTERN),
