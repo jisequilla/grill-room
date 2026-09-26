@@ -12,6 +12,7 @@ import { Markdown } from "@/components/workspace/markdown";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { readsAsDeferral } from "@/lib/deferral-words";
 import {
   ANSWER_KIND_LABEL_KEY,
   type RoundAnswerKind,
@@ -179,6 +180,10 @@ export function RoundCard({
 
   const field = move ? MOVE_FIELD[move] : null;
   const canSaveMove = field ? !field.required || text.trim().length > 0 : false;
+  // The own-answer text box is the one place a settled decision gets typed as
+  // prose, so it is the one place a deferral in disguise can hide. The typed
+  // moves below it (Push back, Prototype) are already not settling answers.
+  const showsDeferralHint = move === "own-answer" && readsAsDeferral(text);
 
   return (
     <article
@@ -436,6 +441,15 @@ export function RoundCard({
                 placeholder={t(field.placeholderKey)}
                 onChange={(event) => setText(event.target.value)}
               />
+              {showsDeferralHint ? (
+                <p
+                  data-testid="deferral-hint"
+                  role="status"
+                  className="text-xs text-muted-foreground"
+                >
+                  {t("workspace.deferralHint")}
+                </p>
+              ) : null}
               <div className="flex justify-end gap-2">
                 <Button
                   type="button"
@@ -445,14 +459,38 @@ export function RoundCard({
                 >
                   {t("workspace.cancel")}
                 </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy || !canSaveMove}
-                  onClick={() => save(move, text.trim())}
-                >
-                  {t("workspace.save")}
-                </Button>
+                {showsDeferralHint ? (
+                  <>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      data-testid="save-as-defer"
+                      disabled={busy}
+                      onClick={() => save("deferred", text.trim())}
+                    >
+                      {t("workspace.saveAsDefer")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      data-testid="save-as-answer"
+                      disabled={busy || !canSaveMove}
+                      onClick={() => save(move, text.trim())}
+                    >
+                      {t("workspace.saveAsAnswer")}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={busy || !canSaveMove}
+                    onClick={() => save(move, text.trim())}
+                  >
+                    {t("workspace.save")}
+                  </Button>
+                )}
               </div>
             </div>
           ) : (
