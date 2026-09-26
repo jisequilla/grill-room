@@ -47,6 +47,7 @@ export function HeaderOverflowMenu({
   const setAnsweringMode = useSetAnsweringMode(sessionId, answeringMode);
   const pending = useRef<MenuDialog | null>(null);
   const [dialog, setDialog] = useState<MenuDialog | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   function openPendingDialog() {
     const next = pending.current;
@@ -59,6 +60,9 @@ export function HeaderOverflowMenu({
     return {
       open: dialog === which,
       onOpenChange: (open: boolean) => setDialog(open ? which : null),
+      // Neither dialog has a trigger of its own, so on close focus goes back
+      // to the button the menu opened from rather than to the body.
+      returnFocusTo: triggerRef,
     };
   }
 
@@ -67,6 +71,7 @@ export function HeaderOverflowMenu({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
+            ref={triggerRef}
             type="button"
             variant="outline"
             size="sm"

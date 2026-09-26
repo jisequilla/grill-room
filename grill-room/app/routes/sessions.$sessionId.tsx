@@ -13,7 +13,7 @@ import type {
   SessionModel,
 } from "@shared/session-constants";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useParams } from "react-router";
 import { toast } from "sonner";
 
@@ -115,6 +115,7 @@ export default function SessionWorkspaceRoute() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [treeSheetOpen, setTreeSheetOpen] = useState(false);
+  const treeTriggerRef = useRef<HTMLButtonElement>(null);
 
   const { data: session, isLoading: sessionLoading } = useActionQuery(
     "get-session",
@@ -404,6 +405,7 @@ export default function SessionWorkspaceRoute() {
         <TreeSheetTrigger
           className="lg:hidden"
           looseEnds={looseEndCount}
+          buttonRef={treeTriggerRef}
           onOpen={() => setTreeSheetOpen(true)}
         />
         <HeaderOverflowMenu
@@ -564,7 +566,11 @@ export default function SessionWorkspaceRoute() {
           </aside>
         </div>
 
-        <TreeSheet open={treeSheetOpen} onOpenChange={setTreeSheetOpen}>
+        <TreeSheet
+          open={treeSheetOpen}
+          onOpenChange={setTreeSheetOpen}
+          returnFocusTo={treeTriggerRef}
+        >
           {treePanel}
         </TreeSheet>
 

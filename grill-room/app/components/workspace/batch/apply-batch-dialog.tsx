@@ -6,7 +6,7 @@ import {
 import { useT } from "@agent-native/core/client/i18n";
 import { IconAlertTriangle, IconStack2 } from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 import { toast } from "sonner";
 
 import { DecisionStateBadge } from "@/components/workspace/decision-state-badge";
@@ -172,16 +172,20 @@ function Summary({ result }: { result: BatchResult }) {
  * review may well have re-asked it — but it says so first.
  *
  * Uncontrolled, it renders its own trigger button. Given `open` and
- * `onOpenChange` (the header's overflow menu), it renders only the dialog.
+ * `onOpenChange` (the header's overflow menu), it renders only the dialog, and
+ * `returnFocusTo` names where focus goes on close, since there is no trigger
+ * of its own to return to.
  */
 export function ApplyBatchDialog({
   sessionId,
   open: controlledOpen,
   onOpenChange,
+  returnFocusTo,
 }: {
   sessionId: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  returnFocusTo?: RefObject<HTMLElement | null>;
 }) {
   const t = useT();
   const queryClient = useQueryClient();
@@ -262,7 +266,14 @@ export function ApplyBatchDialog({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent
+        className="sm:max-w-2xl"
+        onCloseAutoFocus={(event) => {
+          if (!returnFocusTo?.current) return;
+          event.preventDefault();
+          returnFocusTo.current.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t("workspace.batchAction")}</DialogTitle>
           <DialogDescription>

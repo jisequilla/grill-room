@@ -91,8 +91,10 @@ no avatars, no gradient hero, no mascot.
   and at most two visible actions; everything else goes into an overflow menu
   (`…`). The session header shows the answering-mode switch and "Add my own
   decision", then `…` holding "Apply a batch of changes". Below `lg` the
-  visible actions collapse into `…` too, beside the ledger's sheet button, and
-  the title is one truncated line that keeps at least 60% of the header.
+  visible actions collapse into `…` too, so at most two page controls sit
+  beside the title (the ledger's sheet button and `…`), plus the shell's
+  hamburger. At every width the title is one truncated line that takes all
+  the width the actions leave.
 - **Session workspace ("the bench").** Two columns at `lg` and wider: the
   bench (flexible) and the ledger (the design tree, 22rem, 26rem at `2xl`).
   - The bench always opens on the current ask: the round, the done panel, or

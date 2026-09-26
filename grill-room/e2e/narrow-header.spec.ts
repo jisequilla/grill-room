@@ -67,8 +67,12 @@ async function openFromMenuAndClose(
     )
     .toBe(true);
 
-  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
+
+  // The dialog has no trigger of its own: focus goes back to the button the
+  // menu opened from, not to the body.
+  await expect(page.getByTestId("header-overflow")).toBeFocused();
 
   // The page is interactive again: nothing left `pointer-events: none` on the
   // body, and a header button answers a real click.
@@ -197,11 +201,25 @@ test.describe("at 390×844", () => {
     await expect(rows).toHaveCount(2);
     await expect(sheet.getByTestId("tree-footer")).toContainText("1 loose end");
 
+    // Closed without a selection, the sheet hands focus back to its button.
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
+    await expect(trigger).toBeFocused();
+
+    await trigger.click();
+    await expect(sheet).toBeVisible();
     await rows.filter({ hasText: "Where does the data live?" }).click();
     await expect(sheet).toBeHidden();
-    await expect(
-      page.getByRole("dialog", { name: "Where does the data live?" }),
-    ).toBeVisible();
+    const detail = page.getByRole("dialog", {
+      name: "Where does the data live?",
+    });
+    await expect(detail).toBeVisible();
+    // The detail sheet the selection opened keeps the focus.
+    await expect
+      .poll(() =>
+        detail.evaluate((element) => element.contains(document.activeElement)),
+      )
+      .toBe(true);
   });
 });
 
@@ -248,6 +266,18 @@ test.describe("at 1280×720", () => {
     await page.keyboard.press("Escape");
 
     await expect(page.getByRole("heading", { name: "Design tree" })).toBeVisible();
+
+    // The visible "Add my own decision" still owns its dialog, so focus
+    // returns to it.
+    const addButton = header.getByRole("button", {
+      name: "Add my own decision",
+    });
+    await addButton.click();
+    const addDialog = page.getByRole("dialog", { name: "Add my own decision" });
+    await expect(addDialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(addDialog).toBeHidden();
+    await expect(addButton).toBeFocused();
 
     await openFromMenuAndClose(
       page,
