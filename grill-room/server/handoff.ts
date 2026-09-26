@@ -715,14 +715,49 @@ function bundleAccess(facts: ExportFacts, fileStem: string): string {
 }
 
 /**
+ * Every ticket other than 1 that does not reach ticket 1 through
+ * Blocked-by, in ticket order (`source.tickets` is already number-ordered).
+ * `break-into-tickets` requires every ticket to reach ticket 1 at the time
+ * tickets are made, but a ticket set can drift from that afterwards: made
+ * with no project before a greenfield one was attached, made before this
+ * rule existed, or edited by `set-ticket-blocked-by` to drop the path.
+ */
+function ticketsNotReachingOne(tickets: readonly HandoffTicket[]): number[] {
+  return tickets
+    .map((ticket) => ticket.number)
+    .filter((number) => number !== 1 && !transitiveBlockers(number, tickets).includes(1));
+}
+
+/** English list join for the greenfield reach note: "A", "A and B", "A, B and C". */
+function joinList(items: readonly string[]): string {
+  if (items.length <= 1) return items.join("");
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
  * In a repository with no commits, the verify command does not exist yet:
- * ticket 1 sets it up, and every other ticket waits for it (the rule
- * `break-into-tickets` enforces when the tickets are made). This is HANDOFF's
- * line under "Verify command"; {@link greenfieldVerifyNote} is the brief's.
+ * ticket 1 sets it up. Whether every other ticket actually waits for it
+ * depends on whether it reaches ticket 1 through Blocked-by
+ * ({@link transitiveBlockers}) — true at the time `break-into-tickets` makes
+ * the tickets, but not guaranteed afterwards (see
+ * {@link ticketsNotReachingOne}). This is HANDOFF's line under "Verify
+ * command"; {@link greenfieldVerifyNote} is the brief's.
  */
 function greenfieldVerifyLine(source: HandoffSource): string {
-  const first = padTicketNumber(1, source.tickets.length);
-  return `This repository has no commits yet, so this command does not exist until ticket ${first} sets it up. Ticket ${first}'s acceptance includes it passing, and every other ticket waits for ticket ${first}.`;
+  const total = source.tickets.length;
+  const first = padTicketNumber(1, total);
+  const setUp = `This repository has no commits yet, so this command does not exist until ticket ${first} sets it up.`;
+  const nonReaching = ticketsNotReachingOne(source.tickets).map((number) => padTicketNumber(number, total));
+  if (nonReaching.length === 0) {
+    return `${setUp} Ticket ${first}'s acceptance includes it passing, and every other ticket waits for ticket ${first}.`;
+  }
+  const acceptance = `Ticket ${first}'s acceptance includes it passing.`;
+  if (nonReaching.length === 1) {
+    const [only] = nonReaching;
+    return `${setUp} ${acceptance} Ticket ${only} does not depend on ticket ${first}, so run ticket ${first} first and merge it before starting ticket ${only}.`;
+  }
+  return `${setUp} ${acceptance} Tickets ${joinList(nonReaching)} do not depend on ticket ${first}, so run ticket ${first} first and merge it before starting them.`;
 }
 
 function greenfieldVerifyNote(source: HandoffSource, ticketNumber: number): string {
@@ -730,7 +765,11 @@ function greenfieldVerifyNote(source: HandoffSource, ticketNumber: number): stri
   if (ticketNumber === 1) {
     return `This repository has no commits yet: this ticket sets up ${verify}. Make it run and pass from the repository root; that is part of your acceptance.`;
   }
-  return `${verify} is established by ticket ${padTicketNumber(1, source.tickets.length)}, which is merged before this ticket starts.`;
+  const first = padTicketNumber(1, source.tickets.length);
+  if (transitiveBlockers(ticketNumber, source.tickets).includes(1)) {
+    return `${verify} is established by ticket ${first}, which is merged before this ticket starts.`;
+  }
+  return `${verify} is set up by ticket ${first}, but this ticket does not depend on it, so it may not exist yet. If ${verify} does not run from the repository root, stop and report; do not create it yourself.`;
 }
 
 function briefStepZero(

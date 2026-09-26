@@ -482,8 +482,12 @@ session, and is readable and editable in the output page's Handoff block.
   absolute path. A repository with no commits is described as greenfield:
   make the first commit before delegating, and the verify command does not
   exist until ticket 01 sets it up — HANDOFF.md's "Verify command" section
-  says so, ticket 01's brief makes it part of its acceptance, and every
-  other brief names it as established by ticket 01. The stored visibility flag still
+  says so, and names any ticket that does not reach ticket 01 through
+  Blocked-by; ticket 01's brief makes the command part of its acceptance,
+  and every other brief names it as established by ticket 01 only when that
+  ticket reaches ticket 01 through Blocked-by — otherwise the brief warns
+  that the command may not exist yet and to stop and report rather than
+  create it. The stored visibility flag still
   decides the wording of the handoff generated and shown in the app, is
   part of its staleness fingerprint, feeds the settings page and the
   mismatch warning, and is export's fallback when git gives no answer.
