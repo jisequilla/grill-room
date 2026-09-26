@@ -80,6 +80,8 @@ function ticketsTurn(
     title?: string;
     body?: string;
     blockedBy?: number[];
+    kind?: "build" | "gate";
+    waitsFor?: string | null;
   }[],
 ): ScriptedTurn {
   return {
@@ -457,7 +459,14 @@ describe("break-into-tickets in a repository with no commits yet", () => {
     return session.id;
   }
 
-  type Row = { number: number; slug: string; body?: string; blockedBy?: number[] };
+  type Row = {
+    number: number;
+    slug: string;
+    body?: string;
+    blockedBy?: number[];
+    kind?: "build" | "gate";
+    waitsFor?: string | null;
+  };
 
   /** A set shaped as the greenfield section asks: ticket 1 names the command, every other ticket waits for it. */
   function aGreenfieldSet(verifyCommand: string): ScriptedTurn {
@@ -678,6 +687,78 @@ describe("break-into-tickets in a repository with no commits yet", () => {
     });
   });
 
+  describe("gates", () => {
+    const NAMES_IT = "Set up the runner so that `pnpm test` passes.";
+    const ACCOUNT = "An account";
+    const G4 =
+      "Ticket 1 is a gate. This repository has no commits yet, so ticket 1 must be a build ticket that sets up the verify command.";
+    const dependsOnFirst = (number: number) =>
+      `Ticket ${number} does not depend on ticket 1. This repository has no commits yet and ticket 1 sets up the verify command, so every other ticket must list 1 in its \`blockedBy\`, directly or through another ticket's \`blockedBy\`.`;
+
+    it.each<[string, Row[]]>([
+      [
+        "1 build names it; 2 gate, no blockedBy; 3 build ←[1, 2] (a gate need not reach ticket 1)",
+        [
+          { number: 1, slug: "one", body: NAMES_IT },
+          { number: 2, slug: "two", kind: "gate", waitsFor: ACCOUNT },
+          { number: 3, slug: "three", blockedBy: [1, 2] },
+        ],
+      ],
+      [
+        "1 build names it; 2 gate ←[1]; 3 build ←[2] (3 reaches 1 through the gate)",
+        [
+          { number: 1, slug: "one", body: NAMES_IT },
+          { number: 2, slug: "two", kind: "gate", waitsFor: ACCOUNT, blockedBy: [1] },
+          { number: 3, slug: "three", blockedBy: [2] },
+        ],
+      ],
+    ])("accepts %s", async (_, rows) => {
+      const sessionId = await aSessionInProject({ commit: false });
+      const interviewer = scriptInterviewer([ticketsTurn(rows)]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      expect(interviewer.requests).toHaveLength(1);
+    });
+
+    it.each<[string, Row[], string]>([
+      [
+        "1 gate; 2 build ←[1]",
+        [
+          { number: 1, slug: "one", kind: "gate", waitsFor: ACCOUNT, body: NAMES_IT },
+          { number: 2, slug: "two", blockedBy: [1] },
+        ],
+        G4,
+      ],
+      [
+        "1 gate; 2 build ←[1]; 3 build, no blockedBy (G4, then the reach loop)",
+        [
+          { number: 1, slug: "one", kind: "gate", waitsFor: ACCOUNT },
+          { number: 2, slug: "two", blockedBy: [1] },
+          { number: 3, slug: "three" },
+        ],
+        `${G4} ${dependsOnFirst(3)}`,
+      ],
+      [
+        "1 build names it; 2 gate; 3 build ←[2] (only 3 is refused)",
+        [
+          { number: 1, slug: "one", body: NAMES_IT },
+          { number: 2, slug: "two", kind: "gate", waitsFor: ACCOUNT },
+          { number: 3, slug: "three", blockedBy: [2] },
+        ],
+        dependsOnFirst(3),
+      ],
+    ])("rejects %s, and asks again", async (_, rows, expected) => {
+      const sessionId = await aSessionInProject({ commit: false });
+      const interviewer = scriptInterviewer([ticketsTurn(rows), aGreenfieldSet("pnpm test")]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      expect(interviewer.requests).toHaveLength(2);
+      expect(rejectionOf(interviewer.requests[1])).toBe(expected);
+    });
+  });
+
   describe("seam: a set shaped as the prompt section describes passes the check", () => {
     it.each(["pnpm test", "echo `date`"])("verify command %s", async (verifyCommand) => {
       const sessionId = await aSessionInProject({ commit: false, verifyCommand });
@@ -714,9 +795,279 @@ describe("break-into-tickets in a repository with no commits yet", () => {
   });
 });
 
+describe("gates", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  type Row = Parameters<typeof ticketsTurn>[0][number];
+
+  const ACCOUNT = "A live account on the payment platform, with API keys issued.";
+  const G1 = (number: number) =>
+    `Ticket ${number} is a gate, so its \`waitsFor\` must say in one line what it waits for.`;
+  const G2 = (number: number) =>
+    `Ticket ${number} is a build ticket, so its \`waitsFor\` must be null. Only a gate waits for something outside the code.`;
+  const G3 = (number: number) =>
+    `Ticket ${number} is a gate that no ticket lists in \`blockedBy\`. A gate exists to hold back the tickets that need it: list it in their \`blockedBy\`.`;
+
+  function rejectionOf(request: unknown): string {
+    return (request as BreakIntoTicketsRequest).rejectionReason ?? "";
+  }
+
+  it.each<[string, Row[]]>([
+    [
+      "1 build; 2 gate; 3 build ←[1, 2]",
+      [
+        { number: 1, slug: "one" },
+        { number: 2, slug: "two", kind: "gate", waitsFor: ACCOUNT },
+        { number: 3, slug: "three", blockedBy: [1, 2] },
+      ],
+    ],
+    [
+      "1 build; 2 gate ←[1] (Part 1 is used); 3 build ←[2]",
+      [
+        { number: 1, slug: "one" },
+        { number: 2, slug: "two", kind: "gate", waitsFor: "Part 1 is used.", blockedBy: [1] },
+        { number: 3, slug: "three", blockedBy: [2] },
+      ],
+    ],
+    [
+      "1 build; 2 gate; 3 gate ←[2]; 4 build ←[3] (a gate may block a gate)",
+      [
+        { number: 1, slug: "one" },
+        { number: 2, slug: "two", kind: "gate", waitsFor: ACCOUNT },
+        { number: 3, slug: "three", kind: "gate", waitsFor: "The partner agreement is signed.", blockedBy: [2] },
+        { number: 4, slug: "four", blockedBy: [3] },
+      ],
+    ],
+    [
+      "every ticket a build, no kind in the result",
+      [
+        { number: 1, slug: "one" },
+        { number: 2, slug: "two", blockedBy: [1] },
+      ],
+    ],
+    [
+      'a build with waitsFor ""',
+      [
+        { number: 1, slug: "one" },
+        { number: 2, slug: "two", kind: "build", waitsFor: "" },
+      ],
+    ],
+    [
+      'a build with waitsFor "  "',
+      [
+        { number: 1, slug: "one" },
+        { number: 2, slug: "two", kind: "build", waitsFor: "  " },
+      ],
+    ],
+  ])("accepts %s", async (_, rows) => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const interviewer = scriptInterviewer([ticketsTurn(rows)]);
+
+    const { tickets } = await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(1);
+    expect(tickets.map((ticket) => ticket.number)).toEqual(rows.map((row) => row.number));
+  });
+
+  const gateAt3 = (waitsFor: string | null): Row[] => [
+    { number: 1, slug: "one" },
+    { number: 2, slug: "two" },
+    { number: 3, slug: "three", kind: "gate", waitsFor },
+    { number: 4, slug: "four", blockedBy: [3] },
+  ];
+
+  it.each<[string, Row[], string]>([
+    ["G1: a gate whose waitsFor is null", gateAt3(null), G1(3)],
+    ['G1: a gate whose waitsFor is ""', gateAt3(""), G1(3)],
+    ['G1: a gate whose waitsFor is "  "', gateAt3("  "), G1(3)],
+    ["G1: a gate whose waitsFor holds a line feed", gateAt3("An account\nand a card"), G1(3)],
+    ["G1: a gate whose waitsFor holds a carriage return", gateAt3("An account\rand a card"), G1(3)],
+    [
+      'G2: a build whose waitsFor is "An account"',
+      [
+        { number: 1, slug: "one" },
+        { number: 2, slug: "two", kind: "build", waitsFor: "An account" },
+      ],
+      G2(2),
+    ],
+    [
+      "G3: a gate no ticket lists in blockedBy",
+      [
+        { number: 1, slug: "one" },
+        { number: 2, slug: "two", blockedBy: [1] },
+        { number: 3, slug: "three", kind: "gate", waitsFor: ACCOUNT },
+      ],
+      G3(3),
+    ],
+    [
+      "every gate rule at once, by rule and then by number",
+      [
+        { number: 1, slug: "one", kind: "gate", waitsFor: null },
+        { number: 2, slug: "two", kind: "build", waitsFor: "An account" },
+        { number: 3, slug: "three", kind: "gate", waitsFor: "" },
+        { number: 4, slug: "four", kind: "build", waitsFor: "A card", blockedBy: [3] },
+      ],
+      [G1(1), G1(3), G2(2), G2(4), G3(1)].join(" "),
+    ],
+    [
+      "a link error and a gate rule: the link reason first",
+      [
+        { number: 1, slug: "one", blockedBy: [9] },
+        { number: 2, slug: "two", kind: "gate", waitsFor: ACCOUNT },
+      ],
+      `Ticket 1 is blocked by 9, which is not a ticket number in this set. ${G3(2)}`,
+    ],
+    [
+      "a cycle and a gate rule: the gate reason, and no cycle check",
+      [
+        { number: 1, slug: "one", blockedBy: [2] },
+        { number: 2, slug: "two", blockedBy: [1] },
+        { number: 3, slug: "three", kind: "gate", waitsFor: ACCOUNT },
+      ],
+      G3(3),
+    ],
+  ])("rejects %s, and asks again", async (_, rows, expected) => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const interviewer = scriptInterviewer([ticketsTurn(rows), oneGoodTicket]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(2);
+    expect(rejectionOf(interviewer.requests[1])).toBe(expected);
+  });
+});
+
+describe("seam: gates shaped as the prompt describes pass the check", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+  const repos = useTempGitRepos();
+
+  async function aSessionInProject(commit: boolean): Promise<string> {
+    const root = repos.create({ commit });
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+    });
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A local app that grills me about an idea until it is decided.",
+      projectId: project.id,
+    });
+    await confirm(session.id);
+    scriptInterviewer([{ kind: "synthesize-spec", result: { markdown: GOOD_SPEC_MARKDOWN } }]);
+    await synthesizeSpec.run({ sessionId: session.id });
+    return session.id;
+  }
+
+  it.each([
+    ["in a repository with commits", true],
+    ["in a repository with no commits yet", false],
+  ])("%s", async (_, commit) => {
+    const sessionId = await aSessionInProject(commit);
+    const first = scriptInterviewer([
+      ticketsTurn([
+        { number: 1, slug: "set-up", body: "Set up the runner so that `pnpm test` passes." },
+      ]),
+    ]);
+    await breakIntoTickets.run({ sessionId });
+    const prompt = buildPrompt(first.requests[0] as BreakIntoTicketsRequest);
+
+    // Follow the paragraph's words: the kinds it names, a one-line
+    // `waitsFor`, an external gate listed in the `blockedBy` of the ticket
+    // that needs it, a spec gate listing the built work it waits for, and
+    // every build ticket waiting for nothing.
+    const gateKind = /with `kind` "([a-z]+)", a one-line `waitsFor`/.exec(prompt)?.[1];
+    const buildKind = /Every other ticket has `kind`\n"([a-z]+)" and `waitsFor` null\./.exec(prompt)?.[1];
+    expect(gateKind).toBe("gate");
+    expect(buildKind).toBe("build");
+    expect(prompt.includes("## This repository has no commits yet")).toBe(!commit);
+
+    const shaped = ticketsTurn([
+      {
+        number: 1,
+        slug: "set-up-the-workspace",
+        body: "Set up the workspace and its test runner. Acceptance: `pnpm test` passes.",
+        kind: buildKind as "build",
+        waitsFor: null,
+      },
+      {
+        number: 2,
+        slug: "payment-account",
+        body: "The owner opens the account; it is in place once API keys are issued.",
+        kind: gateKind as "gate",
+        waitsFor: "A live account on the payment platform, with API keys issued.",
+      },
+      {
+        number: 3,
+        slug: "take-payments",
+        kind: buildKind as "build",
+        waitsFor: null,
+        blockedBy: [1, 2],
+      },
+      {
+        number: 4,
+        slug: "part-one-used",
+        body: "The owner uses part one on one real export; it is in place once that export is reviewed.",
+        kind: gateKind as "gate",
+        waitsFor: "Part one used on one real export first.",
+        blockedBy: [3],
+      },
+      {
+        number: 5,
+        slug: "part-two",
+        kind: buildKind as "build",
+        waitsFor: null,
+        blockedBy: [4],
+      },
+    ]);
+    const second = scriptInterviewer([shaped]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(second.requests).toHaveLength(1);
+    expect(
+      (await listTickets.run({ sessionId })).tickets.map((ticket) => [ticket.number, ticket.kind]),
+    ).toEqual([
+      [1, "build"],
+      [2, "gate"],
+      [3, "build"],
+      [4, "gate"],
+      [5, "build"],
+    ]);
+  });
+});
+
 describe("list-tickets", () => {
   useTestDatabase();
   afterEach(resetInterviewer);
+
+  it("reports each ticket's kind and waitsFor", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    scriptInterviewer([
+      ticketsTurn([
+        { number: 1, slug: "one", kind: "build", waitsFor: "  " },
+        {
+          number: 2,
+          slug: "two",
+          kind: "gate",
+          waitsFor: "  A live account on the payment platform, with API keys issued.  ",
+        },
+        { number: 3, slug: "three", blockedBy: [1, 2] },
+      ]),
+    ]);
+
+    await breakIntoTickets.run({ sessionId });
+    const { tickets, waves } = await listTickets.run({ sessionId });
+
+    expect(tickets.map((ticket) => [ticket.number, ticket.kind, ticket.waitsFor])).toEqual([
+      [1, "build", null],
+      [2, "gate", "A live account on the payment platform, with API keys issued."],
+      [3, "build", null],
+    ]);
+    expect(waves).toEqual([[1, 2], [3]]);
+  });
 
   it("throws for a session id that does not exist", async () => {
     await expect(

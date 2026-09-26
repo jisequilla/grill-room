@@ -81,6 +81,14 @@ export type RoundSubmissionState = (typeof ROUND_SUBMISSION_STATES)[number];
 export const TICKET_STATUSES = ["ready", "in-progress", "done"] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 
+/**
+ * A build ticket is delegated to a builder. A gate has no builder: it waits
+ * for something outside the code, and the tickets that need it list it in
+ * their `blockedBy`.
+ */
+export const TICKET_KINDS = ["build", "gate"] as const;
+export type TicketKind = (typeof TICKET_KINDS)[number];
+
 /** How a registered project tracks its tickets. Default is `markdown`. */
 export const PROJECT_TRACKER_KINDS = ["beads", "markdown"] as const;
 export type ProjectTrackerKind = (typeof PROJECT_TRACKER_KINDS)[number];

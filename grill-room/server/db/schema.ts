@@ -25,6 +25,7 @@ import {
   SESSION_MODELS,
   SESSION_STATES,
   SESSION_TURN_STATUSES,
+  TICKET_KINDS,
   TICKET_STATUSES,
 } from "../../shared/session-constants.js";
 
@@ -61,6 +62,8 @@ export {
   type SessionState,
   SESSION_TURN_STATUSES,
   type SessionTurnStatus,
+  TICKET_KINDS,
+  type TicketKind,
   TICKET_STATUSES,
   type TicketStatus,
 } from "../../shared/session-constants.js";
@@ -495,6 +498,10 @@ export const tickets = table(
       .default("ready"),
     /** JSON array of ticket ids that block this one. */
     blockedByJson: text("blocked_by_json").notNull().default("[]"),
+    /** `gate` for a ticket that waits for something outside the code and has no builder. */
+    kind: text("kind", { enum: TICKET_KINDS }).notNull().default("build"),
+    /** What a gate waits for, in one line; always null for a build ticket. */
+    waitsFor: text("waits_for"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

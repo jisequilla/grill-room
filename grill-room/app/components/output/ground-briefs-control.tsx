@@ -17,6 +17,7 @@ import {
   MAX_HANDOFF_SCOUT_BUILDS_ON,
   MAX_HANDOFF_SCOUT_TICKETS,
 } from "@shared/session-constants";
+import { blockersThroughGates } from "@shared/ticket-gates";
 
 /** A turn takes a minute or more; the default 60 s client timeout cancels one about to succeed. */
 const TURN_TIMEOUT_MS = 10 * 60 * 1000;
@@ -150,9 +151,12 @@ export function GroundBriefsControl({
     onSettled,
   });
 
-  const tooManyTickets = tickets.length > MAX_HANDOFF_SCOUT_TICKETS;
-  const tooManyBlockers = tickets.some(
-    (ticket) => ticket.blockedBy.length > MAX_HANDOFF_SCOUT_BUILDS_ON,
+  // Counted as `ground-briefs` counts them: build tickets only, each blocked
+  // by what its gates are blocked by, since a gate is never grounded.
+  const groundedBlockers = [...blockersThroughGates(tickets).values()];
+  const tooManyTickets = groundedBlockers.length > MAX_HANDOFF_SCOUT_TICKETS;
+  const tooManyBlockers = groundedBlockers.some(
+    (blockedBy) => blockedBy.length > MAX_HANDOFF_SCOUT_BUILDS_ON,
   );
 
   const disabledCode = groundBriefsDisabledCode({

@@ -11,11 +11,13 @@
 
 import { createHash } from "node:crypto";
 
+import type { TicketKind } from "../shared/session-constants.js";
 import type { StoredReadiness } from "./readiness.js";
 import type { ScoutReportWithStaleness } from "./scout-report.js";
 import type { DecisionView } from "./tree.js";
 
 const STATUS_LINE = "Status: ready-for-agent";
+const GATE_STATUS_LINE = "Status: ready-for-human";
 
 /** The decisions record every export with something settled writes beside the spec. */
 export const DECISIONS_FILE = "decisions.md";
@@ -30,6 +32,10 @@ export interface ExportTicket {
   title: string;
   body: string;
   blockedBy: readonly number[];
+  /** `gate` for a prerequisite outside the code. Absent means `build`. */
+  kind?: TicketKind;
+  /** What a gate waits for; null or absent for a build ticket. */
+  waitsFor?: string | null;
 }
 
 export interface PlannedExportFile {
@@ -395,19 +401,26 @@ export function renderSpecFile(sessionTitle: string, specMarkdown: string): stri
 /**
  * One ticket file's content: `# <NN> <title>`, blank line, `Status:`, then
  * `Blocked by:` (numbers padded the same as the file name, or `none`), blank
- * line, then the ticket body.
+ * line, then the ticket body. A gate's file is for a person, not an agent:
+ * its status reads `ready-for-human`, and a `Wait for:` line follows
+ * `Blocked by:`.
  */
 export function renderTicketFile(params: {
   label: string;
   title: string;
   body: string;
   blockedByLabels: readonly string[];
+  /** Present exactly for a gate: what it waits for. */
+  waitsFor?: string;
 }): string {
   const blockedByLine =
     params.blockedByLabels.length > 0
       ? `Blocked by: ${params.blockedByLabels.join(", ")}`
       : "Blocked by: none";
 
+  if (params.waitsFor !== undefined) {
+    return `# ${params.label} ${params.title}\n\n${GATE_STATUS_LINE}\n${blockedByLine}\nWait for: ${params.waitsFor}\n\n${params.body}`;
+  }
   return `# ${params.label} ${params.title}\n\n${STATUS_LINE}\n${blockedByLine}\n\n${params.body}`;
 }
 
@@ -854,6 +867,7 @@ export function planExport(input: PlanExportInput): ExportPlan {
         title: ticket.title,
         body: ticket.body,
         blockedByLabels,
+        ...(ticket.kind === "gate" ? { waitsFor: ticket.waitsFor ?? "" } : {}),
       }),
     });
   }

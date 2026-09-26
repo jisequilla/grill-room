@@ -95,6 +95,13 @@ export default defineAction({
       );
     }
 
+    if (ticket!.kind === "gate") {
+      fail(
+        `Ticket ${ticket!.number} is a gate: nothing is built for it, so it has no build record.`,
+        { errorCode: "gate_ticket", statusCode: 409 },
+      );
+    }
+
     const now = new Date().toISOString();
 
     let ticketRow = ticket!;

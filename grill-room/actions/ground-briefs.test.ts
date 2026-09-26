@@ -116,6 +116,8 @@ const SPEC_MARKDOWN = [
 interface TicketSpec {
   number: number;
   blockedBy?: number[];
+  kind?: "build" | "gate";
+  waitsFor?: string | null;
 }
 
 function ticketsTurn(tickets: TicketSpec[]): ScriptedTurn {
@@ -947,6 +949,104 @@ describe("ground-briefs", () => {
         "Session not found: missing",
       );
     });
+  });
+});
+
+describe("gates are not grounded", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  const gate = (number: number, blockedBy: number[] = []): TicketSpec => ({
+    number,
+    blockedBy,
+    kind: "gate",
+    waitsFor: "A live account on the payment platform, with API keys issued.",
+  });
+
+  /** `aHandoffScoutResult()` with its second ticket renumbered to `number`. */
+  function groundingFor(number: number): HandoffScoutResult {
+    const result = aHandoffScoutResult();
+    result.tickets[1]!.number = number;
+    return result;
+  }
+
+  it("sends only the build tickets, each blocked through its gates, and accepts a grounding that names no gate", async () => {
+    const { session } = await aSessionWithHandoff({
+      tickets: [{ number: 1 }, gate(2, [1]), { number: 3, blockedBy: [2] }],
+    });
+    const interviewer = scriptInterviewer([{ kind: "handoff-scout", result: groundingFor(3) }]);
+
+    const grounded = await groundBriefs.run({ sessionId: session.id });
+
+    const requests = scoutRequests(interviewer.requests);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.tickets.map((ticket) => [ticket.number, ticket.blockedBy])).toEqual([
+      [1, []],
+      [3, [1]],
+    ]);
+    expect(grounded.grounding).toMatchObject({ result: groundingFor(3), current: true });
+  });
+
+  it("accepts a grounding for a build ticket blocked only by a gate, with no buildsOn at all", async () => {
+    const { session } = await aSessionWithHandoff({
+      tickets: [{ number: 1 }, gate(2), { number: 3, blockedBy: [1, 2] }, { number: 4, blockedBy: [2] }],
+    });
+    const result = groundingFor(3);
+    result.tickets.push({ ...aHandoffScoutResult().tickets[0]!, number: 4, filesToChange: [], buildsOn: [] });
+    const interviewer = scriptInterviewer([{ kind: "handoff-scout", result }]);
+
+    await groundBriefs.run({ sessionId: session.id });
+
+    const requests = scoutRequests(interviewer.requests);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.tickets.map((ticket) => [ticket.number, ticket.blockedBy])).toEqual([
+      [1, []],
+      [3, [1]],
+      [4, []],
+    ]);
+  });
+
+  it("counts a ticket's blockers through its gates for too-many-blockers", async () => {
+    const builds = Array.from({ length: MAX_HANDOFF_SCOUT_BUILDS_ON + 1 }, (_, index) => index + 1);
+    const gateNumber = builds.length + 1;
+    const { session } = await aSessionWithHandoff({
+      tickets: [
+        ...builds.map((number) => ({ number })),
+        gate(gateNumber, builds),
+        { number: gateNumber + 1, blockedBy: [gateNumber] },
+      ],
+    });
+    const interviewer = scriptInterviewer([]);
+
+    await expect(groundBriefs.run({ sessionId: session.id })).rejects.toMatchObject({
+      errorCode: "too-many-blockers",
+    });
+    expect(interviewer.requests).toHaveLength(0);
+  });
+
+  it("counts a gate neither as a ticket nor as a blocker of its own", async () => {
+    const builds = Array.from({ length: MAX_HANDOFF_SCOUT_BUILDS_ON }, (_, index) => index + 1);
+    const gateNumber = builds.length + 1;
+    const { session } = await aSessionWithHandoff({
+      tickets: [
+        ...builds.map((number) => ({ number })),
+        gate(gateNumber, [1]),
+        // One blocker too many as stored, exactly the cap once the gate
+        // collapses into ticket 1, which it already lists.
+        { number: gateNumber + 1, blockedBy: [...builds, gateNumber] },
+      ],
+    });
+    const interviewer = scriptInterviewer([
+      { kind: "handoff-scout", invalidResult: { unexpected: true } },
+    ]);
+
+    await expect(groundBriefs.run({ sessionId: session.id })).rejects.toMatchObject({
+      errorCode: "malformed-output",
+    });
+
+    const [request] = scoutRequests(interviewer.requests);
+    expect(request!.tickets.map((ticket) => ticket.number)).not.toContain(gateNumber);
+    expect(request!.tickets.at(-1)).toMatchObject({ number: gateNumber + 1, blockedBy: builds });
   });
 });
 

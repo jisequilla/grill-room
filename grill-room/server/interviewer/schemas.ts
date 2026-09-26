@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   MAX_HANDOFF_SCOUT_BUILDS_ON,
   MAX_HANDOFF_SCOUT_TICKETS,
+  TICKET_KINDS,
 } from "../../shared/session-constants.js";
 
 /**
@@ -241,6 +242,13 @@ export const breakIntoTicketsResultSchema = z.strictObject({
       body: z.string(),
       /** Numbers of the tickets that must land first. */
       blockedBy: z.array(z.number().int().positive()),
+      /**
+       * `gate` for a prerequisite outside the code, which has no builder.
+       * Defaults so a result that predates gates still parses.
+       */
+      kind: z.enum(TICKET_KINDS).default("build"),
+      /** What a gate waits for, in one line; null for a build ticket. */
+      waitsFor: z.string().nullable().default(null),
     }),
   ),
 });
@@ -495,6 +503,11 @@ export const resultSchemas = {
 export type RequestKind = keyof typeof resultSchemas;
 
 export type ResultFor<Kind extends RequestKind> = z.infer<
+  (typeof resultSchemas)[Kind]
+>;
+
+/** What a result may look like before parsing: a field with a default may be left out. */
+export type ResultInputFor<Kind extends RequestKind> = z.input<
   (typeof resultSchemas)[Kind]
 >;
 
