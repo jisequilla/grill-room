@@ -487,3 +487,83 @@ describe("deadline exhaustion during a persistently dropped connection", () => {
     }
   }, 20_000);
 });
+
+describe("an action's HTTP error status keeps its own message", () => {
+  function sessionCreated() {
+    return {
+      ok: () => true,
+      status: () => 200,
+      text: async () => "",
+      json: async () => ({ id: "session-1" }),
+    };
+  }
+
+  function answered500() {
+    return { ok: () => false, status: () => 500, text: async () => "boom", json: async () => ({}) };
+  }
+
+  it("create-session answering 500 fails with the unwrapped create message, not relabelled as 'gave no response'", async () => {
+    const goto = vi.fn(async () => ({ status: () => 200 }));
+    const post = vi.fn(async (path: string) => {
+      if (path === CREATE_SESSION_PATH) return answered500();
+      throw new Error(`unexpected post path ${path}`);
+    });
+    const get = vi.fn(async () => ({ status: () => 409 }));
+
+    let caught: unknown;
+    try {
+      await runWarmUp({ goto, post, get, log: vi.fn(), logError: vi.fn() });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).not.toBeInstanceOf(WarmUpError);
+    expect((caught as Error).message).toBe("e2e warm-up could not create its session: 500 boom");
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it("delete-session answering 500 fails with the unwrapped delete message, not relabelled as 'gave no response'", async () => {
+    const goto = vi.fn(async () => ({ status: () => 200 }));
+    const post = vi.fn(async (path: string) => {
+      if (path === CREATE_SESSION_PATH) return sessionCreated();
+      if (path === DELETE_SESSION_PATH) return answered500();
+      throw new Error(`unexpected post path ${path}`);
+    });
+    const get = vi.fn(async () => ({ status: () => 409 }));
+    const logError = vi.fn();
+
+    let caught: unknown;
+    try {
+      await runWarmUp({ goto, post, get, log: vi.fn(), logError });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).not.toBeInstanceOf(WarmUpError);
+    expect((caught as Error).message).toBe(
+      "e2e warm-up could not delete its session session-1: 500 boom",
+    );
+    expect(post.mock.calls.filter((c) => c[0] === DELETE_SESSION_PATH)).toHaveLength(1);
+    expect(logError).not.toHaveBeenCalled();
+  });
+
+  it("logs delete-session's unwrapped 500 message through logError once the main sequence already failed", async () => {
+    const goto = vi.fn(async (path: string) => (path === "/" ? { status: () => 200 } : null));
+    const post = vi.fn(async (path: string) => {
+      if (path === CREATE_SESSION_PATH) return sessionCreated();
+      if (path === DELETE_SESSION_PATH) return answered500();
+      throw new Error(`unexpected post path ${path}`);
+    });
+    const get = vi.fn(async () => ({ status: () => 409 }));
+    const logError = vi.fn();
+
+    await expect(runWarmUp({ goto, post, get, log: vi.fn(), logError })).rejects.toThrow(
+      /gave no response/,
+    );
+
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(logError).toHaveBeenCalledWith(
+      "e2e warm-up could not delete its session session-1: 500 boom",
+    );
+  });
+});

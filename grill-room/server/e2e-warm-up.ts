@@ -138,25 +138,37 @@ export interface WarmUpDeps {
 /**
  * Runs one warm-up step's network call against its own `WARM_UP_LIMIT_MS`
  * deadline, retrying a transient connection error through `retryTransient`.
- * Whatever escapes — a non-transient error, or the step's own limit running
- * out — is always a `WarmUpError` naming `path`, the elapsed time and the
- * reason, never a bare `WarmUpStepFailure` (whose `.reason` only this
- * function reads) or an un-annotated cause.
+ * A `WarmUpStepFailure` (the step's own limit running out) always escapes as a
+ * `WarmUpError` naming `path`, the elapsed time and its reason. Any other
+ * error is passed to `otherError`, which decides what escapes instead.
  */
 async function retryStep<T>(
   path: string,
   attempt: (deadline: number) => Promise<T>,
   onRetry: (retryCount: number) => void,
+  otherError: (path: string, elapsedMs: number, error: unknown) => unknown,
 ): Promise<T> {
   const startedAt = Date.now();
   const deadline = startedAt + WARM_UP_LIMIT_MS;
   try {
     return await retryTransient(() => attempt(deadline), deadline, onRetry);
   } catch (error) {
-    const reason = error instanceof WarmUpStepFailure ? error.reason : "gave no response";
-    const cause = error instanceof WarmUpStepFailure ? error.message : describe(error);
-    throw new WarmUpError(path, Date.now() - startedAt, reason, cause);
+    const elapsedMs = Date.now() - startedAt;
+    if (error instanceof WarmUpStepFailure) {
+      throw new WarmUpError(path, elapsedMs, error.reason, error.message);
+    }
+    throw otherError(path, elapsedMs, error);
   }
+}
+
+/** A warm step that got no answer at all: named, timed and labelled like any other step failure. */
+function noResponse(path: string, elapsedMs: number, error: unknown): WarmUpError {
+  return new WarmUpError(path, elapsedMs, "gave no response", describe(error));
+}
+
+/** An action's own error (an HTTP error status, say) escapes exactly as the action threw it. */
+function unchanged(_path: string, _elapsedMs: number, error: unknown): unknown {
+  return error;
 }
 
 /**
@@ -170,9 +182,14 @@ export async function warm(
 ): Promise<void> {
   const startedAt = Date.now();
   let retries = 0;
-  const status = await retryStep(path, answer, (count) => {
-    retries = count;
-  });
+  const status = await retryStep(
+    path,
+    answer,
+    (count) => {
+      retries = count;
+    },
+    noResponse,
+  );
   const suffix =
     retries === 0 ? "" : ` (${retries} connection retr${retries === 1 ? "y" : "ies"})`;
   log(`e2e warm-up: ${path} ${status} ${Date.now() - startedAt} ms${suffix}`);
@@ -241,7 +258,9 @@ async function deleteSession(post: WarmUpDeps["post"], id: string): Promise<void
  * A cleanup failure never hides the warm-up's own failure: when the main
  * sequence already failed, the cleanup failure is reported through
  * `logError` (never `log`, which is only ever a normal warm-up line) instead
- * of escaping; when nothing else failed, it escapes as its own `WarmUpError`.
+ * of escaping; when nothing else failed, it escapes. Either action's own
+ * error (an HTTP error status) escapes exactly as the action threw it; only
+ * a connection that kept dropping until the limit becomes a `WarmUpError`.
  */
 export async function runWarmUp(deps: WarmUpDeps): Promise<void> {
   const { goto, post, get, log, logError } = deps;
@@ -251,7 +270,12 @@ export async function runWarmUp(deps: WarmUpDeps): Promise<void> {
   try {
     await warm("/", navigateStep(goto, "/"), log);
 
-    sessionId = await retryStep(CREATE_SESSION_PATH, () => createThrowawaySession(post), NOOP_RETRY);
+    sessionId = await retryStep(
+      CREATE_SESSION_PATH,
+      () => createThrowawaySession(post),
+      NOOP_RETRY,
+      unchanged,
+    );
 
     const sessionPath = `/sessions/${sessionId}`;
     await warm(sessionPath, navigateStep(goto, sessionPath), log);
@@ -276,7 +300,7 @@ export async function runWarmUp(deps: WarmUpDeps): Promise<void> {
     if (sessionId) {
       const id = sessionId;
       try {
-        await retryStep(DELETE_SESSION_PATH, () => deleteSession(post, id), NOOP_RETRY);
+        await retryStep(DELETE_SESSION_PATH, () => deleteSession(post, id), NOOP_RETRY, unchanged);
       } catch (error) {
         // Never hide the warm-up's own failure behind a cleanup failure.
         if (!failure) throw error;
