@@ -440,7 +440,7 @@ function wavesSection(source: HandoffSource, exportFacts?: ExportFacts): string 
     if (edges.length > 0) lines.push("");
     for (const edge of edges) {
       lines.push(
-        `Ticket ${padTicketNumber(edge.ticket, total)} waits for ticket ${padTicketNumber(edge.waitsFor, total)}: both change ${pathList(edge.sharedPaths)}.`,
+        `- Ticket ${padTicketNumber(edge.ticket, total)} waits for ticket ${padTicketNumber(edge.waitsFor, total)}: both change ${pathList(edge.sharedPaths)}.`,
       );
     }
   }

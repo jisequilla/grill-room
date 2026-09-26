@@ -1131,7 +1131,7 @@ describe("the waves section at export", () => {
       );
 
       expect(section.startsWith(
-        `## Waves\n\n${CHECKED_LINE}\n\nTicket 03 waits for ticket 01: both change \`server/export.ts\`.\n\n### Wave 1\n`,
+        `## Waves\n\n${CHECKED_LINE}\n\n- Ticket 03 waits for ticket 01: both change \`server/export.ts\`.\n\n### Wave 1\n`,
       )).toBe(true);
       expect(labelsByWave(section)).toEqual([["01"], ["02", "03"]]);
       expect(section).not.toContain("was not checked");
@@ -1150,7 +1150,7 @@ describe("the waves section at export", () => {
           implicitEdges: [{ ticket: 3, waitsFor: 1, sharedPaths }],
         }),
       );
-      expect(section).toContain(`\nTicket 03 waits for ticket 01: both change ${named}.\n`);
+      expect(section).toContain(`\n- Ticket 03 waits for ticket 01: both change ${named}.\n`);
     });
 
     it("writes the edge lines in wave order, not ticket order", () => {
@@ -1165,7 +1165,7 @@ describe("the waves section at export", () => {
         }),
       );
       expect(section).toContain(
-        `${CHECKED_LINE}\n\nTicket 03 waits for ticket 02: both change \`b\`.\nTicket 01 waits for ticket 03: both change \`a\`.\n\n### Wave 1`,
+        `${CHECKED_LINE}\n\n- Ticket 03 waits for ticket 02: both change \`b\`.\n- Ticket 01 waits for ticket 03: both change \`a\`.\n\n### Wave 1`,
       );
       expect(labelsByWave(section)).toEqual([["02"], ["03"], ["01"]]);
     });
@@ -1192,7 +1192,7 @@ describe("the waves section at export", () => {
         implicitEdges: [{ ticket: 5, waitsFor: 4, sharedPaths: ["server/export.ts"] }],
       });
 
-      expect(markdown).toContain("\nTicket 005 waits for ticket 004: both change `server/export.ts`.\n");
+      expect(markdown).toContain("\n- Ticket 005 waits for ticket 004: both change `server/export.ts`.\n");
     });
 
     it("with no overlaps: the Blocked-by waves and today's text, with no added lines", () => {

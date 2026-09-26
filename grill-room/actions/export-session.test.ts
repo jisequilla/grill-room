@@ -1676,7 +1676,7 @@ describe("export separates tickets in one wave that change the same file", () =>
     "Tickets in one wave have no Blocked-by between them. Whether they change the same files was not checked, because the briefs are not grounded against the current code: run them one at a time, or ground the briefs first. Start a wave only once every ticket of the previous wave is merged and verified.";
   const PARALLEL_LINE =
     "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.";
-  const EDGE_LINE = "Ticket 03 waits for ticket 02: both change `src/shared/store.ts`.";
+  const EDGE_LINE = "- Ticket 03 waits for ticket 02: both change `src/shared/store.ts`.";
 
   /** One grounded ticket that changes `files`, with nothing it builds on. */
   function groundedTicket(number: number, files: string[]) {
