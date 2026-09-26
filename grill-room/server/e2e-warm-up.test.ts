@@ -238,6 +238,70 @@ describe("runWarmUp", () => {
     }
   });
 
+  it("retries a null response warming '/' and succeeds, calling goto twice for that path (proves the isNoResponseYet wiring at runWarmUp's '/' call)", async () => {
+    let rootCalls = 0;
+    const goto = vi.fn(async (path: string) => {
+      if (path === "/") {
+        rootCalls += 1;
+        if (rootCalls === 1) return null;
+        return { status: () => 200 };
+      }
+      return { status: () => 200 };
+    });
+    const post = vi.fn(async (path: string) => {
+      if (path === CREATE_SESSION_PATH) {
+        return {
+          ok: () => true,
+          status: () => 200,
+          text: async () => "",
+          json: async () => ({ id: "session-1" }),
+        };
+      }
+      if (path === DELETE_SESSION_PATH) {
+        return { ok: () => true, status: () => 200, text: async () => "", json: async () => ({}) };
+      }
+      throw new Error(`unexpected post path ${path}`);
+    });
+    const get = vi.fn(async () => ({ status: () => 409 }));
+    const log = vi.fn();
+    const logError = vi.fn();
+
+    await expect(runWarmUp({ goto, post, get, log, logError })).resolves.toBeUndefined();
+
+    expect(goto.mock.calls.filter((c) => c[0] === "/")).toHaveLength(2);
+  });
+
+  it("retries a null response warming the session page and succeeds, calling goto twice for that path (proves the isNoResponseYet wiring at runWarmUp's session-page call)", async () => {
+    let sessionCalls = 0;
+    const goto = vi.fn(async (path: string) => {
+      if (path === "/") return { status: () => 200 };
+      sessionCalls += 1;
+      if (sessionCalls === 1) return null;
+      return { status: () => 200 };
+    });
+    const post = vi.fn(async (path: string) => {
+      if (path === CREATE_SESSION_PATH) {
+        return {
+          ok: () => true,
+          status: () => 200,
+          text: async () => "",
+          json: async () => ({ id: "session-1" }),
+        };
+      }
+      if (path === DELETE_SESSION_PATH) {
+        return { ok: () => true, status: () => 200, text: async () => "", json: async () => ({}) };
+      }
+      throw new Error(`unexpected post path ${path}`);
+    });
+    const get = vi.fn(async () => ({ status: () => 409 }));
+    const log = vi.fn();
+    const logError = vi.fn();
+
+    await expect(runWarmUp({ goto, post, get, log, logError })).resolves.toBeUndefined();
+
+    expect(goto.mock.calls.filter((c) => c[0] === SESSION_PATH)).toHaveLength(2);
+  });
+
   it("retries a dropped connection warming '/' and reports it, without changing the line count", async () => {
     const { goto, post, get, log, logError } = buildDeps("root");
 
