@@ -35,7 +35,7 @@ test("reopening a settled decision runs its stale review and re-asks the affecte
   let cards = page.getByTestId("round-card");
   await expect(cards).toHaveCount(1);
   await expect(cards.first()).toContainText("What shape should this take?");
-  await answerOwnText(cards.first(), "A workspace.");
+  await answerOwnText(cards.first(), "A workspace.", "save");
   await page.getByRole("button", { name: "Submit round" }).click();
 
   // ---- Round 2: its two dependents -----------------------------------------
@@ -43,8 +43,8 @@ test("reopening a settled decision runs its stale review and re-asks the affecte
   await expect(cards).toHaveCount(2);
   await expect(cards.first()).toContainText("Where does the data live?");
   await expect(cards.last()).toContainText("How does it sync?");
-  await answerOwnText(cards.first(), "On disk.");
-  await answerOwnText(cards.last(), "Whatever the shape needs.");
+  await answerOwnText(cards.first(), "On disk.", "save");
+  await answerOwnText(cards.last(), "Whatever the shape needs.", "save");
   await page.getByRole("button", { name: "Submit round" }).click();
 
   // Nothing left to propose: no round is open, and the tree holds all three,
@@ -67,7 +67,7 @@ test("reopening a settled decision runs its stale review and re-asks the affecte
   cards = page.getByTestId("round-card");
   await expect(cards).toHaveCount(1);
   await expect(cards.first()).toContainText("What shape should this take?");
-  await answerOwnText(cards.first(), "A page, after all.");
+  await answerOwnText(cards.first(), "A page, after all.", "save");
   await page.getByRole("button", { name: "Submit round" }).click();
 
   // ---- The what-changed digest shows on this very submission ---------------

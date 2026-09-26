@@ -183,7 +183,7 @@ test.describe("at 390×844", () => {
     await page.getByRole("button", { name: "Start the interview" }).click();
     const cards = page.getByTestId("round-card");
     await expect(cards).toHaveCount(2);
-    await answerOwnText(cards.first(), "A workspace, on disk.");
+    await answerOwnText(cards.first(), "A workspace, on disk.", "save");
     await cards
       .last()
       .getByRole("button", { name: "I don't know", exact: true })

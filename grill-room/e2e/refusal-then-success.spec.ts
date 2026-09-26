@@ -42,7 +42,7 @@ test("round history's attempt log shows the refusal row then the success row", a
   await expect(cards).toHaveCount(1);
   await expect(cards.first()).toContainText("What shape should this take?");
 
-  await answerOwnText(cards.first(), "A single page.");
+  await answerOwnText(cards.first(), "A single page.", "save");
   await expect(page.getByTestId("round-progress")).toHaveText(
     "1 of 1 answered",
   );

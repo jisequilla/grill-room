@@ -33,8 +33,10 @@ async function answerRoundToDeferral(
   await expect(cards.first()).toContainText(HOLD);
   await expect(cards.last()).toContainText(SERVICE);
 
-  await answerOwnText(cards.first(), DEFERRING_ANSWER);
-  await answerOwnText(cards.last(), "Dog walking.");
+  // The backstop's real case: the save-time nudge flags the answer, the owner
+  // saves it as their answer anyway, and the done-time check catches it.
+  await answerOwnText(cards.first(), DEFERRING_ANSWER, "save-past-nudge");
+  await answerOwnText(cards.last(), "Dog walking.", "save");
   await expect(page.getByTestId("round-progress")).toHaveText(
     "2 of 2 answered",
   );
