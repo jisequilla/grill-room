@@ -262,6 +262,17 @@ const messages = {
     scoutDroppedNote: "Dropped — still shown to the interviewer as context.",
     scoutMeta: "Read commit {{commit}} on {{model}}.",
 
+    briefLabel: "Brief",
+    briefSummary: "{{scout}} · {{readiness}}",
+    briefScoutNotRun: "Scout: not run",
+    briefScoutReading: "Scout: reading…",
+    briefScoutReadCommit: "Scout: read {{commit}}",
+    briefScoutNoCommit: "Scout: read · no commits yet",
+    briefScoutCounts: "{{kept}} kept, {{dropped}} dropped",
+    briefScoutToReview: ", {{count}} to review",
+    briefReadinessJudging: "Readiness · judging…",
+    briefReadinessNotJudged: "Readiness · not judged",
+
     modelSelectLabel: "Interviewer model",
     modelLockedError: "This session's interviewer model is fixed on {{model}}.",
     modelChangeFailed: "Could not change the session's interviewer model.",

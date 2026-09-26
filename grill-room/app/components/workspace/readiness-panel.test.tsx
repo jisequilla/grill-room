@@ -31,7 +31,7 @@ function judged(result: Partial<Readiness["result"]> = {}): Readiness {
 
 function render(
   readiness: Readiness | null,
-  { working = false, isAssessing = false } = {},
+  { working = false, isAssessing = false, canAssess = true } = {},
 ) {
   return renderToStaticMarkup(
     <ReadinessPanel
@@ -39,6 +39,7 @@ function render(
       working={working}
       isAssessing={isAssessing}
       onAssess={() => {}}
+      canAssess={canAssess}
     />,
   );
 }
@@ -163,6 +164,24 @@ describe("ReadinessPanel", () => {
     );
     expect(reassess).toContain(DISABLED);
     expect(section(render(null), "readiness-assess")).not.toContain(DISABLED);
+  });
+
+  it("shows the verdict read-only, with no assess control, once a round exists", () => {
+    const html = render(judged(), { canAssess: false });
+
+    expect(html).toContain('data-testid="readiness-panel"');
+    expect(html).toContain('data-testid="readiness-verdict"');
+    expect(section(html, "readiness-verdict")).toContain('data-verdict="ready"');
+    expect(html).not.toContain('data-testid="readiness-assess"');
+    expect(html).not.toContain('data-testid="readiness-reassess"');
+  });
+
+  it("still offers no control with no judgment and canAssess false (a defensive combination the route never actually produces)", () => {
+    const html = render(null, { canAssess: false });
+
+    expect(html).toContain('data-testid="readiness-panel"');
+    expect(html).not.toContain('data-testid="readiness-assess"');
+    expect(html).not.toContain('data-testid="readiness-reassess"');
   });
 });
 
