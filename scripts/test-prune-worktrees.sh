@@ -172,14 +172,19 @@ test_long_history() {
   git -C "$work" commit -q -m "root"
   git -C "$work" branch -M main
 
-  git -C "$work" worktree add -q ".claude/worktrees/agent-fresh" -b agent-fresh-branch main
-
+  # Build the long history first, so the fresh branch's tip (created below,
+  # at main's now-advanced tip) is the very first line `git rev-list` prints
+  # (newest first) rather than the last — the case that breaks a
+  # `printf | grep -qx` pipe under pipefail once history outgrows the pipe
+  # buffer.
   tree="$(git -C "$work" rev-parse HEAD^{tree})"
   parent="$(git -C "$work" rev-parse HEAD)"
   for i in $(seq 1 2000); do
     parent="$(git -C "$work" commit-tree -p "$parent" -m "filler $i" "$tree")"
   done
   git -C "$work" update-ref refs/heads/main "$parent"
+
+  git -C "$work" worktree add -q ".claude/worktrees/agent-fresh" -b agent-fresh-branch main
 
   out="$(bash "$prune_script" "$work")"
 
