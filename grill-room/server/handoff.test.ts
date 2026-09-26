@@ -981,6 +981,14 @@ describe("export-time facts", () => {
     const FIRST_BRIEF_LINE =
       "This repository has no commits yet: this ticket sets up `just verify`. Make it run and pass from the repository root; that is part of your acceptance.";
     const OTHER_BRIEF_LINE = "`just verify` is established by ticket 01, which is merged before this ticket starts.";
+    const NOT_REACHING_BRIEF_LINE =
+      "`just verify` is set up by ticket 01, but this ticket does not depend on it, so it may not exist yet. If `just verify` does not run from the repository root, stop and report; do not create it yourself.";
+    const ONE_NOT_REACHING_LINE =
+      "This repository has no commits yet, so this command does not exist until ticket 01 sets it up. Ticket 01's acceptance includes it passing. Ticket 03 does not depend on ticket 01, so run ticket 01 first and merge it before starting ticket 03.";
+    const TWO_NOT_REACHING_LINE =
+      "This repository has no commits yet, so this command does not exist until ticket 01 sets it up. Ticket 01's acceptance includes it passing. Tickets 03 and 05 do not depend on ticket 01, so run ticket 01 first and merge it before starting them.";
+    const THREE_NOT_REACHING_LINE =
+      "This repository has no commits yet, so this command does not exist until ticket 01 sets it up. Ticket 01's acceptance includes it passing. Tickets 03, 05 and 07 do not depend on ticket 01, so run ticket 01 first and merge it before starting them.";
 
     /** One top-level section, from its heading up to the next one. */
     function section(markdown: string, heading: string): string {
@@ -990,15 +998,36 @@ describe("export-time facts", () => {
       return markdown.slice(start, end === -1 ? undefined : end).trimEnd();
     }
 
-    /** `count` tickets: 1 has no blockers, every other ticket is blocked by 1. */
-    function aSourceWithTickets(count: number): HandoffSource {
+    /**
+     * Like {@link aSource}, but ticket 3 is blocked by 2 instead of
+     * unblocked, so every ticket reaches ticket 1 through Blocked-by (3
+     * transitively, through 2). `aSource` itself keeps ticket 3 unblocked
+     * because the wave-order test above relies on it; these greenfield
+     * reach tests need a fixture where every ticket actually reaches
+     * ticket 1, so they use this one instead.
+     */
+    function aReachableSource(overrides: Partial<HandoffSource["project"]> = {}): HandoffSource {
+      const source = aSource(overrides);
+      return {
+        ...source,
+        tickets: source.tickets.map((ticket) => (ticket.number === 3 ? { ...ticket, blockedBy: [2] } : ticket)),
+        waves: [[1], [2], [3]],
+      };
+    }
+
+    /**
+     * `count` tickets: 1 has no blockers; each number in `unblocked` has none
+     * either, so it does not reach ticket 1; every other ticket is blocked
+     * by 1.
+     */
+    function aSourceWithTickets(count: number, unblocked: readonly number[] = []): HandoffSource {
       const tickets = Array.from({ length: count }, (_, index) => ({
         id: `t${index + 1}`,
         number: index + 1,
         slug: `ticket-${index + 1}`,
         title: `Ticket ${index + 1}`,
         body: "Do it.",
-        blockedBy: index === 0 ? [] : [1],
+        blockedBy: index === 0 || unblocked.includes(index + 1) ? [] : [1],
       }));
       return {
         ...aSource(),
@@ -1008,16 +1037,45 @@ describe("export-time facts", () => {
     }
 
     it.each(["tracked", "ignored"] as const)(
-      "HANDOFF, greenfield (%s): the Verify command section is unchanged, then the line",
+      "HANDOFF, greenfield (%s), every ticket reaches ticket 1: the Verify command section is unchanged, then the line",
       (visibility) => {
         const greenfield = section(
-          renderHandoffMarkdown(aSource(), false, { visibility, greenfield: true }),
+          renderHandoffMarkdown(aReachableSource(), false, { visibility, greenfield: true }),
           "## Verify command",
         );
-        const plain = section(renderHandoffMarkdown(aSource()), "## Verify command");
+        const plain = section(renderHandoffMarkdown(aReachableSource()), "## Verify command");
         expect(greenfield).toBe(`${plain}\n\n${HANDOFF_LINE}`);
       },
     );
+
+    it("HANDOFF, greenfield, one ticket does not reach ticket 1: named in its own sentence", () => {
+      const greenfield = section(
+        renderHandoffMarkdown(aSource(), false, { visibility: "ignored", greenfield: true }),
+        "## Verify command",
+      );
+      const plain = section(renderHandoffMarkdown(aSource()), "## Verify command");
+      expect(greenfield).toBe(`${plain}\n\n${ONE_NOT_REACHING_LINE}`);
+    });
+
+    it("HANDOFF, greenfield, two tickets do not reach ticket 1: joined with \"and\"", () => {
+      const source = aSourceWithTickets(5, [3, 5]);
+      const greenfield = section(
+        renderHandoffMarkdown(source, false, { visibility: "ignored", greenfield: true }),
+        "## Verify command",
+      );
+      const plain = section(renderHandoffMarkdown(source), "## Verify command");
+      expect(greenfield).toBe(`${plain}\n\n${TWO_NOT_REACHING_LINE}`);
+    });
+
+    it("HANDOFF, greenfield, three or more tickets do not reach ticket 1: joined with commas", () => {
+      const source = aSourceWithTickets(7, [3, 5, 7]);
+      const greenfield = section(
+        renderHandoffMarkdown(source, false, { visibility: "ignored", greenfield: true }),
+        "## Verify command",
+      );
+      const plain = section(renderHandoffMarkdown(source), "## Verify command");
+      expect(greenfield).toBe(`${plain}\n\n${THREE_NOT_REACHING_LINE}`);
+    });
 
     it.each(["tracked", "ignored"] as const)("HANDOFF, not greenfield (%s): unchanged", (visibility) => {
       const markdown = renderHandoffMarkdown(aSource({ visibility }), false, { visibility, greenfield: false });
@@ -1041,12 +1099,23 @@ describe("export-time facts", () => {
       [1, "ignored"],
       [2, "ignored"],
     ] as const)(
-      "brief for another ticket (index %i, %s), greenfield: the command is established by ticket 01",
+      "brief for another ticket that reaches ticket 1 (index %i, %s), greenfield: the command is established by ticket 01",
       (index, visibility) => {
         const facts = { visibility, greenfield: true };
-        const stepZero = section(briefAt(aSource(), index, facts), "## Step 0: confirm your base");
+        const stepZero = section(briefAt(aReachableSource(), index, facts), "## Step 0: confirm your base");
         expect(stepZero.endsWith(`\n\n${OTHER_BRIEF_LINE}`)).toBe(true);
         expect(stepZero).not.toContain("this ticket sets up");
+      },
+    );
+
+    it.each(["tracked", "ignored"] as const)(
+      "brief for a ticket that does not reach ticket 1 (%s), greenfield: it may not exist yet",
+      (visibility) => {
+        const facts = { visibility, greenfield: true };
+        const stepZero = section(briefAt(aSource(), 2, facts), "## Step 0: confirm your base");
+        expect(stepZero.endsWith(`\n\n${NOT_REACHING_BRIEF_LINE}`)).toBe(true);
+        expect(stepZero).not.toContain("this ticket sets up");
+        expect(stepZero).not.toContain("is established by ticket");
       },
     );
 
@@ -1071,6 +1140,36 @@ describe("export-time facts", () => {
       );
     });
 
+    it("the ticket number is padded in the non-reaching wording too: 001 and 003 in a set of 100", () => {
+      const source = aSourceWithTickets(100, [3]);
+      const facts = { visibility: "ignored" as const, greenfield: true };
+
+      expect(renderHandoffMarkdown(source, false, facts)).toContain(
+        "This repository has no commits yet, so this command does not exist until ticket 001 sets it up. Ticket 001's acceptance includes it passing. Ticket 003 does not depend on ticket 001, so run ticket 001 first and merge it before starting ticket 003.",
+      );
+      expect(briefAt(source, 2, facts)).toContain(
+        "`just verify` is set up by ticket 001, but this ticket does not depend on it, so it may not exist yet. If `just verify` does not run from the repository root, stop and report; do not create it yourself.",
+      );
+    });
+
+    it("a ticket that fails to reach ticket 1 only indirectly is named too: blocked by another non-reaching ticket", () => {
+      // Ticket 3 is unblocked (non-reaching); ticket 4 is blocked by 3, not by
+      // 1, so it does not reach ticket 1 either, only transitively through 3's
+      // own non-reach.
+      const base = aSourceWithTickets(5);
+      const tickets = base.tickets.map((ticket) => {
+        if (ticket.number === 3) return { ...ticket, blockedBy: [] };
+        if (ticket.number === 4) return { ...ticket, blockedBy: [3] };
+        return ticket;
+      });
+      const source: HandoffSource = { ...base, tickets, waves: [[1, 3], [2, 4], [5]] };
+      const facts = { visibility: "ignored" as const, greenfield: true };
+
+      expect(renderHandoffMarkdown(source, false, facts)).toContain(
+        "This repository has no commits yet, so this command does not exist until ticket 01 sets it up. Ticket 01's acceptance includes it passing. Tickets 03 and 04 do not depend on ticket 01, so run ticket 01 first and merge it before starting them.",
+      );
+    });
+
     it("a verify command with a backtick is still written as inline code", () => {
       const source = aSource({ verifyCommand: "echo `date`" });
       const facts = { visibility: "ignored" as const, greenfield: true };
@@ -1084,7 +1183,7 @@ describe("export-time facts", () => {
       // do not depend on greenfield, so the only other difference is the
       // "Before delegating" paragraph from gr-ibp.4.1.
       const facts = { visibility: "ignored" as const, greenfield: true };
-      const source = aSource({ visibility: "ignored" });
+      const source = aReachableSource({ visibility: "ignored" });
 
       expect(
         renderHandoffMarkdown(source, false, facts)
