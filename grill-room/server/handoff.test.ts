@@ -1140,6 +1140,36 @@ describe("export-time facts", () => {
       );
     });
 
+    it("the ticket number is padded in the non-reaching wording too: 001 and 003 in a set of 100", () => {
+      const source = aSourceWithTickets(100, [3]);
+      const facts = { visibility: "ignored" as const, greenfield: true };
+
+      expect(renderHandoffMarkdown(source, false, facts)).toContain(
+        "This repository has no commits yet, so this command does not exist until ticket 001 sets it up. Ticket 001's acceptance includes it passing. Ticket 003 does not depend on ticket 001, so run ticket 001 first and merge it before starting ticket 003.",
+      );
+      expect(briefAt(source, 2, facts)).toContain(
+        "`just verify` is set up by ticket 001, but this ticket does not depend on it, so it may not exist yet. If `just verify` does not run from the repository root, stop and report; do not create it yourself.",
+      );
+    });
+
+    it("a ticket that fails to reach ticket 1 only indirectly is named too: blocked by another non-reaching ticket", () => {
+      // Ticket 3 is unblocked (non-reaching); ticket 4 is blocked by 3, not by
+      // 1, so it does not reach ticket 1 either, only transitively through 3's
+      // own non-reach.
+      const base = aSourceWithTickets(5);
+      const tickets = base.tickets.map((ticket) => {
+        if (ticket.number === 3) return { ...ticket, blockedBy: [] };
+        if (ticket.number === 4) return { ...ticket, blockedBy: [3] };
+        return ticket;
+      });
+      const source: HandoffSource = { ...base, tickets, waves: [[1, 3], [2, 4], [5]] };
+      const facts = { visibility: "ignored" as const, greenfield: true };
+
+      expect(renderHandoffMarkdown(source, false, facts)).toContain(
+        "This repository has no commits yet, so this command does not exist until ticket 01 sets it up. Ticket 01's acceptance includes it passing. Tickets 03 and 04 do not depend on ticket 01, so run ticket 01 first and merge it before starting them.",
+      );
+    });
+
     it("a verify command with a backtick is still written as inline code", () => {
       const source = aSource({ verifyCommand: "echo `date`" });
       const facts = { visibility: "ignored" as const, greenfield: true };
