@@ -2,18 +2,22 @@ import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  type BreakIntoTicketsRequest,
   resetInterviewer,
   scriptInterviewer,
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
+import { buildPrompt } from "../server/interviewer/prompt.js";
 import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
+import { useTempGitRepos } from "../test/git-repos.js";
 import breakIntoTickets from "./break-into-tickets.js";
 import createSession from "./create-session.js";
 import getSession from "./get-session.js";
 import getSpec from "./get-spec.js";
 import getTurn from "./get-turn.js";
 import listTickets from "./list-tickets.js";
+import registerProject from "./register-project.js";
 import synthesizeSpec from "./synthesize-spec.js";
 
 function aSession() {
@@ -422,6 +426,290 @@ describe("break-into-tickets", () => {
       expect(latest!.runs[0]!.attempts[0]!.reason).toContain(
         "blocking cycle",
       );
+    });
+  });
+});
+
+describe("break-into-tickets in a repository with no commits yet", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+  const repos = useTempGitRepos();
+
+  /** A confirmed session with a current spec, in a real project whose repository has commits or not. */
+  async function aSessionInProject(options: {
+    commit: boolean;
+    verifyCommand?: string;
+  }): Promise<string> {
+    const root = repos.create({ commit: options.commit });
+    const project = await registerProject.run({
+      root,
+      verifyCommand: options.verifyCommand ?? "pnpm test",
+      workingExportFolder: ".scratch",
+    });
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A local app that grills me about an idea until it is decided.",
+      projectId: project.id,
+    });
+    await confirm(session.id);
+    scriptInterviewer([{ kind: "synthesize-spec", result: { markdown: GOOD_SPEC_MARKDOWN } }]);
+    await synthesizeSpec.run({ sessionId: session.id });
+    return session.id;
+  }
+
+  type Row = { number: number; slug: string; body?: string; blockedBy?: number[] };
+
+  /** A set shaped as the greenfield section asks: ticket 1 names the command, every other ticket waits for it. */
+  function aGreenfieldSet(verifyCommand: string): ScriptedTurn {
+    return ticketsTurn([
+      { number: 1, slug: "set-up", body: `Set up the runner. Acceptance: \`${verifyCommand}\` passes.` },
+      { number: 2, slug: "build", blockedBy: [1] },
+    ]);
+  }
+
+  function rejectionOf(request: unknown): string {
+    return (request as BreakIntoTicketsRequest).rejectionReason ?? "";
+  }
+
+  describe("the request", () => {
+    it("carries greenfield and the verify command for a repository without commits", async () => {
+      const sessionId = await aSessionInProject({ commit: false, verifyCommand: "just verify" });
+      const interviewer = scriptInterviewer([aGreenfieldSet("just verify")]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      expect(interviewer.requests[0]).toMatchObject({
+        kind: "break-into-tickets",
+        greenfield: true,
+        verifyCommand: "just verify",
+      });
+    });
+
+    it("carries greenfield false and the verify command for a repository with commits", async () => {
+      const sessionId = await aSessionInProject({ commit: true, verifyCommand: "just verify" });
+      const interviewer = scriptInterviewer([oneGoodTicket]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      expect(interviewer.requests[0]).toMatchObject({
+        kind: "break-into-tickets",
+        greenfield: false,
+        verifyCommand: "just verify",
+      });
+    });
+
+    it("carries greenfield false and no verify command for a session with no project", async () => {
+      const sessionId = await aConfirmedSessionWithSpec();
+      const interviewer = scriptInterviewer([oneGoodTicket]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      expect(interviewer.requests[0]).toMatchObject({
+        kind: "break-into-tickets",
+        greenfield: false,
+        verifyCommand: null,
+      });
+    });
+  });
+
+  describe("the ticket set", () => {
+    const NAMES_IT = "Set up the runner so that `pnpm test` passes.";
+    const LACKS_IT = "Set up the runner.";
+    const dependsOnFirst = (number: number) => `Ticket ${number} does not depend on ticket 1.`;
+    const DOES_NOT_NAME = "Ticket 1 does not name the verify command.";
+
+    it.each<[string, string, Row[]]>([
+      [
+        "1 names the command, 2 blocked by 1, 3 blocked by 2",
+        "pnpm test",
+        [
+          { number: 1, slug: "one", body: NAMES_IT },
+          { number: 2, slug: "two", blockedBy: [1] },
+          { number: 3, slug: "three", blockedBy: [2] },
+        ],
+      ],
+      ["1 names the command, alone", "pnpm test", [{ number: 1, slug: "one", body: NAMES_IT }]],
+      [
+        "a command with a backtick: 1 does not name it, 2 blocked by 1",
+        "echo `date`",
+        [
+          { number: 1, slug: "one", body: LACKS_IT },
+          { number: 2, slug: "two", blockedBy: [1] },
+        ],
+      ],
+      [
+        "a command with a backtick: ticket 1 alone, not naming it",
+        "echo `date`",
+        [{ number: 1, slug: "one", body: LACKS_IT }],
+      ],
+    ])("accepts %s", async (_, verifyCommand, rows) => {
+      const sessionId = await aSessionInProject({ commit: false, verifyCommand });
+      const interviewer = scriptInterviewer([ticketsTurn(rows)]);
+
+      const { tickets } = await breakIntoTickets.run({ sessionId });
+
+      expect(interviewer.requests).toHaveLength(1);
+      expect(tickets.map((ticket) => ticket.number)).toEqual(rows.map((row) => row.number));
+    });
+
+    const GREENFIELD_REJECTIONS: [string, string, Row[], string[], string[]][] = [
+      [
+        "3 not blocked by anything",
+        "pnpm test",
+        [
+          { number: 1, slug: "one", body: NAMES_IT },
+          { number: 2, slug: "two", blockedBy: [1] },
+          { number: 3, slug: "three" },
+        ],
+        [dependsOnFirst(3)],
+        [dependsOnFirst(2), DOES_NOT_NAME],
+      ],
+      [
+        "1 lacks the command",
+        "pnpm test",
+        [
+          { number: 1, slug: "one", body: LACKS_IT },
+          { number: 2, slug: "two", blockedBy: [1] },
+        ],
+        [DOES_NOT_NAME],
+        [dependsOnFirst(2)],
+      ],
+      [
+        "verify `test`: 1 says test, but not as inline code",
+        "test",
+        [{ number: 1, slug: "one", body: "This is not a test of the runner" }],
+        [DOES_NOT_NAME],
+        [],
+      ],
+      [
+        "a command with a backtick: 2 not blocked by 1",
+        "echo `date`",
+        [
+          { number: 1, slug: "one", body: LACKS_IT },
+          { number: 2, slug: "two" },
+        ],
+        [dependsOnFirst(2)],
+        [DOES_NOT_NAME],
+      ],
+    ];
+
+    it.each(GREENFIELD_REJECTIONS)(
+      "rejects %s, and asks again",
+      async (_, verifyCommand, rows, expected, notExpected) => {
+        const sessionId = await aSessionInProject({ commit: false, verifyCommand });
+        const interviewer = scriptInterviewer([ticketsTurn(rows), aGreenfieldSet(verifyCommand)]);
+
+        await breakIntoTickets.run({ sessionId });
+
+        expect(interviewer.requests).toHaveLength(2);
+        const reason = rejectionOf(interviewer.requests[1]);
+        for (const text of expected) expect(reason).toContain(text);
+        for (const text of notExpected) expect(reason).not.toContain(text);
+      },
+    );
+
+    it.each(GREENFIELD_REJECTIONS)(
+      "accepts %s in a repository with commits",
+      async (_, verifyCommand, rows) => {
+        const sessionId = await aSessionInProject({ commit: true, verifyCommand });
+        const interviewer = scriptInterviewer([ticketsTurn(rows)]);
+
+        await breakIntoTickets.run({ sessionId });
+
+        expect(interviewer.requests).toHaveLength(1);
+      },
+    );
+
+    it("gives a set with a duplicate number only today's reasons, greenfield or not", async () => {
+      const rows: Row[] = [
+        { number: 1, slug: "one", body: NAMES_IT },
+        { number: 1, slug: "one-again" },
+        { number: 3, slug: "three" },
+      ];
+      const reasonFor = async (commit: boolean) => {
+        const sessionId = await aSessionInProject({ commit });
+        const interviewer = scriptInterviewer([ticketsTurn(rows), aGreenfieldSet("pnpm test")]);
+        await breakIntoTickets.run({ sessionId });
+        return rejectionOf(interviewer.requests[1]);
+      };
+
+      const greenfield = await reasonFor(false);
+
+      expect(greenfield).toBe(
+        "Ticket number 1 is used more than once. Every ticket needs its own number. Ticket numbers must run from 1 to 3 with no gaps. Missing: 2.",
+      );
+      expect(greenfield).toBe(await reasonFor(true));
+    });
+
+    it("gives a cyclic set only the cycle reason", async () => {
+      const sessionId = await aSessionInProject({ commit: false });
+      const interviewer = scriptInterviewer([
+        ticketsTurn([
+          { number: 1, slug: "one", body: LACKS_IT },
+          { number: 2, slug: "two", blockedBy: [3] },
+          { number: 3, slug: "three", blockedBy: [2] },
+        ]),
+        aGreenfieldSet("pnpm test"),
+      ]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      expect(rejectionOf(interviewer.requests[1])).toBe("These tickets form a blocking cycle: 2, 3.");
+    });
+
+    it("gives up after exhausting retries and records a failed turn", async () => {
+      const sessionId = await aSessionInProject({ commit: false });
+      const bad = ticketsTurn([
+        { number: 1, slug: "one", body: NAMES_IT },
+        { number: 2, slug: "two" },
+      ]);
+      const interviewer = scriptInterviewer([bad, bad, bad]);
+
+      await expect(breakIntoTickets.run({ sessionId })).rejects.toThrow(
+        /does not validate 3 times\. Last reason: Ticket 2 does not depend on ticket 1/,
+      );
+
+      expect(interviewer.requests).toHaveLength(3);
+      expect((await listTickets.run({ sessionId })).tickets).toEqual([]);
+      expect(await getSession.run({ id: sessionId })).toMatchObject({
+        turnStatus: "failed",
+        turnErrorCode: "invalid-tickets",
+      });
+    });
+  });
+
+  describe("seam: a set shaped as the prompt section describes passes the check", () => {
+    it.each(["pnpm test", "echo `date`"])("verify command %s", async (verifyCommand) => {
+      const sessionId = await aSessionInProject({ commit: false, verifyCommand });
+      const first = scriptInterviewer([aGreenfieldSet(verifyCommand)]);
+      await breakIntoTickets.run({ sessionId });
+      const prompt = buildPrompt(first.requests[0] as BreakIntoTicketsRequest);
+
+      // Follow the section's words: ticket 1 names the command in the inline
+      // form the section writes (none when it asks for none), and the others
+      // wait for ticket 1, one of them only through another ticket.
+      expect(prompt).toContain("## This repository has no commits yet");
+      const inlineForm = /written as inline\ncode: (.*)\.\n/.exec(prompt)?.[1] ?? null;
+      expect(inlineForm === null).toBe(verifyCommand.includes("`"));
+      const shaped = ticketsTurn([
+        {
+          number: 1,
+          slug: "set-up-the-runner",
+          body: `Set up the project and its test runner.${inlineForm ? ` Acceptance: ${inlineForm} passes from the repository root.` : ""}`,
+        },
+        { number: 2, slug: "build-the-workspace", blockedBy: [1] },
+        { number: 3, slug: "store-on-disk", blockedBy: [2] },
+      ]);
+      const second = scriptInterviewer([shaped]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      expect(second.requests).toHaveLength(1);
+      expect((await listTickets.run({ sessionId })).tickets.map((ticket) => ticket.slug)).toEqual([
+        "set-up-the-runner",
+        "build-the-workspace",
+        "store-on-disk",
+      ]);
     });
   });
 });
