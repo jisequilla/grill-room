@@ -423,6 +423,30 @@ export type ModelCallOutcome =
       reason: string;
     };
 
+/** Tool calls one attempt made, counted by tool name: `{ "Read": 3, "Grep": 1 }`. */
+export type ToolCallCounts = Record<string, number>;
+
+/**
+ * One model call's usage, read from the command line's JSON result, and the
+ * tools it called, counted from its session transcript. Each field is null
+ * when the value was missing or of the wrong type; a missing value never
+ * fails the turn.
+ */
+export interface CliMetrics {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
+  costUsd: number | null;
+  /** The command line's own turn count (`num_turns`), not the app's turn. */
+  cliTurns: number | null;
+  cliDurationMs: number | null;
+  cliApiDurationMs: number | null;
+  sessionId: string | null;
+  /** Null when the transcript could not be read, `{}` when no tool was called. */
+  toolCalls: ToolCallCounts | null;
+}
+
 export type ModelCallOutcomeKind = ModelCallOutcome["kind"];
 
 /**
@@ -445,6 +469,12 @@ export interface ModelCallEnd extends ModelCallStart {
   endedAt: Date;
   durationMs: number;
   outcome: ModelCallOutcome;
+  /**
+   * What the call cost and did, whatever its outcome, when it produced a
+   * parseable command line result. Absent when it did not: the process
+   * failed, timed out, or printed something that is not JSON.
+   */
+  metrics?: CliMetrics;
 }
 
 /**

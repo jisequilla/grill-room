@@ -12,6 +12,7 @@
  * `observer` to the port and the recorder itself to `askUntilAccepted`.
  */
 import type {
+  CliMetrics,
   ModelCallEnd,
   ModelCallObserver,
   ModelCallOutcome,
@@ -53,8 +54,21 @@ export interface TurnRecorder extends AttemptRecorder {
   finish(outcome: string): Promise<void>;
 }
 
-/** How one model call's outcome is stored as an attempt. */
-function attemptOf(outcome: ModelCallOutcome): {
+/**
+ * How one model call is stored as an attempt: its outcome's kind, reason and
+ * raw output, and its usage whatever the kind — a refused or schema-invalid
+ * call cost as much as a successful one.
+ */
+function attemptOf(call: ModelCallEnd): {
+  kind: AttemptKind;
+  reason: string | null;
+  rawOutput: string | null;
+  metrics: CliMetrics | null;
+} {
+  return { ...attemptKindOf(call.outcome), metrics: call.metrics ?? null };
+}
+
+function attemptKindOf(outcome: ModelCallOutcome): {
   kind: AttemptKind;
   reason: string | null;
   rawOutput: string | null;
@@ -105,7 +119,7 @@ function recorderFor(turnId: string, runId: string): TurnRecorder {
       const attemptId = running;
       running = null;
       if (!attemptId) return;
-      await completeAttempt({ attemptId, ...attemptOf(call.outcome) });
+      await completeAttempt({ attemptId, ...attemptOf(call) });
       if (call.outcome.kind === "success") lastSucceeded = attemptId;
     },
   };

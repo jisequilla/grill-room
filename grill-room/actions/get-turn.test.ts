@@ -1,15 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { FAKE_CONVERSATION_ID } from "../server/interviewer/fake.js";
+import {
+  resetInterviewer,
+  schemaInvalidTurn,
+  scriptInterviewer,
+} from "../server/interviewer/index.js";
+import { aProposeRoundResult } from "../server/interviewer/test-fixtures.js";
 import {
   addRun,
   completeAttempt,
   completeTurn,
   createTurn,
+  findLatestTurn,
   startAttempt,
 } from "../server/turn-records.js";
 import { useTestDatabase } from "../test/db.js";
 import createSession from "./create-session.js";
 import getTurn from "./get-turn.js";
+import requestNextRound from "./request-next-round.js";
 
 async function aSession(): Promise<string> {
   const session = await createSession.run({
@@ -82,5 +91,40 @@ describe("get-turn", () => {
         rawOutput: '{"round":{"cards":[]}}',
       }),
     ]);
+  });
+
+  describe("with the fake interviewer", () => {
+    afterEach(resetInterviewer);
+
+    it("exposes the fake's canned usage on every attempt that produced a result", async () => {
+      const sessionId = await aSession();
+      scriptInterviewer([
+        schemaInvalidTurn("propose-round"),
+        { kind: "propose-round", result: aProposeRoundResult() },
+      ]);
+
+      await expect(requestNextRound.run({ sessionId })).rejects.toThrow();
+      await requestNextRound.run({ sessionId });
+
+      const latest = await findLatestTurn({ sessionId, turnKind: "propose-round" });
+      const turn = await getTurn.run({ turnId: latest!.id });
+      const attempts = turn.runs.flatMap((run) => run.attempts);
+      const canned = {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0,
+        cliTurns: 1,
+        cliDurationMs: 10,
+        cliApiDurationMs: 10,
+        sessionId: FAKE_CONVERSATION_ID,
+        toolCalls: {},
+      };
+      expect(attempts).toEqual([
+        expect.objectContaining({ kind: "schema-invalid", ...canned }),
+        expect.objectContaining({ kind: "success", ...canned }),
+      ]);
+    });
   });
 });
