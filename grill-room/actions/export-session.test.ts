@@ -1668,3 +1668,156 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
     );
   });
 });
+
+describe("export separates tickets in one wave that change the same file", () => {
+  useTestDatabase();
+
+  const NOT_CHECKED_LINE =
+    "Tickets in one wave have no Blocked-by between them. Whether they change the same files was not checked, because the briefs are not grounded against the current code: run them one at a time, or ground the briefs first. Start a wave only once every ticket of the previous wave is merged and verified.";
+  const PARALLEL_LINE =
+    "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.";
+  const EDGE_LINE = "- Ticket 03 waits for ticket 02: both change `src/shared/store.ts`.";
+
+  /** One grounded ticket that changes `files`, with nothing it builds on. */
+  function groundedTicket(number: number, files: string[]) {
+    const base = aHandoffScoutResult().tickets[0]!;
+    return {
+      ...base,
+      number,
+      filesToChange: files.map((file) => ({ path: file, change: "edit" as const })),
+      buildsOn: [],
+    };
+  }
+
+  /** Three tickets with no Blocked-by at all: 02 and 03 both change `src/shared/store.ts`. */
+  async function aSessionWithOverlap() {
+    const { root, project } = await aProject();
+    const session = await aSession("Grill Room", project.id);
+    await insertTicket(session.id, { number: 1, slug: "build-the-workspace" });
+    await insertTicket(session.id, { number: 2, slug: "store-on-disk" });
+    await insertTicket(session.id, { number: 3, slug: "list-the-store" });
+    await insertSpec(session.id, { ticketsCurrent: true });
+    await generateHandoff.run({ sessionId: session.id });
+    return { root, session };
+  }
+
+  async function groundNow(sessionId: string, root: string): Promise<void> {
+    const loaded = await loadHandoffSource(sessionId);
+    if (!("source" in loaded)) throw new Error("expected a handoff source");
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    await storeBriefGrounding({
+      sessionId,
+      result: aHandoffScoutResult({
+        tickets: [
+          groundedTicket(1, ["src/workspace.ts"]),
+          groundedTicket(2, ["src/shared/store.ts", "src/disk.ts"]),
+          groundedTicket(3, ["src/shared/store.ts", "src/list.ts"]),
+        ],
+      }),
+      commitRead: head,
+      handoffFingerprint: handoffFingerprint(loaded.source),
+      model: "sonnet",
+      turnId: null,
+      ranAt: new Date().toISOString(),
+    });
+  }
+
+  async function exportedHandoff(root: string): Promise<string> {
+    return fs.readFile(path.join(root, ".scratch", "grill-room", "HANDOFF.md"), "utf8");
+  }
+
+  function waveHeadingBefore(markdown: string, needle: string): string {
+    const at = markdown.indexOf(needle);
+    expect(at).toBeGreaterThan(-1);
+    const heading = markdown.lastIndexOf("### Wave ", at);
+    return markdown.slice(heading, markdown.indexOf("\n", heading));
+  }
+
+  it("with current grounding, puts 02 and 03 in different waves and names the shared file", async () => {
+    const { root, session } = await aSessionWithOverlap();
+    await groundNow(session.id, root);
+    expect((await previewExport.run({ sessionId: session.id })).groundingState).toBe("current");
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    const handoff = await exportedHandoff(root);
+    expect(handoff).toContain(`${PARALLEL_LINE}\n\n${EDGE_LINE}\n\n### Wave 1`);
+    expect(waveHeadingBefore(handoff, "**01 Ticket 1**")).toBe("### Wave 1");
+    expect(waveHeadingBefore(handoff, "**02 Ticket 2**")).toBe("### Wave 1");
+    expect(waveHeadingBefore(handoff, "**03 Ticket 3**")).toBe("### Wave 2");
+    expect(handoff).not.toContain("was not checked");
+  });
+
+  it("with stale grounding, carries the not-checked line and the Blocked-by waves", async () => {
+    const { root, session } = await aSessionWithOverlap();
+    await groundNow(session.id, root);
+    await setTicketBlockedBy.run({ ticketId: await ticketIdFor(session.id, 3), blockedBy: [1] });
+    await generateHandoff.run({ sessionId: session.id });
+    expect((await previewExport.run({ sessionId: session.id })).groundingState).toBe("stale");
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    const handoff = await exportedHandoff(root);
+    expect(handoff).toContain(`## Waves\n\n${NOT_CHECKED_LINE}\n\n### Wave 1`);
+    expect(handoff).not.toContain("do not block each other");
+    expect(handoff).not.toContain("waits for ticket");
+    expect(waveHeadingBefore(handoff, "**02 Ticket 2**")).toBe("### Wave 1");
+    expect(waveHeadingBefore(handoff, "**03 Ticket 3** (blocked by 01)")).toBe("### Wave 2");
+  });
+
+  it("with no grounding, carries the not-checked line", async () => {
+    const { root, session } = await aSessionWithOverlap();
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    const handoff = await exportedHandoff(root);
+    expect(handoff).toContain(`## Waves\n\n${NOT_CHECKED_LINE}\n\n### Wave 1`);
+    expect(handoff).not.toContain("waits for ticket");
+  });
+
+  it("leaves the stored Blocked-by unchanged", async () => {
+    const { root, session } = await aSessionWithOverlap();
+    await groundNow(session.id, root);
+    const before = await listTickets.run({ sessionId: session.id });
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    const after = await listTickets.run({ sessionId: session.id });
+    expect(after.tickets.map((ticket) => ticket.blockedBy)).toEqual([[], [], []]);
+    expect(after.tickets).toEqual(before.tickets);
+    expect(after.waves).toEqual([[1, 2, 3]]);
+    expect(await exportedHandoff(root)).toContain(EDGE_LINE);
+  });
+
+  it("keeps an edited HANDOFF.md word for word, with current grounding and an overlap", async () => {
+    const { root, session } = await aSessionWithOverlap();
+    const [row] = await getDb()
+      .select()
+      .from(schema.handoffs)
+      .where(eq(schema.handoffs.sessionId, session.id))
+      .limit(1);
+    const edited = `${row!.markdown}\nOwner note: run the tickets one at a time.\n`;
+    await updateHandoff.run({ sessionId: session.id, markdown: edited });
+    await groundNow(session.id, root);
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    const handoff = await exportedHandoff(root);
+    expect(handoff).toBe(fillBundlePath(edited, bundlePathFor("tracked", root, bundleDir)));
+    expect(handoff).not.toContain("waits for ticket");
+  });
+
+  it("still separates an unedited HANDOFF.md when only a brief was edited", async () => {
+    const { root, session } = await aSessionWithOverlap();
+    await updateHandoff.run({
+      sessionId: session.id,
+      briefs: [{ ticketNumber: 1, markdown: "# Brief 01: hand-edited\n" }],
+    });
+    await groundNow(session.id, root);
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    expect(await exportedHandoff(root)).toContain(`${PARALLEL_LINE}\n\n${EDGE_LINE}\n\n### Wave 1`);
+  });
+});
