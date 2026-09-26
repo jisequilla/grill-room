@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CONNECTION_RETRY_DELAY_MS,
   navigateStep,
+  NoResponseYet,
   retryTransient,
   runWarmUp,
   STARTING_RETRY_DELAY_MS,
@@ -12,6 +13,8 @@ import {
   WarmUpError,
   WarmUpStepFailure,
 } from "./e2e-warm-up.js";
+
+const isNoResponseYet = (error: unknown) => error instanceof NoResponseYet;
 
 const CREATE_SESSION_PATH = "/_agent-native/actions/create-session";
 const DELETE_SESSION_PATH = "/_agent-native/actions/delete-session";
@@ -105,12 +108,75 @@ describe("wording", () => {
     expect(message).not.toContain("gave no response");
   });
 
-  it("keeps 'gave no response' for a navigation that produced no response at all", async () => {
-    const goto = vi.fn(async () => null);
+  it("retries a null response and succeeds, with one retry log line in the same format as a transient-connection retry", async () => {
+    let calls = 0;
+    const goto = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) return null;
+      return { status: () => 200 };
+    });
+    const log = vi.fn();
 
-    await expect(
-      runWarmUp({ goto, post: vi.fn(), get: vi.fn(), log: vi.fn(), logError: vi.fn() }),
-    ).rejects.toThrow(/gave no response/);
+    await warm(SESSION_PATH, navigateStep(goto, SESSION_PATH), log, isNoResponseYet);
+
+    expect(goto).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]?.[0] as string).toContain("(1 connection retry)");
+  });
+
+  it("keeps 'gave no response' for a navigation that gives no response on every attempt until the deadline, stating the elapsed time", async () => {
+    vi.useFakeTimers();
+    try {
+      const goto = vi.fn(async () => null);
+      const log = vi.fn();
+
+      const promise = warm(SESSION_PATH, navigateStep(goto, SESSION_PATH), log, isNoResponseYet);
+      const settled = promise.then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
+      await vi.advanceTimersByTimeAsync(WARM_UP_LIMIT_MS + 10_000);
+
+      const result = await settled;
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        const message = (result.error as Error).message;
+        expect(message).toContain("gave no response");
+        expect(message).not.toContain("the server kept dropping the connection");
+        const elapsedMatch = message.match(/after (\d+) ms \(limit 180000 ms\)/);
+        expect(elapsedMatch).not.toBeNull();
+        expect(Number(elapsedMatch?.[1])).toBeGreaterThanOrEqual(WARM_UP_LIMIT_MS - 1_000);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
+
+  it("retries a null response then a dropped connection, and succeeds", async () => {
+    let calls = 0;
+    const goto = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) return null;
+      if (calls === 2) throw new Error("connect ECONNREFUSED 127.0.0.1:1234");
+      return { status: () => 200 };
+    });
+    const log = vi.fn();
+
+    await warm(SESSION_PATH, navigateStep(goto, SESSION_PATH), log, isNoResponseYet);
+
+    expect(goto).toHaveBeenCalledTimes(3);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0]?.[0] as string).toContain("(2 connection retries)");
+  });
+
+  it("returns a 500 response as warm, without retrying (pinning today's behaviour)", async () => {
+    const goto = vi.fn(async () => ({ status: () => 500 }));
+    const step = navigateStep(goto, SESSION_PATH);
+
+    const status = await step(Date.now() + 5_000);
+
+    expect(status).toBe(500);
     expect(goto).toHaveBeenCalledTimes(1);
   });
 });
@@ -441,7 +507,9 @@ describe("deadline exhaustion during a persistently dropped connection", () => {
     try {
       const goto = vi.fn(async (path: string) => {
         if (path === "/") return { status: () => 200 };
-        return null; // session page: an instant, non-transient failure — no retry, no wait
+        // session page: an instant, non-transient failure — no retry, no wait.
+        // (Not a null response: those now retry until the deadline, per gr-brx.)
+        throw new Error("boom");
       });
       const post = vi.fn(async (path: string) => {
         if (path === CREATE_SESSION_PATH) {
@@ -548,7 +616,12 @@ describe("an action's HTTP error status keeps its own message", () => {
   });
 
   it("logs delete-session's unwrapped 500 message through logError once the main sequence already failed", async () => {
-    const goto = vi.fn(async (path: string) => (path === "/" ? { status: () => 200 } : null));
+    // session page: an instant, non-transient failure — no retry, no wait.
+    // (Not a null response: those now retry until the deadline, per gr-brx.)
+    const goto = vi.fn(async (path: string) => {
+      if (path === "/") return { status: () => 200 };
+      throw new Error("boom");
+    });
     const post = vi.fn(async (path: string) => {
       if (path === CREATE_SESSION_PATH) return sessionCreated();
       if (path === DELETE_SESSION_PATH) return answered500();
