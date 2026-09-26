@@ -619,14 +619,22 @@ describe("editing a handoff moves baselines", () => {
     });
   });
 
-  it("U2: a brief saved back to its generated text keeps its baseline", async () => {
+  it("U2: a brief saved back to its generated text keeps its baseline, even after its ticket changed", async () => {
     const { session } = await aReadySession();
     const generated = await generateHandoff.run({ sessionId: session.id });
     const baseline = (await storedHandoff(session.id)).briefs[1]!.generatedSha256;
 
     await editBrief(session.id, 2, generated.briefs[1]!.markdown);
+    expect((await storedHandoff(session.id)).briefs[1]!.generatedSha256).toBe(baseline);
+
+    // Kept by a row-3 regeneration, then saved back to the text it was generated with.
+    await editBrief(session.id, 2, MY_BRIEF_2);
+    await unblockTicket2(session.id);
+    await generateHandoff.run({ sessionId: session.id });
+    const savedBack = await editBrief(session.id, 2, generated.briefs[1]!.markdown);
 
     expect((await storedHandoff(session.id)).briefs[1]!.generatedSha256).toBe(baseline);
+    expect(savedBack).toMatchObject({ editedBriefs: [], outdatedBriefs: [] });
   });
 
   it("U3: an edit saved while stale keeps its baseline, and is named outdated after the next regeneration", async () => {
