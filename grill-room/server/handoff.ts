@@ -690,6 +690,7 @@ export function renderHandoffMarkdown(
       codeBlock(source.project.verifyCommand),
       "",
       "Run from the repository root: once by the subagent before it hands the ticket back, and again by you before you merge it in.",
+      ...(facts.greenfield ? ["", greenfieldVerifyLine(source)] : []),
     ].join("\n"),
     beforeDelegatingSection(source, facts),
     wavesSection(source),
@@ -713,7 +714,31 @@ function bundleAccess(facts: ExportFacts, fileStem: string): string {
   return `The bundle is ignored by git, so it is NOT in your worktree. Read it by absolute path from the main checkout: the spec at ${specPath} and your ticket at ${ticketPath}. Never write to it.`;
 }
 
-function briefStepZero(source: HandoffSource, fileStem: string, facts: ExportFacts): string {
+/**
+ * In a repository with no commits, the verify command does not exist yet:
+ * ticket 1 sets it up, and every other ticket waits for it (the rule
+ * `break-into-tickets` enforces when the tickets are made). This is HANDOFF's
+ * line under "Verify command"; {@link greenfieldVerifyNote} is the brief's.
+ */
+function greenfieldVerifyLine(source: HandoffSource): string {
+  const first = padTicketNumber(1, source.tickets.length);
+  return `This repository has no commits yet, so this command does not exist until ticket ${first} sets it up. Ticket ${first}'s acceptance includes it passing, and every other ticket waits for ticket ${first}.`;
+}
+
+function greenfieldVerifyNote(source: HandoffSource, ticketNumber: number): string {
+  const verify = inlineCode(source.project.verifyCommand);
+  if (ticketNumber === 1) {
+    return `This repository has no commits yet: this ticket sets up ${verify}. Make it run and pass from the repository root; that is part of your acceptance.`;
+  }
+  return `${verify} is established by ticket ${padTicketNumber(1, source.tickets.length)}, which is merged before this ticket starts.`;
+}
+
+function briefStepZero(
+  source: HandoffSource,
+  fileStem: string,
+  facts: ExportFacts,
+  ticketNumber: number,
+): string {
   const base =
     source.project.deliveryRecipe === "pull-request"
       ? "`origin/main`"
@@ -724,6 +749,7 @@ function briefStepZero(source: HandoffSource, fileStem: string, facts: ExportFac
     `Your worktree was created from ${base}. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.`,
     "",
     bundleAccess(facts, fileStem),
+    ...(facts.greenfield ? ["", greenfieldVerifyNote(source, ticketNumber)] : []),
   ].join("\n");
 }
 
@@ -966,7 +992,7 @@ export function renderBrief(
   const sections: (string | null)[] = [
     `# Brief ${label}: ${ticket.title}`,
     `You are implementing ticket ${label} of "${source.session.title}". You work only inside the git worktree you were started in.`,
-    briefStepZero(source, fileStem, facts),
+    briefStepZero(source, fileStem, facts, ticket.number),
     [
       "## The ticket",
       "",

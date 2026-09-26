@@ -232,6 +232,14 @@ export interface ReopenedRepoDecision {
 export interface BreakIntoTicketsRequest extends RequestBase {
   kind: "break-into-tickets";
   specMarkdown: string;
+  /**
+   * Whether the session's project repository has no commits yet. Ticket 1
+   * then sets up the runner behind `verifyCommand`, and every other ticket
+   * depends on it. False for a session with no project.
+   */
+  greenfield: boolean;
+  /** The project's verify command, or null for a session with no project. */
+  verifyCommand: string | null;
 }
 
 /**
