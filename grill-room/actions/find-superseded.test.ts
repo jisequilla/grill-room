@@ -1157,7 +1157,11 @@ describe("find-superseded", () => {
     it("after the last retry, keeps the valid deferral, drops the invalid one and says so in the attempt log", async () => {
       const session = await aSession();
       await aTreeWithTwoOwnAnswers(session.id);
-      const stillWrong = deferrals({ key: "hold" }, { key: "invented" });
+      // A decision of the tree, but an accepted recommendation: never listed.
+      await aSettledDecision(session.id, "tone", T1, {
+        answerKind: "accepted-recommendation",
+      });
+      const stillWrong = deferrals({ key: "hold" }, { key: "tone" });
       const interviewer = scriptInterviewer([
         DONE_PROPOSAL,
         ...Array.from({ length: MAX_TURN_RETRIES + 1 }, () => stillWrong),
@@ -1173,6 +1177,9 @@ describe("find-superseded", () => {
       expect(await readDecision("d-hold")).toMatchObject({
         deferralReason: DEFERRAL_REASON,
       });
+      expect(await readDecision("d-tone")).toMatchObject({
+        deferralReason: null,
+      });
       const turn = await findLatestTurn({
         sessionId: session.id,
         turnKind: "find-superseded",
@@ -1182,7 +1189,7 @@ describe("find-superseded", () => {
       expect(attempts[attempts.length - 1]).toMatchObject({
         kind: "success",
         reason:
-          'Kept the valid entries after the last retry. Dropped this deferral: "invented" ("invented" is not one of the own answers to check for a deferral. Rule only on the ones listed.)',
+          'Kept the valid entries after the last retry. Dropped this deferral: "tone" ("tone" is not one of the own answers to check for a deferral. Rule only on the ones listed.)',
       });
     });
 
