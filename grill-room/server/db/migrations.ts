@@ -518,4 +518,9 @@ ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS settled_by_id TEXT`,
 ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS visibility_recheck BOOLEAN NOT NULL DEFAULT false;
 UPDATE gr_projects SET durable_export_folder = working_export_folder, working_export_folder = '.grill-room', visibility_recheck = true WHERE working_export_folder = 'docs' OR substr(working_export_folder, 1, 5) = 'docs/'`,
   },
+  {
+    version: 67,
+    name: "decisions-deferral-reason-column",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS deferral_reason TEXT`,
+  },
 ];

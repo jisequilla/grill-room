@@ -228,6 +228,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   "reopen-stale-review": { turns: reopenStaleReviewTurns() },
   supersession: { turns: supersessionTurns() },
   replacement: { turns: replacementTurns() },
+  deferral: { turns: deferralTurns() },
   "refusal-then-success": { turns: refusalThenSuccessTurns() },
   // Long enough to see the turn running before it fails, and again before the
   // manual retry succeeds — with enough margin that a slow machine (several
@@ -371,10 +372,11 @@ export function createScenarioInterviewer(
 }
 
 /**
- * A replacement-only `find-superseded` request — no loose ends, only settled
- * decisions to check — that no script asked for. A done proposal asks one
- * whenever two decisions settled at different times, which scripts written
- * (or recorded) before the check existed never queued. Answered empty without
+ * A `find-superseded` request with no loose ends — only settled decisions to
+ * check for replacement or deferral — that no script asked for. A done
+ * proposal asks one whenever two decisions settled at different times, or any
+ * decision settled with the user's own answer, which scripts written (or
+ * recorded) before those checks existed never queued. Answered empty without
  * taking anything from the queue, so those scripts stay in step; a script that
  * does queue a `find-superseded` turn next still gets it.
  */
@@ -439,7 +441,7 @@ function createScriptedInterviewer(
 
     if (answersWithoutScript(request, source.peek(request))) {
       const resumes = conversationOf(request) != null;
-      const result = { supersessions: [], replacements: [] };
+      const result = { supersessions: [], replacements: [], deferrals: [] };
       return observeCall(
         observer,
         {
@@ -747,6 +749,7 @@ export function supersessionTurns(): ScriptedTurn[] {
           },
         ],
         replacements: [],
+        deferrals: [],
       },
     },
   ];
@@ -807,8 +810,61 @@ export function replacementTurns(): ScriptedTurn[] {
               "The data lives in a synced cloud folder, not only on the local disk.",
           },
         ],
+        deferrals: [],
       },
     },
+  ];
+}
+
+/**
+ * An own answer that defers its question instead of deciding it. Round 1 asks
+ * two independent decisions; the user answers `hold-period` with an own answer
+ * that waits on something else and `first-service` for real. Then the done
+ * proposal, and the check that follows it, which flags `hold-period` as a
+ * deferral. The last turn is the round "Continue interview" asks for once the
+ * user accepts: it proposes nothing new, so the round it opens holds only the
+ * deferred decision, asked again. What `deferral` schedules.
+ */
+export function deferralTurns(): ScriptedTurn[] {
+  return [
+    {
+      kind: "propose-round",
+      result: aRound([
+        aProposedDecision("hold-period", {
+          title: "How long is a payout held before release?",
+          body: "A hold protects against disputes, and delays the seller.",
+          recommendedAnswer: "48 hours.",
+        }),
+        aProposedDecision("first-service", {
+          title: "Which service launches first?",
+          body: "One service first keeps the launch small.",
+          recommendedAnswer: "Dog walking.",
+        }),
+      ]),
+    },
+    {
+      kind: "propose-round",
+      result: aRound([], {
+        done: {
+          summary: "The hold period and the first service are settled.",
+        },
+      }),
+    },
+    {
+      kind: "find-superseded",
+      result: {
+        supersessions: [],
+        replacements: [],
+        deferrals: [
+          {
+            key: "hold-period",
+            reason:
+              "The answer waits on dispute handling instead of choosing a hold period.",
+          },
+        ],
+      },
+    },
+    { kind: "propose-round", result: aRound([]) },
   ];
 }
 
@@ -1112,7 +1168,7 @@ export function cannedInterviewTurns(): ScriptedTurn[] {
       // not answered anywhere else in the tree, so nothing is superseded and
       // the user resolves it by hand, exactly as before this turn existed.
       kind: "find-superseded",
-      result: { supersessions: [], replacements: [] },
+      result: { supersessions: [], replacements: [], deferrals: [] },
     },
     {
       kind: "synthesize-spec",

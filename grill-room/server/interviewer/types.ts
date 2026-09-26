@@ -194,6 +194,13 @@ export interface FindSupersededRequest extends RequestBase {
    * settled strictly after it, in tree order: the only ones that may replace it.
    */
   laterKeys: Record<string, string[]>;
+  /**
+   * The settled decisions whose answer is the user's own, by key, in tree
+   * order, to check for answers that postpone the question rather than decide
+   * it: not replaced, and with no supersession or deferral already pending.
+   * Empty when there is nothing to check.
+   */
+  deferrableKeys: string[];
 }
 
 export interface SynthesizeSpecRequest extends RequestBase {

@@ -358,9 +358,27 @@ function renderTask(
         "one left open is not a replacement. Be conservative: an empty list is the right",
         "answer when nothing was replaced.",
       ];
+      const deferralSection = [
+        request.looseEndKeys.length > 0 || request.replaceableKeys.length > 0
+          ? "## Also: own answers that defer the question instead of deciding it"
+          : "## Your task: find own answers that defer the question instead of deciding it",
+        "",
+        `Own answers to check: ${request.deferrableKeys.join(", ")}`,
+        "",
+        "Each decision above was settled with the user's own words. Return one entry in",
+        "`deferrals` for each whose answer does not decide the question but postpones it",
+        "until something else is known: \"wait until…\", \"decide later\", \"TBD\", \"once X",
+        "is settled\", \"depends on Y\" with no choice made. Name the decision in `key` and",
+        "say in `reason` what the answer waits on.",
+        "",
+        "An answer that decides and names a condition for revisiting it is not a deferral:",
+        "\"48 h hold; revisit after launch\" decides 48 h. Be conservative: an empty list is",
+        "the right answer when every own answer decides its question.",
+      ];
       const sections: string[][] = [];
       if (request.looseEndKeys.length > 0) sections.push(looseEndSection);
       if (request.replaceableKeys.length > 0) sections.push(replacementSection);
+      if (request.deferrableKeys.length > 0) sections.push(deferralSection);
       return sections.map((lines) => lines.join("\n")).join("\n\n");
     }
 

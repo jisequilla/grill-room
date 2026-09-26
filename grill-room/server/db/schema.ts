@@ -284,6 +284,15 @@ export const decisions = table(
     /** Which settled decision answers it and why, kept as the history entry's reason. */
     supersessionReason: text("supersession_reason"),
     /**
+     * On a settled own answer, the interviewer's reason for reading it as a
+     * deferral rather than a decision: what the answer waits on. A *proposal*,
+     * like the supersession columns: the answer, its kind and its state stay
+     * exactly as they were until the user accepts, which turns the decision
+     * into a `deferred` loose end. Dismissing it, or any write that changes
+     * or clears the answer, clears it.
+     */
+    deferralReason: text("deferral_reason"),
+    /**
      * The settled decision that replaced this one, once the user accepted the
      * replacement. The answer stays as it was; this is the lasting link that
      * marks it out of date. Cleared when this decision's own answer changes,

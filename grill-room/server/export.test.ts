@@ -33,6 +33,7 @@ function decision(key: string, overrides: Partial<DecisionView> = {}): DecisionV
     state: "settled",
     answer: { text: `Answer of ${key}`, kind: "accepted-recommendation" },
     supersession: null,
+    deferralReason: null,
     replacedBy: null,
     settledBy: null,
     dispositionTarget: null,
@@ -363,6 +364,19 @@ describe("planExport: decisions.md", () => {
     expect(content).not.toContain("Statement of repo-stack");
     expect(content).not.toContain('id="repo-stack"');
     expect(content).not.toContain("Title of repo-stack");
+  });
+
+  it("keeps a settled own answer whose deferral is only proposed as an entry", () => {
+    const pending = decision("hold", {
+      answer: { text: "Wait until dispute handling is settled", kind: "own-answer" },
+      deferralReason: "The answer waits on dispute handling.",
+    });
+
+    const content = decisionsFile([pending])!;
+
+    expect(content).toContain('<a id="hold"></a>');
+    expect(content).toContain("Title of hold");
+    expect(content).toContain("Wait until dispute handling is settled");
   });
 
   it("leaves out loose ends, open questions, and anything not settled, withdrawn or unplaced", () => {

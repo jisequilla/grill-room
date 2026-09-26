@@ -319,14 +319,26 @@ export const CLEARED_ANSWER_LINKS = {
 } as const;
 
 /**
- * A decision's own pending supersession proposal. It is a claim about the
- * answer the decision holds, so a write that changes or clears that answer
- * drops it in the same update, beside {@link CLEARED_ANSWER_LINKS}.
+ * A pending supersession proposal alone: the three columns that name another
+ * decision as answering or replacing this one. What a reopen or a re-ask
+ * clears on the *other* rows whose proposal names the decision it unsettled —
+ * a deferral names no other decision, so it is not part of this.
  */
-export const CLEARED_PROPOSAL = {
+export const CLEARED_SUPERSESSION = {
   supersededById: null,
   supersessionAnswer: null,
   supersessionReason: null,
+} as const;
+
+/**
+ * A decision's own pending proposals: a supersession, and a deferral. Both
+ * are claims about the answer the decision holds, so a write that changes or
+ * clears that answer drops them in the same update, beside
+ * {@link CLEARED_ANSWER_LINKS}.
+ */
+export const CLEARED_PROPOSAL = {
+  ...CLEARED_SUPERSESSION,
+  deferralReason: null,
 } as const;
 
 /** A stored decision, exactly as the table holds it. */
@@ -435,6 +447,12 @@ export interface DecisionView {
    * a loose end: nothing about its answer changes until the user accepts.
    */
   supersession: DecisionSupersession | null;
+  /**
+   * The interviewer's reason for reading this settled own answer as a
+   * deferral, pending the user's acceptance, or null. Nothing about the
+   * answer changes while it is pending.
+   */
+  deferralReason: string | null;
   /** The settled decision that replaced this one, once the user accepted it. */
   replacedBy: DecisionReplacedBy | null;
   /** The decision whose answer settled this former loose end. */
@@ -547,6 +565,7 @@ export function describeDecisions(
           reason: row.supersessionReason ?? "",
         }
       : null,
+    deferralReason: row.deferralReason,
     replacedBy: row.replacedById
       ? {
           id: row.replacedById,

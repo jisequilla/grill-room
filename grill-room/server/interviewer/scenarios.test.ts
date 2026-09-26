@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import acceptDeferral from "../../actions/accept-deferral.js";
 import assessReadiness from "../../actions/assess-readiness.js";
 import createSession from "../../actions/create-session.js";
 import getTree from "../../actions/get-tree.js";
@@ -402,6 +403,51 @@ describe("named scenarios for every request kind", () => {
       supersession: { kind: "replaces-settled", byKey: "storage-location" },
       replacedBy: null,
     });
+  });
+
+  it("deferral scripts a round, its done proposal, a check that flags one own answer, and the round that asks it again once accepted", async () => {
+    const session = await aSession();
+    const interviewer = useScenario(session.id, "deferral");
+
+    const done = await answerOpenRoundByKey(session.id, {
+      "hold-period": {
+        answerKind: "own-answer",
+        answer: "Wait until dispute handling is settled",
+      },
+      "first-service": { answerKind: "own-answer", answer: "Dog walking." },
+    });
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "propose-round",
+      "propose-round",
+      "find-superseded",
+    ]);
+    expect(interviewer.requests[2]).toMatchObject({
+      kind: "find-superseded",
+      looseEndKeys: [],
+      replaceableKeys: [],
+      deferrableKeys: ["hold-period", "first-service"],
+    });
+    expect(done.state).toBe("done-proposed");
+
+    const tree = await getTree.run({ sessionId: session.id });
+    const hold = tree.decisions.find((decision) => decision.key === "hold-period")!;
+    expect(hold).toMatchObject({
+      state: "settled",
+      answer: { kind: "own-answer" },
+      deferralReason: expect.stringContaining("dispute handling"),
+    });
+    expect(
+      tree.decisions.find((decision) => decision.key === "first-service"),
+    ).toMatchObject({ deferralReason: null });
+
+    await acceptDeferral.run({ decisionId: hold.id });
+    const again = await requestNextRound.run({ sessionId: session.id });
+
+    expect(again.round?.decisions.map((card) => card.key)).toEqual([
+      "hold-period",
+    ]);
+    expect(interviewer.remainingFor(session.id)).toBe(0);
   });
 
   it("refusal-then-success scripts one refused attempt and the accepted retry, in the same turn", async () => {

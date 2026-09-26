@@ -28,6 +28,7 @@ import {
   deriveTreeStates,
   CLEARED_ANSWER_LINKS,
   CLEARED_PROPOSAL,
+  CLEARED_SUPERSESSION,
   recommendedChoiceRejection,
   transitiveDependencies,
   treeFacts,
@@ -347,7 +348,7 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
       // it is kept: it records where that answer came from.
       await db
         .update(schema.decisions)
-        .set({ ...CLEARED_PROPOSAL, updatedAt: now })
+        .set({ ...CLEARED_SUPERSESSION, updatedAt: now })
         .where(eq(schema.decisions.supersededById, row.id));
       await db
         .update(schema.decisions)

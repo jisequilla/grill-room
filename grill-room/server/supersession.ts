@@ -1,6 +1,7 @@
 /**
  * The supersession turn: which loose ends a later settled decision has already
- * answered, and which settled decisions a later one replaced.
+ * answered, which settled decisions a later one replaced, and which of the
+ * user's own answers postpone their question rather than decide it.
  *
  * A loose end is a question the user left open — "I don't know", deferred,
  * flagged for a prototype, or pushed back with no response. The interview
@@ -12,10 +13,14 @@
  * decision that settled later changes, narrows or reverses it, and a builder
  * reading the earlier answer alone would build the wrong thing.
  *
+ * And an own answer can settle a decision without deciding it: "wait until
+ * dispute handling is settled" is a deferral written as an answer, and it
+ * would export as a decision.
+ *
  * What comes back is stored as a **proposal** and nothing else. The decision
  * keeps its answer, its kind and its place in the tree until the user accepts;
  * the proposal columns (`supersededById`, `supersessionAnswer`,
- * `supersessionReason`) are the whole of what this writes. An interviewer that
+ * `supersessionReason`, `deferralReason`) are the whole of what this writes. An interviewer that
  * is wrong here costs one dismissal, not a decision recorded in the user's
  * name. A pending proposal never blocks confirmation.
  *
@@ -143,11 +148,36 @@ export function laterKeysOf(
   );
 }
 
-/** Whether a turn has anything to ask about: a loose end or a replaceable decision. */
+/**
+ * Rows of the settled decisions this turn would check for a deferral, in the
+ * order given: the user's own answer, settled, not replaced, and with no
+ * supersession or deferral already pending on it. An accepted recommendation
+ * is the interviewer's own answer and never a deferral; a disposition, a kept
+ * repo decision and a loose end are not own answers.
+ */
+export function deferrableDecisions(
+  rows: readonly DecisionRow[],
+): DecisionRow[] {
+  const states = deriveTreeStates(treeFacts(rows));
+  return rows.filter(
+    (row) =>
+      states.get(row.id) === "settled" &&
+      row.answerKind === "own-answer" &&
+      row.replacedById == null &&
+      row.supersededById == null &&
+      row.deferralReason == null,
+  );
+}
+
+/**
+ * Whether a turn has anything to ask about: a loose end, a replaceable
+ * decision, or a deferrable own answer.
+ */
 function hasAnythingToCheck(rows: readonly DecisionRow[]): boolean {
   return (
     supersedableLooseEnds(rows).length > 0 ||
-    replaceableDecisions(rows).length > 0
+    replaceableDecisions(rows).length > 0 ||
+    deferrableDecisions(rows).length > 0
   );
 }
 
@@ -159,6 +189,8 @@ export interface SupersessionCheck {
   replaceableKeys: readonly string[];
   /** The request's `laterKeys`: each replaceable key's possible replacers. */
   laterKeys: Readonly<Record<string, readonly string[]>>;
+  /** The deferrable keys the request listed. */
+  deferrableKeys: readonly string[];
   /** The keys of every decision currently derived settled. */
   settledKeys: readonly string[];
   /**
@@ -266,11 +298,49 @@ function replacementRejectionReasons(
 }
 
 /**
+ * Why each of the result's deferrals cannot be stored, one list per entry in
+ * the result's order: empty for an entry that can be. A second entry for the
+ * same decision is the one refused.
+ */
+function deferralRejectionReasons(
+  check: SupersessionCheck,
+  result: FindSupersededResult,
+): string[][] {
+  const deferrable = new Set(check.deferrableKeys);
+  const replaced = new Set(result.replacements.map((entry) => entry.replacedKey));
+  const seen = new Set<string>();
+
+  return result.deferrals.map((entry) => {
+    const reasons: string[] = [];
+    if (seen.has(entry.key)) {
+      reasons.push(
+        `Decision "${entry.key}" was flagged as a deferral twice. Give at most one deferral per decision.`,
+      );
+    }
+    seen.add(entry.key);
+
+    if (!deferrable.has(entry.key)) {
+      reasons.push(
+        `"${entry.key}" is not one of the own answers to check for a deferral. Rule only on the ones listed.`,
+      );
+    }
+
+    if (replaced.has(entry.key)) {
+      reasons.push(
+        `"${entry.key}" is both replaced and flagged as a deferral. Give it one or the other.`,
+      );
+    }
+    return reasons;
+  });
+}
+
+/**
  * Why a result cannot be stored, written for the interviewer: it is sent back
  * verbatim. Empty when every supersession names a loose end that was asked
  * about and a decision that really is settled, every replacement names a
- * decision that was asked about and one listed after it, and nothing appears
- * twice.
+ * decision that was asked about and one listed after it, every deferral names
+ * an own answer that was asked about and is not also replaced, and nothing
+ * appears twice.
  */
 export function supersessionRejectionReasons(
   input: SupersessionCheck & { result: FindSupersededResult },
@@ -278,30 +348,61 @@ export function supersessionRejectionReasons(
   return [
     ...looseEndRejectionReasons(input, input.result),
     ...replacementRejectionReasons(input, input.result).flat(),
+    ...deferralRejectionReasons(input, input.result).flat(),
   ];
 }
 
 /**
- * The result with its invalid replacements dropped, and a line for the attempt
- * log naming each dropped entry and why; null when nothing was dropped.
+ * The result with its invalid replacements and deferrals dropped, and a line
+ * for the attempt log naming each dropped entry and why; null when nothing
+ * was dropped.
+ *
+ * Deferrals are judged against the replacements as the interviewer sent them,
+ * so a decision named in both loses its deferral even when its replacement is
+ * the one dropped.
  */
-function keepValidReplacements(
+function keepValidEntries(
   check: SupersessionCheck,
   result: FindSupersededResult,
 ): { result: FindSupersededResult; dropped: string | null } {
-  const reasons = replacementRejectionReasons(check, result);
-  const kept = result.replacements.filter((_, index) => reasons[index]!.length === 0);
-  const dropped = result.replacements.flatMap((entry, index) =>
-    reasons[index]!.length === 0
-      ? []
-      : [`"${entry.replacedKey}" by "${entry.byKey}" (${reasons[index]!.join(" ")})`],
+  const replacementReasons = replacementRejectionReasons(check, result);
+  const deferralReasons = deferralRejectionReasons(check, result);
+  const keptReplacements = result.replacements.filter(
+    (_, index) => replacementReasons[index]!.length === 0,
   );
+  const keptDeferrals = result.deferrals.filter(
+    (_, index) => deferralReasons[index]!.length === 0,
+  );
+  const droppedReplacements = result.replacements.flatMap((entry, index) =>
+    replacementReasons[index]!.length === 0
+      ? []
+      : [
+          `"${entry.replacedKey}" by "${entry.byKey}" (${replacementReasons[index]!.join(" ")})`,
+        ],
+  );
+  const droppedDeferrals = result.deferrals.flatMap((entry, index) =>
+    deferralReasons[index]!.length === 0
+      ? []
+      : [`"${entry.key}" (${deferralReasons[index]!.join(" ")})`],
+  );
+  const parts = [
+    droppedReplacements.length === 0
+      ? null
+      : `${droppedReplacements.length === 1 ? "this replacement" : "these replacements"}: ${droppedReplacements.join("; ")}`,
+    droppedDeferrals.length === 0
+      ? null
+      : `${droppedDeferrals.length === 1 ? "this deferral" : "these deferrals"}: ${droppedDeferrals.join("; ")}`,
+  ].filter((part): part is string => part != null);
   return {
-    result: { ...result, replacements: kept },
+    result: {
+      ...result,
+      replacements: keptReplacements,
+      deferrals: keptDeferrals,
+    },
     dropped:
-      dropped.length === 0
+      parts.length === 0
         ? null
-        : `Kept the valid entries after the last retry. Dropped ${dropped.length === 1 ? "this replacement" : "these replacements"}: ${dropped.join("; ")}`,
+        : `Kept the valid entries after the last retry. Dropped ${parts.join("; and ")}`,
   };
 }
 
@@ -332,17 +433,26 @@ async function scan(
   const rows = await loadDecisions();
   const looseEnds = supersedableLooseEnds(rows);
   const replaceable = replaceableDecisions(rows);
-  if (looseEnds.length === 0 && replaceable.length === 0) return conversationId;
+  const deferrable = deferrableDecisions(rows);
+  if (
+    looseEnds.length === 0 &&
+    replaceable.length === 0 &&
+    deferrable.length === 0
+  ) {
+    return conversationId;
+  }
 
   const askedKeys = looseEnds.map(portKey);
   const replaceableKeys = replaceable.map(portKey);
   const laterKeys = laterKeysOf(rows);
+  const deferrableKeys = deferrable.map(portKey);
   const states = deriveTreeStates(treeFacts(rows));
   const settledRows = rows.filter((row) => states.get(row.id) === "settled");
   const check: SupersessionCheck = {
     askedKeys,
     replaceableKeys,
     laterKeys,
+    deferrableKeys,
     settledKeys: settledRows.map(portKey),
     dispositionedKeys: settledRows
       .filter((row) => row.answerKind === "dispositioned")
@@ -377,6 +487,7 @@ async function scan(
           looseEndKeys: askedKeys,
           replaceableKeys,
           laterKeys,
+          deferrableKeys,
           rejectionReason: attempt.rejectionReason,
         },
         attempt.observer,
@@ -384,9 +495,9 @@ async function scan(
     },
     reasonsToRefuse: (result) => {
       const reasons = supersessionRejectionReasons({ ...check, result });
-      // On the last attempt, invalid replacements alone no longer fail the
-      // scan: the valid entries are kept and the invalid ones dropped below.
-      // Invalid loose-end entries still do.
+      // On the last attempt, invalid replacements and deferrals alone no
+      // longer fail the scan: the valid entries are kept and the invalid ones
+      // dropped below. Invalid loose-end entries still do.
       const lastAttempt = attemptsAsked > MAX_TURN_RETRIES;
       if (lastAttempt && looseEndRejectionReasons(check, result).length === 0) {
         return [];
@@ -400,7 +511,7 @@ async function scan(
       ),
   });
 
-  const kept = keepValidReplacements(check, accepted.result);
+  const kept = keepValidEntries(check, accepted.result);
   if (kept.dropped) await recorder?.noted(kept.dropped);
   const turn = { ...accepted, result: kept.result };
 
@@ -439,6 +550,16 @@ async function scan(
       .where(eq(schema.decisions.id, replacedId));
   }
 
+  for (const entry of turn.result.deferrals) {
+    const deferredId = idByKey.get(entry.key);
+    if (!deferredId) continue;
+
+    await db
+      .update(schema.decisions)
+      .set({ deferralReason: entry.reason, updatedAt: now })
+      .where(eq(schema.decisions.id, deferredId));
+  }
+
   return turn.conversationId;
 }
 
@@ -455,8 +576,8 @@ async function scan(
  * This runs nested inside the propose-round turn, not through `runTurn`, but
  * it still gets its own `find-superseded` turn record: `startTurnRecorder` is
  * used directly, and the recorder is closed here rather than by `runTurn`.
- * Does nothing at all — not even a turn record — when the session has neither
- * a loose end nor a replaceable decision this could apply to.
+ * Does nothing at all — not even a turn record — when the session has no
+ * loose end, replaceable decision or deferrable own answer this could apply to.
  */
 export async function findSupersessionsForDone(input: {
   session: SupersessionSession;
@@ -514,8 +635,8 @@ export async function findSupersessionsForDone(input: {
 /**
  * The whole turn, for the explicit action: the session reads as working while
  * the model thinks, and a failure is stored on it the way any other failed turn
- * is. Does nothing at all — not even a turn status — when the session has
- * neither a loose end nor a replaceable decision this could apply to.
+ * is. Does nothing at all — not even a turn status — when the session has no
+ * loose end, replaceable decision or deferrable own answer this could apply to.
  */
 export async function runSupersessionTurn(sessionId: string): Promise<void> {
   const db = getDb();
