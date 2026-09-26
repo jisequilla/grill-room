@@ -328,6 +328,22 @@ export default function SessionWorkspaceRoute() {
     assessReadiness.isPending ||
     (working && activeTurn?.turnKind === "assess-readiness");
 
+  // The strip's body shows `ReadinessPanel` whenever there is something for
+  // it to show: the pre-round-1 invitation (`showReadiness`), or a stored
+  // judgment that outlives round 1 (DESIGN.md's "no project, a readiness
+  // judgment exists" row applies for the whole session, not only before the
+  // first round). This must stay in exact lockstep with `BriefStrip`'s own
+  // render gate (`hasProject || readiness !== null || showReadiness`) so a
+  // strip that renders always has something in its body: `hasProject` gets
+  // the scout panel, this gets the readiness panel, and the gate is the `||`
+  // of both.
+  const readinessBodyVisible = showReadiness || readiness !== null;
+
+  // `assess-readiness` refuses with `has-rounds` once any round exists, so
+  // the panel stops offering the control from then on — read-only after
+  // that, not gone.
+  const canAssessReadiness = rounds !== undefined && rounds.rounds.length === 0;
+
   const selected =
     decisions.find((decision) => decision.id === selectedId) ?? null;
 
@@ -439,13 +455,14 @@ export default function SessionWorkspaceRoute() {
                   turn={scoutTurn ?? null}
                 />
               ) : null}
-              {showReadiness ? (
+              {readinessBodyVisible ? (
                 <ReadinessPanel
-                  readiness={round.readiness}
+                  readiness={readiness}
                   working={working}
                   isAssessing={assessReadiness.isPending}
                   onAssess={() => assessReadiness.mutate({ sessionId: id })}
                   turn={readinessTurn ?? null}
+                  canAssess={canAssessReadiness}
                 />
               ) : null}
             </BriefStrip>

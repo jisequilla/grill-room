@@ -2,7 +2,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import enUS from "@/i18n/en-US";
-import { BriefStrip, briefSummary } from "@/components/workspace/brief-strip";
+import {
+  BriefStrip,
+  briefSummary,
+  nextBriefStripOpenState,
+} from "@/components/workspace/brief-strip";
 import type { Readiness, ScoutReport } from "@/components/workspace/readiness-panel";
 
 /**
@@ -271,5 +275,81 @@ describe("BriefStrip", () => {
   it("renders the strip before the first round even with no project and no judgment yet, so the readiness invitation stays reachable", () => {
     const html = render({ showReadiness: true });
     expect(html).toContain('data-testid="brief-strip"');
+  });
+
+  it("gives the scout half of the summary its own truncating span, and keeps the readiness half (and its separator) in non-truncating ones", () => {
+    // Structural, not content: `render()` has no i18n catalog wired up (see
+    // the file-top note), so the readiness text itself is a humanized
+    // fallback, not "Ready" — this pins the class split that makes the
+    // readiness verdict survive a narrow viewport instead of the text.
+    const html = render({ hasProject: true, scoutReport: scoutReport() });
+
+    expect(html).toContain('class="min-w-0 flex-1 truncate"');
+    const shrinkSpans = [...html.matchAll(/<span class="shrink-0"[^>]*>/g)];
+    expect(shrinkSpans.length).toBeGreaterThan(0);
+    for (const [tag] of shrinkSpans) {
+      expect(tag).not.toContain("truncate");
+    }
+  });
+});
+
+describe("nextBriefStripOpenState", () => {
+  it("expands on the first resolution when there are no rounds yet", () => {
+    expect(
+      nextBriefStripOpenState({
+        previousConfirmedCount: null,
+        roundsCount: 0,
+        currentOpen: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("collapses on the first resolution when a round already exists — never a guess made before that resolution", () => {
+    expect(
+      nextBriefStripOpenState({
+        previousConfirmedCount: null,
+        roundsCount: 1,
+        currentOpen: false,
+      }),
+    ).toBe(false);
+    // Even if some earlier code had left it expanded, the first real
+    // resolution overrides that guess.
+    expect(
+      nextBriefStripOpenState({
+        previousConfirmedCount: null,
+        roundsCount: 1,
+        currentOpen: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("collapses live, once, the moment the round count leaves zero", () => {
+    expect(
+      nextBriefStripOpenState({
+        previousConfirmedCount: 0,
+        roundsCount: 1,
+        currentOpen: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("never re-collapses a later round opening, and never re-expands one either — the user's own choice holds", () => {
+    // The scenario acceptance non-blocking item (a) asks for: the user
+    // re-expanded after round 1 collapsed it, then round 2 opens.
+    expect(
+      nextBriefStripOpenState({
+        previousConfirmedCount: 1,
+        roundsCount: 2,
+        currentOpen: true,
+      }),
+    ).toBe(true);
+    // And the mirror case: still collapsed, round 2 opens — stays collapsed.
+    expect(
+      nextBriefStripOpenState({
+        previousConfirmedCount: 1,
+        roundsCount: 2,
+        currentOpen: false,
+      }),
+    ).toBe(false);
   });
 });

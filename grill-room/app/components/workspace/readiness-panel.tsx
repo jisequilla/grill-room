@@ -56,6 +56,7 @@ export function ReadinessPanel({
   isAssessing,
   onAssess,
   turn = null,
+  canAssess = true,
 }: {
   readiness: Readiness | null;
   /** The session's interviewer is working on some turn. */
@@ -71,6 +72,15 @@ export function ReadinessPanel({
    * is this judgment or the first round.
    */
   turn?: Turn | null;
+  /**
+   * Whether assessing (or re-assessing) is still open to this session.
+   * `assess-readiness` refuses with `has-rounds` once any round exists, so
+   * the panel stops offering the action from then on and shows the verdict
+   * read-only — the panel itself keeps rendering (a stored judgment is
+   * shown for as long as the session lives, not only before round 1).
+   * Defaults to `true`, the panel's original, only behaviour.
+   */
+  canAssess?: boolean;
 }) {
   const t = useT();
   const result = readiness?.result ?? null;
@@ -88,23 +98,25 @@ export function ReadinessPanel({
             <ReadinessBadge verdict={result.verdict} testId="readiness-verdict" />
           ) : null}
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant={result ? "outline" : "default"}
-          disabled={busy}
-          onClick={onAssess}
-          data-testid={result ? "readiness-reassess" : "readiness-assess"}
-        >
-          {busy && <Spinner className="size-4" />}
-          {t(
-            busy
-              ? "workspace.readinessAssessing"
-              : result
-                ? "workspace.readinessReassess"
-                : "workspace.readinessAssess",
-          )}
-        </Button>
+        {canAssess ? (
+          <Button
+            type="button"
+            size="sm"
+            variant={result ? "outline" : "default"}
+            disabled={busy}
+            onClick={onAssess}
+            data-testid={result ? "readiness-reassess" : "readiness-assess"}
+          >
+            {busy && <Spinner className="size-4" />}
+            {t(
+              busy
+                ? "workspace.readinessAssessing"
+                : result
+                  ? "workspace.readinessReassess"
+                  : "workspace.readinessAssess",
+            )}
+          </Button>
+        ) : null}
       </div>
 
       <TurnAttemptLog turn={turn} />
