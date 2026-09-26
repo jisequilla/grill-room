@@ -342,16 +342,20 @@ const messages = {
       "These are the interviewer's to resolve, not yours. Another round reconfirms, re-asks, or places them.",
     continueInterview: "Continue the interview",
 
-    checkSuperseded: "Check for answered loose ends",
+    checkSuperseded: "Check for answered or replaced decisions",
     checkingSuperseded: "Checking…",
     checkSupersededFailed:
-      "Could not check which loose ends a later decision already answered.",
+      "Could not check which loose ends or settled decisions a later decision already answered or replaced.",
     supersededBy: "Answered by: {{title}}",
     supersededByUnknown: "another settled decision",
     acceptSupersession: "Accept",
     dismissSupersession: "Not the same",
     acceptSupersessionFailed: "Could not accept that answer.",
     dismissSupersessionFailed: "Could not dismiss that suggestion.",
+
+    replacedDecisionsHeading: "Replaced decisions",
+    replacedBy: "Replaced by: {{title}}",
+    replacedByUnknown: "a later decision",
 
     reasonUnknown: "You said you don't know",
     reasonDeferred: "Deferred",
