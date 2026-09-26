@@ -7,6 +7,7 @@ You are implementing bead {{bead}} in the Grill Room app (`grill-room/` in this 
 - **Check what you build on.** Before anything else, confirm that every file and symbol under "Builds on" exists. If one does not, stop and report.
 - **Follow the ticket.** The Behaviour table is the spec, and "Pattern to copy" shows how the code should look.
 - **Prove each acceptance line.** For every numbered line, write the test it names. Then revert only the change that line covers, confirm the test fails, and restore the change. Report the result per line. Revert with a temporary commit or a copy of the file, never `git stash`: the stash stack is shared by every worktree and session.
+- **Keep the ticket's rules in the tests.** A test that encodes a ticket rule may not be changed to match the code. If the rule seems wrong, stop and report.
 - **Stay in scope.** Keep the change inside the ticket's Files. A minimal edit elsewhere is allowed only if the PR body names the file and says why.
 - **Run verification in the foreground.** Run each Verify command to completion before you report. Never start one in the background and report while it is still running.
 

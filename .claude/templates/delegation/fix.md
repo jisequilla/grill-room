@@ -16,7 +16,7 @@ The ticket, for context:
 
 ## How to work
 
-For each finding, write or extend a test that fails without your fix and passes with it. Report each one. To show it failing, revert with a temporary commit or a copy of the file, never `git stash`.
+For each finding, write or extend a test that fails without your fix and passes with it. Report each one. A test that encodes a ticket rule may not be changed to match the code. If the rule seems wrong, stop and report. To show it failing, revert with a temporary commit or a copy of the file, never `git stash`.
 
 Run the ticket's Verify commands in the foreground, and let each one finish before you report. A result that says verification is still running is not a result.
 
