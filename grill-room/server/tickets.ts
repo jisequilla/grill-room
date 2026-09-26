@@ -78,9 +78,15 @@ export function numbersOnCycles(
  *
  * The cycle check only runs once numbers and links resolve cleanly — a
  * dangling or duplicated number makes the graph meaningless to walk.
+ *
+ * With `greenfield` (the project's repository has no commits yet), a set that
+ * passes every check above is also refused when ticket 1 does not set up the
+ * verify command or another ticket does not wait for ticket 1; see
+ * {@link greenfieldReasons}.
  */
 export function validateTicketSet(
   tickets: readonly ProposedTicket[],
+  greenfield: GreenfieldRules | null = null,
 ): TicketSetValidation {
   const reasons: string[] = [];
 
@@ -153,7 +159,59 @@ export function validateTicketSet(
     );
   }
 
+  if (reasons.length === 0 && greenfield) {
+    reasons.push(...greenfieldReasons(byNumber, greenfield.verifyCommand));
+  }
+
   return { ok: reasons.length === 0, reasons };
+}
+
+/** The verify command a greenfield breakdown's ticket 1 sets up. */
+export interface GreenfieldRules {
+  verifyCommand: string;
+}
+
+/**
+ * A repository with no commits has no verify command yet, so ticket 1 sets it
+ * up and every other ticket waits for it: ticket 1's body names the command as
+ * single-backtick inline code (skipped for a command that itself contains a
+ * backtick, which cannot be written that way), and every other ticket reaches
+ * ticket 1 through `blockedBy`, directly or transitively. Only called on a set
+ * whose numbers and links resolve and hold no cycle.
+ */
+function greenfieldReasons(
+  byNumber: ReadonlyMap<number, ProposedTicket>,
+  verifyCommand: string,
+): string[] {
+  const reasons: string[] = [];
+
+  const first = byNumber.get(1);
+  if (first && !verifyCommand.includes("`") && !first.body.includes(`\`${verifyCommand}\``)) {
+    reasons.push(
+      `Ticket 1 does not name the verify command. This repository has no commits yet, so ticket 1 sets that command up, and its body must name it in its acceptance, written as inline code: \`${verifyCommand}\`.`,
+    );
+  }
+
+  const reachesFirst = new Map<number, boolean>();
+  function reaches(number: number): boolean {
+    const known = reachesFirst.get(number);
+    if (known !== undefined) return known;
+    const result = (byNumber.get(number)?.blockedBy ?? []).some(
+      (blocker) => blocker === 1 || reaches(blocker),
+    );
+    reachesFirst.set(number, result);
+    return result;
+  }
+
+  for (const number of [...byNumber.keys()].sort((a, b) => a - b)) {
+    if (number !== 1 && !reaches(number)) {
+      reasons.push(
+        `Ticket ${number} does not depend on ticket 1. This repository has no commits yet and ticket 1 sets up the verify command, so every other ticket must list 1 in its \`blockedBy\`, directly or through another ticket's \`blockedBy\`.`,
+      );
+    }
+  }
+
+  return reasons;
 }
 
 /** A ticket as `computeWaves` needs it: a number and its blockers, already resolved to numbers. */

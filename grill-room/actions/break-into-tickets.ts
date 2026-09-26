@@ -5,8 +5,10 @@ import { eq, inArray } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
+import { headCommit } from "../server/export-bundle.js";
 import { getInterviewer } from "../server/interviewer/index.js";
 import type { BreakIntoTicketsResult } from "../server/interviewer/index.js";
+import { getProject } from "../server/projects.js";
 import { validateTicketSet } from "../server/tickets.js";
 import {
   askUntilAccepted,
@@ -116,6 +118,13 @@ export default defineAction({
           // decisions land in the same millisecond.
           .orderBy(schema.decisions.createdAt, schema.decisions.id);
 
+        // A repository with no commits has no verify command yet: ticket 1
+        // sets it up and every other ticket waits for it. Measured once per
+        // breakdown, so every retry is judged against the same answer.
+        const project = session!.projectId ? await getProject(session!.projectId) : undefined;
+        const verifyCommand = project?.verifyCommand ?? null;
+        const greenfield = project ? (await headCommit(project.rootPath)) === null : false;
+
         const interviewer = getInterviewer();
 
         const accepted = await askUntilAccepted<BreakIntoTicketsResult>({
@@ -137,11 +146,17 @@ export default defineAction({
                   projectContext: await projectContextFor(session!),
                 },
                 specMarkdown: spec!.markdown,
+                greenfield,
+                verifyCommand,
                 rejectionReason,
               },
               observer,
             ),
-          reasonsToRefuse: (result) => validateTicketSet(result.tickets).reasons,
+          reasonsToRefuse: (result) =>
+            validateTicketSet(
+              result.tickets,
+              greenfield && verifyCommand !== null ? { verifyCommand } : null,
+            ).reasons,
           exhausted: (lastReason) =>
             new TurnRejected(
               "invalid-tickets",

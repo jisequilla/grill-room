@@ -505,7 +505,7 @@ async function resolveOverrides(
 }
 
 /** The project's HEAD commit, or null when it has none or is not a git repository. */
-async function headCommit(root: string): Promise<string | null> {
+export async function headCommit(root: string): Promise<string | null> {
   try {
     const head = await runGit(root, ["rev-parse", "HEAD"]);
     return head.exitCode === 0 ? head.stdout.trim() || null : null;

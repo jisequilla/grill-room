@@ -1522,6 +1522,8 @@ describe("what the adapter sends to break a spec into tickets", () => {
       kind: "break-into-tickets",
       context: aContext(),
       specMarkdown: "## Problem Statement\n\nExport the training log.",
+      greenfield: false,
+      verifyCommand: null,
       rejectionReason: null,
     });
     const prompt = valueOf(runner.invocations[0]!.args, "-p") as string;
@@ -1539,6 +1541,70 @@ describe("what the adapter sends to break a spec into tickets", () => {
         "  its tests, rather than leaving them to a tests-only ticket.",
       ].join("\n"),
     );
+  });
+
+  describe("in a repository with no commits yet", () => {
+    const RULES_END = "  its tests, rather than leaving them to a tests-only ticket.";
+
+    async function promptFor(greenfield: boolean, verifyCommand: string | null): Promise<string> {
+      const runner = recordingRunner([ok(anEnvelope({ structured_output: { tickets: [] } }))]);
+      await createClaudeCliInterviewer({ runCli: runner.runCli }).breakIntoTickets({
+        kind: "break-into-tickets",
+        context: aContext(),
+        specMarkdown: "## Problem Statement\n\nExport the training log.",
+        greenfield,
+        verifyCommand,
+        rejectionReason: null,
+      });
+      return valueOf(runner.invocations[0]!.args, "-p") as string;
+    }
+
+    it("adds one section after the rules: ticket 1 sets up the verify command, every other ticket depends on it", async () => {
+      const plain = await promptFor(false, "pnpm test");
+      const greenfield = await promptFor(true, "pnpm test");
+
+      const section = [
+        "## This repository has no commits yet",
+        "",
+        "The project's repository is empty, so its verify command does not work",
+        "yet:",
+        "",
+        "```bash",
+        "pnpm test",
+        "```",
+        "",
+        "Ticket 1 sets up the project and its test runner so that this command,",
+        "run from the repository root, runs and passes.",
+        "Ticket 1's body names that command in its acceptance, written as inline",
+        "code: `pnpm test`.",
+        "Every other ticket depends on ticket 1, directly or through another",
+        "ticket's `blockedBy`.",
+      ].join("\n");
+      expect(plain).toContain(RULES_END);
+      expect(greenfield).toBe(plain.replace(RULES_END, `${RULES_END}\n\n${section}`));
+    });
+
+    it("asks for no inline form when the command itself contains a backtick", async () => {
+      const prompt = await promptFor(true, "echo `date`");
+
+      expect(prompt).toContain("## This repository has no commits yet");
+      expect(prompt).toContain("```bash\necho `date`\n```");
+      expect(prompt).toContain("Ticket 1's body names that command in its acceptance.\n");
+      expect(prompt).not.toContain("written as inline");
+    });
+
+    it.each([
+      ["not greenfield, with a verify command", false, "pnpm test"],
+      ["not greenfield, no project", false, null],
+    ] as const)("%s: no section, and the prompt is byte for byte as without the new fields", async (_, greenfield, verifyCommand) => {
+      const prompt = await promptFor(greenfield, verifyCommand);
+
+      expect(prompt).not.toContain("## This repository has no commits yet");
+      expect(prompt).not.toContain("pnpm test");
+      // With no retry reason, today's prompt ends with the rules.
+      expect(prompt.endsWith(RULES_END)).toBe(true);
+      expect(prompt).toBe(await promptFor(false, null));
+    });
   });
 });
 

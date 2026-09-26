@@ -882,8 +882,12 @@ describe("export-time facts", () => {
     return markdown.slice(start, markdown.indexOf("\n## ", start + 1));
   }
 
-  function firstBrief(source: HandoffSource, facts?: { visibility: "tracked" | "ignored"; greenfield: boolean }) {
-    return renderBrief(source, source.tickets[0]!, {}, facts);
+  function briefAt(
+    source: HandoffSource,
+    index: number,
+    facts?: { visibility: "tracked" | "ignored"; greenfield: boolean },
+  ) {
+    return renderBrief(source, source.tickets[index]!, {}, facts);
   }
 
   describe("pathsNote", () => {
@@ -943,19 +947,19 @@ describe("export-time facts", () => {
 
   describe("bundleAccess", () => {
     it("tracked, not greenfield: unchanged", () => {
-      const brief = firstBrief(aSource(), { visibility: "tracked", greenfield: false });
+      const brief = briefAt(aSource(), 0, { visibility: "tracked", greenfield: false });
       expect(brief).toContain(TRACKED_ACCESS);
-      expect(brief).toBe(firstBrief(aSource()));
+      expect(brief).toBe(briefAt(aSource(), 0));
     });
 
     it("tracked, greenfield: the operator commits the bundle first", () => {
-      const brief = firstBrief(aSource(), { visibility: "tracked", greenfield: true });
+      const brief = briefAt(aSource(), 0, { visibility: "tracked", greenfield: true });
       expect(brief).toContain(TRACKED_GREENFIELD_ACCESS);
       expect(brief).not.toContain("The bundle is committed in this repository");
     });
 
     it.each([false, true])("ignored, greenfield %s: the ignored sentence", (greenfield) => {
-      const brief = firstBrief(aSource(), { visibility: "ignored", greenfield });
+      const brief = briefAt(aSource(), 0, { visibility: "ignored", greenfield });
       expect(brief).toContain(IGNORED_ACCESS);
       expect(brief).not.toContain("The bundle is committed in this repository");
     });
@@ -966,8 +970,129 @@ describe("export-time facts", () => {
     expect(renderHandoffMarkdown(stale, false, { visibility: "ignored", greenfield: false })).toBe(
       renderHandoffMarkdown(aSource({ visibility: "ignored" })),
     );
-    expect(firstBrief(stale, { visibility: "ignored", greenfield: false })).toBe(
-      firstBrief(aSource({ visibility: "ignored" })),
+    expect(briefAt(stale, 0, { visibility: "ignored", greenfield: false })).toBe(
+      briefAt(aSource({ visibility: "ignored" }), 0),
     );
+  });
+
+  describe("the verify command in a repository with no commits yet", () => {
+    const HANDOFF_LINE =
+      "This repository has no commits yet, so this command does not exist until ticket 01 sets it up. Ticket 01's acceptance includes it passing, and every other ticket waits for ticket 01.";
+    const FIRST_BRIEF_LINE =
+      "This repository has no commits yet: this ticket sets up `just verify`. Make it run and pass from the repository root; that is part of your acceptance.";
+    const OTHER_BRIEF_LINE = "`just verify` is established by ticket 01, which is merged before this ticket starts.";
+
+    /** One top-level section, from its heading up to the next one. */
+    function section(markdown: string, heading: string): string {
+      const start = markdown.indexOf(heading);
+      expect(start).toBeGreaterThan(-1);
+      const end = markdown.indexOf("\n## ", start + 1);
+      return markdown.slice(start, end === -1 ? undefined : end).trimEnd();
+    }
+
+    /** `count` tickets: 1 has no blockers, every other ticket is blocked by 1. */
+    function aSourceWithTickets(count: number): HandoffSource {
+      const tickets = Array.from({ length: count }, (_, index) => ({
+        id: `t${index + 1}`,
+        number: index + 1,
+        slug: `ticket-${index + 1}`,
+        title: `Ticket ${index + 1}`,
+        body: "Do it.",
+        blockedBy: index === 0 ? [] : [1],
+      }));
+      return {
+        ...aSource(),
+        tickets,
+        waves: [[1], tickets.slice(1).map((ticket) => ticket.number)],
+      };
+    }
+
+    it.each(["tracked", "ignored"] as const)(
+      "HANDOFF, greenfield (%s): the Verify command section is unchanged, then the line",
+      (visibility) => {
+        const greenfield = section(
+          renderHandoffMarkdown(aSource(), false, { visibility, greenfield: true }),
+          "## Verify command",
+        );
+        const plain = section(renderHandoffMarkdown(aSource()), "## Verify command");
+        expect(greenfield).toBe(`${plain}\n\n${HANDOFF_LINE}`);
+      },
+    );
+
+    it.each(["tracked", "ignored"] as const)("HANDOFF, not greenfield (%s): unchanged", (visibility) => {
+      const markdown = renderHandoffMarkdown(aSource({ visibility }), false, { visibility, greenfield: false });
+      expect(markdown).not.toContain("does not exist until ticket");
+      expect(markdown).toBe(renderHandoffMarkdown(aSource({ visibility })));
+    });
+
+    it.each(["tracked", "ignored"] as const)(
+      "brief for ticket 1, greenfield (%s): the set-up line comes after the bundle-access paragraph",
+      (visibility) => {
+        const facts = { visibility, greenfield: true };
+        const stepZero = section(briefAt(aSource(), 0, facts), "## Step 0: confirm your base");
+        expect(stepZero.endsWith(`\n\n${FIRST_BRIEF_LINE}`)).toBe(true);
+        expect(stepZero).not.toContain("is established by ticket");
+      },
+    );
+
+    it.each([
+      [1, "tracked"],
+      [2, "tracked"],
+      [1, "ignored"],
+      [2, "ignored"],
+    ] as const)(
+      "brief for another ticket (index %i, %s), greenfield: the command is established by ticket 01",
+      (index, visibility) => {
+        const facts = { visibility, greenfield: true };
+        const stepZero = section(briefAt(aSource(), index, facts), "## Step 0: confirm your base");
+        expect(stepZero.endsWith(`\n\n${OTHER_BRIEF_LINE}`)).toBe(true);
+        expect(stepZero).not.toContain("this ticket sets up");
+      },
+    );
+
+    it.each([0, 1, 2])("brief at index %i, not greenfield: unchanged", (index) => {
+      for (const visibility of ["tracked", "ignored"] as const) {
+        const brief = briefAt(aSource({ visibility }), index, { visibility, greenfield: false });
+        expect(brief).not.toContain("this ticket sets up");
+        expect(brief).not.toContain("is established by ticket");
+        expect(brief).toBe(briefAt(aSource({ visibility }), index));
+      }
+    });
+
+    it("the ticket number is padded as every other ticket reference: 001 in a set of 100", () => {
+      const source = aSourceWithTickets(100);
+      const facts = { visibility: "ignored" as const, greenfield: true };
+
+      expect(renderHandoffMarkdown(source, false, facts)).toContain(
+        "This repository has no commits yet, so this command does not exist until ticket 001 sets it up. Ticket 001's acceptance includes it passing, and every other ticket waits for ticket 001.",
+      );
+      expect(briefAt(source, 1, facts)).toContain(
+        "`just verify` is established by ticket 001, which is merged before this ticket starts.",
+      );
+    });
+
+    it("a verify command with a backtick is still written as inline code", () => {
+      const source = aSource({ verifyCommand: "echo `date`" });
+      const facts = { visibility: "ignored" as const, greenfield: true };
+
+      expect(briefAt(source, 0, facts)).toContain("this ticket sets up `` echo `date` ``.");
+      expect(briefAt(source, 1, facts)).toContain("`` echo `date` `` is established by ticket 01");
+    });
+
+    it("the lifecycle, report and every other part are unchanged: only the two lines differ", () => {
+      // Ignored visibility, where the bundle-access sentence and paths note
+      // do not depend on greenfield, so the only other difference is the
+      // "Before delegating" paragraph from gr-ibp.4.1.
+      const facts = { visibility: "ignored" as const, greenfield: true };
+      const source = aSource({ visibility: "ignored" });
+
+      expect(
+        renderHandoffMarkdown(source, false, facts)
+          .replace(`\n\n${HANDOFF_LINE}`, "")
+          .replace(`${GREENFIELD_PARAGRAPH}\n\n`, ""),
+      ).toBe(renderHandoffMarkdown(source));
+      expect(briefAt(source, 0, facts).replace(`\n\n${FIRST_BRIEF_LINE}`, "")).toBe(briefAt(source, 0));
+      expect(briefAt(source, 1, facts).replace(`\n\n${OTHER_BRIEF_LINE}`, "")).toBe(briefAt(source, 1));
+    });
   });
 });

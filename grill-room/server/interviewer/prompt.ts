@@ -463,8 +463,44 @@ function renderTask(
         "  regenerated interface gains;",
         "- a unit of code and its tests: the ticket that builds the code writes",
         "  its tests, rather than leaving them to a tests-only ticket.",
+        ...(request.greenfield && request.verifyCommand !== null
+          ? ["", greenfieldTicketsSection(request.verifyCommand)]
+          : []),
       ].join("\n");
   }
+}
+
+/**
+ * The break-into-tickets rules for a repository with no commits: ticket 1
+ * sets up the runner behind the verify command, and every other ticket waits
+ * for it. `validateTicketSet` checks the same two rules. A command that
+ * itself contains a backtick cannot be written as single-backtick inline
+ * code, so for it the prompt asks for no inline form and the check skips the
+ * body rule.
+ */
+function greenfieldTicketsSection(verifyCommand: string): string {
+  const namesIt = verifyCommand.includes("`")
+    ? ["Ticket 1's body names that command in its acceptance."]
+    : [
+        "Ticket 1's body names that command in its acceptance, written as inline",
+        `code: \`${verifyCommand}\`.`,
+      ];
+  return [
+    "## This repository has no commits yet",
+    "",
+    "The project's repository is empty, so its verify command does not work",
+    "yet:",
+    "",
+    "```bash",
+    verifyCommand,
+    "```",
+    "",
+    "Ticket 1 sets up the project and its test runner so that this command,",
+    "run from the repository root, runs and passes.",
+    ...namesIt,
+    "Every other ticket depends on ticket 1, directly or through another",
+    "ticket's `blockedBy`.",
+  ].join("\n");
 }
 
 /**
