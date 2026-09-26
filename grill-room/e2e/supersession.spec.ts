@@ -27,7 +27,7 @@ test("the done panel shows the proposed supersession and its attempt log", async
   await expect(cards.first()).toContainText("What shape should this take?");
   await expect(cards.last()).toContainText("Where does the data live?");
 
-  await answerOwnText(cards.first(), "A workspace, on disk.");
+  await answerOwnText(cards.first(), "A workspace, on disk.", "save");
   await cards
     .last()
     .getByRole("button", { name: "I don't know", exact: true })

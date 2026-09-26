@@ -361,6 +361,8 @@ const messages = {
     looseEndsInterviewerNote:
       "These are the interviewer's to resolve, not yours. Another round reconfirms, re-asks, or places them.",
     continueInterview: "Continue the interview",
+    looseEndsDeferredNote:
+      "A deferred question comes back as a card when the interview continues.",
 
     checkSuperseded: "Check for answered or replaced decisions",
     checkingSuperseded: "Checking…",
@@ -376,6 +378,13 @@ const messages = {
     replacedDecisionsHeading: "Replaced decisions",
     replacedBy: "Replaced by: {{title}}",
     replacedByUnknown: "a later decision",
+
+    deferralProposalsHeading: "Answers that read as deferrals",
+    deferralWaitsOn: "Reads as a deferral",
+    acceptDeferral: "Accept",
+    dismissDeferral: "Dismiss",
+    acceptDeferralFailed: "Could not turn that answer into a deferral.",
+    dismissDeferralFailed: "Could not dismiss that suggestion.",
 
     reasonUnknown: "You said you don't know",
     reasonDeferred: "Deferred",

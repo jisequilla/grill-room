@@ -157,6 +157,23 @@ describe("reopen-decision", () => {
     ]);
   });
 
+  it("clears the reopened decision's own pending deferral proposal", async () => {
+    const { sessionId } = await aSettledChain();
+    const shapeId = await decisionId(sessionId, "shape");
+    await getDb()
+      .update(schema.decisions)
+      .set({ deferralReason: "It waits on the storage decision." })
+      .where(eq(schema.decisions.id, shapeId));
+
+    await reopenDecision.run({ decisionId: shapeId });
+
+    const [row] = await getDb()
+      .select()
+      .from(schema.decisions)
+      .where(eq(schema.decisions.id, shapeId));
+    expect(row?.deferralReason).toBeNull();
+  });
+
   it("asks the question again as a round of its own, without troubling the interviewer", async () => {
     const { sessionId, interviewer } = await aSettledChain();
     const before = interviewer.requests.length;

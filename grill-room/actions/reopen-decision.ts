@@ -14,6 +14,7 @@ import {
   treeFacts,
 } from "../server/tree.js";
 import { failIfTurnInProgress } from "../server/turn.js";
+import { withdrawClaimsOn } from "../server/withdraw-claims.js";
 import getCurrentRound from "./get-current-round.js";
 
 /**
@@ -109,25 +110,9 @@ export async function reopenDecisionCore(
     })
     .where(eq(schema.decisions.id, decisionId));
 
-  // A supersession is the claim that this decision, as settled, already
-  // answers a loose end. It no longer is settled, so the claim goes with it.
-  await db
-    .update(schema.decisions)
-    .set({
-      supersededById: null,
-      supersessionAnswer: null,
-      supersessionReason: null,
-      updatedAt: now,
-    })
-    .where(eq(schema.decisions.supersededById, decisionId));
-
-  // Nor does it still replace anything: the decisions it replaced read as
-  // current again. A loose end it settled keeps `settledById`, which records
-  // where that answer came from rather than a claim about this one.
-  await db
-    .update(schema.decisions)
-    .set({ replacedById: null, replacedReason: null, updatedAt: now })
-    .where(eq(schema.decisions.replacedById, decisionId));
+  // It is no longer settled, so what other decisions claim about its answer
+  // goes with it.
+  await withdrawClaimsOn(decisionId, now);
 
   if (session.state !== "interviewing") {
     await returnSessionToInterviewing(session, now);

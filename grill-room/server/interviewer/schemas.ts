@@ -150,10 +150,10 @@ export const reviewStaleResultSchema = z.strictObject({
 });
 
 /**
- * Loose ends a later settled decision turns out to have answered, and settled
- * decisions a later one replaced.
+ * Loose ends a later settled decision turns out to have answered, settled
+ * decisions a later one replaced, and own answers that defer rather than decide.
  *
- * Either list may be absent from a recorded result, and reads as empty. At
+ * Any list may be absent from a recorded result, and reads as empty. At
  * most one entry per loose end or replaced decision, and only when genuine:
  * the result is a set of proposals the user accepts or rejects one by one, so
  * an over-eager entry costs the user the same work it was meant to save.
@@ -186,6 +186,21 @@ export const findSupersededResultSchema = z.strictObject({
         /** The decision that settled later and replaced it. */
         byKey: decisionKey,
         /** What the later decision changes. */
+        reason: z.string().min(1),
+      }),
+    )
+    .default([]),
+  /**
+   * The user's own answers that do not decide their question but postpone it
+   * until something else is known. Proposals as well: the answer stays
+   * settled until the user accepts, which turns it into a deferred loose end.
+   */
+  deferrals: z
+    .array(
+      z.strictObject({
+        /** The decision, by key. One of the deferrable keys the request listed. */
+        key: decisionKey,
+        /** What the answer waits on. */
         reason: z.string().min(1),
       }),
     )

@@ -157,7 +157,11 @@ describe("the scripted fake interviewer", () => {
       aFindSupersededRequest({ looseEndKeys: [], replaceableKeys: ["shape"] }),
     );
 
-    expect(checked.result).toEqual({ supersessions: [], replacements: [] });
+    expect(checked.result).toEqual({
+      supersessions: [],
+      replacements: [],
+      deferrals: [],
+    });
     expect(interviewer.remaining).toBe(1);
     expect((await interviewer.proposeRound(aProposeRoundRequest())).result).toEqual(
       round,
@@ -171,7 +175,11 @@ describe("the scripted fake interviewer", () => {
       aFindSupersededRequest({ looseEndKeys: [], replaceableKeys: ["shape"] }),
     );
 
-    expect(checked.result).toEqual({ supersessions: [], replacements: [] });
+    expect(checked.result).toEqual({
+      supersessions: [],
+      replacements: [],
+      deferrals: [],
+    });
     expect(interviewer.requests).toHaveLength(1);
   });
 

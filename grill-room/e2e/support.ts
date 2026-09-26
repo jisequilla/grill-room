@@ -66,12 +66,28 @@ export async function chooseScenario(
  * has no choices and no recommendation (`aProposedDecision`'s defaults in
  * `server/interviewer/fake.ts`), so this is the one way to answer them
  * through the UI.
+ *
+ * `save` names the path the caller expects, so a text the deferral nudge
+ * (gr-ibp.1.3) reads differently fails here rather than timing out:
+ * - `"save"`: the text decides; no hint shows, and the plain Save saves it.
+ * - `"save-past-nudge"`: the text reads as a deferral; the hint shows, and
+ *   the owner overrides it with "Save as my answer".
  */
-export async function answerOwnText(card: Locator, text: string): Promise<void> {
+export async function answerOwnText(
+  card: Locator,
+  text: string,
+  save: "save" | "save-past-nudge",
+): Promise<void> {
   await card.getByRole("button", { name: "Write my own" }).click();
   await card
     .getByPlaceholder("What you have decided, in your own words")
     .fill(text);
+  if (save === "save-past-nudge") {
+    await expect(card.getByTestId("deferral-hint")).toBeVisible();
+    await card.getByTestId("save-as-answer").click();
+    return;
+  }
+  await expect(card.getByTestId("deferral-hint")).toHaveCount(0);
   await card.getByRole("button", { name: "Save", exact: true }).click();
 }
 

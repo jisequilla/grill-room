@@ -14,6 +14,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { toast } from "sonner";
 
+import { DeferralProposals } from "@/components/workspace/deferral-proposals";
 import { LooseEndList } from "@/components/workspace/loose-end-list";
 import { Markdown } from "@/components/workspace/markdown";
 import { ReplacedDecisions } from "@/components/workspace/replaced-decisions";
@@ -187,6 +188,8 @@ export function DoneProposedPanel({
       </section>
 
       <ReplacedDecisions decisions={decisions} onOpenDecision={onOpenDecision} />
+
+      <DeferralProposals decisions={decisions} onOpenDecision={onOpenDecision} />
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
         <p className="min-w-0 flex-1 text-sm text-muted-foreground">

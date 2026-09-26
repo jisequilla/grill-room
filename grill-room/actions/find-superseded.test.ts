@@ -8,10 +8,13 @@ import {
   scriptInterviewer,
   type FindSupersededRequest,
 } from "../server/interviewer/index.js";
-import { supersessionRejectionReasons } from "../server/supersession.js";
+import {
+  deferrableDecisions,
+  supersessionRejectionReasons,
+} from "../server/supersession.js";
 import { describeDecisions } from "../server/tree.js";
 import { findLatestTurn } from "../server/turn-records.js";
-import { MAX_TURN_RETRIES } from "../server/turn.js";
+import { MAX_TURN_RETRIES, portKey } from "../server/turn.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import confirmSession from "./confirm-session.js";
 import createSession from "./create-session.js";
@@ -152,6 +155,21 @@ function replacements(
         reason: "The later decision moves the data off the local disk.",
         ...entry,
       })),
+      deferrals: [],
+    },
+  };
+}
+
+const DEFERRAL_REASON =
+  "The answer waits on dispute handling instead of choosing a hold period.";
+
+function deferrals(...entries: { key: string; reason?: string }[]) {
+  return {
+    kind: "find-superseded" as const,
+    result: {
+      supersessions: [],
+      replacements: [],
+      deferrals: entries.map((entry) => ({ reason: DEFERRAL_REASON, ...entry })),
     },
   };
 }
@@ -173,6 +191,7 @@ function supersessions(
         ...entry,
       })),
       replacements: [],
+      deferrals: [],
     },
   };
 }
@@ -237,11 +256,13 @@ describe("find-superseded", () => {
 
     it("does not ask at all when the session has no loose end it could apply to", async () => {
       const session = await aSession();
+      // An accepted recommendation, not an own answer: an own answer is
+      // always checked for a deferral.
       await insertDecision(session.id, {
         id: "d-shape",
         key: "shape",
         questionTitle: "What shape should this take?",
-        answerKind: "own-answer",
+        answerKind: "accepted-recommendation",
         currentAnswer: "A workspace",
         settledAt: new Date().toISOString(),
       });
@@ -403,8 +424,13 @@ describe("find-superseded", () => {
 
     it("counts only a strictly later settlement, and runs no turn when nothing is replaceable", async () => {
       const session = await aSession();
-      await aSettledDecision(session.id, "shape", T1);
-      await aSettledDecision(session.id, "storage", T1);
+      // Accepted recommendations, so neither is checked for a deferral.
+      await aSettledDecision(session.id, "shape", T1, {
+        answerKind: "accepted-recommendation",
+      });
+      await aSettledDecision(session.id, "storage", T1, {
+        answerKind: "accepted-recommendation",
+      });
       // A decision set aside later does not make an earlier one replaceable.
       await aSettledDecision(session.id, "hosting", T2, {
         answerKind: "dispositioned",
@@ -721,6 +747,7 @@ describe("find-superseded", () => {
             },
             { replacedKey: "early", byKey: "early", reason: "Itself." },
           ],
+          deferrals: [],
         },
       };
       const interviewer = scriptInterviewer([
@@ -789,6 +816,7 @@ describe("find-superseded", () => {
               reason: "The later decision moves the data off the local disk.",
             },
           ],
+          deferrals: [],
         },
       };
       scriptInterviewer([
@@ -866,6 +894,7 @@ describe("find-superseded", () => {
           askedKeys: [],
           replaceableKeys: ["storage"],
           laterKeys: { storage: ["storage-location"] },
+          deferrableKeys: [],
           settledKeys: ["storage", "storage-location"],
           dispositionedKeys: [],
           repoEstablishedKeys: [],
@@ -875,6 +904,509 @@ describe("find-superseded", () => {
       // A recorded result from before replacements existed still parses.
       expect(
         findSupersededResultSchema.parse({ supersessions: [] }).replacements,
+      ).toEqual([]);
+    });
+  });
+
+  describe("own answers that defer: which are checked", () => {
+    async function sessionRows(sessionId: string) {
+      return getDb()
+        .select()
+        .from(schema.decisions)
+        .where(eq(schema.decisions.sessionId, sessionId))
+        .orderBy(schema.decisions.createdAt, schema.decisions.id);
+    }
+
+    it("holds exactly the settled, unreplaced own answers with nothing pending, in tree order", async () => {
+      const session = await aSession();
+      const created = (second: number) =>
+        `2026-08-01T00:00:${String(second).padStart(2, "0")}.000Z`;
+      await aSettledDecision(session.id, "late-own", T2, { createdAt: created(0) });
+      await aSettledDecision(session.id, "own", T1, { createdAt: created(1) });
+      await aSettledDecision(session.id, "recommended", T1, {
+        answerKind: "accepted-recommendation",
+        createdAt: created(2),
+      });
+      await aSettledDecision(session.id, "set-aside", T1, {
+        answerKind: "dispositioned",
+        dispositionTarget: "out-of-scope",
+        createdAt: created(3),
+      });
+      await aSettledDecision(session.id, "repo", T1, {
+        answerKind: "repo-established",
+        introducedBy: "repo",
+        repoSource: "recorded",
+        repoCitation: "AGENTS.md:1",
+        repoStatement: "Data lives in Postgres.",
+        createdAt: created(4),
+      });
+      await insertDecision(session.id, {
+        id: "d-loose",
+        key: "loose",
+        questionTitle: "Title of loose",
+        answerKind: "deferred",
+        currentAnswer: "Later",
+        createdAt: created(5),
+      });
+      await aSettledDecision(session.id, "replaced", T1, {
+        replacedById: "d-late-own",
+        createdAt: created(6),
+      });
+      await aSettledDecision(session.id, "supersession-pending", T1, {
+        supersededById: "d-late-own",
+        supersessionReason: "Replaced later.",
+        createdAt: created(7),
+      });
+      await aSettledDecision(session.id, "deferral-pending", T1, {
+        deferralReason: "Waits on something.",
+        createdAt: created(8),
+      });
+      // Reopened at T1 after this settled at T0: stale, not settled.
+      await aSettledDecision(session.id, "parent", T3, {
+        reopenedAt: T1,
+        answerKind: "accepted-recommendation",
+        createdAt: created(9),
+      });
+      await aSettledDecision(session.id, "stale", T0, {
+        dependsOnJson: JSON.stringify(["d-parent"]),
+        createdAt: created(10),
+      });
+      await aSettledDecision(session.id, "withdrawn", T1, {
+        withdrawnAt: T2,
+        createdAt: created(11),
+      });
+
+      expect(deferrableDecisions(await sessionRows(session.id)).map(portKey)).toEqual(
+        ["late-own", "own"],
+      );
+    });
+
+    it("sends the deferrable own answers with the done proposal's check, in tree order", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "hold", T1, {
+        createdAt: "2026-08-01T00:00:00.000Z",
+      });
+      await aSettledDecision(session.id, "service", T1, {
+        answerKind: "accepted-recommendation",
+        createdAt: "2026-08-01T00:00:01.000Z",
+      });
+      await aSettledDecision(session.id, "vetting", T1, {
+        createdAt: "2026-08-01T00:00:02.000Z",
+      });
+      const interviewer = scriptInterviewer([DONE_PROPOSAL, deferrals()]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests[1]).toMatchObject({
+        kind: "find-superseded",
+        looseEndKeys: [],
+        replaceableKeys: [],
+        deferrableKeys: ["hold", "vetting"],
+      });
+    });
+
+    it("never offers a decision with a pending deferral for replacement", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "hold", T1, {
+        currentAnswer: "Wait until dispute handling is settled",
+        deferralReason: DEFERRAL_REASON,
+      });
+      await aSettledDecision(session.id, "disputes", T2);
+      const interviewer = scriptInterviewer([
+        replacements({ replacedKey: "hold", byKey: "disputes" }),
+        deferrals(),
+      ]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(interviewer.requests[0]).toMatchObject({
+        kind: "find-superseded",
+        replaceableKeys: [],
+        deferrableKeys: ["disputes"],
+      });
+      expect((interviewer.requests[0] as FindSupersededRequest).laterKeys).toEqual(
+        {},
+      );
+      // The replacement it was offered anyway is refused, and never stored.
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining(
+          '"hold" is not one of the decisions to check for replacement.',
+        ),
+      });
+      expect(await readDecision("d-hold")).toMatchObject({
+        supersededById: null,
+        deferralReason: DEFERRAL_REASON,
+      });
+    });
+
+    it("runs the check when a deferrable own answer is the only thing to check", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "hold", T1);
+      const interviewer = scriptInterviewer([
+        DONE_PROPOSAL,
+        deferrals({ key: "hold" }),
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests.map((request) => request.kind)).toEqual([
+        "propose-round",
+        "find-superseded",
+      ]);
+      expect(result.state).toBe("done-proposed");
+      expect(await readDecision("d-hold")).toMatchObject({
+        deferralReason: DEFERRAL_REASON,
+      });
+    });
+  });
+
+  describe("own answers that defer: what comes back", () => {
+    /** Two own answers, the only candidates, settled in one round. */
+    async function aTreeWithTwoOwnAnswers(sessionId: string) {
+      await aSettledDecision(sessionId, "hold", T1, {
+        currentAnswer: "Wait until dispute handling is settled",
+      });
+      await aSettledDecision(sessionId, "service", T1, {
+        currentAnswer: "Dog walking",
+      });
+    }
+
+    it("stores a valid deferral as a proposal and changes nothing else", async () => {
+      const session = await aSession();
+      await aTreeWithTwoOwnAnswers(session.id);
+      scriptInterviewer([DONE_PROPOSAL, deferrals({ key: "hold" })]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(result.state).toBe("done-proposed");
+      expect(await readDecision("d-hold")).toMatchObject({
+        deferralReason: DEFERRAL_REASON,
+        currentAnswer: "Wait until dispute handling is settled",
+        answerKind: "own-answer",
+        settledAt: T1,
+        supersededById: null,
+        supersessionAnswer: null,
+        supersessionReason: null,
+        replacedById: null,
+      });
+      expect(await readDecision("d-service")).toMatchObject({
+        deferralReason: null,
+        answerKind: "own-answer",
+      });
+      // Still settled: nothing blocks confirmation while it is pending.
+      expect(await listLooseEnds.run({ sessionId: session.id })).toEqual([]);
+      const rows = await getDb()
+        .select()
+        .from(schema.decisions)
+        .where(eq(schema.decisions.sessionId, session.id));
+      expect(describeDecisions(rows).find((d) => d.key === "hold")).toMatchObject({
+        state: "settled",
+        deferralReason: DEFERRAL_REASON,
+      });
+    });
+
+    async function rejectionFor(
+      wrong: ReturnType<typeof deferrals>,
+      extraTree: (sessionId: string) => Promise<void> = async () => {},
+    ) {
+      const session = await aSession();
+      await aTreeWithTwoOwnAnswers(session.id);
+      await extraTree(session.id);
+      const interviewer = scriptInterviewer([
+        DONE_PROPOSAL,
+        wrong,
+        deferrals({ key: "hold" }),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests).toHaveLength(3);
+      // The retry is stored; the rejected entry never was.
+      expect(await readDecision("d-hold")).toMatchObject({
+        deferralReason: DEFERRAL_REASON,
+      });
+      return (interviewer.requests[2] as { rejectionReason: string | null })
+        .rejectionReason;
+    }
+
+    it("rejects a key the request never listed, and asks again", async () => {
+      expect(await rejectionFor(deferrals({ key: "invented" }))).toContain(
+        '"invented" is not one of the own answers to check for a deferral. Rule only on the ones listed.',
+      );
+    });
+
+    it("rejects an accepted recommendation, which was never listed", async () => {
+      expect(
+        await rejectionFor(deferrals({ key: "tone" }), (sessionId) =>
+          aSettledDecision(sessionId, "tone", T1, {
+            answerKind: "accepted-recommendation",
+          }),
+        ),
+      ).toContain('"tone" is not one of the own answers to check for a deferral.');
+    });
+
+    it("rejects a decision flagged twice, and asks again", async () => {
+      expect(
+        await rejectionFor(deferrals({ key: "hold" }, { key: "hold" })),
+      ).toContain(
+        'Decision "hold" was flagged as a deferral twice. Give at most one deferral per decision.',
+      );
+    });
+
+    it("rejects a decision both replaced and flagged, and asks again", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "hold", T1, {
+        currentAnswer: "Wait until dispute handling is settled",
+      });
+      await aSettledDecision(session.id, "disputes", T2);
+      const both = {
+        kind: "find-superseded" as const,
+        result: {
+          supersessions: [],
+          replacements: [
+            { replacedKey: "hold", byKey: "disputes", reason: "Disputes changed it." },
+          ],
+          deferrals: [{ key: "hold", reason: DEFERRAL_REASON }],
+        },
+      };
+      const interviewer = scriptInterviewer([
+        DONE_PROPOSAL,
+        both,
+        deferrals({ key: "hold" }),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests[2]).toMatchObject({
+        rejectionReason: expect.stringContaining(
+          '"hold" is both replaced and flagged as a deferral. Give it one or the other.',
+        ),
+      });
+      expect(await readDecision("d-hold")).toMatchObject({
+        deferralReason: DEFERRAL_REASON,
+        supersededById: null,
+      });
+    });
+
+    it("after the last retry, keeps the valid deferral, drops the invalid one and says so in the attempt log", async () => {
+      const session = await aSession();
+      await aTreeWithTwoOwnAnswers(session.id);
+      // A decision of the tree, but an accepted recommendation: never listed.
+      await aSettledDecision(session.id, "tone", T1, {
+        answerKind: "accepted-recommendation",
+      });
+      const stillWrong = deferrals({ key: "hold" }, { key: "tone" });
+      const interviewer = scriptInterviewer([
+        DONE_PROPOSAL,
+        ...Array.from({ length: MAX_TURN_RETRIES + 1 }, () => stillWrong),
+      ]);
+
+      const result = await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests).toHaveLength(MAX_TURN_RETRIES + 2);
+      expect(result.state).toBe("done-proposed");
+      expect(await getSession.run({ id: session.id })).toMatchObject({
+        turnErrorCode: null,
+      });
+      expect(await readDecision("d-hold")).toMatchObject({
+        deferralReason: DEFERRAL_REASON,
+      });
+      expect(await readDecision("d-tone")).toMatchObject({
+        deferralReason: null,
+      });
+      const turn = await findLatestTurn({
+        sessionId: session.id,
+        turnKind: "find-superseded",
+      });
+      expect(turn?.outcome).toBe("succeeded");
+      const attempts = turn!.runs[0]!.attempts;
+      expect(attempts[attempts.length - 1]).toMatchObject({
+        kind: "success",
+        reason:
+          'Kept the valid entries after the last retry. Dropped this deferral: "tone" ("tone" is not one of the own answers to check for a deferral. Rule only on the ones listed.)',
+      });
+    });
+
+    /**
+     * Runs one result on every attempt, so the last one is judged by the
+     * last-retry drop, and returns the attempt log's closing line.
+     */
+    async function lastRetryOf(
+      sessionId: string,
+      result: {
+        replacements: { replacedKey: string; byKey: string; reason: string }[];
+        deferrals: { key: string; reason: string }[];
+      },
+    ) {
+      scriptInterviewer([
+        DONE_PROPOSAL,
+        ...Array.from({ length: MAX_TURN_RETRIES + 1 }, () => ({
+          kind: "find-superseded" as const,
+          result: { supersessions: [], ...result },
+        })),
+      ]);
+
+      const done = await requestNextRound.run({ sessionId });
+
+      expect(done.state).toBe("done-proposed");
+      expect(await getSession.run({ id: sessionId })).toMatchObject({
+        turnErrorCode: null,
+      });
+      const turn = await findLatestTurn({
+        sessionId,
+        turnKind: "find-superseded",
+      });
+      expect(turn?.outcome).toBe("succeeded");
+      const attempts = turn!.runs[0]!.attempts;
+      expect(attempts).toHaveLength(MAX_TURN_RETRIES + 1);
+      return attempts[attempts.length - 1];
+    }
+
+    /** hold, an own answer, and disputes, settled after it: hold is replaceable and deferrable. */
+    async function aTreeWhereHoldIsBoth(sessionId: string) {
+      await aSettledDecision(sessionId, "hold", T1, {
+        currentAnswer: "Wait until dispute handling is settled",
+      });
+      await aSettledDecision(sessionId, "disputes", T2);
+    }
+
+    it("after the last retry, keeps the first of two deferrals of one decision and drops the second", async () => {
+      const session = await aSession();
+      await aTreeWithTwoOwnAnswers(session.id);
+
+      const last = await lastRetryOf(session.id, {
+        replacements: [],
+        deferrals: [
+          { key: "hold", reason: "First: it waits on dispute handling." },
+          { key: "hold", reason: "Second: it waits on the payment provider." },
+        ],
+      });
+
+      expect(await readDecision("d-hold")).toMatchObject({
+        deferralReason: "First: it waits on dispute handling.",
+      });
+      expect(last).toMatchObject({
+        kind: "success",
+        reason:
+          'Kept the valid entries after the last retry. Dropped this deferral: "hold" (Decision "hold" was flagged as a deferral twice. Give at most one deferral per decision.)',
+      });
+    });
+
+    it("after the last retry, keeps a valid replacement and drops the deferral of the same decision", async () => {
+      const session = await aSession();
+      await aTreeWhereHoldIsBoth(session.id);
+
+      const last = await lastRetryOf(session.id, {
+        replacements: [
+          { replacedKey: "hold", byKey: "disputes", reason: "Disputes decide it." },
+        ],
+        deferrals: [{ key: "hold", reason: DEFERRAL_REASON }],
+      });
+
+      expect(await readDecision("d-hold")).toMatchObject({
+        supersededById: "d-disputes",
+        supersessionReason: "Disputes decide it.",
+        deferralReason: null,
+      });
+      expect(last).toMatchObject({
+        kind: "success",
+        reason:
+          'Kept the valid entries after the last retry. Dropped this deferral: "hold" ("hold" is both replaced and flagged as a deferral. Give it one or the other.)',
+      });
+    });
+
+    it("after the last retry, drops the deferral of a decision whose replacement is itself dropped", async () => {
+      const session = await aSession();
+      await aTreeWhereHoldIsBoth(session.id);
+
+      const last = await lastRetryOf(session.id, {
+        replacements: [{ replacedKey: "hold", byKey: "hold", reason: "Itself." }],
+        deferrals: [{ key: "hold", reason: DEFERRAL_REASON }],
+      });
+
+      expect(await readDecision("d-hold")).toMatchObject({
+        supersededById: null,
+        deferralReason: null,
+      });
+      expect(last).toMatchObject({
+        kind: "success",
+        reason:
+          'Kept the valid entries after the last retry. Dropped this replacement: "hold" by "hold" ("hold" cannot replace itself.); and this deferral: "hold" ("hold" is both replaced and flagged as a deferral. Give it one or the other.)',
+      });
+    });
+
+    it("still fails the scan when a loose-end entry stays invalid after the last retry, storing no deferral", async () => {
+      const session = await aSession();
+      await aTreeWithOneLooseEnd(session.id);
+      const stillWrong = {
+        kind: "find-superseded" as const,
+        result: {
+          supersessions: [
+            {
+              looseEndKey: "storage",
+              answeredByKey: "invented",
+              answer: "On disk",
+              reason: "Invented.",
+            },
+          ],
+          replacements: [],
+          deferrals: [{ key: "shape", reason: DEFERRAL_REASON }],
+        },
+      };
+      scriptInterviewer([
+        DONE_PROPOSAL,
+        ...Array.from({ length: MAX_TURN_RETRIES + 1 }, () => stillWrong),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(await getSession.run({ id: session.id })).toMatchObject({
+        turnErrorCode: "invalid-supersession",
+      });
+      expect(await readDecision("d-shape")).toMatchObject({
+        deferralReason: null,
+      });
+    });
+
+    it("seam: every deferral shape the prompt describes passes the check for a request built from the same rows", async () => {
+      const session = await aSession();
+      await aTreeWithTwoOwnAnswers(session.id);
+      const rows = await getDb()
+        .select()
+        .from(schema.decisions)
+        .where(eq(schema.decisions.sessionId, session.id))
+        .orderBy(schema.decisions.createdAt, schema.decisions.id);
+      const deferrableKeys = deferrableDecisions(rows).map(portKey);
+
+      // What the prompt asks for: one entry per listed key, naming it in
+      // `key` and saying in `reason` what the answer waits on.
+      const parsed = findSupersededResultSchema.parse({
+        deferrals: deferrableKeys.map((key) => ({
+          key,
+          reason: `The answer for ${key} waits on dispute handling.`,
+        })),
+      });
+
+      expect(deferrableKeys).toEqual(["hold", "service"]);
+      expect(parsed.supersessions).toEqual([]);
+      expect(parsed.replacements).toEqual([]);
+      expect(
+        supersessionRejectionReasons({
+          askedKeys: [],
+          replaceableKeys: [],
+          laterKeys: {},
+          deferrableKeys,
+          settledKeys: rows.map(portKey),
+          dispositionedKeys: [],
+          repoEstablishedKeys: [],
+          result: parsed,
+        }),
+      ).toEqual([]);
+      // A result with only the other two lists, as recorded before deferrals
+      // existed, still parses.
+      expect(
+        findSupersededResultSchema.parse({ supersessions: [], replacements: [] })
+          .deferrals,
       ).toEqual([]);
     });
   });

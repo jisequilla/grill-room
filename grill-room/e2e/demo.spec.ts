@@ -202,6 +202,7 @@ test("demo: the whole app, from idea to export", async ({ page, request }) => {
   await answerOwnText(
     citationCard,
     "A user or interviewer decision carries no citation; the field is left null for those, and only repo-origin entries carry one.",
+    "save",
   );
   await beat(page, citationCard);
 
@@ -260,6 +261,7 @@ test("demo: the whole app, from idea to export", async ({ page, request }) => {
   await answerOwnText(
     inclusionCard,
     "Settled decisions only, plus a clearly separated Unresolved section listing every open, deferred, unknown and prototype-flagged loose end by title, so a reader sees them without the next scout mistaking them for recorded decisions.",
+    "save",
   );
   await beat(page, inclusionCard);
   await page.getByRole("button", { name: "Submit round" }).click();

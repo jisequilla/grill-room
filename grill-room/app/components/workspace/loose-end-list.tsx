@@ -169,31 +169,60 @@ export function LooseEndList({
 
   const mine = looseEnds.filter((end) => isResolvableByUser(end.reason));
   const theirs = looseEnds.filter((end) => !isResolvableByUser(end.reason));
+  // A deferred decision comes back as a card at the next round, so it is also
+  // resolved by continuing the interview. Only needed while there is no
+  // interviewer's loose end, whose own button already continues it.
+  const offerContinueForDeferred =
+    theirs.length === 0 && mine.some((end) => end.reason === "deferred");
 
   return (
     <div className="space-y-4">
       {mine.length > 0 ? (
-        <ul className="space-y-2">
-          {mine.map((looseEnd) => (
-            <Row
-              key={looseEnd.id}
-              looseEnd={looseEnd}
-              onOpenDecision={onOpenDecision}
-            >
-              {looseEnd.supersession ? (
-                <Supersession
+        <div className="space-y-2">
+          <ul className="space-y-2">
+            {mine.map((looseEnd) => (
+              <Row
+                key={looseEnd.id}
+                looseEnd={looseEnd}
+                onOpenDecision={onOpenDecision}
+              >
+                {looseEnd.supersession ? (
+                  <Supersession
+                    decisionId={looseEnd.id}
+                    supersession={looseEnd.supersession}
+                  />
+                ) : null}
+                <AnswerNow decisionId={looseEnd.id} />
+                <SetAsideDialog
                   decisionId={looseEnd.id}
-                  supersession={looseEnd.supersession}
+                  questionTitle={looseEnd.questionTitle}
                 />
-              ) : null}
-              <AnswerNow decisionId={looseEnd.id} />
-              <SetAsideDialog
-                decisionId={looseEnd.id}
-                questionTitle={looseEnd.questionTitle}
-              />
-            </Row>
-          ))}
-        </ul>
+              </Row>
+            ))}
+          </ul>
+          {offerContinueForDeferred ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+                {t("workspace.looseEndsDeferredNote")}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isContinuing}
+                onClick={onContinueInterview}
+                data-testid="continue-deferred"
+              >
+                {isContinuing ? (
+                  <Spinner className="size-4" />
+                ) : (
+                  <IconRefresh className="size-4" />
+                )}
+                {t("workspace.continueInterview")}
+              </Button>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {theirs.length > 0 ? (

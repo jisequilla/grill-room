@@ -89,6 +89,32 @@ describe("answer-decision", () => {
     },
   );
 
+  it("clears a pending deferral proposal along with the answer it was about", async () => {
+    const session = await aSession();
+    await arrangeDecision(session.id, {
+      id: "decision-1",
+      key: "shape",
+      answerKind: "deferred",
+      answer: "Later",
+    });
+    await getDb()
+      .update(schema.decisions)
+      .set({ deferralReason: "It waits on the storage decision." })
+      .where(eq(schema.decisions.id, "decision-1"));
+
+    const result = await answerDecision.run({
+      decisionId: "decision-1",
+      answer: "A workspace.",
+    });
+
+    expect(result.deferralReason).toBeNull();
+    const [row] = await getDb()
+      .select()
+      .from(schema.decisions)
+      .where(eq(schema.decisions.id, "decision-1"));
+    expect(row?.deferralReason).toBeNull();
+  });
+
   it("refuses a decision that was never a loose end", async () => {
     const session = await aSession();
     await arrangeDecision(session.id, {

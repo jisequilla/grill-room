@@ -221,12 +221,30 @@ describe("what the adapter sends for a find-superseded check", () => {
     "answer when nothing was replaced.",
   ].join("\n");
 
+  const DEFERRAL_BODY = [
+    "Own answers to check: vetting, hold",
+    "",
+    "Each decision above was settled with the user's own words. Return one entry in",
+    "`deferrals` for each whose answer does not decide the question but postpones it",
+    "until something else is known: \"wait until…\", \"decide later\", \"TBD\", \"once X",
+    "is settled\", \"depends on Y\" with no choice made. Name the decision in `key` and",
+    "say in `reason` what the answer waits on.",
+    "",
+    "An answer that decides and names a condition for revisiting it is not a deferral:",
+    "\"48 h hold; revisit after launch\" decides 48 h. Be conservative: an empty list is",
+    "the right answer when every own answer decides its question.",
+  ].join("\n");
+
   const LATER_KEYS = {
     shape: ["storage", "storage-location"],
     storage: ["storage-location"],
   };
 
-  async function promptFor(looseEndKeys: string[], replaceableKeys: string[]) {
+  async function promptFor(
+    looseEndKeys: string[],
+    replaceableKeys: string[],
+    deferrableKeys: string[] = [],
+  ) {
     const runner = recordingRunner([
       ok(anEnvelope({ structured_output: aFindSupersededResult() })),
     ]);
@@ -235,6 +253,7 @@ describe("what the adapter sends for a find-superseded check", () => {
         looseEndKeys,
         replaceableKeys,
         laterKeys: replaceableKeys.length > 0 ? LATER_KEYS : {},
+        deferrableKeys,
       }),
     );
     return valueOf(runner.invocations[0].args, "-p") as string;
@@ -266,6 +285,36 @@ describe("what the adapter sends for a find-superseded check", () => {
       `## Your task: find settled decisions a later decision replaced\n\n${REPLACEMENT_BODY}`,
     );
     expect(prompt).not.toContain("Loose ends to judge");
+    expect(prompt).not.toContain("## Also:");
+  });
+
+  it("sends no deferral section when no own answer is deferrable", async () => {
+    const prompt = await promptFor(["storage", "tone"], ["shape", "storage"]);
+
+    expect(prompt).not.toContain("deferrals");
+    expect(prompt).not.toContain("Own answers to check");
+  });
+
+  it("appends the deferral section after the other two, leaving their text as it was", async () => {
+    const prompt = await promptFor(
+      ["storage", "tone"],
+      ["shape", "storage"],
+      ["vetting", "hold"],
+    );
+
+    expect(prompt).toContain(
+      `${LOOSE_END_SECTION}\n\n## Also: settled decisions a later decision replaced\n\n${REPLACEMENT_BODY}\n\n## Also: own answers that defer the question instead of deciding it\n\n${DEFERRAL_BODY}`,
+    );
+  });
+
+  it("sends the deferral section alone, as the task, when there is nothing else to check", async () => {
+    const prompt = await promptFor([], [], ["vetting", "hold"]);
+
+    expect(prompt).toContain(
+      `## Your task: find own answers that defer the question instead of deciding it\n\n${DEFERRAL_BODY}`,
+    );
+    expect(prompt).not.toContain("Loose ends to judge");
+    expect(prompt).not.toContain("Decisions to check");
     expect(prompt).not.toContain("## Also:");
   });
 });

@@ -96,3 +96,43 @@ describe("projects-durable-export-folder migration", () => {
     }
   });
 });
+
+describe("decisions-deferral-reason-column migration", () => {
+  beforeEach(dropSchema);
+
+  it("adds a nullable deferral_reason to a database at v66, leaving existing decisions without one", async () => {
+    const before = appMigrations.filter((migration) => migration.version <= 66);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    const decisionId = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [sessionId, "Grill Room", "An idea.", now, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_decisions (id, session_id, question_title, question_body, offered_choices_json, depends_on_json, introduced_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [decisionId, sessionId, "How long is a payout held?", "", "[]", "[]", "interviewer", now, now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const { rows } = await getDbExec().execute({
+      sql: `SELECT deferral_reason FROM gr_decisions WHERE id = ?`,
+      args: [decisionId],
+    });
+    expect(rows).toEqual([{ deferral_reason: null }]);
+
+    await getDbExec().execute({
+      sql: `UPDATE gr_decisions SET deferral_reason = ? WHERE id = ?`,
+      args: ["It waits on dispute handling.", decisionId],
+    });
+    const updated = await getDbExec().execute({
+      sql: `SELECT deferral_reason FROM gr_decisions WHERE id = ?`,
+      args: [decisionId],
+    });
+    expect(updated.rows).toEqual([{ deferral_reason: "It waits on dispute handling." }]);
+  });
+});
