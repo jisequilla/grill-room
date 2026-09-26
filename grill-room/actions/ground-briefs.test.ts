@@ -1046,7 +1046,10 @@ describe("gates are not grounded", () => {
 
     const [request] = scoutRequests(interviewer.requests);
     expect(request!.tickets.map((ticket) => ticket.number)).not.toContain(gateNumber);
-    expect(request!.tickets.at(-1)).toMatchObject({ number: gateNumber + 1, blockedBy: builds });
+    expect(request!.tickets[request!.tickets.length - 1]).toMatchObject({
+      number: gateNumber + 1,
+      blockedBy: builds,
+    });
   });
 });
 
