@@ -48,6 +48,18 @@ function isTransientConnectionError(error: unknown): boolean {
   return TRANSIENT_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
 }
 
+/**
+ * A navigation resolved with no response at all (`goto()` returned null). A
+ * null response while the dev server is still starting is as transient as a
+ * refused connection, so `retryTransient` retries it too when a caller opts
+ * in — see its `isExtraRetryable` parameter.
+ */
+export class NoResponseYet extends Error {
+  constructor() {
+    super("navigation produced no response");
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -91,20 +103,32 @@ export class WarmUpError extends Error {
  * timeout clamped to 1 ms) instead of "kept dropping the connection". So the
  * wait itself is never started once it would end past the deadline: this
  * throws the real reason immediately instead.
+ *
+ * `isExtraRetryable`, when given, names additional errors to retry inside
+ * this same loop (never a second one) — a null navigation response, for a
+ * caller that opts in. When retries run out, the failure's reason follows the
+ * last error: "gave no response" when it matched `isExtraRetryable` rather
+ * than a transient connection error, "the server kept dropping the
+ * connection" otherwise, as before. A caller that omits `isExtraRetryable`
+ * behaves exactly as it did before this parameter existed.
  */
 export async function retryTransient<T>(
   attempt: () => Promise<T>,
   deadline: number,
   onRetry: (retryCount: number) => void,
+  isExtraRetryable?: (error: unknown) => boolean,
 ): Promise<T> {
   let retries = 0;
   for (;;) {
     try {
       return await attempt();
     } catch (error) {
-      if (!isTransientConnectionError(error)) throw error;
+      const isTransient = isTransientConnectionError(error);
+      const isExtra = !isTransient && (isExtraRetryable?.(error) ?? false);
+      if (!isTransient && !isExtra) throw error;
       if (Date.now() + CONNECTION_RETRY_DELAY_MS >= deadline) {
-        throw new WarmUpStepFailure("the server kept dropping the connection", describe(error));
+        const reason = isExtra ? "gave no response" : "the server kept dropping the connection";
+        throw new WarmUpStepFailure(reason, describe(error));
       }
       retries += 1;
       onRetry(retries);
@@ -147,11 +171,12 @@ async function retryStep<T>(
   attempt: (deadline: number) => Promise<T>,
   onRetry: (retryCount: number) => void,
   otherError: (path: string, elapsedMs: number, error: unknown) => unknown,
+  isExtraRetryable?: (error: unknown) => boolean,
 ): Promise<T> {
   const startedAt = Date.now();
   const deadline = startedAt + WARM_UP_LIMIT_MS;
   try {
-    return await retryTransient(() => attempt(deadline), deadline, onRetry);
+    return await retryTransient(() => attempt(deadline), deadline, onRetry, isExtraRetryable);
   } catch (error) {
     const elapsedMs = Date.now() - startedAt;
     if (error instanceof WarmUpStepFailure) {
@@ -179,6 +204,7 @@ export async function warm(
   path: string,
   answer: (deadline: number) => Promise<number>,
   log: (message: string) => void,
+  isExtraRetryable?: (error: unknown) => boolean,
 ): Promise<void> {
   const startedAt = Date.now();
   let retries = 0;
@@ -189,6 +215,7 @@ export async function warm(
       retries = count;
     },
     noResponse,
+    isExtraRetryable,
   );
   const suffix =
     retries === 0 ? "" : ` (${retries} connection retr${retries === 1 ? "y" : "ies"})`;
@@ -210,7 +237,7 @@ export function navigateStep(
         );
       }
       const response = await goto(path, { timeout: remaining });
-      if (!response) throw new Error("navigation produced no response");
+      if (!response) throw new NoResponseYet();
       if (response.status() !== STARTING_STATUS) return response.status();
       await sleep(STARTING_RETRY_DELAY_MS);
     }
@@ -267,8 +294,10 @@ export async function runWarmUp(deps: WarmUpDeps): Promise<void> {
   let sessionId: string | undefined;
   let failure: unknown;
 
+  const isNoResponseYet = (error: unknown) => error instanceof NoResponseYet;
+
   try {
-    await warm("/", navigateStep(goto, "/"), log);
+    await warm("/", navigateStep(goto, "/"), log, isNoResponseYet);
 
     sessionId = await retryStep(
       CREATE_SESSION_PATH,
@@ -278,7 +307,7 @@ export async function runWarmUp(deps: WarmUpDeps): Promise<void> {
     );
 
     const sessionPath = `/sessions/${sessionId}`;
-    await warm(sessionPath, navigateStep(goto, sessionPath), log);
+    await warm(sessionPath, navigateStep(goto, sessionPath), log, isNoResponseYet);
 
     // The session has no project on purpose: `preview-export` refuses it with
     // 409 `no-project`, and that refusal has still compiled the route.

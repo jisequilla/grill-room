@@ -45,7 +45,7 @@ import { padTicketNumber, sanitizeTicketSlug } from "./export.js";
 // runtime import back into it would be a cycle.
 import type { HandoffScoutResult } from "./interviewer/index.js";
 import { getProject } from "./projects.js";
-import { computeWaves, describeTickets } from "./tickets.js";
+import { computeWaves, describeTickets, type ImplicitEdge } from "./tickets.js";
 
 /** Stands for the bundle directory in stored markdown; export replaces it. */
 export const BUNDLE_TOKEN = "{{BUNDLE}}";
@@ -103,6 +103,13 @@ export interface HandoffBrief {
 export interface ExportFacts {
   visibility: ProjectVisibility;
   greenfield: boolean;
+  /**
+   * Present exactly when the brief grounding is current: the waves in which
+   * no two tickets change the same file, and the orderings that separation
+   * added. Absent, HANDOFF says overlaps were not checked.
+   */
+  waves?: readonly (readonly number[])[];
+  implicitEdges?: readonly ImplicitEdge[];
 }
 
 /** The facts a render uses: the export's when given, otherwise the stored flag and not greenfield. */
@@ -397,16 +404,48 @@ function fillSlotsLine(groundingCurrent: boolean): string {
   return "- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.";
 }
 
-function wavesSection(source: HandoffSource): string {
+/** Paths as inline code: `` `a` and `b` ``, or `` `a`, `b` and `c` ``. */
+function pathList(paths: readonly string[]): string {
+  const codes = paths.map(inlineCode);
+  return codes.length <= 1 ? codes.join("") : `${codes.slice(0, -1).join(", ")} and ${codes[codes.length - 1]}`;
+}
+
+/**
+ * The waves. When the export checked for overlapping files
+ * (`exportFacts.waves` present), they are the separated waves with one line
+ * per ordering the separation added. Otherwise they come from Blocked-by, and
+ * the section says overlaps were not checked.
+ */
+function wavesSection(source: HandoffSource, exportFacts?: ExportFacts): string {
   const total = source.tickets.length;
   const byNumber = new Map(source.tickets.map((ticket) => [ticket.number, ticket]));
+  const checked = exportFacts?.waves !== undefined;
+  const waves = exportFacts?.waves ?? source.waves;
   const lines = [
     "## Waves",
     "",
-    "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.",
+    checked
+      ? "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified."
+      : "Tickets in one wave have no Blocked-by between them. Whether they change the same files was not checked, because the briefs are not grounded against the current code: run them one at a time, or ground the briefs first. Start a wave only once every ticket of the previous wave is merged and verified.",
   ];
 
-  source.waves.forEach((wave, index) => {
+  if (checked) {
+    const waveOf = new Map(waves.flatMap((wave, index) => wave.map((number) => [number, index] as const)));
+    const edges = [...(exportFacts?.implicitEdges ?? [])].sort(
+      (a, b) =>
+        (waveOf.get(a.ticket) ?? 0) - (waveOf.get(b.ticket) ?? 0) ||
+        a.ticket - b.ticket ||
+        a.waitsFor - b.waitsFor,
+    );
+    if (edges.length > 0) lines.push("");
+    for (const edge of edges) {
+      lines.push(
+        `- Ticket ${padTicketNumber(edge.ticket, total)} waits for ticket ${padTicketNumber(edge.waitsFor, total)}: both change ${pathList(edge.sharedPaths)}.`,
+      );
+    }
+  }
+
+  waves.forEach((wave, index) => {
     lines.push("", `### Wave ${index + 1}`, "");
     for (const number of wave) {
       const ticket = byNumber.get(number);
@@ -693,7 +732,7 @@ export function renderHandoffMarkdown(
       ...(facts.greenfield ? ["", greenfieldVerifyLine(source)] : []),
     ].join("\n"),
     beforeDelegatingSection(source, facts),
-    wavesSection(source),
+    wavesSection(source, exportFacts),
     lifecycleSection(source, groundingCurrent),
   ];
   if (source.project.adversarialReview) sections.push(reviewingSection(source));
