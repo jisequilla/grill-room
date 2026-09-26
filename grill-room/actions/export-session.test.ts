@@ -1530,6 +1530,38 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
     expect(handoff.content).toContain("- Spec: `.scratch/grill-room/spec.md`");
   });
 
+  it("root no longer a git repository, stored ignored: falls back to the stored flag, absolute paths", async () => {
+    const { root, session } = await aHandoffSession({ visibility: "ignored" });
+    await fs.rm(path.join(root, ".git"), { recursive: true, force: true });
+
+    const plan = await planExportBundle({ sessionId: session.id, slug: "grill-room" });
+
+    expect(plan.project.visibility).toBe("ignored");
+    expect(plan.effectiveVisibility).toBe("ignored");
+    expect(plan.greenfield).toBe(true);
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
+    expect(handoff.content).toContain(`- Spec: \`${bundleDir}/spec.md\``);
+    const brief = plan.files.find((file) => file.relativePath === "briefs/01-build-the-workspace.md")!;
+    expect(brief.content).toContain(`the spec at \`${bundleDir}/spec.md\``);
+  });
+
+  it("checks the bundle folder itself: a negation that un-ignores it wins over its ignored parent's contents", async () => {
+    const { root, session } = await aHandoffSession({
+      gitignore: ".scratch/*\n!.scratch/grill-room/\n",
+      visibility: "ignored",
+    });
+
+    const plan = await planExportBundle({ sessionId: session.id, slug: "grill-room" });
+
+    expect(plan.project.visibility).toBe("ignored");
+    expect(plan.effectiveVisibility).toBe("tracked");
+    expect(plan.greenfield).toBe(false);
+    const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
+    expect(handoff.content).toContain("- Spec: `.scratch/grill-room/spec.md`");
+    expect(handoff.content).toContain(`${root}\`). The bundle lives in \`.scratch\`, which git tracks.`);
+  });
+
   it("never writes the stored flag, still reports it, and keeps the fingerprint independent of git's answer", async () => {
     const { root, project, session } = await aHandoffSession({ visibility: "tracked" });
     const fingerprintOf = async () => {
