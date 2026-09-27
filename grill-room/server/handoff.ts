@@ -51,7 +51,14 @@ import { hashExportContent, openingSections, padTicketNumber, sanitizeTicketSlug
 // runtime import back into it would be a cycle.
 import type { HandoffScoutResult } from "./interviewer/index.js";
 import { getProject } from "./projects.js";
-import { computeWaves, describeTickets, type ImplicitEdge } from "./tickets.js";
+import {
+  computeWaves,
+  describeTickets,
+  type ImplicitEdge,
+  uncoveredStories,
+  type UserStory,
+  userStories,
+} from "./tickets.js";
 
 /** Stands for the bundle directory in stored markdown; export replaces it. */
 export const BUNDLE_TOKEN = "{{BUNDLE}}";
@@ -109,6 +116,14 @@ export interface HandoffSource {
     adversarialReview: boolean;
     trackerCommandsJson: string | null;
   };
+  /**
+   * The spec's user stories no ticket lists in its `implements`, ascending.
+   * Null (or absent) when the spec numbers no stories, or when any ticket was
+   * made before the story check. Worked out from `spec.markdown` and each
+   * ticket's `implements`, so it never enters the fingerprint: both change
+   * only with values it already hashes.
+   */
+  uncoveredStories?: readonly UserStory[] | null;
 }
 
 export interface HandoffBrief {
@@ -758,6 +773,16 @@ function buildRecordSection(source: HandoffSource): string | null {
   ].join("\n");
 }
 
+function uncoveredStoriesSection(stories: readonly UserStory[]): string {
+  return [
+    "## Stories no ticket implements",
+    "",
+    "No ticket lists these user stories from the spec in its `implements`. Before calling the feature done, add a ticket for each one, or confirm with the owner that it needs none.",
+    "",
+    ...stories.map((story) => `- Story ${story.number}: ${story.text}`),
+  ].join("\n");
+}
+
 export function renderHandoffMarkdown(
   source: HandoffSource,
   groundingCurrent = false,
@@ -792,6 +817,9 @@ export function renderHandoffMarkdown(
     ].join("\n"),
     beforeDelegatingSection(source, facts),
     wavesSection(source, exportFacts),
+    ...(source.uncoveredStories && source.uncoveredStories.length > 0
+      ? [uncoveredStoriesSection(source.uncoveredStories)]
+      : []),
     lifecycleSection(source, groundingCurrent),
   ];
   if (source.project.adversarialReview) sections.push(reviewingSection(source));
@@ -1267,6 +1295,15 @@ export async function loadHandoffSource(
     };
   }
 
+  const stories = userStories(spec.markdown);
+  const uncovered =
+    stories.length === 0 || tickets.some((ticket) => ticket.implements === null)
+      ? null
+      : uncoveredStories(
+          tickets.map((ticket) => ({ kind: ticket.kind, implements: ticket.implements ?? [] })),
+          stories,
+        );
+
   return {
     source: {
       session: { id: session.id, title: session.title, idea: session.idea },
@@ -1297,6 +1334,7 @@ export async function loadHandoffSource(
         adversarialReview: project.adversarialReview,
         trackerCommandsJson: project.trackerCommandsJson,
       },
+      uncoveredStories: uncovered,
     },
   };
 }

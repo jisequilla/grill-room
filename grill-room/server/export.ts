@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import type { TicketKind } from "../shared/session-constants.js";
 import type { StoredReadiness } from "./readiness.js";
 import type { ScoutReportWithStaleness } from "./scout-report.js";
+import { numberRanges } from "./tickets.js";
 import type { DecisionView } from "./tree.js";
 
 const STATUS_LINE = "Status: ready-for-agent";
@@ -36,6 +37,8 @@ export interface ExportTicket {
   kind?: TicketKind;
   /** What a gate waits for; null or absent for a build ticket. */
   waitsFor?: string | null;
+  /** The spec's user stories it builds; null or absent for tickets made before the story check. */
+  implements?: readonly number[] | null;
 }
 
 export interface PlannedExportFile {
@@ -403,7 +406,8 @@ export function renderSpecFile(sessionTitle: string, specMarkdown: string): stri
  * `Blocked by:` (numbers padded the same as the file name, or `none`), blank
  * line, then the ticket body. A gate's file is for a person, not an agent:
  * its status reads `ready-for-human`, and a `Wait for:` line follows
- * `Blocked by:`.
+ * `Blocked by:`. A ticket that cites user stories ends that block with an
+ * `Implements:` line.
  */
 export function renderTicketFile(params: {
   label: string;
@@ -412,16 +416,22 @@ export function renderTicketFile(params: {
   blockedByLabels: readonly string[];
   /** Present exactly for a gate: what it waits for. */
   waitsFor?: string;
+  /** The user stories the ticket builds; no line when null, absent or empty. */
+  implements?: readonly number[] | null;
 }): string {
   const blockedByLine =
     params.blockedByLabels.length > 0
       ? `Blocked by: ${params.blockedByLabels.join(", ")}`
       : "Blocked by: none";
+  const implementsLine =
+    params.implements && params.implements.length > 0
+      ? `\nImplements: ${new Set(params.implements).size === 1 ? "user story" : "user stories"} ${numberRanges(params.implements)}`
+      : "";
 
   if (params.waitsFor !== undefined) {
-    return `# ${params.label} ${params.title}\n\n${GATE_STATUS_LINE}\n${blockedByLine}\nWait for: ${params.waitsFor}\n\n${params.body}`;
+    return `# ${params.label} ${params.title}\n\n${GATE_STATUS_LINE}\n${blockedByLine}\nWait for: ${params.waitsFor}${implementsLine}\n\n${params.body}`;
   }
-  return `# ${params.label} ${params.title}\n\n${STATUS_LINE}\n${blockedByLine}\n\n${params.body}`;
+  return `# ${params.label} ${params.title}\n\n${STATUS_LINE}\n${blockedByLine}${implementsLine}\n\n${params.body}`;
 }
 
 /** A decision's anchor and tie-break: its key, or its id for a row that has none. */
@@ -868,6 +878,7 @@ export function planExport(input: PlanExportInput): ExportPlan {
         body: ticket.body,
         blockedByLabels,
         ...(ticket.kind === "gate" ? { waitsFor: ticket.waitsFor ?? "" } : {}),
+        implements: ticket.implements ?? null,
       }),
     });
   }

@@ -8,6 +8,7 @@ import {
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
 import { buildPrompt } from "../server/interviewer/prompt.js";
+import { MAX_TURN_RETRIES } from "../server/turn.js";
 import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
@@ -65,10 +66,10 @@ const GOOD_SPEC_MARKDOWN = [
 ].join("\n");
 
 /** A session confirmed and carrying a current spec, ready to break into tickets. */
-async function aConfirmedSessionWithSpec(): Promise<string> {
+async function aConfirmedSessionWithSpec(markdown: string = GOOD_SPEC_MARKDOWN): Promise<string> {
   const session = await aSession();
   await confirm(session.id);
-  scriptInterviewer([{ kind: "synthesize-spec", result: { markdown: GOOD_SPEC_MARKDOWN } }]);
+  scriptInterviewer([{ kind: "synthesize-spec", result: { markdown } }]);
   await synthesizeSpec.run({ sessionId: session.id });
   return session.id;
 }
@@ -82,6 +83,7 @@ function ticketsTurn(
     blockedBy?: number[];
     kind?: "build" | "gate";
     waitsFor?: string | null;
+    implements?: number[];
   }[],
 ): ScriptedTurn {
   return {
@@ -91,6 +93,8 @@ function ticketsTurn(
         title: `Ticket ${ticket.number}`,
         body: `Do the work of ticket ${ticket.number}.`,
         blockedBy: [],
+        // GOOD_SPEC_MARKDOWN numbers one story: every build ticket builds it.
+        implements: ticket.kind === "gate" ? [] : [1],
         ...ticket,
       })),
     },
@@ -1069,6 +1073,35 @@ describe("list-tickets", () => {
     expect(waves).toEqual([[1, 2], [3]]);
   });
 
+  it("reports each ticket's implements", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    scriptInterviewer([
+      ticketsTurn([
+        { number: 1, slug: "one", implements: [1, 1] },
+        { number: 2, slug: "two", implements: [] },
+        { number: 3, slug: "three" },
+      ]),
+    ]);
+    await breakIntoTickets.run({ sessionId });
+
+    const listed = await listTickets.run({ sessionId });
+    expect(listed.tickets.map((ticket) => [ticket.number, ticket.implements])).toEqual([
+      [1, [1]],
+      [2, []],
+      [3, [1]],
+    ]);
+
+    await getDb()
+      .update(schema.tickets)
+      .set({ implementsJson: null })
+      .where(eq(schema.tickets.id, listed.tickets[0]!.id));
+    expect((await listTickets.run({ sessionId })).tickets.map((ticket) => ticket.implements)).toEqual([
+      null,
+      [],
+      [1],
+    ]);
+  });
+
   it("throws for a session id that does not exist", async () => {
     await expect(
       listTickets.run({ sessionId: "missing" }),
@@ -1131,5 +1164,313 @@ describe("list-tickets", () => {
 
     expect(first.waves).toEqual(second.waves);
     expect(first.waves).toEqual([[1], [2]]);
+  });
+});
+
+/** A spec that numbers user stories 1 to `count`. */
+function aSpecWithStories(count: number): string {
+  return GOOD_SPEC_MARKDOWN.replace(
+    "1. As a user, I want a workspace, so that I can see what I am deciding.",
+    Array.from({ length: count }, (_, index) => `${index + 1}. As a user, I want part ${index + 1}.`).join("\n"),
+  );
+}
+
+const NO_STORIES_SPEC = GOOD_SPEC_MARKDOWN.replace(
+  "1. As a user, I want a workspace, so that I can see what I am deciding.",
+  "- As a user, I want a workspace.",
+);
+
+describe("user stories", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  type Row = Parameters<typeof ticketsTurn>[0][number];
+
+  const ALL = Array.from({ length: 62 }, (_, index) => index + 1);
+  const ACCOUNT = "A live account on the payment platform, with API keys issued.";
+  const SOFT_TAIL =
+    "in no ticket's `implements`. Every user story must be implemented by at least one ticket: add its number to the ticket that builds it, or add a ticket for it.";
+
+  function rejectionOf(request: unknown): string {
+    return (request as BreakIntoTicketsRequest).rejectionReason ?? "";
+  }
+
+  /** Ticket 1 builds every story; ticket 2 is a gate ticket 3 waits for. */
+  const covering = (overrides: { two?: Partial<Row>; three?: Partial<Row>; one?: Partial<Row> } = {}): Row[] => [
+    { number: 1, slug: "one", implements: ALL, ...overrides.one },
+    { number: 2, slug: "two", kind: "gate", waitsFor: ACCOUNT, ...overrides.two },
+    { number: 3, slug: "three", blockedBy: [2], implements: [], ...overrides.three },
+  ];
+
+  it("carries the spec's story numbers in the request", async () => {
+    const withStory = await aConfirmedSessionWithSpec();
+    const first = scriptInterviewer([oneGoodTicket]);
+    await breakIntoTickets.run({ sessionId: withStory });
+    expect(first.requests[0]).toMatchObject({ userStories: [1] });
+
+    const without = await aConfirmedSessionWithSpec(NO_STORIES_SPEC);
+    const second = scriptInterviewer([oneGoodTicket]);
+    await breakIntoTickets.run({ sessionId: without });
+    expect(second.requests[0]).toMatchObject({ userStories: [] });
+  });
+
+  it.each<[string, Row[], [number, number[]][]]>([
+    [
+      "a build ticket citing [4, 4], stored [4]",
+      covering({ three: { implements: [4, 4] } }),
+      [[1, ALL], [2, []], [3, [4]]],
+    ],
+    [
+      "a build ticket citing no story",
+      covering({ three: { implements: [] } }),
+      [[1, ALL], [2, []], [3, []]],
+    ],
+  ])("accepts %s", async (_, rows, stored) => {
+    const sessionId = await aConfirmedSessionWithSpec(aSpecWithStories(62));
+    const interviewer = scriptInterviewer([ticketsTurn(rows)]);
+
+    const { tickets } = await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(1);
+    expect(tickets.map((ticket) => [ticket.number, ticket.implements])).toEqual(stored);
+  });
+
+  it.each<[string, Row[], string]>([
+    [
+      "a build ticket citing story 70",
+      covering({ three: { implements: [70] } }),
+      "Ticket 3 implements user story 70, which the spec does not have. The spec's user stories are 1-62.",
+    ],
+    [
+      "a build ticket citing stories 2, 63, 64 and 70",
+      covering({ three: { implements: [2, 63, 64, 70] } }),
+      "Ticket 3 implements user stories 63-64, 70, which the spec does not have. The spec's user stories are 1-62.",
+    ],
+    [
+      "a gate citing story 5",
+      covering({ two: { implements: [5] } }),
+      "Ticket 2 is a gate, so it implements no user story. Leave its `implements` empty.",
+    ],
+    [
+      "a gate citing story 70",
+      covering({ two: { implements: [70] } }),
+      "Ticket 2 is a gate, so it implements no user story. Leave its `implements` empty.",
+    ],
+    [
+      "story 4 in no build ticket's implements",
+      covering({ one: { implements: ALL.filter((n) => n !== 4) } }),
+      `User story 4 is ${SOFT_TAIL}`,
+    ],
+    [
+      "stories 4, 9, 10 and 11 in no build ticket's implements",
+      covering({ one: { implements: ALL.filter((n) => ![4, 9, 10, 11].includes(n)) } }),
+      `User stories 4, 9-11 are ${SOFT_TAIL}`,
+    ],
+    [
+      "story 4 cited only by a gate",
+      covering({ one: { implements: ALL.filter((n) => n !== 4) }, two: { implements: [4] } }),
+      `Ticket 2 is a gate, so it implements no user story. Leave its \`implements\` empty. User story 4 is ${SOFT_TAIL}`,
+    ],
+  ])("rejects %s, and asks again", async (_, rows, expected) => {
+    const sessionId = await aConfirmedSessionWithSpec(aSpecWithStories(62));
+    const interviewer = scriptInterviewer([ticketsTurn(rows), ticketsTurn(covering())]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(2);
+    expect(rejectionOf(interviewer.requests[1])).toBe(expected);
+  });
+
+  it("stores a ticket's implements deduplicated and ascending", async () => {
+    const sessionId = await aConfirmedSessionWithSpec(aSpecWithStories(3));
+    const interviewer = scriptInterviewer([
+      ticketsTurn([
+        { number: 1, slug: "one", implements: [3, 1, 3] },
+        { number: 2, slug: "two", implements: [2] },
+      ]),
+    ]);
+
+    const { tickets } = await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(1);
+    expect(tickets.map((ticket) => ticket.implements)).toEqual([[1, 3], [2]]);
+  });
+
+  it("puts the story reasons after the ticket set's own reasons", async () => {
+    const sessionId = await aConfirmedSessionWithSpec(aSpecWithStories(62));
+    const interviewer = scriptInterviewer([
+      ticketsTurn(covering({ one: { blockedBy: [9], implements: [70] } })),
+      ticketsTurn(covering()),
+    ]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(rejectionOf(interviewer.requests[1])).toBe(
+      `Ticket 1 is blocked by 9, which is not a ticket number in this set. Ticket 1 implements user story 70, which the spec does not have. The spec's user stories are 1-62. User stories 1-62 are ${SOFT_TAIL}`,
+    );
+  });
+
+  it("accepts the last attempt with stories still uncovered, and notes it", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const uncovered = ticketsTurn([{ number: 1, slug: "one", implements: [] }]);
+    const interviewer = scriptInterviewer(
+      Array.from({ length: MAX_TURN_RETRIES + 1 }, () => uncovered),
+    );
+
+    const { tickets } = await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(MAX_TURN_RETRIES + 1);
+    expect(tickets.map((ticket) => [ticket.slug, ticket.implements])).toEqual([["one", []]]);
+    const turn = await findLatestTurn({ sessionId, turnKind: "break-into-tickets" });
+    expect(turn?.outcome).toBe("succeeded");
+    const attempts = turn!.runs[0]!.attempts;
+    expect(attempts.map((attempt) => attempt.kind)).toEqual([
+      "tree-rule-refusal",
+      "tree-rule-refusal",
+      "success",
+    ]);
+    expect(attempts[attempts.length - 1]).toMatchObject({
+      kind: "success",
+      reason: "Accepted after the last retry, with user story 1 in no ticket's implements.",
+    });
+  });
+
+  it("notes several stories still uncovered on the last attempt as ranges", async () => {
+    const sessionId = await aConfirmedSessionWithSpec(aSpecWithStories(11));
+    const uncovered = ticketsTurn([
+      { number: 1, slug: "one", implements: [1, 2, 3, 5, 6, 7, 8] },
+    ]);
+    scriptInterviewer(Array.from({ length: MAX_TURN_RETRIES + 1 }, () => uncovered));
+
+    await breakIntoTickets.run({ sessionId });
+
+    const turn = await findLatestTurn({ sessionId, turnKind: "break-into-tickets" });
+    const attempts = turn!.runs[0]!.attempts;
+    expect(attempts[attempts.length - 1]).toMatchObject({
+      kind: "success",
+      reason: "Accepted after the last retry, with user stories 4, 9-11 in no ticket's implements.",
+    });
+  });
+
+  it("still refuses a wrong citation on the last attempt", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const wrong = ticketsTurn([{ number: 1, slug: "one", implements: [1, 70] }]);
+    const interviewer = scriptInterviewer(
+      Array.from({ length: MAX_TURN_RETRIES + 1 }, () => wrong),
+    );
+
+    await expect(breakIntoTickets.run({ sessionId })).rejects.toThrow(
+      /does not validate 3 times\. Last reason: Ticket 1 implements user story 70, which the spec does not have\. The spec's user stories are 1\.$/,
+    );
+
+    expect(interviewer.requests).toHaveLength(MAX_TURN_RETRIES + 1);
+    expect((await listTickets.run({ sessionId })).tickets).toEqual([]);
+    expect(await getSession.run({ id: sessionId })).toMatchObject({
+      turnStatus: "failed",
+      turnErrorCode: "invalid-tickets",
+    });
+  });
+
+  it("a spec with no numbered stories skips the check and stores implements empty", async () => {
+    const sessionId = await aConfirmedSessionWithSpec(NO_STORIES_SPEC);
+    const interviewer = scriptInterviewer([
+      ticketsTurn([
+        { number: 1, slug: "one", implements: [70, 3] },
+        { number: 2, slug: "two", kind: "gate", waitsFor: ACCOUNT, implements: [5] },
+        { number: 3, slug: "three", blockedBy: [2], implements: [] },
+      ]),
+    ]);
+
+    const { tickets } = await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(1);
+    expect(tickets.map((ticket) => ticket.implements)).toEqual([[], [], []]);
+    const prompt = buildPrompt(interviewer.requests[0] as BreakIntoTicketsRequest);
+    expect(prompt).not.toContain("## User stories");
+    expect(prompt).not.toContain("implements");
+  });
+});
+
+describe("seam: a set shaped as the user stories section describes passes the check", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+  const repos = useTempGitRepos();
+
+  it.each([
+    ["in a repository with commits", true],
+    ["in a repository with no commits yet", false],
+  ])("%s", async (_, commit) => {
+    const root = repos.create({ commit });
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+    });
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A local app that grills me about an idea until it is decided.",
+      projectId: project.id,
+    });
+    await confirm(session.id);
+    scriptInterviewer([{ kind: "synthesize-spec", result: { markdown: aSpecWithStories(3) } }]);
+    await synthesizeSpec.run({ sessionId: session.id });
+    const sessionId = session.id;
+
+    const first = scriptInterviewer([
+      ticketsTurn([
+        {
+          number: 1,
+          slug: "set-up",
+          body: "Set up the runner so that `pnpm test` passes.",
+          implements: [1, 2, 3],
+        },
+      ]),
+    ]);
+    await breakIntoTickets.run({ sessionId });
+    const prompt = buildPrompt(first.requests[0] as BreakIntoTicketsRequest);
+
+    // Read the numbers the section names, then follow its words: a setup
+    // ticket and a gate cite nothing, and every story is in some build
+    // ticket's `implements`.
+    const listed = /^The spec numbers its user stories: (.*)\.$/m.exec(prompt)?.[1];
+    expect(listed).toBeDefined();
+    const stories = listed!.split(", ").flatMap((piece) => {
+      const [from, to] = piece.split("-").map(Number);
+      return Array.from({ length: (to ?? from!) - from! + 1 }, (_, index) => from! + index);
+    });
+    expect(stories).toEqual([1, 2, 3]);
+    expect(prompt.includes("## This repository has no commits yet")).toBe(!commit);
+
+    const shaped = ticketsTurn([
+      {
+        number: 1,
+        slug: "set-up-the-project",
+        body: "Set up the project and its test runner. Acceptance: `pnpm test` passes.",
+        implements: [],
+      },
+      { number: 2, slug: "build-the-workspace", blockedBy: [1], implements: stories.slice(0, 2) },
+      { number: 3, slug: "store-on-disk", blockedBy: [1, 4], implements: stories.slice(2) },
+      {
+        number: 4,
+        slug: "payment-account",
+        body: "The owner opens the account; it is in place once API keys are issued.",
+        kind: "gate",
+        waitsFor: "A live account on the payment platform, with API keys issued.",
+        implements: [],
+      },
+    ]);
+    const second = scriptInterviewer([shaped]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(second.requests).toHaveLength(1);
+    expect(
+      (await listTickets.run({ sessionId })).tickets.map((ticket) => [ticket.number, ticket.implements]),
+    ).toEqual([
+      [1, []],
+      [2, [1, 2]],
+      [3, [3]],
+      [4, []],
+    ]);
   });
 });

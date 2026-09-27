@@ -249,6 +249,8 @@ export const breakIntoTicketsResultSchema = z.strictObject({
       kind: z.enum(TICKET_KINDS).default("build"),
       /** What a gate waits for, in one line; null for a build ticket. */
       waitsFor: z.string().nullable().default(null),
+      /** Numbers of the spec's user stories this ticket builds. */
+      implements: z.array(z.number().int().positive()).default([]),
     }),
   ),
 });

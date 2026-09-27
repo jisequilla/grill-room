@@ -71,6 +71,7 @@ interface TicketSpec {
   blockedBy?: number[];
   kind?: "build" | "gate";
   waitsFor?: string;
+  implements?: number[];
 }
 
 function ticketsTurn(tickets: TicketSpec[]): ScriptedTurn {
@@ -81,6 +82,8 @@ function ticketsTurn(tickets: TicketSpec[]): ScriptedTurn {
         title: `Ticket ${ticket.number}`,
         body: `Do the work of ticket ${ticket.number}.`,
         blockedBy: [],
+        // The spec numbers one story: every build ticket builds it; a gate builds none.
+        implements: ticket.kind === "gate" ? [] : [1],
         ...ticket,
       })),
     },
@@ -189,6 +192,92 @@ describe("handoff generation", () => {
     );
     expect(order.every((index) => index > -1)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  /** A ready session whose breakdown left story 1 uncovered on every attempt, so the last was accepted. */
+  async function aSessionWithAnUncoveredStory() {
+    const root = repos.create();
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+    });
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A local app that grills me about an idea until it is decided.",
+      projectId: project.id,
+    });
+    await getDb()
+      .update(schema.sessions)
+      .set({ state: "confirmed" })
+      .where(eq(schema.sessions.id, session.id));
+    const uncovered = ticketsTurn([
+      { number: 1, slug: "build-the-workspace", implements: [] },
+      { number: 2, slug: "store-on-disk", blockedBy: [1], implements: [] },
+    ]);
+    scriptInterviewer([
+      { kind: "synthesize-spec", result: { markdown: SPEC_MARKDOWN } },
+      uncovered,
+      uncovered,
+      uncovered,
+    ]);
+    await synthesizeSpec.run({ sessionId: session.id });
+    await breakIntoTickets.run({ sessionId: session.id });
+    return session;
+  }
+
+  it("lists the stories no ticket implements", async () => {
+    const session = await aSessionWithAnUncoveredStory();
+
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+
+    expect(markdown).toContain(
+      [
+        "## Stories no ticket implements",
+        "",
+        "No ticket lists these user stories from the spec in its `implements`. Before calling the feature done, add a ticket for each one, or confirm with the owner that it needs none.",
+        "",
+        "- Story 1: As a user, I want a workspace, so that I can see what I am deciding.",
+        "",
+        "## Delegation lifecycle",
+      ].join("\n"),
+    );
+    expect(markdown.indexOf("## Waves")).toBeLessThan(markdown.indexOf("## Stories no ticket implements"));
+  });
+
+  it("renders no stories section when every story is implemented", async () => {
+    const { session } = await aReadySession();
+
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+
+    expect(markdown).not.toContain("## Stories no ticket implements");
+  });
+
+  it("renders no stories section when any one ticket was made before the check", async () => {
+    const session = await aSessionWithAnUncoveredStory();
+    const [first] = (await listTickets.run({ sessionId: session.id })).tickets;
+    await getDb()
+      .update(schema.tickets)
+      .set({ implementsJson: null })
+      .where(eq(schema.tickets.id, first!.id));
+
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+
+    expect(markdown).not.toContain("## Stories no ticket implements");
+  });
+
+  it("renders no stories section for tickets made before the check", async () => {
+    const session = await aSessionWithAnUncoveredStory();
+    await getDb()
+      .update(schema.tickets)
+      .set({ implementsJson: null })
+      .where(eq(schema.tickets.sessionId, session.id));
+
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+
+    expect(markdown).not.toContain("## Stories no ticket implements");
+    const loaded = await loadHandoffSource(session.id);
+    expect("source" in loaded && loaded.source.uncoveredStories).toBeNull();
   });
 
   it("goes stale on a blocker edit, and regenerating clears it with the new waves", async () => {
