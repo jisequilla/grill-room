@@ -94,8 +94,24 @@ describe("specSections", () => {
   });
 
   it("keeps a repeated heading's first text", () => {
-    const sections = specSections("## Notes\n\nfirst\n\n## Notes\n\nsecond");
-    expect(sections.find((section) => section.name === "Notes")?.text).toBe("\nfirst\n");
+    const facts: ConsistencyFacts = {
+      specMarkdown: "## Notes\n\nfirst\n\n## Notes\n\nsecond",
+      tickets: [],
+      settledKeys: [],
+    };
+    const quoting = (quote: string) =>
+      consistencyReasons({ findings: [aFinding({ at: inSpec(quote, "Notes") })] }, facts);
+
+    expect(quoting("first")).toEqual([[]]);
+    expect(quoting("second")).toEqual([
+      [MISQUOTE("second", `the spec's "Notes" section`)],
+    ]);
+    // The list of sections names it once.
+    expect(
+      consistencyReasons({ findings: [aFinding({ at: inSpec("first", "Other") })] }, facts),
+    ).toEqual([
+      ['Finding 1 names the spec section "Other", which the spec does not have. Its sections are: Notes.'],
+    ]);
   });
 
   it("keeps a ### heading inside its section", () => {
