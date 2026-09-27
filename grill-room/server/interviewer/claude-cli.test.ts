@@ -1631,6 +1631,7 @@ describe("what the adapter sends to break a spec into tickets", () => {
       specMarkdown: "## Problem Statement\n\nExport the training log.",
       greenfield: false,
       verifyCommand: null,
+      userStories: [],
       rejectionReason: null,
     });
     const prompt = valueOf(runner.invocations[0]!.args, "-p") as string;
@@ -1661,6 +1662,7 @@ describe("what the adapter sends to break a spec into tickets", () => {
       specMarkdown: "## Problem Statement\n\nExport the training log.",
       greenfield,
       verifyCommand: "pnpm test",
+      userStories: [],
       rejectionReason: null,
     });
     const prompt = valueOf(runner.invocations[0]!.args, "-p") as string;
@@ -1699,6 +1701,7 @@ describe("what the adapter sends to break a spec into tickets", () => {
         specMarkdown: "## Problem Statement\n\nExport the training log.",
         greenfield,
         verifyCommand,
+        userStories: [],
         rejectionReason: null,
       });
       return valueOf(runner.invocations[0]!.args, "-p") as string;
@@ -1750,6 +1753,52 @@ describe("what the adapter sends to break a spec into tickets", () => {
       expect(prompt.endsWith(RULES_END)).toBe(true);
       expect(prompt).toBe(await promptFor(false, null));
     });
+  });
+
+  it.each([
+    ["not greenfield", false],
+    ["greenfield", true],
+  ] as const)("adds the user stories section last, only when the spec numbers stories: %s", async (_, greenfield) => {
+    async function promptFor(userStories: number[]): Promise<string> {
+      const runner = recordingRunner([ok(anEnvelope({ structured_output: { tickets: [] } }))]);
+      await createClaudeCliInterviewer({ runCli: runner.runCli }).breakIntoTickets({
+        kind: "break-into-tickets",
+        context: aContext(),
+        specMarkdown: "## Problem Statement\n\nExport the training log.",
+        greenfield,
+        verifyCommand: "pnpm test",
+        userStories,
+        rejectionReason: null,
+      });
+      return valueOf(runner.invocations[0]!.args, "-p") as string;
+    }
+
+    const without = await promptFor([]);
+    const withStories = await promptFor([1, 2, 3, 5]);
+
+    const section = [
+      "## User stories",
+      "",
+      "The spec numbers its user stories: 1-3, 5.",
+      "",
+      "In each ticket's `implements`, list the numbers of the user stories that",
+      "ticket builds, as the spec numbers them. Every one of those stories must be",
+      "in the `implements` of at least one ticket. A ticket that builds no story,",
+      "such as one that only sets up the project, leaves `implements` empty. A gate",
+      "implements no story: leave its `implements` empty.",
+    ].join("\n");
+
+    expect(without).not.toContain("## User stories");
+    expect(withStories).toBe(`${without}\n\n${section}`);
+    if (greenfield) {
+      expect(withStories).toContain(
+        "directly or through another ticket's `blockedBy`; a gate need not.\n\n## User stories",
+      );
+    } else {
+      expect(withStories).toContain(
+        "agent can build, configure or test in the repository is a build ticket.\n\n## User stories",
+      );
+    }
   });
 });
 

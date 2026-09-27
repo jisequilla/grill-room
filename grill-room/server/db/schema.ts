@@ -502,6 +502,11 @@ export const tickets = table(
     kind: text("kind", { enum: TICKET_KINDS }).notNull().default("build"),
     /** What a gate waits for, in one line; always null for a build ticket. */
     waitsFor: text("waits_for"),
+    /**
+     * JSON array of the spec's user story numbers this ticket builds. NULL for
+     * tickets made before the story check existed.
+     */
+    implementsJson: text("implements_json"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

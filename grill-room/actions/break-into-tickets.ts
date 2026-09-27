@@ -9,7 +9,15 @@ import { headCommit } from "../server/export-bundle.js";
 import { getInterviewer } from "../server/interviewer/index.js";
 import type { BreakIntoTicketsResult } from "../server/interviewer/index.js";
 import { getProject } from "../server/projects.js";
-import { storedWaitsFor, validateTicketSet } from "../server/tickets.js";
+import {
+  numberRanges,
+  storedImplements,
+  storedWaitsFor,
+  storyReasons,
+  uncoveredStories,
+  userStories,
+  validateTicketSet,
+} from "../server/tickets.js";
 import {
   askUntilAccepted,
   decisionSnapshots,
@@ -124,14 +132,19 @@ export default defineAction({
         const project = session!.projectId ? await getProject(session!.projectId) : undefined;
         const verifyCommand = project?.verifyCommand ?? null;
         const greenfield = project ? (await headCommit(project.rootPath)) === null : false;
+        // The spec's numbered user stories, read once so every retry is
+        // judged against the same list. None skips the story check.
+        const stories = userStories(spec!.markdown).map((story) => story.number);
 
         const interviewer = getInterviewer();
+        let attemptsAsked = 0;
 
         const accepted = await askUntilAccepted<BreakIntoTicketsResult>({
           conversationId: session!.conversationId,
           recorder,
-          ask: async ({ conversationId, rejectionReason, observer }) =>
-            interviewer.breakIntoTickets(
+          ask: async ({ conversationId, rejectionReason, observer }) => {
+            attemptsAsked += 1;
+            return interviewer.breakIntoTickets(
               {
                 kind: "break-into-tickets",
                 context: {
@@ -148,21 +161,40 @@ export default defineAction({
                 specMarkdown: spec!.markdown,
                 greenfield,
                 verifyCommand,
+                userStories: stories,
                 rejectionReason,
               },
               observer,
-            ),
-          reasonsToRefuse: (result) =>
-            validateTicketSet(
+            );
+          },
+          // On the last attempt, stories no ticket cites no longer refuse the
+          // set: it is accepted and the gap noted below. Every other reason
+          // still refuses it.
+          reasonsToRefuse: (result) => [
+            ...validateTicketSet(
               result.tickets,
               greenfield && verifyCommand !== null ? { verifyCommand } : null,
             ).reasons,
+            ...storyReasons(result.tickets, stories, {
+              lastAttempt: attemptsAsked > MAX_TURN_RETRIES,
+            }),
+          ],
           exhausted: (lastReason) =>
             new TurnRejected(
               "invalid-tickets",
               `The interviewer proposed a ticket breakdown that does not validate ${MAX_TURN_RETRIES + 1} times. Last reason: ${lastReason}`,
             ),
         });
+
+        const uncovered = uncoveredStories(
+          accepted.result.tickets,
+          stories.map((number) => ({ number })),
+        ).map((story) => story.number);
+        if (uncovered.length > 0) {
+          await recorder?.noted(
+            `Accepted after the last retry, with ${uncovered.length === 1 ? "user story" : "user stories"} ${numberRanges(uncovered)} in no ticket's implements.`,
+          );
+        }
 
         const now = new Date().toISOString();
         const idByNumber = new Map(
@@ -185,6 +217,9 @@ export default defineAction({
             status: "ready" as const,
             kind: ticket.kind,
             waitsFor: ticket.kind === "gate" ? storedWaitsFor(ticket) : null,
+            implementsJson: JSON.stringify(
+              stories.length === 0 ? [] : storedImplements(ticket.implements),
+            ),
             blockedByJson: JSON.stringify(
               ticket.blockedBy.flatMap((number) => {
                 const id = idByNumber.get(number);

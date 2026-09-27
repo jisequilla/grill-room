@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { collisionKey } from "./brief-grounding.js";
 import {
   computeWaves,
+  numberRanges,
   separateOverlaps,
+  userStories,
   type ImplicitEdge,
   type TicketForSeparation,
   type TicketForWaves,
@@ -174,5 +176,114 @@ describe("separateOverlaps", () => {
       ok: false,
       cycle: [1, 2],
     });
+  });
+});
+
+describe("userStories", () => {
+  const section = (...lines: string[]) =>
+    ["## Problem Statement", "", "Export it.", "", "## User Stories", "", ...lines, "", "## Implementation Decisions", "", "- One."].join("\n");
+
+  it.each([
+    [
+      "numbered with a period",
+      section("1. As a user, I want A, so that B.", "2. As a tester, I want C.", "3. As an owner, I want D."),
+      [
+        { number: 1, text: "As a user, I want A, so that B." },
+        { number: 2, text: "As a tester, I want C." },
+        { number: 3, text: "As an owner, I want D." },
+      ],
+    ],
+    [
+      "numbered with a parenthesis",
+      section("1) As a user, I want A.", "2) As a user, I want B."),
+      [
+        { number: 1, text: "As a user, I want A." },
+        { number: 2, text: "As a user, I want B." },
+      ],
+    ],
+    [
+      "with a nested, indented item",
+      section("1. As a user, I want A.", "   1. a nested detail", "2. As a user, I want B."),
+      [
+        { number: 1, text: "As a user, I want A." },
+        { number: 2, text: "As a user, I want B." },
+      ],
+    ],
+    [
+      "with a continuation line",
+      section("1. As a user, I want A,", "   so that B."),
+      [{ number: 1, text: "As a user, I want A," }],
+    ],
+    [
+      "starting at 3",
+      section("3. Three.", "4. Four.", "5. Five."),
+      [
+        { number: 3, text: "Three." },
+        { number: 4, text: "Four." },
+        { number: 5, text: "Five." },
+      ],
+    ],
+    [
+      "with a gap",
+      section("1. One.", "2. Two.", "4. Four."),
+      [
+        { number: 1, text: "One." },
+        { number: 2, text: "Two." },
+        { number: 4, text: "Four." },
+      ],
+    ],
+    [
+      "with a repeated number",
+      section("1. First", "1. Second", "1. Third"),
+      [{ number: 1, text: "First" }],
+    ],
+    [
+      "under a lowercase heading",
+      "## user stories\n\n1. One.",
+      [{ number: 1, text: "One." }],
+    ],
+    ["under a level-3 heading", "### User Stories\n\n1. One.", []],
+    ["with no heading at all", "## Problem Statement\n\n1. One.", []],
+    [
+      "when the heading is followed directly by the next section",
+      ["## Problem Statement", "## Solution", "## User Stories", "## Implementation Decisions", "## Testing Decisions"].join("\n\n"),
+      [],
+    ],
+    [
+      "stopping at the next level-2 heading",
+      "## User Stories\n\n1. One.\n\n## Implementation Decisions\n\n2. Two.",
+      [{ number: 1, text: "One." }],
+    ],
+    [
+      "past a level-3 subheading",
+      "## User Stories\n\n1. One.\n\n### Admin\n\n2. Two.",
+      [
+        { number: 1, text: "One." },
+        { number: 2, text: "Two." },
+      ],
+    ],
+    ["with no space after the marker", section("10.No space"), []],
+    ["written as bullets", section("- As a user, I want A.", "- As a user, I want B."), []],
+    [
+      "with Windows line endings",
+      "## User Stories\r\n\r\n1. One.\r\n2. Two.",
+      [
+        { number: 1, text: "One." },
+        { number: 2, text: "Two." },
+      ],
+    ],
+  ])("reads stories %s", (_, markdown, expected) => {
+    expect(userStories(markdown)).toEqual(expected);
+  });
+});
+
+describe("numberRanges", () => {
+  it.each([
+    [[1, 2, 3, 5], "1-3, 5"],
+    [[4], "4"],
+    [[5, 4], "4-5"],
+    [[1, 3, 3, 9, 10, 11], "1, 3, 9-11"],
+  ])("writes %j as %s", (numbers, expected) => {
+    expect(numberRanges(numbers)).toBe(expected);
   });
 });

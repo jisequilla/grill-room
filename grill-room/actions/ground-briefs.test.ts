@@ -118,6 +118,7 @@ interface TicketSpec {
   blockedBy?: number[];
   kind?: "build" | "gate";
   waitsFor?: string | null;
+  implements?: number[];
 }
 
 function ticketsTurn(tickets: TicketSpec[]): ScriptedTurn {
@@ -129,6 +130,8 @@ function ticketsTurn(tickets: TicketSpec[]): ScriptedTurn {
         title: `Ticket ${ticket.number}`,
         body: `Do the work of ticket ${ticket.number}.`,
         blockedBy: [],
+        // The spec numbers one story: every build ticket builds it; a gate builds none.
+        implements: ticket.kind === "gate" ? [] : [1],
         ...ticket,
       })),
     },

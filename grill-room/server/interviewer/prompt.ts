@@ -1,3 +1,4 @@
+import { numberRanges } from "../tickets.js";
 import { interviewerInstructions, loadSpecTemplate } from "./instructions.js";
 import {
   MAX_HANDOFF_SCOUT_BUILDS_ON,
@@ -502,8 +503,30 @@ function renderTask(
         ...(request.greenfield && request.verifyCommand !== null
           ? ["", greenfieldTicketsSection(request.verifyCommand)]
           : []),
+        ...(request.userStories.length > 0
+          ? ["", userStoriesTicketsSection(request.userStories)]
+          : []),
       ].join("\n");
   }
+}
+
+/**
+ * The break-into-tickets rule for a spec that numbers its user stories: each
+ * ticket cites the stories it builds in `implements`, and every story is
+ * cited by at least one ticket. `storyReasons` checks the same rule.
+ */
+function userStoriesTicketsSection(userStories: readonly number[]): string {
+  return [
+    "## User stories",
+    "",
+    `The spec numbers its user stories: ${numberRanges(userStories)}.`,
+    "",
+    "In each ticket's `implements`, list the numbers of the user stories that",
+    "ticket builds, as the spec numbers them. Every one of those stories must be",
+    "in the `implements` of at least one ticket. A ticket that builds no story,",
+    "such as one that only sets up the project, leaves `implements` empty. A gate",
+    "implements no story: leave its `implements` empty.",
+  ].join("\n");
 }
 
 /**

@@ -1698,3 +1698,60 @@ describe("gates", () => {
     });
   });
 });
+
+describe("stories no ticket implements", () => {
+  const STORY_4 = {
+    number: 4,
+    text: "As a project owner, I want deleting the working folder to lose nothing anyone still reads, so that cleanup is safe by construction.",
+  };
+  const STORY_9 = {
+    number: 9,
+    text: "As an existing project owner whose export folder is already under docs, I want it to become the durable root and the working root to default to `.grill-room`, so that my documentation stays where it is.",
+  };
+  const SECTION = [
+    "## Stories no ticket implements",
+    "",
+    "No ticket lists these user stories from the spec in its `implements`. Before calling the feature done, add a ticket for each one, or confirm with the owner that it needs none.",
+    "",
+    `- Story 4: ${STORY_4.text}`,
+    `- Story 9: ${STORY_9.text}`,
+  ].join("\n");
+
+  it.each([
+    ["absent", undefined],
+    ["null", null],
+    ["empty", []],
+  ] as const)("renders no section when uncoveredStories is %s", (_, uncoveredStories) => {
+    const markdown = renderHandoffMarkdown({ ...aSource(), uncoveredStories });
+    expect(markdown).toBe(renderHandoffMarkdown(aSource()));
+    expect(markdown).not.toContain("## Stories no ticket implements");
+  });
+
+  it("renders one bullet per story, right after Waves and before the delegation lifecycle", () => {
+    const without = renderHandoffMarkdown(aSource());
+    const markdown = renderHandoffMarkdown({ ...aSource(), uncoveredStories: [STORY_4, STORY_9] });
+
+    expect(markdown).toBe(
+      without.replace("\n\n## Delegation lifecycle", `\n\n${SECTION}\n\n## Delegation lifecycle`),
+    );
+    const waves = markdown.indexOf("## Waves");
+    const section = markdown.indexOf("## Stories no ticket implements");
+    const lifecycle = markdown.indexOf("## Delegation lifecycle");
+    expect(waves).toBeGreaterThan(-1);
+    expect(waves).toBeLessThan(section);
+    expect(section).toBeLessThan(lifecycle);
+  });
+
+  it("renders a single story as one bullet", () => {
+    const markdown = renderHandoffMarkdown({ ...aSource(), uncoveredStories: [STORY_4] });
+    expect(markdown).toContain(
+      `confirm with the owner that it needs none.\n\n- Story 4: ${STORY_4.text}\n\n## Delegation lifecycle`,
+    );
+  });
+
+  it("leaves the briefs and the fingerprint alone", () => {
+    const withStories = { ...aSource(), uncoveredStories: [STORY_4] };
+    expect(renderHandoff(withStories).briefs).toEqual(renderHandoff(aSource()).briefs);
+    expect(handoffFingerprint(withStories)).toBe(handoffFingerprint(aSource()));
+  });
+});

@@ -264,6 +264,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   "scout-project-readiness": { turns: scoutProjectReadinessTurns() },
   "handoff-scout": { turns: handoffScoutTurns() },
   "gate-ticket": { turns: gateTicketTurns() },
+  "uncovered-story": { turns: uncoveredStoryTurns() },
   ...(demoScenario ? { [DEMO_SCENARIO]: demoScenario } : {}),
 };
 
@@ -983,6 +984,7 @@ export function gateTicketTurns(): ScriptedTurn[] {
             blockedBy: [],
             kind: "build",
             waitsFor: null,
+            implements: [1],
           },
           {
             number: 2,
@@ -992,6 +994,7 @@ export function gateTicketTurns(): ScriptedTurn[] {
             blockedBy: [],
             kind: "gate",
             waitsFor: "A live account on the payment platform, with API keys issued.",
+            implements: [],
           },
           {
             number: 3,
@@ -1001,11 +1004,46 @@ export function gateTicketTurns(): ScriptedTurn[] {
             blockedBy: [1, 2],
             kind: "build",
             waitsFor: null,
+            implements: [],
           },
         ],
       },
     },
   ];
+}
+
+/**
+ * {@link cannedInterviewTurns} with its breakdown replaced by three identical
+ * ones that cite no user story, so the spec's story 1 stays uncovered: the
+ * first two are refused and the third is accepted on the last attempt. What
+ * `uncovered-story` schedules.
+ */
+export function uncoveredStoryTurns(): ScriptedTurn[] {
+  const turns = cannedInterviewTurns();
+  const breakdown: ScriptedTurn = {
+    kind: "break-into-tickets",
+    result: {
+      tickets: [
+        {
+          number: 1,
+          slug: "build-the-workspace",
+          title: "Build the workspace",
+          body: "Build the workspace shell.",
+          blockedBy: [],
+          implements: [],
+        },
+        {
+          number: 2,
+          slug: "store-on-disk",
+          title: "Store the data on disk",
+          body: "Persist the workspace's data.",
+          blockedBy: [1],
+          implements: [],
+        },
+      ],
+    },
+  };
+  return [...turns.slice(0, -1), breakdown, breakdown, breakdown];
 }
 
 export function refusalThenSuccessTurns(): ScriptedTurn[] {
@@ -1348,6 +1386,7 @@ export function cannedInterviewTurns(): ScriptedTurn[] {
             title: "Build the workspace",
             body: "Build the workspace shell.",
             blockedBy: [],
+            implements: [1],
           },
           {
             number: 2,
@@ -1355,6 +1394,7 @@ export function cannedInterviewTurns(): ScriptedTurn[] {
             title: "Store the data on disk",
             body: "Persist the workspace's data.",
             blockedBy: [1],
+            implements: [],
           },
         ],
       },

@@ -385,3 +385,44 @@ describe("handoffs-markdown-generated-sha256 migration", () => {
     expect(updated.rows).toEqual([{ markdown_generated_sha256: "a-baseline" }]);
   });
 });
+
+describe("tickets-implements-column migration", () => {
+  beforeEach(dropSchema);
+
+  it("reads an existing ticket's implements_json as NULL, and round-trips a value, on a database at the previous version", async () => {
+    const migration = appMigrations.find((entry) => entry.name === "tickets-implements-column")!;
+    const before = appMigrations.filter((entry) => entry.version < migration.version);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    const ticketId = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [sessionId, "Grill Room", "An idea.", now, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_tickets (id, session_id, number, slug, title, body, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [ticketId, sessionId, 1, "build-the-workspace", "Build the workspace", "", now, now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const existing = await getDbExec().execute({
+      sql: `SELECT implements_json FROM gr_tickets WHERE id = ?`,
+      args: [ticketId],
+    });
+    expect(existing.rows).toEqual([{ implements_json: null }]);
+
+    await getDbExec().execute({
+      sql: `UPDATE gr_tickets SET implements_json = ? WHERE id = ?`,
+      args: ["[1,2]", ticketId],
+    });
+    const updated = await getDbExec().execute({
+      sql: `SELECT implements_json FROM gr_tickets WHERE id = ?`,
+      args: [ticketId],
+    });
+    expect(updated.rows).toEqual([{ implements_json: "[1,2]" }]);
+  });
+});

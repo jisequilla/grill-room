@@ -1225,3 +1225,58 @@ describe("planExport: a gate's ticket file", () => {
     ]);
   });
 });
+
+describe("planExport: a ticket's Implements line", () => {
+  const ACCOUNT = "A live account on the payment platform, with API keys issued.";
+
+  function fileFor(ticket: {
+    kind?: "build" | "gate";
+    waitsFor?: string | null;
+    implements?: readonly number[] | null;
+  }): string {
+    const tickets = [
+      {
+        number: 1,
+        slug: "build-the-workspace",
+        title: "Build the workspace",
+        body: "Build it.",
+        blockedBy: [],
+        ...ticket,
+      },
+    ];
+    return planExport({
+      sessionTitle: "Grill Room",
+      idea: "An idea.",
+      specMarkdown: "## Problem\n\nA spec.",
+      tickets,
+      decisions: [],
+      readiness: null,
+      scoutReport: null,
+    }).files.find((file) => file.relativePath === "issues/01-build-the-workspace.md")!.content;
+  }
+
+  it.each([
+    ["one story", [3], "Implements: user story 3"],
+    ["several stories, as ranges", [5, 2, 3], "Implements: user stories 2-3, 5"],
+  ])("writes %s after Blocked by", (_, implementsList, line) => {
+    expect(fileFor({ implements: implementsList })).toBe(
+      `# 01 Build the workspace\n\nStatus: ready-for-agent\nBlocked by: none\n${line}\n\nBuild it.`,
+    );
+  });
+
+  it("writes it after a gate's Wait for line", () => {
+    expect(fileFor({ kind: "gate", waitsFor: ACCOUNT, implements: [3] })).toBe(
+      `# 01 Build the workspace\n\nStatus: ready-for-human\nBlocked by: none\nWait for: ${ACCOUNT}\nImplements: user story 3\n\nBuild it.`,
+    );
+  });
+
+  it.each([
+    ["empty", []],
+    ["null", null],
+    ["absent", undefined],
+  ] as const)("writes no line when implements is %s", (_, implementsList) => {
+    expect(fileFor(implementsList === undefined ? {} : { implements: implementsList })).toBe(
+      "# 01 Build the workspace\n\nStatus: ready-for-agent\nBlocked by: none\n\nBuild it.",
+    );
+  });
+});

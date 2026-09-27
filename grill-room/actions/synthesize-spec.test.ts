@@ -100,6 +100,7 @@ const oneUnblockedTicket: ScriptedTurn = {
         title: "Build the workspace",
         body: "Build the workspace shell.",
         blockedBy: [],
+        implements: [1],
       },
     ],
   },

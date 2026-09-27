@@ -247,6 +247,12 @@ export interface BreakIntoTicketsRequest extends RequestBase {
   greenfield: boolean;
   /** The project's verify command, or null for a session with no project. */
   verifyCommand: string | null;
+  /**
+   * The numbers of the spec's user stories, as `userStories` reads them from
+   * `specMarkdown`. Empty when the spec numbers none: the prompt then asks
+   * for no citations and the story check is skipped.
+   */
+  userStories: number[];
 }
 
 /**

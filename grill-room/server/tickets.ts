@@ -23,6 +23,8 @@ export interface ProposedTicket {
   kind: TicketKind;
   /** What a gate waits for, in one line; null (or blank) for a build ticket. */
   waitsFor: string | null;
+  /** The numbers of the spec's user stories this ticket builds. */
+  implements: readonly number[];
 }
 
 export interface TicketSetValidation {
@@ -477,6 +479,8 @@ export interface StoredTicket {
   blockedByJson: string;
   kind: TicketKind;
   waitsFor: string | null;
+  /** JSON array of user story numbers; null for tickets made before the story check. */
+  implementsJson: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -493,6 +497,8 @@ export interface TicketView {
   kind: TicketKind;
   /** What a gate waits for; always null for a build ticket. */
   waitsFor: string | null;
+  /** The user stories it builds; null for tickets made before the story check. */
+  implements: number[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -518,9 +524,152 @@ export function describeTickets(
       }),
       kind: row.kind,
       waitsFor: row.waitsFor,
+      implements: parseImplements(row.implementsJson),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }));
+}
+
+/**
+ * A stored `implementsJson` read back: null for a NULL column, otherwise the
+ * array's positive integers, and `[]` for text that is not a JSON array.
+ */
+export function parseImplements(json: string | null): number[] | null {
+  if (json === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(
+    (value): value is number => typeof value === "number" && Number.isInteger(value) && value > 0,
+  );
+}
+
+/** What a ticket's `implements` is stored as: deduplicated and ascending. */
+export function storedImplements(numbers: readonly number[]): number[] {
+  return [...new Set(numbers)].sort((a, b) => a - b);
+}
+
+/** One of the spec's numbered user stories, as written. */
+export interface UserStory {
+  number: number;
+  text: string;
+}
+
+const USER_STORIES_HEADING = /^##[ \t]+User Stories[ \t]*$/i;
+const SECTION_END = /^#{1,2}[ \t]/;
+const STORY_ITEM = /^(\d{1,9})[.)][ \t]+(\S.*)$/;
+
+/**
+ * The spec's numbered user stories: the column-0 ordered-list items under the
+ * first `## User Stories` heading, up to the next level-1 or level-2 heading.
+ * Numbers are taken as written, and a repeated number keeps its first text.
+ * Only an item's first line counts; indented lines, bullets and subheadings
+ * are ignored. Ascending by number.
+ */
+export function userStories(specMarkdown: string): UserStory[] {
+  const lines = specMarkdown.split(/\r?\n/);
+  const start = lines.findIndex((line) => USER_STORIES_HEADING.test(line));
+  if (start === -1) return [];
+
+  const byNumber = new Map<number, string>();
+  for (const line of lines.slice(start + 1)) {
+    if (SECTION_END.test(line)) break;
+    const match = STORY_ITEM.exec(line);
+    if (!match) continue;
+    const number = Number(match[1]);
+    if (!byNumber.has(number)) byNumber.set(number, match[2]!.trim());
+  }
+
+  return [...byNumber]
+    .map(([number, text]) => ({ number, text }))
+    .sort((a, b) => a.number - b.number);
+}
+
+/**
+ * Numbers as ranges, for the prompt, the reasons and the issue file: sorted,
+ * deduplicated, runs of two or more written `a-b`, joined with `, `.
+ */
+export function numberRanges(numbers: readonly number[]): string {
+  const sorted = [...new Set(numbers)].sort((a, b) => a - b);
+  const pieces: string[] = [];
+  let index = 0;
+  while (index < sorted.length) {
+    let end = index;
+    while (end + 1 < sorted.length && sorted[end + 1] === sorted[end]! + 1) end += 1;
+    pieces.push(end > index ? `${sorted[index]}-${sorted[end]}` : `${sorted[index]}`);
+    index = end + 1;
+  }
+  return pieces.join(", ");
+}
+
+/** The stories no build ticket lists in `implements`, ascending. */
+export function uncoveredStories<Story extends { number: number }>(
+  tickets: readonly { kind: TicketKind; implements: readonly number[] }[],
+  stories: readonly Story[],
+): Story[] {
+  const covered = new Set(
+    tickets.filter((ticket) => ticket.kind !== "gate").flatMap((ticket) => ticket.implements),
+  );
+  return stories
+    .filter((story) => !covered.has(story.number))
+    .sort((a, b) => a.number - b.number);
+}
+
+/** `user story 4`, or `user stories 4, 9-11`. */
+function storiesPhrase(numbers: readonly number[]): string {
+  return `${numbers.length === 1 ? "user story" : "user stories"} ${numberRanges(numbers)}`;
+}
+
+/**
+ * Why a proposed set's story citations cannot be stored, written for the
+ * interviewer. Per ticket, in number order: a gate that cites any story, and a
+ * build ticket citing a number the spec does not have. Then, unless this is
+ * the last attempt, the stories no build ticket cites. Empty when the spec
+ * numbers no stories.
+ */
+export function storyReasons(
+  tickets: readonly ProposedTicket[],
+  stories: readonly number[],
+  options: { lastAttempt: boolean },
+): string[] {
+  if (stories.length === 0) return [];
+  const known = new Set(stories);
+  const reasons: string[] = [];
+
+  for (const ticket of [...tickets].sort((a, b) => a.number - b.number)) {
+    if (ticket.kind === "gate") {
+      if (ticket.implements.length > 0) {
+        reasons.push(
+          `Ticket ${ticket.number} is a gate, so it implements no user story. Leave its \`implements\` empty.`,
+        );
+      }
+      continue;
+    }
+    const unknown = storedImplements(ticket.implements).filter((number) => !known.has(number));
+    if (unknown.length > 0) {
+      reasons.push(
+        `Ticket ${ticket.number} implements ${storiesPhrase(unknown)}, which the spec does not have. The spec's user stories are ${numberRanges(stories)}.`,
+      );
+    }
+  }
+
+  if (!options.lastAttempt) {
+    const uncovered = uncoveredStories(
+      tickets,
+      stories.map((number) => ({ number })),
+    ).map((story) => story.number);
+    if (uncovered.length > 0) {
+      reasons.push(
+        `${uncovered.length === 1 ? "User story" : "User stories"} ${numberRanges(uncovered)} ${uncovered.length === 1 ? "is" : "are"} in no ticket's \`implements\`. Every user story must be implemented by at least one ticket: add its number to the ticket that builds it, or add a ticket for it.`,
+      );
+    }
+  }
+
+  return reasons;
 }
 
 /** The facts `ticketsAreCurrent` needs from a session's spec. */

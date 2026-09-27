@@ -556,4 +556,9 @@ ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS waits_for TEXT`,
     name: "handoffs-markdown-generated-sha256",
     sql: `ALTER TABLE gr_handoffs ADD COLUMN IF NOT EXISTS markdown_generated_sha256 TEXT`,
   },
+  {
+    version: 72,
+    name: "tickets-implements-column",
+    sql: `ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS implements_json TEXT`,
+  },
 ];
