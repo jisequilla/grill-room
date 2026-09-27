@@ -117,6 +117,17 @@ const twoGoodTickets = ticketsTurn([
   { number: 2, slug: "store-on-disk", blockedBy: [1] },
 ]);
 
+const G1 = (number: number) =>
+  `Ticket ${number} is a gate, so its \`waitsFor\` must say in one line what it waits for.`;
+const G2 = (number: number) =>
+  `Ticket ${number} is a build ticket, so its \`waitsFor\` must be null. Only a gate waits for something outside the code.`;
+const G3 = (number: number) =>
+  `Ticket ${number} is a gate that no ticket lists in \`blockedBy\`. A gate exists to hold back the tickets that need it: list it in their \`blockedBy\`.`;
+
+function rejectionOf(request: unknown): string {
+  return (request as BreakIntoTicketsRequest).rejectionReason ?? "";
+}
+
 describe("break-into-tickets", () => {
   useTestDatabase();
   afterEach(resetInterviewer);
@@ -815,16 +826,6 @@ describe("gates", () => {
   type Row = Parameters<typeof ticketsTurn>[0][number];
 
   const ACCOUNT = "A live account on the payment platform, with API keys issued.";
-  const G1 = (number: number) =>
-    `Ticket ${number} is a gate, so its \`waitsFor\` must say in one line what it waits for.`;
-  const G2 = (number: number) =>
-    `Ticket ${number} is a build ticket, so its \`waitsFor\` must be null. Only a gate waits for something outside the code.`;
-  const G3 = (number: number) =>
-    `Ticket ${number} is a gate that no ticket lists in \`blockedBy\`. A gate exists to hold back the tickets that need it: list it in their \`blockedBy\`.`;
-
-  function rejectionOf(request: unknown): string {
-    return (request as BreakIntoTicketsRequest).rejectionReason ?? "";
-  }
 
   it.each<[string, Row[]]>([
     [
@@ -956,6 +957,8 @@ describe("seam: gates shaped as the prompt describes pass the check", () => {
   afterEach(resetInterviewer);
   const repos = useTempGitRepos();
 
+  type Row = Parameters<typeof ticketsTurn>[0][number];
+
   async function aSessionInProject(commit: boolean): Promise<string> {
     const root = repos.create({ commit });
     const project = await registerProject.run({
@@ -972,6 +975,47 @@ describe("seam: gates shaped as the prompt describes pass the check", () => {
     scriptInterviewer([{ kind: "synthesize-spec", result: { markdown: GOOD_SPEC_MARKDOWN } }]);
     await synthesizeSpec.run({ sessionId: session.id });
     return session.id;
+  }
+
+  function shapedRows(): Row[] {
+    return [
+      {
+        number: 1,
+        slug: "set-up-the-workspace",
+        body: "Set up the workspace and its test runner. Acceptance: `pnpm test` passes.",
+        kind: "build",
+        waitsFor: null,
+      },
+      {
+        number: 2,
+        slug: "payment-account",
+        body: "The owner opens the account; it is in place once API keys are issued.",
+        kind: "gate",
+        waitsFor: "A live account on the payment platform, with API keys issued.",
+      },
+      {
+        number: 3,
+        slug: "take-payments",
+        kind: "build",
+        waitsFor: null,
+        blockedBy: [1, 2],
+      },
+      {
+        number: 4,
+        slug: "part-one-used",
+        body: "The owner uses part one on one real export; it is in place once that export is reviewed.",
+        kind: "gate",
+        waitsFor: "Part one used on one real export first.",
+        blockedBy: [3],
+      },
+      {
+        number: 5,
+        slug: "part-two",
+        kind: "build",
+        waitsFor: null,
+        blockedBy: [4],
+      },
+    ];
   }
 
   it.each([
@@ -996,45 +1040,22 @@ describe("seam: gates shaped as the prompt describes pass the check", () => {
     expect(gateKind).toBe("gate");
     expect(buildKind).toBe("build");
     expect(prompt.includes("## This repository has no commits yet")).toBe(!commit);
+    expect(prompt).toContain(
+      "Every gate must be in the `blockedBy` of at least one other ticket: a gate\nthat holds back no ticket is refused.",
+    );
 
-    const shaped = ticketsTurn([
-      {
-        number: 1,
-        slug: "set-up-the-workspace",
-        body: "Set up the workspace and its test runner. Acceptance: `pnpm test` passes.",
-        kind: buildKind as "build",
-        waitsFor: null,
-      },
-      {
-        number: 2,
-        slug: "payment-account",
-        body: "The owner opens the account; it is in place once API keys are issued.",
-        kind: gateKind as "gate",
-        waitsFor: "A live account on the payment platform, with API keys issued.",
-      },
-      {
-        number: 3,
-        slug: "take-payments",
-        kind: buildKind as "build",
-        waitsFor: null,
-        blockedBy: [1, 2],
-      },
-      {
-        number: 4,
-        slug: "part-one-used",
-        body: "The owner uses part one on one real export; it is in place once that export is reviewed.",
-        kind: gateKind as "gate",
-        waitsFor: "Part one used on one real export first.",
-        blockedBy: [3],
-      },
-      {
-        number: 5,
-        slug: "part-two",
-        kind: buildKind as "build",
-        waitsFor: null,
-        blockedBy: [4],
-      },
-    ]);
+    const rows = shapedRows();
+    expect(
+      rows
+        .filter((row) => row.kind === "gate")
+        .every((gate) =>
+          rows.some(
+            (other) => other.number !== gate.number && (other.blockedBy ?? []).includes(gate.number),
+          ),
+        ),
+    ).toBe(true);
+
+    const shaped = ticketsTurn(rows);
     const second = scriptInterviewer([shaped]);
 
     await breakIntoTickets.run({ sessionId });
@@ -1049,6 +1070,22 @@ describe("seam: gates shaped as the prompt describes pass the check", () => {
       [4, "gate"],
       [5, "build"],
     ]);
+  });
+
+  it.each([
+    ["in a repository with commits", true],
+    ["in a repository with no commits yet", false],
+  ])("refuses a gate no ticket lists, with G3's reason, %s", async (_, commit) => {
+    const sessionId = await aSessionInProject(commit);
+    const rows = shapedRows();
+    const unlisted = rows.map((row) => (row.number === 5 ? { ...row, blockedBy: [3] } : row));
+
+    const interviewer = scriptInterviewer([ticketsTurn(unlisted), ticketsTurn(rows)]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(3);
+    expect(rejectionOf(interviewer.requests[1])).toBe(G3(4));
   });
 });
 
