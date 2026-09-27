@@ -546,7 +546,14 @@ describe("cardsAskable and cardsCurrent", () => {
   const EARLIER = "2026-09-27T09:00:00.000Z";
   const BREAKDOWN = "2026-09-27T10:00:00.000Z";
   const LATER = "2026-09-27T11:00:00.000Z";
-  const spec = {
+  const spec: {
+    consistencyCheckedFor: string | null;
+    consistencySpecSha256: string | null;
+    ticketsGeneratedAt: string | null;
+    markdown: string;
+    current: boolean;
+    updatedAt: string;
+  } = {
     consistencyCheckedFor: BREAKDOWN,
     consistencySpecSha256: hash,
     ticketsGeneratedAt: BREAKDOWN,

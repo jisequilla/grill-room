@@ -207,15 +207,15 @@ describe("add-decision", () => {
       const fromAction = await addDecision.run({ sessionId: viaAction, ...input });
       const fromCore = await addDecisionCore({ sessionId: viaCore, ...input });
 
-      const comparable = (view: typeof fromAction) => ({
+      const comparable = (view: NonNullable<typeof fromAction>) => ({
         ...view,
         id: "<id>",
-        key: view!.key.replace(/-[0-9a-f]{8}$/, "-<suffix>"),
+        key: view.key?.replace(/-[0-9a-f]{8}$/, "-<suffix>"),
         awaitingPlacementSince: "<now>",
         createdAt: "<now>",
         updatedAt: "<now>",
       });
-      expect(comparable(fromCore)).toEqual(comparable(fromAction));
+      expect(comparable(fromCore!)).toEqual(comparable(fromAction!));
       expect(fromCore).toMatchObject({
         questionTitle: input.title,
         questionBody: input.body,
