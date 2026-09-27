@@ -321,7 +321,7 @@ describe("handoff generation", () => {
     expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(true);
     const withRecords = await generateHandoff.run({ sessionId: session.id });
     expect(withRecords.markdown).toContain(
-      `pnpm action set-build-record --sessionId ${session.id} --ticketNumber 2 `,
+      `pnpm action set-build-record --sessionId ${session.id} --ticketNumber <ticket-number> `,
     );
   });
 
