@@ -8,6 +8,7 @@ import {
   FILE_BOUNDARIES_SLOT,
   fillBundlePath,
   handoffFingerprint,
+  type HandoffCard,
   type HandoffGrounding,
   type HandoffSource,
   parseBriefs,
@@ -15,6 +16,7 @@ import {
   renderHandoff,
   renderHandoffMarkdown,
 } from "./handoff.js";
+import { consistencyFindingsResult } from "./interviewer/fake.js";
 
 const ROOT = "/repos/target";
 
@@ -597,6 +599,33 @@ describe("handoffFingerprint", () => {
     expect(handoffFingerprint(aSource())).toBe(pinned);
     expect(handoffFingerprint(aSource({ maxTicketsInFlight: 3 }))).toBe(pinned);
     expect(handoffFingerprint(aSource({ maxTicketsInFlight: 2 }))).not.toBe(pinned);
+  });
+
+  it("hashes a source with no open card and a current or absent check exactly as before, and each consistency key differently", () => {
+    const pinned = "7cb3834b6357f33c1d8fd7a276ceb2266946f3cf08139ebab86bf924b1125261";
+
+    expect(handoffFingerprint(aSource())).toBe(pinned);
+    expect(handoffFingerprint({ ...aSource(), openCards: [] })).toBe(pinned);
+    expect(handoffFingerprint({ ...aSource(), consistencyNotCurrent: false })).toBe(pinned);
+    expect(
+      handoffFingerprint({ ...aSource(), openCards: [], consistencyNotCurrent: false }),
+    ).toBe(pinned);
+
+    const oneCard = handoffFingerprint({ ...aSource(), openCards: [scenarioOpenCards()[1]!] });
+    const notCurrent = handoffFingerprint({ ...aSource(), consistencyNotCurrent: true });
+    expect(oneCard).not.toBe(pinned);
+    expect(notCurrent).not.toBe(pinned);
+    expect(notCurrent).not.toBe(oneCard);
+    // Any change to an open card changes it too: its question, or one card fewer.
+    expect(
+      handoffFingerprint({
+        ...aSource(),
+        openCards: [{ ...scenarioOpenCards()[1]!, question: "Another?" }],
+      }),
+    ).not.toBe(oneCard);
+    expect(
+      handoffFingerprint({ ...aSource(), openCards: scenarioOpenCards().slice(0, 2) }),
+    ).not.toBe(oneCard);
   });
 });
 
@@ -2016,5 +2045,209 @@ describe("execution plan", () => {
     expect(markdown).toContain(`${plan}\n## Waves\n`);
     expect(markdown.indexOf("## Before delegating")).toBeLessThan(markdown.indexOf("## Execution plan"));
     expect(markdown.split("## Execution plan")).toHaveLength(2);
+  });
+});
+
+/**
+ * The open cards of the `consistency-findings` scenario's check with card 7
+ * dismissed: cards 1 to 6, as `loadHandoffSource` passes them.
+ */
+function scenarioOpenCards(): HandoffCard[] {
+  return consistencyFindingsResult()
+    .findings.slice(0, 6)
+    .map((finding, index) => ({
+      number: index + 1,
+      kind: finding.kind,
+      at: finding.at,
+      against: finding.against,
+      question: finding.question,
+    }));
+}
+
+describe("questions the spec and tickets leave open", () => {
+  const OPEN_QUESTIONS = [
+    "## Questions the spec and tickets leave open",
+    "",
+    "The consistency check found these statements, which leave a builder to decide something the owner never decided. Before delegating a ticket a question quotes, get the owner's answer and put it in the delegation prompt; the question is also in that ticket's brief. Answer the rest before calling the feature done.",
+    "",
+    '- How long after the benchmark ends must run data be kept? (spec, Implementation Decisions: "must outlast the benchmark horizon")',
+    '- What is N, the number of cadences polling is capped at? (ticket 02: "capped at N x cadence")',
+    '- Which root span does a run driven by hand get? (spec, Implementation Decisions: "A run whose run_id starts with `wf_` gets a root span.")',
+    '- Does ticket 1 fill in Retention now, or is it left as a placeholder for a later ticket? (spec, Implementation Decisions: "Retention is a placeholder for a later ticket."; ticket 01: "Fill in Retention")',
+    '- Which does the booking payment use: Checkout or Payment Element? (ticket 03: "Checkout or Payment Element")',
+    '- How long can an accepted booking stay unpaid before it times out? (spec, Implementation Decisions: "follow a defined timeout")',
+  ].join("\n");
+  const NOT_JUDGED = [
+    "## Questions the spec and tickets leave open",
+    "",
+    'The consistency check has not judged these tickets: it failed, it was skipped because the breakdown has more tickets than one check covers, or it ran on an earlier spec or breakdown. So nothing here lists what the spec and tickets leave a builder to decide. Before delegating a ticket, read it for a limit with no value, a rule stated for one case only, an "X or Y" left open, a value called defined with no default, or a target named only by its role, and get the owner\'s answer to each.',
+  ].join("\n");
+
+  // The rows of the HANDOFF table. A dismissed or asked card never reaches
+  // the source: `loadHandoffSource` passes only open current cards.
+  it.each<[string, Partial<HandoffSource>, string | null]>([
+    ["never checked, and every existing fixture", {}, null],
+    ["current, one or more open cards", { openCards: scenarioOpenCards(), consistencyNotCurrent: false }, OPEN_QUESTIONS],
+    ["current, no cards", { openCards: [], consistencyNotCurrent: false }, null],
+    ["current, every card dismissed or asked", { openCards: [], consistencyNotCurrent: false }, null],
+    ["exists, not current: this breakdown's check failed", { openCards: [], consistencyNotCurrent: true }, NOT_JUDGED],
+    ["exists, not current: skipped above 40 tickets", { openCards: [], consistencyNotCurrent: true }, NOT_JUDGED],
+    [
+      "exists, not current: the cards are from an earlier spec or breakdown",
+      { openCards: [], consistencyNotCurrent: true },
+      NOT_JUDGED,
+    ],
+  ])("%s", (_, fields, expected) => {
+    const withStories: HandoffSource = {
+      ...aSource(),
+      uncoveredStories: [{ number: 4, text: "As an owner, I want it all." }],
+    };
+    const without = renderHandoffMarkdown(withStories);
+    const markdown = renderHandoffMarkdown({ ...withStories, ...fields });
+
+    if (expected === null) {
+      expect(markdown).toBe(without);
+      expect(markdown).not.toContain("## Questions the spec and tickets leave open");
+      return;
+    }
+    // Exactly the section, directly after the uncovered stories and before the lifecycle.
+    expect(markdown).toBe(
+      without.replace("\n\n## Delegation lifecycle", `\n\n${expected}\n\n## Delegation lifecycle`),
+    );
+    expect(markdown.indexOf("## Stories no ticket implements")).toBeLessThan(
+      markdown.indexOf("## Questions the spec and tickets leave open"),
+    );
+    expect(markdown.split("## Questions the spec and tickets leave open")).toHaveLength(2);
+  });
+
+  it("renders the not-judged paragraph instead of the questions when both are given", () => {
+    const markdown = renderHandoffMarkdown({
+      ...aSource(),
+      openCards: scenarioOpenCards(),
+      consistencyNotCurrent: true,
+    });
+    expect(markdown).toContain(NOT_JUDGED);
+    expect(markdown).not.toContain("must outlast the benchmark horizon");
+  });
+
+  it("pads a quoted ticket as its issue file is, three digits from 100 tickets", () => {
+    const tickets = Array.from({ length: 100 }, (_, index) => ({
+      id: `t${index + 1}`,
+      number: index + 1,
+      slug: `ticket-${index + 1}`,
+      title: `Ticket ${index + 1}`,
+      body: "Do it.",
+      blockedBy: [],
+    }));
+    const markdown = renderHandoffMarkdown({
+      ...aSource(),
+      tickets,
+      waves: [tickets.map((ticket) => ticket.number)],
+      openCards: [scenarioOpenCards()[1]!],
+    });
+    expect(markdown).toContain(
+      '- What is N, the number of cadences polling is capped at? (ticket 002: "capped at N x cadence")',
+    );
+  });
+});
+
+describe("open questions on a brief", () => {
+  const BRIEF_02_SECTION = [
+    "## Open questions on this ticket",
+    "",
+    "The consistency check found that this ticket leaves these questions to the owner. Do not choose an answer yourself: if your prompt does not give you the owner's answer to one, stop and report the question instead of building around it.",
+    "",
+    "- What is N, the number of cadences polling is capped at? (\"capped at N x cadence\")",
+  ].join("\n");
+
+  /** The brief of ticket `number`, rendered from `source`, or undefined when it gets none. */
+  function briefOf(source: HandoffSource, number: number): string | undefined {
+    return renderHandoff(source).briefs.find((brief) => brief.ticketNumber === number)?.markdown;
+  }
+
+  /** `briefOf` without cards, with `section` placed after the ticket and before File boundaries. */
+  function withSection(number: number, sectionText: string): string {
+    return briefOf(aSource(), number)!.replace(
+      "\n\n## File boundaries",
+      `\n\n${sectionText}\n\n## File boundaries`,
+    );
+  }
+
+  it("renders exactly the question quoting ticket 02, after the ticket and before File boundaries", () => {
+    const source = { ...aSource(), openCards: scenarioOpenCards() };
+    expect(briefOf(source, 2)).toBe(withSection(2, BRIEF_02_SECTION));
+  });
+
+  it.each<[string, Partial<HandoffSource>, number, string[] | null]>([
+    ["a ticket quoted by no open current card", { openCards: scenarioOpenCards().slice(0, 1) }, 2, null],
+    ["every existing fixture", {}, 2, null],
+    [
+      "ticket 1, quoted as the `against` side of card 4",
+      { openCards: scenarioOpenCards() },
+      1,
+      [
+        '- Does ticket 1 fill in Retention now, or is it left as a placeholder for a later ticket? ("Fill in Retention")',
+      ],
+    ],
+    [
+      "two cards quoting ticket 3, in card-number order",
+      {
+        openCards: [
+          ...scenarioOpenCards(),
+          {
+            number: 7,
+            kind: "unnamed-target",
+            at: { artefact: "ticket", section: null, ticket: 3, quote: "the booking service" },
+            against: null,
+            question: "Which host is the booking service?",
+          },
+        ],
+      },
+      3,
+      [
+        '- Which does the booking payment use: Checkout or Payment Element? ("Checkout or Payment Element")',
+        '- Which host is the booking service? ("the booking service")',
+      ],
+    ],
+    ["a card quoting only the spec", { openCards: [scenarioOpenCards()[0]!] }, 1, null],
+    ["the card quoting it dismissed or asked", { openCards: [], consistencyNotCurrent: false }, 2, null],
+    ["the check exists but is not current", { openCards: [], consistencyNotCurrent: true }, 2, null],
+  ])("%s", (_, fields, number, bullets) => {
+    const brief = briefOf({ ...aSource(), ...fields }, number);
+    if (bullets === null) {
+      expect(brief).toBe(briefOf(aSource(), number));
+      expect(brief).not.toContain("## Open questions on this ticket");
+      return;
+    }
+    expect(brief).toBe(
+      withSection(
+        number,
+        [
+          "## Open questions on this ticket",
+          "",
+          "The consistency check found that this ticket leaves these questions to the owner. Do not choose an answer yourself: if your prompt does not give you the owner's answer to one, stop and report the question instead of building around it.",
+          "",
+          ...bullets,
+        ].join("\n"),
+      ),
+    );
+  });
+
+  it("lists a card quoting a gate only in HANDOFF.md: a gate gets no brief", () => {
+    const gateCard: HandoffCard = {
+      number: 1,
+      kind: "undefaulted-value",
+      at: { artefact: "ticket", section: null, ticket: 2, quote: "API keys are issued" },
+      against: null,
+      question: "Which API keys does the payment account need?",
+    };
+    const source = { ...aSourceWithGate(), openCards: [gateCard] };
+    const rendered = renderHandoff(source);
+
+    expect(rendered.briefs.map((brief) => brief.ticketNumber)).toEqual([1, 3]);
+    expect(rendered.briefs).toEqual(renderHandoff(aSourceWithGate()).briefs);
+    expect(rendered.markdown).toContain(
+      '- Which API keys does the payment account need? (ticket 02: "API keys are issued")',
+    );
   });
 });

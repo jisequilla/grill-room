@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { applyMigrations } from "../../test/db.js";
 import { IN_MEMORY_DATABASE_URL } from "../../test/setup.js";
+import { hashExportContent } from "../export.js";
 import { appMigrations, MIGRATIONS_TABLE } from "./migrations.js";
 
 async function dropSchema(): Promise<void> {
@@ -511,5 +512,72 @@ describe("consistency-findings-table migration", () => {
       args: [sessionId],
     });
     expect(card.rows).toEqual([{ status: "open", against_json: null, decision_key: null }]);
+  });
+});
+
+describe("consistency-findings-decision-column migration", () => {
+  beforeEach(dropSchema);
+
+  it("adds the card's decision and the spec's attempt stamp and hash, backfilling both from the checked stamp and the markdown, on a database at the previous version", async () => {
+    const migration = appMigrations.find(
+      (entry) => entry.name === "consistency-findings-decision-column",
+    )!;
+    const before = appMigrations.filter((entry) => entry.version < migration.version);
+    expect(before[before.length - 1]!.name).toBe("consistency-findings-session-index");
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const checkedAt = "2026-09-01T10:00:00.000Z";
+    const specs = [
+      { id: randomUUID(), markdown: "## Problem Statement\n\nChecked.\n", checked: checkedAt },
+      {
+        id: randomUUID(),
+        markdown: "## Problem Statement\r\n\r\nChecked, with CRLF line ends.\r\n",
+        checked: checkedAt,
+      },
+      { id: randomUUID(), markdown: "## Problem Statement\n\nNever checked.\n", checked: null },
+    ];
+    const sessionIds: string[] = [];
+    for (const spec of specs) {
+      const sessionId = randomUUID();
+      sessionIds.push(sessionId);
+      await getDbExec().execute({
+        sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+        args: [sessionId, "Grill Room", "An idea.", now, now],
+      });
+      await getDbExec().execute({
+        sql: `INSERT INTO gr_specs (id, session_id, markdown, tickets_generated_at, consistency_checked_for, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        args: [spec.id, sessionId, spec.markdown, checkedAt, spec.checked, now, now],
+      });
+    }
+    const cardId = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_consistency_findings (id, session_id, number, kind, at_json, question, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [cardId, sessionIds[0], 1, "open-choice", "{}", "Which?", "dismissed", now, now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const card = await getDbExec().execute({
+      sql: `SELECT status, decision_id FROM gr_consistency_findings WHERE id = ?`,
+      args: [cardId],
+    });
+    expect(card.rows).toEqual([{ status: "dismissed", decision_id: null }]);
+
+    const stamps = [];
+    for (const spec of specs) {
+      const { rows } = await getDbExec().execute({
+        sql: `SELECT consistency_attempted_for, consistency_spec_sha256 FROM gr_specs WHERE id = ?`,
+        args: [spec.id],
+      });
+      stamps.push(rows[0]);
+    }
+    expect(stamps).toEqual([
+      { consistency_attempted_for: checkedAt, consistency_spec_sha256: hashExportContent(specs[0]!.markdown) },
+      { consistency_attempted_for: checkedAt, consistency_spec_sha256: hashExportContent(specs[1]!.markdown) },
+      { consistency_attempted_for: null, consistency_spec_sha256: null },
+    ]);
   });
 });
