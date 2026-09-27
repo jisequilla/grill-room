@@ -1839,6 +1839,44 @@ describe("export separates tickets in one wave that change the same file", () =>
   });
 });
 
+describe("export after a regeneration that kept an edited brief", () => {
+  useTestDatabase();
+
+  it("writes the kept brief word for word, and HANDOFF.md and the other briefs from today's render", async () => {
+    const { root, session } = await aReadySession();
+    await insertTicket(session.id, { number: 3, slug: "export-it" });
+    await generateHandoff.run({ sessionId: session.id });
+    const mine = "# My brief 2\n";
+    await updateHandoff.run({ sessionId: session.id, briefs: [{ ticketNumber: 2, markdown: mine }] });
+    await setTicketBlockedBy.run({ ticketId: await ticketIdFor(session.id, 2), blockedBy: [] });
+    const regenerated = await generateHandoff.run({ sessionId: session.id });
+    expect(regenerated).toMatchObject({ stale: false, editedBriefs: [2], outdatedBriefs: [2] });
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    expect(result.ungroundedBriefs).toEqual(expect.arrayContaining([{ ticket: 2, reason: "edited" }]));
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    expect(await fs.readFile(path.join(bundleDir, "briefs", "02-store-on-disk.md"), "utf8")).toBe(mine);
+
+    const handoffOnDisk = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoffOnDisk).toContain("**02 Ticket 2**");
+    expect(handoffOnDisk).not.toContain("**02 Ticket 2** (blocked by 01)");
+
+    const loaded = await loadHandoffSource(session.id);
+    if (!("source" in loaded)) throw new Error("expected a handoff source");
+    const bundlePath = bundlePathFor(loaded.source.project.visibility, loaded.source.project.rootPath, bundleDir);
+    for (const [number, file] of [
+      [1, "01-build-the-workspace.md"],
+      [3, "03-export-it.md"],
+    ] as const) {
+      const ticket = loaded.source.tickets.find((candidate) => candidate.number === number)!;
+      expect(await fs.readFile(path.join(bundleDir, "briefs", file), "utf8")).toBe(
+        fillBundlePath(renderBrief(loaded.source, ticket), bundlePath),
+      );
+    }
+  });
+});
+
 describe("gates", () => {
   useTestDatabase();
 

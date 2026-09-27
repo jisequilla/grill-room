@@ -9,6 +9,7 @@ import {
   handoffFingerprint,
   type HandoffGrounding,
   type HandoffSource,
+  parseBriefs,
   renderBrief,
   renderHandoff,
   renderHandoffMarkdown,
@@ -480,6 +481,23 @@ describe("bundle paths", () => {
     expect(fillBundlePath(`${BUNDLE_TOKEN}/spec.md and ${BUNDLE_TOKEN}/briefs/`, "x")).toBe(
       "x/spec.md and x/briefs/",
     );
+  });
+});
+
+describe("parseBriefs", () => {
+  it("keeps a string generatedSha256 and drops a non-string one, keeping the brief", () => {
+    const json = JSON.stringify([
+      { ticketNumber: 1, relativePath: "briefs/01-a.md", markdown: "# A\n", generatedSha256: "abc" },
+      { ticketNumber: 2, relativePath: "briefs/02-b.md", markdown: "# B\n", generatedSha256: 42 },
+      { ticketNumber: 3, relativePath: "briefs/03-c.md", markdown: "# C\n", generatedSha256: null },
+      { ticketNumber: 4, relativePath: "briefs/04-d.md", markdown: "# D\n" },
+    ]);
+    expect(parseBriefs(json)).toEqual([
+      { ticketNumber: 1, relativePath: "briefs/01-a.md", markdown: "# A\n", generatedSha256: "abc" },
+      { ticketNumber: 2, relativePath: "briefs/02-b.md", markdown: "# B\n" },
+      { ticketNumber: 3, relativePath: "briefs/03-c.md", markdown: "# C\n" },
+      { ticketNumber: 4, relativePath: "briefs/04-d.md", markdown: "# D\n" },
+    ]);
   });
 });
 

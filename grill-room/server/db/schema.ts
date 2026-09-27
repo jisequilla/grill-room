@@ -545,13 +545,19 @@ export const handoffs = table("gr_handoffs", {
     .references(() => sessions.id, { onDelete: "cascade" }),
   /** HANDOFF.md, with `{{BUNDLE}}` standing for the bundle path export fills in. */
   markdown: text("markdown").notNull(),
-  /** JSON array of `{ ticketNumber, relativePath, markdown }`, one per ticket, in number order. */
+  /**
+   * JSON array of `{ ticketNumber, relativePath, markdown, generatedSha256? }`, one per ticket,
+   * in number order. `generatedSha256` is the brief's baseline: the hash of the brief text Grill
+   * Room generated for it. It is absent on a legacy row.
+   */
   briefsJson: text("briefs_json").notNull().default("[]"),
   fingerprint: text("fingerprint").notNull(),
   revision: integer("revision").notNull().default(1),
   generatedAt: text("generated_at").notNull(),
-  /** Set by an edit in the UI, cleared by regeneration. */
+  /** Set by an edit in the UI; cleared by a regeneration that keeps no edited brief. */
   editedAt: text("edited_at"),
+  /** HANDOFF.md's baseline: the hash of the text Grill Room generated for it. Null on a legacy row. */
+  markdownGeneratedSha256: text("markdown_generated_sha256"),
   exportedFingerprint: text("exported_fingerprint"),
   exportedRevision: integer("exported_revision"),
   exportedAt: text("exported_at"),

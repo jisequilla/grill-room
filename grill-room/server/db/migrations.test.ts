@@ -345,3 +345,43 @@ describe("tickets-kind-columns migration", () => {
     ]);
   });
 });
+
+describe("handoffs-markdown-generated-sha256 migration", () => {
+  beforeEach(dropSchema);
+
+  it("adds a nullable markdown_generated_sha256 to handoffs on a database at v70, leaving an existing handoff without one", async () => {
+    const before = appMigrations.filter((migration) => migration.version <= 70);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    const handoffId = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [sessionId, "Grill Room", "An idea.", now, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_handoffs (id, session_id, markdown, briefs_json, fingerprint, generated_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [handoffId, sessionId, "# Handoff\n", "[]", "a-fingerprint", now, now, now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const { rows } = await getDbExec().execute({
+      sql: `SELECT markdown_generated_sha256 FROM gr_handoffs WHERE id = ?`,
+      args: [handoffId],
+    });
+    expect(rows).toEqual([{ markdown_generated_sha256: null }]);
+
+    await getDbExec().execute({
+      sql: `UPDATE gr_handoffs SET markdown_generated_sha256 = ? WHERE id = ?`,
+      args: ["a-baseline", handoffId],
+    });
+    const updated = await getDbExec().execute({
+      sql: `SELECT markdown_generated_sha256 FROM gr_handoffs WHERE id = ?`,
+      args: [handoffId],
+    });
+    expect(updated.rows).toEqual([{ markdown_generated_sha256: "a-baseline" }]);
+  });
+});

@@ -551,4 +551,9 @@ ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS tool_calls_json TEXT`,
     sql: `ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'build';
 ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS waits_for TEXT`,
   },
+  {
+    version: 71,
+    name: "handoffs-markdown-generated-sha256",
+    sql: `ALTER TABLE gr_handoffs ADD COLUMN IF NOT EXISTS markdown_generated_sha256 TEXT`,
+  },
 ];

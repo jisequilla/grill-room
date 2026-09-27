@@ -59,8 +59,11 @@ function documentText(handoff: Handoff, key: string): string {
 
 /**
  * The session's HANDOFF.md and per-ticket briefs: generate, read, edit, and
- * regenerate them. Regenerating over edits asks first. Badges say when the
- * handoff no longer matches its inputs and when the exported copy is behind.
+ * regenerate them. Regenerating keeps hand-edited briefs and asks first only
+ * when it would lose an edit; "Regenerate, replacing edits" asks to rewrite
+ * everything. Badges say when the handoff no longer matches its inputs and
+ * when the exported copy is behind, and a note names kept briefs whose
+ * ticket changed since.
  */
 export function HandoffSection({ sessionId }: { sessionId: string }) {
   const t = useT();
@@ -110,13 +113,12 @@ export function HandoffSection({ sessionId }: { sessionId: string }) {
     : null;
   const busy = generate.isPending || update.isPending;
 
-  function regenerate() {
-    if (handoff?.editedAt) {
-      setConfirmOverwrite(true);
-      return;
-    }
-    generate.mutate({ sessionId });
-  }
+  const outdatedPaths =
+    handoff && !handoff.stale
+      ? handoff.briefs
+          .filter((brief) => handoff.outdatedBriefs.includes(brief.ticketNumber))
+          .map((brief) => brief.relativePath)
+      : [];
 
   function save() {
     if (draft === null) return;
@@ -186,6 +188,14 @@ export function HandoffSection({ sessionId }: { sessionId: string }) {
               {reason ?? t("output.handoffStaleHint")}
             </p>
           ) : null}
+          {outdatedPaths.length > 0 ? (
+            <p className="text-xs text-owed" data-testid="handoff-outdated-edits">
+              {t("output.handoffOutdatedEdits", {
+                count: outdatedPaths.length,
+                briefs: outdatedPaths.join(", "),
+              })}
+            </p>
+          ) : null}
 
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="w-full max-w-xs space-y-1.5">
@@ -229,12 +239,24 @@ export function HandoffSection({ sessionId }: { sessionId: string }) {
                 variant="outline"
                 size="sm"
                 disabled={busy || !data.canGenerate}
-                onClick={regenerate}
+                onClick={() => generate.mutate({ sessionId })}
                 data-testid="regenerate-handoff"
               >
                 {generate.isPending ? <Spinner className="size-4" /> : <IconRefresh className="size-4" />}
                 {t(generate.isPending ? "output.generatingHandoff" : "output.regenerateHandoff")}
               </Button>
+              {handoff.editedAt ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={busy || !data.canGenerate}
+                  onClick={() => setConfirmOverwrite(true)}
+                  data-testid="regenerate-handoff-replace"
+                >
+                  {t("output.regenerateHandoffReplaceEdits")}
+                </Button>
+              ) : null}
             </div>
           </div>
 
