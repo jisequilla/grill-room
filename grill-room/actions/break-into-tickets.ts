@@ -4,9 +4,14 @@ import { defineAction, fail } from "@agent-native/core/action";
 import { eq, inArray } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
+import {
+  checkConsistencyForBreakdown,
+  tooManyTicketsMessage,
+  type ConsistencyFailure,
+} from "../server/consistency.js";
 import { getDb, schema } from "../server/db/index.js";
 import { headCommit } from "../server/export-bundle.js";
-import { getInterviewer } from "../server/interviewer/index.js";
+import { getInterviewer, MAX_HANDOFF_SCOUT_TICKETS } from "../server/interviewer/index.js";
 import type { BreakIntoTicketsResult } from "../server/interviewer/index.js";
 import { getProject } from "../server/projects.js";
 import {
@@ -113,6 +118,12 @@ export default defineAction({
         );
       }
     }
+
+    // The consistency check that follows an accepted breakdown runs inside
+    // its turn, but its failure (or its skip above the ticket cap) can only
+    // be stored once `runTurn` has written the breakdown's own result: the
+    // success path clears the session's error fields after `take` returns.
+    let consistencyFailure: ConsistencyFailure | null = null;
 
     await runTurn({
       sessionId,
@@ -258,9 +269,34 @@ export default defineAction({
           })
           .where(eq(schema.specs.sessionId, sessionId));
 
+        // One check covers at most as many tickets as the handoff scout
+        // grounds; above that it is skipped, not attempted.
+        const ticketCount = accepted.result.tickets.length;
+        consistencyFailure =
+          ticketCount > MAX_HANDOFF_SCOUT_TICKETS
+            ? {
+                code: "too-many-tickets",
+                message: tooManyTicketsMessage(ticketCount, MAX_HANDOFF_SCOUT_TICKETS, true),
+              }
+            : (await checkConsistencyForBreakdown({ session: session! })).failure;
+
         return accepted.conversationId;
       },
     });
+
+    // The tickets stay and the status stays `idle`: the error only says why
+    // the reopen cards were not refreshed.
+    const failure = consistencyFailure as ConsistencyFailure | null;
+    if (failure) {
+      await db
+        .update(schema.sessions)
+        .set({
+          turnErrorCode: failure.code,
+          turnErrorMessage: failure.message,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.sessions.id, sessionId));
+    }
 
     return listTickets.run({ sessionId });
   },

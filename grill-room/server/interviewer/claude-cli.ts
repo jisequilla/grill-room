@@ -15,6 +15,7 @@ import {
 import type {
   AssessReadinessRequest,
   BreakIntoTicketsRequest,
+  CheckConsistencyRequest,
   CliMetrics,
   FindSupersededRequest,
   HandoffScoutRequest,
@@ -636,6 +637,13 @@ export function createClaudeCliInterviewer(
     scoutHandoff: (request: HandoffScoutRequest, observer?: ModelCallObserver) =>
       turn(request, observer) as Promise<
         InterviewerTurn<ResultFor<"handoff-scout">>
+      >,
+    checkConsistency: (
+      request: CheckConsistencyRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"check-consistency">>
       >,
   };
 }

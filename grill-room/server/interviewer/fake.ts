@@ -6,6 +6,7 @@ import type { RequestKind, ResultFor, ResultInputFor } from "./schemas.js";
 import type {
   AssessReadinessRequest,
   BreakIntoTicketsRequest,
+  CheckConsistencyRequest,
   CliMetrics,
   FindSupersededRequest,
   HandoffScoutRequest,
@@ -266,6 +267,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   "gate-ticket": { turns: gateTicketTurns() },
   "uncovered-story": { turns: uncoveredStoryTurns() },
   "long-chain": { turns: longChainTurns() },
+  "consistency-findings": { turns: consistencyFindingsTurns() },
   ...(demoScenario ? { [DEMO_SCENARIO]: demoScenario } : {}),
 };
 
@@ -400,23 +402,35 @@ export function createScenarioInterviewer(
 }
 
 /**
- * A `find-superseded` request with no loose ends — only settled decisions to
- * check for replacement or deferral — that no script asked for. A done
- * proposal asks one whenever two decisions settled at different times, or any
- * decision settled with the user's own answer, which scripts written (or
- * recorded) before those checks existed never queued. Answered empty without
- * taking anything from the queue, so those scripts stay in step; a script that
- * does queue a `find-superseded` turn next still gets it.
+ * A request no script asked for, answered empty without taking anything from
+ * the queue, so scripts written (or recorded) before its check existed stay
+ * in step; a script that does queue a turn of that kind next still gets it.
+ *
+ * - A `find-superseded` request with no loose ends — only settled decisions
+ *   to check for replacement or deferral. A done proposal asks one whenever
+ *   two decisions settled at different times, or any decision settled with
+ *   the user's own answer.
+ * - A `check-consistency` request. Every successful breakdown asks one.
  */
 function answersWithoutScript(
   request: InterviewerRequest,
   next: ScriptedTurn | undefined,
 ): boolean {
+  if (request.kind === "check-consistency") {
+    return next?.kind !== "check-consistency";
+  }
   return (
     request.kind === "find-superseded" &&
     request.looseEndKeys.length === 0 &&
     next?.kind !== "find-superseded"
   );
+}
+
+/** The empty answer to a request {@link answersWithoutScript} answers. */
+function unscriptedResult(request: InterviewerRequest): unknown {
+  return request.kind === "check-consistency"
+    ? { findings: [] }
+    : { supersessions: [], replacements: [], deferrals: [], restatements: [] };
 }
 
 function createScriptedInterviewer(
@@ -474,7 +488,7 @@ function createScriptedInterviewer(
 
     if (answersWithoutScript(request, source.peek(request))) {
       const resumes = conversationOf(request) != null;
-      const result = { supersessions: [], replacements: [], deferrals: [], restatements: [] };
+      const result = unscriptedResult(request);
       return observeCall(
         observer,
         {
@@ -594,6 +608,13 @@ function createScriptedInterviewer(
     scoutHandoff: (request: HandoffScoutRequest, observer?: ModelCallObserver) =>
       turn(request, observer) as Promise<
         InterviewerTurn<ResultFor<"handoff-scout">>
+      >,
+    checkConsistency: (
+      request: CheckConsistencyRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"check-consistency">>
       >,
   };
 }
@@ -1081,6 +1102,195 @@ export function longChainTurns(): ScriptedTurn[] {
     ...cannedInterviewTurns().slice(0, -1),
     breakdown((number) => (number === 1 ? [] : [number - 1])),
     breakdown((number) => (number === 1 ? [] : number === 2 ? [1] : [2])),
+  ];
+}
+
+/**
+ * The spec `consistency-findings` synthesizes: one statement of each kind a
+ * consistency check reports, in the words of the reviews that asked for the
+ * check. Shared with the tests.
+ */
+export function consistencySpecMarkdown(): string {
+  return [
+    "## Problem Statement",
+    "",
+    "Benchmark runs lose their data before anyone reads the results.",
+    "",
+    "## Solution",
+    "",
+    "A run store that keeps benchmark data, bookings and payments for the monitor.",
+    "",
+    "## User Stories",
+    "",
+    "1. As an operator, I want run data kept until the benchmark ends, so that I can compare runs.",
+    "2. As a guest, I want to pay for a booking, so that it is confirmed.",
+    "",
+    "## Implementation Decisions",
+    "",
+    "- Run data must outlast the benchmark horizon.",
+    "- Retention is a placeholder for a later ticket.",
+    "- A run whose run_id starts with `wf_` gets a root span.",
+    "- Unpaid accepted bookings follow a defined timeout.",
+    "",
+    "## Testing Decisions",
+    "",
+    "- Behaviour is tested at the action boundary.",
+    "",
+    "## Out of Scope",
+    "",
+    "- Anything not decided above.",
+    "",
+    "## Further Notes",
+    "",
+    "- This spec came from the fake interviewer.",
+  ].join("\n");
+}
+
+/** The four tickets `consistency-findings` breaks its spec into. */
+export function consistencyTickets(): ResultFor<"break-into-tickets">["tickets"] {
+  const ticket = (
+    number: number,
+    slug: string,
+    title: string,
+    body: string,
+    blockedBy: number[],
+    stories: number[],
+  ) => ({
+    number,
+    slug,
+    title,
+    body,
+    blockedBy,
+    implements: stories,
+    kind: "build" as const,
+    waitsFor: null,
+  });
+  return [
+    ticket(
+      1,
+      "fill-in-retention",
+      "Fill in the retention policy",
+      "Fill in Retention: delete run data once it is older than the retention window.",
+      [],
+      [1],
+    ),
+    ticket(2, "poll-hook-events", "Poll the hook events", "Poll the hook log. Polling is capped at N x cadence.", [1], []),
+    ticket(
+      3,
+      "take-booking-payments",
+      "Take booking payments",
+      "Use Checkout or Payment Element for the booking payment.",
+      [],
+      [2],
+    ),
+    ticket(
+      4,
+      "deploy-to-staging",
+      "Deploy the service",
+      "The service is deployable to a staging environment.",
+      [1, 2, 3],
+      [],
+    ),
+  ];
+}
+
+/** The seven findings the accepted check of `consistency-findings` reports, one of each kind and a second threshold. */
+export function consistencyFindingsResult(): ResultFor<"check-consistency"> {
+  const spec = (quote: string) => ({
+    artefact: "spec" as const,
+    section: "Implementation Decisions",
+    ticket: null,
+    quote,
+  });
+  const ticket = (number: number, quote: string) => ({
+    artefact: "ticket" as const,
+    section: null,
+    ticket: number,
+    quote,
+  });
+  return {
+    findings: [
+      {
+        kind: "unquantified-threshold",
+        at: spec("must outlast the benchmark horizon"),
+        against: null,
+        question: "How long after the benchmark ends must run data be kept?",
+        decisionKey: "storage",
+      },
+      {
+        kind: "unquantified-threshold",
+        at: ticket(2, "capped at N x cadence"),
+        against: null,
+        question: "What is N, the number of cadences polling is capped at?",
+        decisionKey: null,
+      },
+      {
+        kind: "one-case-rule",
+        at: spec("A run whose run_id starts with `wf_` gets a root span."),
+        against: null,
+        question: "Which root span does a run driven by hand get?",
+        decisionKey: null,
+      },
+      {
+        kind: "spec-ticket-contradiction",
+        at: spec("Retention is a placeholder for a later ticket."),
+        against: ticket(1, "Fill in Retention"),
+        question:
+          "Does ticket 1 fill in Retention now, or is it left as a placeholder for a later ticket?",
+        decisionKey: null,
+      },
+      {
+        kind: "open-choice",
+        at: ticket(3, "Checkout or Payment Element"),
+        against: null,
+        question: "Which does the booking payment use: Checkout or Payment Element?",
+        decisionKey: null,
+      },
+      {
+        kind: "undefaulted-value",
+        at: spec("follow a defined timeout"),
+        against: null,
+        question: "How long can an accepted booking stay unpaid before it times out?",
+        decisionKey: null,
+      },
+      {
+        kind: "unnamed-target",
+        at: ticket(4, "deployable to a staging environment"),
+        against: null,
+        question: "Which host is the staging environment?",
+        decisionKey: null,
+      },
+    ],
+  };
+}
+
+/**
+ * The canned interview, with a spec and four tickets that leave six kinds of
+ * question open, and the check that follows the breakdown: refused once for a
+ * misquote in its first finding, then accepted with seven findings. What
+ * `consistency-findings` schedules.
+ */
+export function consistencyFindingsTurns(): ScriptedTurn[] {
+  const accepted = consistencyFindingsResult();
+  const [first, ...rest] = accepted.findings;
+  const misquoted: ResultFor<"check-consistency"> = {
+    findings: [
+      { ...first!, at: { ...first!.at, quote: "must outlast the benchmark horizons" } },
+      ...rest,
+    ],
+  };
+  return [
+    ...cannedInterviewTurns().map((turn): ScriptedTurn => {
+      if (turn.kind === "synthesize-spec") {
+        return { kind: "synthesize-spec", result: { markdown: consistencySpecMarkdown() } };
+      }
+      if (turn.kind === "break-into-tickets") {
+        return { kind: "break-into-tickets", result: { tickets: consistencyTickets() } };
+      }
+      return turn;
+    }),
+    { kind: "check-consistency", result: misquoted },
+    { kind: "check-consistency", result: accepted },
   ];
 }
 

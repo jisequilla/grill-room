@@ -14,7 +14,11 @@ import {
   withResumeFallback,
 } from "./fake.js";
 import type { ProposeRoundResult } from "./schemas.js";
-import type { ModelCallEnd, ModelCallObserver } from "./types.js";
+import type {
+  CheckConsistencyRequest,
+  ModelCallEnd,
+  ModelCallObserver,
+} from "./types.js";
 import {
   getInterviewer,
   INTERVIEWER_ENV_VAR,
@@ -168,6 +172,45 @@ describe("the scripted fake interviewer", () => {
     expect((await interviewer.proposeRound(aProposeRoundRequest())).result).toEqual(
       round,
     );
+  });
+
+  it("answers a consistency check nobody scripted with no findings", async () => {
+    const request: CheckConsistencyRequest = {
+      kind: "check-consistency",
+      context: aProposeRoundRequest().context,
+      specMarkdown: "## Solution\n\nA workspace.",
+      tickets: [],
+      rejectionReason: null,
+      previousResult: null,
+    };
+    const round = aProposeRoundResult();
+    const scripted = {
+      findings: [
+        {
+          kind: "open-choice" as const,
+          at: { artefact: "spec" as const, section: "Solution", ticket: null, quote: "A workspace." },
+          against: null,
+          question: "Which workspace?",
+          decisionKey: null,
+        },
+      ],
+    };
+    const interviewer = createFakeInterviewer([
+      { kind: "propose-round", result: round },
+      { kind: "check-consistency", result: scripted },
+    ]);
+    const { observer, ended } = recordingObserver();
+
+    const unscripted = await interviewer.checkConsistency(request, observer);
+
+    expect(unscripted.result).toEqual({ findings: [] });
+    expect(ended).toHaveLength(1);
+    expect(ended[0].metrics).toEqual(FAKE_CLI_METRICS);
+    expect(interviewer.remaining).toBe(2);
+    expect((await interviewer.proposeRound(aProposeRoundRequest())).result).toEqual(round);
+    expect((await interviewer.checkConsistency(request)).result).toEqual(scripted);
+    expect(interviewer.remaining).toBe(0);
+    expect((await interviewer.checkConsistency(request)).result).toEqual({ findings: [] });
   });
 
   it("reports its canned usage for an unscripted find-superseded answer", async () => {

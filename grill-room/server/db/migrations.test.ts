@@ -464,3 +464,52 @@ describe("projects-max-tickets-in-flight-column migration", () => {
     expect(updated.rows).toEqual([{ max_tickets_in_flight: 7 }]);
   });
 });
+
+describe("consistency-findings-table migration", () => {
+  beforeEach(dropSchema);
+
+  it("creates the reopen cards table and its index, and reads an existing spec as never checked, on a database at the previous version", async () => {
+    const migration = appMigrations.find((entry) => entry.name === "consistency-findings-table")!;
+    const before = appMigrations.filter((entry) => entry.version < migration.version);
+    expect(before[before.length - 1]!.name).toBe("projects-max-tickets-in-flight-column");
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    const specId = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [sessionId, "Grill Room", "An idea.", now, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_specs (id, session_id, markdown, tickets_generated_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [specId, sessionId, "## Problem Statement\n", now, now, now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const spec = await getDbExec().execute({
+      sql: `SELECT consistency_checked_for, consistency_turn_id FROM gr_specs WHERE id = ?`,
+      args: [specId],
+    });
+    expect(spec.rows).toEqual([{ consistency_checked_for: null, consistency_turn_id: null }]);
+
+    const index = await getDbExec().execute({
+      sql: `SELECT tablename FROM pg_indexes WHERE indexname = ?`,
+      args: ["gr_idx_consistency_findings_session"],
+    });
+    expect(index.rows).toEqual([{ tablename: "gr_consistency_findings" }]);
+
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_consistency_findings (id, session_id, number, kind, at_json, question, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [randomUUID(), sessionId, 1, "open-choice", "{}", "Which?", now, now],
+    });
+    const card = await getDbExec().execute({
+      sql: `SELECT status, against_json, decision_key FROM gr_consistency_findings WHERE session_id = ?`,
+      args: [sessionId],
+    });
+    expect(card.rows).toEqual([{ status: "open", against_json: null, decision_key: null }]);
+  });
+});

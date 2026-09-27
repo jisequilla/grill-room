@@ -2,17 +2,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import acceptDeferral from "../../actions/accept-deferral.js";
 import assessReadiness from "../../actions/assess-readiness.js";
+import breakIntoTickets from "../../actions/break-into-tickets.js";
+import confirmSession from "../../actions/confirm-session.js";
 import createSession from "../../actions/create-session.js";
 import getTree from "../../actions/get-tree.js";
+import listConsistencyFindings from "../../actions/list-consistency-findings.js";
 import registerProject from "../../actions/register-project.js";
 import reopenDecision from "../../actions/reopen-decision.js";
 import requestNextRound from "../../actions/request-next-round.js";
 import saveDraftAnswer from "../../actions/save-draft-answer.js";
 import scoutProject from "../../actions/scout-project.js";
 import submitRound from "../../actions/submit-round.js";
+import synthesizeSpec from "../../actions/synthesize-spec.js";
 import { useTestDatabase } from "../../test/db.js";
 import { useTempGitRepos } from "../../test/git-repos.js";
 import {
+  consistencyFindingsResult,
   createScenarioInterviewer,
   DEFAULT_SCENARIO,
   fakeScenarios,
@@ -27,7 +32,11 @@ import {
   selectedFakeInterviewer,
   setInterviewer,
 } from "./index.js";
-import type { FindSupersededRequest, ModelCallObserver } from "./types.js";
+import type {
+  CheckConsistencyRequest,
+  FindSupersededRequest,
+  ModelCallObserver,
+} from "./types.js";
 import {
   aContext,
   anAssessReadinessRequest,
@@ -494,6 +503,49 @@ describe("named scenarios for every request kind", () => {
       tree.decisions.find((decision) => decision.key === "first-service"),
     ).toMatchObject({ restatementText: null });
     expect(interviewer.remainingFor(session.id)).toBe(0);
+  });
+
+  it("consistency-findings scripts a breakdown and a check refused once", async () => {
+    const session = await aSession();
+    const interviewer = useScenario(session.id, "consistency-findings");
+
+    const done = await answerOpenRound(session.id);
+    expect(done.state).toBe("done-proposed");
+    await confirmSession.run({ sessionId: session.id });
+    await synthesizeSpec.run({ sessionId: session.id });
+    await breakIntoTickets.run({ sessionId: session.id });
+
+    expect(interviewer.requests.map((request) => request.kind).slice(-4)).toEqual([
+      "synthesize-spec",
+      "break-into-tickets",
+      "check-consistency",
+      "check-consistency",
+    ]);
+    const retry = interviewer.requests[interviewer.requests.length - 1] as CheckConsistencyRequest;
+    expect(retry.rejectionReason).toBe(
+      'Finding 1 quotes "must outlast the benchmark horizons", which is not in the spec\'s "Implementation Decisions" section. Copy the words exactly as they are written there.',
+    );
+    expect(interviewer.remainingFor(session.id)).toBe(0);
+
+    const list = await listConsistencyFindings.run({ sessionId: session.id });
+    expect(list).toMatchObject({ checked: true, current: true });
+    expect(
+      list.findings.map(({ number, kind, at, against, question, decisionKey, status }) => ({
+        number,
+        kind,
+        at,
+        against,
+        question,
+        decisionKey,
+        status,
+      })),
+    ).toEqual(
+      consistencyFindingsResult().findings.map((finding, index) => ({
+        number: index + 1,
+        ...finding,
+        status: "open",
+      })),
+    );
   });
 
   it("long-chain is registered by name and ends with the long breakdown and its flatter retry", () => {

@@ -566,4 +566,28 @@ ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS waits_for TEXT`,
     name: "projects-max-tickets-in-flight-column",
     sql: `ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS max_tickets_in_flight INTEGER NOT NULL DEFAULT 3`,
   },
+  {
+    version: 74,
+    name: "consistency-findings-table",
+    sql: `CREATE TABLE IF NOT EXISTS gr_consistency_findings (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES gr_sessions(id) ON DELETE CASCADE,
+      number INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      at_json TEXT NOT NULL,
+      against_json TEXT,
+      question TEXT NOT NULL,
+      decision_key TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+ALTER TABLE gr_specs ADD COLUMN IF NOT EXISTS consistency_checked_for TEXT;
+ALTER TABLE gr_specs ADD COLUMN IF NOT EXISTS consistency_turn_id TEXT REFERENCES gr_turns(id) ON DELETE SET NULL`,
+  },
+  {
+    version: 75,
+    name: "consistency-findings-session-index",
+    sql: `CREATE INDEX IF NOT EXISTS gr_idx_consistency_findings_session ON gr_consistency_findings(session_id)`,
+  },
 ];

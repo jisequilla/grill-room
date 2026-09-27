@@ -491,6 +491,60 @@ export const handoffScoutContractSchema = z.strictObject({
     .max(MAX_HANDOFF_SCOUT_TICKETS),
 });
 
+/**
+ * The six kinds of statement a consistency check reports: each leaves a
+ * builder something to decide alone.
+ */
+export const CONSISTENCY_KINDS = [
+  "unquantified-threshold",
+  "one-case-rule",
+  "spec-ticket-contradiction",
+  "open-choice",
+  "undefaulted-value",
+  "unnamed-target",
+] as const;
+
+export type ConsistencyKind = (typeof CONSISTENCY_KINDS)[number];
+
+/** A consistency check reports at most this many findings. */
+export const MAX_CONSISTENCY_FINDINGS = 20;
+
+/** Where a finding's words are: a spec section by its heading, or a ticket by its number. */
+const consistencyPlace = z.strictObject({
+  artefact: z.enum(["spec", "ticket"]),
+  /** The spec section's heading as written after "## "; null for a ticket. */
+  section: z.string().min(1).nullable(),
+  /** The ticket's number; null for the spec. */
+  ticket: z.number().int().positive().nullable(),
+  /** The words, copied exactly from that place. */
+  quote: z.string().min(1),
+});
+
+/**
+ * What a consistency check found in a spec and its tickets: the statements a
+ * builder would have to decide alone, each with one question for the owner.
+ * The schema checks only the shape. Every other rule (the quote is where the
+ * finding says, the kind's fields agree, the question is a question) lives in
+ * `consistencyReasons` in `server/consistency.ts`, so a breach is sent back
+ * with a reason rather than ending the turn as `malformed-output`.
+ */
+export const checkConsistencyResultSchema = z.strictObject({
+  findings: z
+    .array(
+      z.strictObject({
+        kind: z.enum(CONSISTENCY_KINDS),
+        at: consistencyPlace,
+        /** The other side of a spec-ticket-contradiction; null for every other kind. */
+        against: consistencyPlace.nullable(),
+        /** One question for the owner, ending with "?". */
+        question: z.string().min(1),
+        /** The settled decision the text came from, or null. */
+        decisionKey: decisionKey.nullable(),
+      }),
+    )
+    .max(MAX_CONSISTENCY_FINDINGS),
+});
+
 export const resultSchemas = {
   "propose-round": proposeRoundResultSchema,
   "review-stale": reviewStaleResultSchema,
@@ -500,6 +554,7 @@ export const resultSchemas = {
   "assess-readiness": assessReadinessResultSchema,
   "scout-project": scoutProjectResultSchema,
   "handoff-scout": handoffScoutResultSchema,
+  "check-consistency": checkConsistencyResultSchema,
 } as const;
 
 export type RequestKind = keyof typeof resultSchemas;
@@ -521,6 +576,9 @@ export type BreakIntoTicketsResult = ResultFor<"break-into-tickets">;
 export type AssessReadinessResult = ResultFor<"assess-readiness">;
 export type ScoutProjectResult = ResultFor<"scout-project">;
 export type HandoffScoutResult = ResultFor<"handoff-scout">;
+export type CheckConsistencyResult = ResultFor<"check-consistency">;
+export type ConsistencyFinding = CheckConsistencyResult["findings"][number];
+export type ConsistencyPlace = ConsistencyFinding["at"];
 
 /**
  * The schemas the model is constrained by, where they are stricter than the

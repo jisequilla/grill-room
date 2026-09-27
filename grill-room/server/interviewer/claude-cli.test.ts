@@ -24,9 +24,13 @@ import {
 import { InterviewerError } from "./errors.js";
 import { DOCS_FOLDER_ADDENDUM, loadGrillingSkill } from "./instructions.js";
 import { transcriptPath, type TranscriptQuery } from "./transcript-tools.js";
-import { jsonSchemaFor } from "./schemas.js";
+import { jsonSchemaFor, type CheckConsistencyResult } from "./schemas.js";
 import { SCOUT_MODEL } from "./types.js";
-import type { ModelCallEnd, ModelCallObserver } from "./types.js";
+import type {
+  CheckConsistencyRequest,
+  ModelCallEnd,
+  ModelCallObserver,
+} from "./types.js";
 import {
   aContext,
   anAssessReadinessRequest,
@@ -423,6 +427,195 @@ describe("what the adapter sends for a find-superseded check", () => {
     expect(prompt).not.toContain("Loose ends to judge");
     expect(prompt).not.toContain("Decisions to check");
     expect(prompt).not.toContain("## Also:");
+  });
+});
+
+describe("what the adapter sends for a consistency check", () => {
+  const SPEC = "## Implementation Decisions\n\n- Run data must outlast the benchmark horizon.";
+  const aResult = (): CheckConsistencyResult => ({
+    findings: [
+      {
+        kind: "unquantified-threshold",
+        at: {
+          artefact: "spec",
+          section: "Implementation Decisions",
+          ticket: null,
+          quote: "must outlast the benchmark horizon",
+        },
+        against: null,
+        question: "How long after the benchmark ends must run data be kept?",
+        decisionKey: null,
+      },
+    ],
+  });
+  const aRequest = (
+    overrides: Partial<CheckConsistencyRequest> = {},
+  ): CheckConsistencyRequest => ({
+    kind: "check-consistency",
+    context: aContext({ model: "opus" }),
+    specMarkdown: SPEC,
+    tickets: [
+      {
+        number: 1,
+        title: "Poll the hook events",
+        body: "Polling is capped at N x cadence.",
+        kind: "build",
+        waitsFor: null,
+      },
+      {
+        number: 2,
+        title: "Get a staging account",
+        body: "The owner provides one.",
+        kind: "gate",
+        waitsFor: "A staging account from the owner",
+      },
+    ],
+    rejectionReason: null,
+    previousResult: null,
+    ...overrides,
+  });
+
+  const TASK_SECTION = [
+    "## Your task: find what a builder would have to decide alone",
+    "",
+    "A builder who meets a statement that leaves something undecided picks an",
+    "answer on their own, and the owner finds out in review. Find every such",
+    "statement in the spec and the tickets above, and turn each into one question",
+    "for the owner.",
+    "",
+    "The six kinds of finding, each with an example:",
+    "",
+    '- `unquantified-threshold`: a limit, bound or duration with no value. "Run',
+    '  data must outlast the benchmark horizon" names no horizon; "capped at N x',
+    '  cadence" gives no N.',
+    "- `one-case-rule`: a rule stated for one case, leaving its sibling cases",
+    '  unhandled. "A run whose run_id starts with `wf_` gets a root span" says',
+    "  nothing about runs driven by hand.",
+    "- `spec-ticket-contradiction`: the spec and a ticket say different things",
+    '  about the same point. The spec calls Retention "a placeholder for a later',
+    '  ticket" while a ticket says to fill it in.',
+    '- `open-choice`: an "X or Y" the text leaves open. "Use Checkout or Payment',
+    '  Element" never says which.',
+    "- `undefaulted-value`: a value called defined, configurable or set, with no",
+    '  value and no default. "Unpaid accepted bookings follow a defined timeout"',
+    "  gives no timeout.",
+    "- `unnamed-target`: a host, service, account or place named only by its",
+    '  role. "deployable to a staging environment" names no host.',
+    "",
+    "Return one entry in `findings` for each, at most 20:",
+    "",
+    "- `kind`: one of the six kinds above.",
+    '- `at`: where the text is. In the spec: `artefact` "spec", `section` the',
+    '  heading of the spec section it sits under, exactly as written after "## ",',
+    '  and `ticket` null. In a ticket: `artefact` "ticket", `ticket` its number,',
+    "  and `section` null.",
+    "- `at.quote`: the words that leave the question open, copied exactly: the",
+    "  same words, case, punctuation and markup. Quote a phrase or a sentence, not",
+    "  a paragraph. Keep every letter's case as the text has it, even where an",
+    "  example above starts with a capital: a phrase from mid-sentence starts as",
+    "  it does there.",
+    "- `against`: for a `spec-ticket-contradiction` only, the other side, in the",
+    "  same form as `at`: one side in the spec and the other in a ticket. Null for",
+    "  every other kind.",
+    "- `question`: one question the owner can answer in a sentence, ending with",
+    '  "?". Ask for the missing value or choice itself: "How long after the',
+    '  benchmark ends must run data be kept?", not "Should the horizon be',
+    '  defined?".',
+    "- `decisionKey`: the key of the settled decision in the tree above that the",
+    "  text comes from, or null when none does.",
+    "",
+    "Be conservative. A value given anywhere in the spec, the tickets or the tree",
+    'is not missing: "a defined timeout" is not a finding when a decision sets it',
+    "to 48 hours. Detail a builder can settle alone without changing what the",
+    "owner gets, such as a name or a file layout, is not a finding. An empty list",
+    "is the right answer when nothing is left open.",
+  ].join("\n");
+
+  it("constrains the output to the consistency schema, on the session's model, with every tool disabled and no conversation resumed", async () => {
+    const runner = recordingRunner([ok(anEnvelope({ structured_output: aResult() }))]);
+
+    const turn = await createClaudeCliInterviewer({ runCli: runner.runCli }).checkConsistency(
+      aRequest(),
+    );
+
+    const { args } = runner.invocations[0];
+    expect(valueOf(args, "--allowed-tools")).toBe("");
+    expect(valueOf(args, "--model")).toBe("opus");
+    expect(JSON.parse(valueOf(args, "--json-schema") as string)).toEqual(
+      jsonSchemaFor("check-consistency"),
+    );
+    expect(args).not.toContain("--resume");
+    expect(args).not.toContain("--add-dir");
+    expect(turn.result).toEqual(aResult());
+  });
+
+  it("sends the opening line, the rendered spec and tickets, then the task section exactly", async () => {
+    const runner = recordingRunner([ok(anEnvelope({ structured_output: aResult() }))]);
+
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).checkConsistency(aRequest());
+
+    const prompt = valueOf(runner.invocations[0].args, "-p") as string;
+    expect(
+      prompt.startsWith(
+        "You are checking a finished spec and its implementation tickets inside the Grill Room app, before a builder reads them. The design tree the spec was written from comes first, then the spec, then the tickets, then your task.\n\n## The session\n",
+      ),
+    ).toBe(true);
+    const rendered = [
+      "## The spec",
+      "",
+      "```markdown",
+      SPEC,
+      "```",
+      "",
+      "## The tickets",
+      "",
+      "### Ticket 1: Poll the hook events",
+      "Kind: build",
+      "",
+      "```markdown",
+      "Polling is capped at N x cadence.",
+      "```",
+      "",
+      "### Ticket 2: Get a staging account",
+      "Kind: gate",
+      "Waits for: A staging account from the owner",
+      "",
+      "```markdown",
+      "The owner provides one.",
+      "```",
+      "",
+      TASK_SECTION,
+    ].join("\n");
+    expect(prompt.endsWith(`\n\n${rendered}`)).toBe(true);
+    expect(prompt).not.toContain(loadGrillingSkill().trimEnd());
+  });
+
+  it("hands a retry its previous answer in a fenced json block", async () => {
+    const previous = aResult();
+    const runner = recordingRunner([ok(anEnvelope({ structured_output: aResult() }))]);
+
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).checkConsistency(
+      aRequest({ rejectionReason: "Finding 1 has an empty quote.", previousResult: previous }),
+    );
+
+    const { args } = runner.invocations[0];
+    const prompt = valueOf(args, "-p") as string;
+    expect(args).not.toContain("--resume");
+    expect(prompt).toContain(
+      [
+        `${TASK_SECTION.split("\n").slice(-1)[0]}`,
+        "",
+        "## Your previous answer was rejected",
+        "",
+        "Finding 1 has an empty quote.",
+        "",
+        "Your previous answer, exactly as the app received it:",
+        "",
+        "```json",
+        JSON.stringify(previous, null, 2),
+        "```",
+      ].join("\n"),
+    );
   });
 });
 
