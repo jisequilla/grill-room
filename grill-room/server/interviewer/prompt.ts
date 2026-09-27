@@ -500,6 +500,15 @@ function renderTask(
         "lists those tickets in its own `blockedBy`. Every other ticket has `kind`",
         "\"build\" and `waitsFor` null. Never make ordinary work a gate: anything an",
         "agent can build, configure or test in the repository is a build ticket.",
+        "",
+        "Keep chains of `blockedBy` short, so that tickets can be built side by side.",
+        "List a ticket in another's `blockedBy` only when that ticket uses its output:",
+        "code it calls, a file it creates, a table it reads. Build order alone is not",
+        "a reason, and neither is testing: each ticket writes its own tests, as above,",
+        "so no ticket waits for a tests-only ticket. When many tickets would change",
+        "the same file, such as a shared schema, a route table or a registration list,",
+        "make that change its own early ticket that the others list in `blockedBy`,",
+        "rather than chaining them one after another through that file.",
         ...(request.greenfield && request.verifyCommand !== null
           ? ["", greenfieldTicketsSection(request.verifyCommand)]
           : []),

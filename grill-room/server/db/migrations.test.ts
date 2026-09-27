@@ -426,3 +426,41 @@ describe("tickets-implements-column migration", () => {
     expect(updated.rows).toEqual([{ implements_json: "[1,2]" }]);
   });
 });
+
+describe("projects-max-tickets-in-flight-column migration", () => {
+  beforeEach(dropSchema);
+
+  it("reads an existing project's max_tickets_in_flight as 3, and round-trips a value, on a database at the previous version", async () => {
+    const migration = appMigrations.find(
+      (entry) => entry.name === "projects-max-tickets-in-flight-column",
+    )!;
+    const before = appMigrations.filter((entry) => entry.version < migration.version);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_projects (id, name, root_path, verify_command, working_export_folder, visibility, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, "Grill Room", "/repos/grill-room", "pnpm test", ".scratch", "tracked", now, now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const existing = await getDbExec().execute({
+      sql: `SELECT max_tickets_in_flight FROM gr_projects WHERE id = ?`,
+      args: [id],
+    });
+    expect(existing.rows).toEqual([{ max_tickets_in_flight: 3 }]);
+
+    await getDbExec().execute({
+      sql: `UPDATE gr_projects SET max_tickets_in_flight = ? WHERE id = ?`,
+      args: [7, id],
+    });
+    const updated = await getDbExec().execute({
+      sql: `SELECT max_tickets_in_flight FROM gr_projects WHERE id = ?`,
+      args: [id],
+    });
+    expect(updated.rows).toEqual([{ max_tickets_in_flight: 7 }]);
+  });
+});

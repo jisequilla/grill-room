@@ -4,6 +4,7 @@ import {
   BUNDLE_TOKEN,
   bundlePathFor,
   CODEBASE_FACTS_SLOT,
+  type ExportFacts,
   FILE_BOUNDARIES_SLOT,
   fillBundlePath,
   handoffFingerprint,
@@ -583,10 +584,19 @@ describe("handoffFingerprint", () => {
       aSource({ rootPath: "/elsewhere" }),
       aSource({ deliveryRecipe: "local-merge" }),
       aSource({ adversarialReview: false }),
+      aSource({ maxTicketsInFlight: 2 }),
     ];
     for (const variant of variants) {
       expect(handoffFingerprint(variant)).not.toBe(base);
     }
+  });
+
+  it("hashes a project on the default in-flight cap exactly as before, and a changed cap differently", () => {
+    const pinned = "7cb3834b6357f33c1d8fd7a276ceb2266946f3cf08139ebab86bf924b1125261";
+
+    expect(handoffFingerprint(aSource())).toBe(pinned);
+    expect(handoffFingerprint(aSource({ maxTicketsInFlight: 3 }))).toBe(pinned);
+    expect(handoffFingerprint(aSource({ maxTicketsInFlight: 2 }))).not.toBe(pinned);
   });
 });
 
@@ -1347,7 +1357,7 @@ describe("export-time facts", () => {
 
 describe("the waves section at export", () => {
   const CHECKED_LINE =
-    "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.";
+    "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most 3 at a time. Start a wave only once every ticket of the previous wave is merged and verified.";
   const NOT_CHECKED_LINE =
     "Tickets in one wave have no Blocked-by between them. Whether they change the same files was not checked, because the briefs are not grounded against the current code: run them one at a time, or ground the briefs first. Start a wave only once every ticket of the previous wave is merged and verified.";
 
@@ -1463,7 +1473,7 @@ describe("the waves section at export", () => {
 
       expect(section.startsWith(`## Waves\n\n${NOT_CHECKED_LINE}\n\n### Wave 1\n`)).toBe(true);
       expect(section).not.toContain("do not block each other");
-      expect(section).not.toContain("at most two at a time");
+      expect(section).not.toContain("at most 3 at a time");
       expect(section).not.toContain("waits for");
       expect(labelsByWave(section)).toEqual([["01", "03"], ["02"]]);
     });
@@ -1486,7 +1496,7 @@ describe("gates", () => {
   const GATE_INTRO =
     "A ticket marked (gate) is not code and has no brief: nothing is delegated for it. Ask the owner whether what it waits for is in place, and once it is, mark the gate met. A met gate counts as merged and verified for starting the next wave, and no ticket blocked by a gate starts before the gate is met.";
   const CHECKED_LINE =
-    "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.";
+    "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most 3 at a time. Start a wave only once every ticket of the previous wave is merged and verified.";
   const NOT_CHECKED_LINE =
     "Tickets in one wave have no Blocked-by between them. Whether they change the same files was not checked, because the briefs are not grounded against the current code: run them one at a time, or ground the briefs first. Start a wave only once every ticket of the previous wave is merged and verified.";
   const plain = { visibility: "tracked" as const, greenfield: false };
@@ -1847,5 +1857,151 @@ describe("stories no ticket implements", () => {
     const withStories = { ...aSource(), uncoveredStories: [STORY_4] };
     expect(renderHandoff(withStories).briefs).toEqual(renderHandoff(aSource()).briefs);
     expect(handoffFingerprint(withStories)).toBe(handoffFingerprint(aSource()));
+  });
+});
+
+describe("execution plan", () => {
+  const plain = { visibility: "tracked" as const, greenfield: false };
+  const WHY =
+    "Every ticket in flight draws on the same subscription's rate limit, and a rate-limited failure reads like a failed ticket; each one's reports also need your attention before it can merge.";
+  const UNGROUNDED = " Until the briefs are grounded, run one at a time, as Waves says.";
+
+  /** The "Execution plan" section alone, up to the next top-level heading. */
+  function executionPlanOf(markdown: string): string {
+    const start = markdown.indexOf("## Execution plan");
+    expect(start).toBeGreaterThan(-1);
+    return markdown.slice(start, markdown.indexOf("\n## ", start + 1));
+  }
+
+  /** The line of the section that starts with `prefix`. */
+  function lineOf(markdown: string, prefix: string): string {
+    const line = executionPlanOf(markdown)
+      .split("\n")
+      .find((candidate) => candidate.startsWith(prefix));
+    expect(line, `a line starting ${prefix}`).toBeDefined();
+    return line!;
+  }
+
+  /** The source's own waves, as export facts: overlaps checked, none found. */
+  function checked(source: HandoffSource) {
+    return { ...plain, waves: source.waves, implicitEdges: [] };
+  }
+
+  function withTickets(
+    tickets: { number: number; blockedBy?: number[]; kind?: "build" | "gate" }[],
+    waves: number[][],
+  ): HandoffSource {
+    return {
+      ...aSource(),
+      tickets: tickets.map((ticket) => ({
+        id: `t${ticket.number}`,
+        number: ticket.number,
+        slug: `ticket-${ticket.number}`,
+        title: `Ticket ${ticket.number}`,
+        body: "Build it.",
+        blockedBy: ticket.blockedBy ?? [],
+        ...(ticket.kind === "gate" ? { kind: "gate" as const, waitsFor: PAYMENT_ACCOUNT } : {}),
+      })),
+      waves,
+    };
+  }
+
+  it.each<[string, HandoffSource, ExportFacts | undefined, string]>([
+    ["aSource()", aSource(), undefined, "2 build tickets, built one after another: 01 → 02."],
+    ["aSourceWithGate()", aSourceWithGate(), undefined, "2 build tickets, built one after another: 01 → 03."],
+    [
+      "aSourceWithGate({}, [1])",
+      aSourceWithGate({}, [1]),
+      undefined,
+      "2 build tickets, built one after another: 01 → gate 02 → 03.",
+    ],
+    ["one build ticket", withTickets([{ number: 1 }], [[1]]), undefined, "1 build ticket: 01."],
+    [
+      "every ticket a gate",
+      withTickets([{ number: 1, kind: "gate" }, { number: 2, kind: "gate", blockedBy: [1] }], [[1], [2]]),
+      undefined,
+      "no build tickets.",
+    ],
+    [
+      "an ordering the overlap separation added",
+      withTickets([{ number: 1 }, { number: 2 }, { number: 3 }], [[1, 2, 3]]),
+      { ...plain, waves: [[1, 2], [3]], implicitEdges: [{ ticket: 3, waitsFor: 1, sharedPaths: ["a.ts"] }] },
+      "2 build tickets, built one after another: 01 → 03.",
+    ],
+  ])("the longest chain line: %s", (_, source, facts, text) => {
+    expect(lineOf(renderHandoffMarkdown(source, false, facts), "- Longest chain: ")).toBe(
+      `- Longest chain: ${text}`,
+    );
+  });
+
+  it.each<[string, HandoffSource, string]>([
+    ["aSource()", aSource(), "- Wave widths, in build tickets: 2, 1 (wave 1 first)."],
+    ["aSourceWithGate()", aSourceWithGate(), "- Wave widths, in build tickets: 1, 1 (wave 1 first)."],
+    [
+      "aSourceWithGate({}, [1])",
+      aSourceWithGate({}, [1]),
+      "- Wave widths, in build tickets: 1, gate only, 1 (wave 1 first).",
+    ],
+  ])("the wave widths line: %s", (_, source, line) => {
+    expect(lineOf(renderHandoffMarkdown(source), "- Wave widths")).toBe(line);
+  });
+
+  it.each<[string, number | undefined, boolean, string]>([
+    ["absent, checked", undefined, true, `- Run at most 3 tickets at a time, even when a wave is wider. ${WHY}`],
+    ["3, checked", 3, true, `- Run at most 3 tickets at a time, even when a wave is wider. ${WHY}`],
+    [
+      "absent, not checked",
+      undefined,
+      false,
+      `- Run at most 3 tickets at a time, even when a wave is wider. ${WHY}${UNGROUNDED}`,
+    ],
+    [
+      "3, not checked",
+      3,
+      false,
+      `- Run at most 3 tickets at a time, even when a wave is wider. ${WHY}${UNGROUNDED}`,
+    ],
+    ["2, checked", 2, true, `- Run at most 2 tickets at a time, even when a wave is wider. ${WHY}`],
+    ["1, checked", 1, true, `- Run one ticket at a time. ${WHY}`],
+    ["1, not checked", 1, false, `- Run one ticket at a time. ${WHY}`],
+  ])("the cap line: %s", (_, cap, isChecked, line) => {
+    const source = aSource(cap === undefined ? {} : { maxTicketsInFlight: cap });
+    const markdown = renderHandoffMarkdown(source, false, isChecked ? checked(source) : plain);
+    const plan = executionPlanOf(markdown);
+
+    expect(plan.trimEnd().split("\n").pop()).toBe(line);
+    expect(plan).toBe(
+      [
+        "## Execution plan",
+        "",
+        "- Longest chain: 2 build tickets, built one after another: 01 → 02.",
+        "- Wave widths, in build tickets: 2, 1 (wave 1 first).",
+        line,
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it.each<[string, number | undefined, string]>([
+    ["absent", undefined, "start with at most 3 at a time"],
+    ["3", 3, "start with at most 3 at a time"],
+    ["5", 5, "start with at most 5 at a time"],
+    ["1", 1, "start with one at a time"],
+  ])("the checked waves intro follows the project's cap: %s", (_, cap, phrase) => {
+    const source = aSource(cap === undefined ? {} : { maxTicketsInFlight: cap });
+    const markdown = renderHandoffMarkdown(source, false, checked(source));
+
+    expect(markdown).toContain(
+      `## Waves\n\nTickets in one wave do not block each other and may run in parallel, each in its own worktree; ${phrase}. Start a wave only once every ticket of the previous wave is merged and verified.`,
+    );
+  });
+
+  it("sits right before the waves", () => {
+    const markdown = renderHandoffMarkdown(aSource());
+    const plan = executionPlanOf(markdown);
+
+    expect(markdown).toContain(`${plan}\n## Waves\n`);
+    expect(markdown.indexOf("## Before delegating")).toBeLessThan(markdown.indexOf("## Execution plan"));
+    expect(markdown.split("## Execution plan")).toHaveLength(2);
   });
 });

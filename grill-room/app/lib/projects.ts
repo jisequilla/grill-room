@@ -12,7 +12,8 @@ export type ProjectField =
   | "verifyCommand"
   | "workingExportFolder"
   | "durableExportFolder"
-  | "slugPattern";
+  | "slugPattern"
+  | "maxTicketsInFlight";
 
 /**
  * Every code the project registry refuses with, mapped to the fields it belongs
@@ -62,6 +63,10 @@ export const PROJECT_ERROR: Record<string, { fields: ProjectField[]; key: string
   "invalid-slug-pattern": {
     fields: ["slugPattern"],
     key: "projects.invalidSlugPattern",
+  },
+  "invalid-max-tickets-in-flight": {
+    fields: ["maxTicketsInFlight"],
+    key: "projects.invalidMaxTicketsInFlight",
   },
 };
 

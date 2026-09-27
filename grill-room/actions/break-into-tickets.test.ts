@@ -7,7 +7,9 @@ import {
   scriptInterviewer,
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
+import { longChainTurns } from "../server/interviewer/fake.js";
 import { buildPrompt } from "../server/interviewer/prompt.js";
+import { type ProposedTicket, validateTicketSet } from "../server/tickets.js";
 import { MAX_TURN_RETRIES } from "../server/turn.js";
 import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
@@ -1472,5 +1474,223 @@ describe("seam: a set shaped as the user stories section describes passes the ch
       [3, [3]],
       [4, []],
     ]);
+  });
+});
+
+describe("the longest chain", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  type Row = Parameters<typeof ticketsTurn>[0][number];
+
+  function rejectionOf(request: unknown): string {
+    return (request as BreakIntoTicketsRequest).rejectionReason ?? "";
+  }
+
+  const SLUGS = ["one", "two", "three", "four", "five", "six"];
+  /** Six build tickets, each waiting for `blockedBy(number)`. */
+  const six = (blockedBy: (number: number) => number[]): Row[] =>
+    SLUGS.map((slug, index) => ({ number: index + 1, slug, blockedBy: blockedBy(index + 1) }));
+
+  const LONG = six((number) => (number === 1 ? [] : [number - 1]));
+  const FLAT = six((number) => (number === 1 ? [] : [1]));
+  const LONG_WITH_H = six((number) => (number === 1 ? [9] : [number - 1]));
+  const FLAT_WITH_H = six((number) => (number === 1 ? [9] : [1]));
+  const CYCLE = six((number) => (number === 1 ? [6] : [number - 1]));
+
+  const H = "Ticket 1 is blocked by 9, which is not a ticket number in this set.";
+  const CHAIN =
+    "The longest chain of tickets that must be built one after another is 6 build tickets (1 → 2 → 3 → 4 → 5 → 6), in a set of 6 build tickets; keep it to 4 or fewer. List a ticket in `blockedBy` only when it uses that ticket's output, and give a file that many tickets change its own early ticket, so more tickets can be built side by side.";
+  const NOTE =
+    "Accepted with the longest chain at 6 build tickets (1 → 2 → 3 → 4 → 5 → 6), over the limit of 4 for a set of 6 build tickets.";
+
+  it.each<[string, Row[][], string[], Row[], string | null]>([
+    ["1: L (refused with the chain reason; 2 is asked)", [LONG, FLAT], [CHAIN], FLAT, null],
+    ["1: L; 2: L", [LONG, LONG], [CHAIN], LONG, NOTE],
+    ["1: L; 2: flat", [LONG, FLAT], [CHAIN], FLAT, null],
+    ["1: H and L", [LONG_WITH_H, FLAT], [`${H} ${CHAIN}`], FLAT, null],
+    ["1: H and L; 2: H and L", [LONG_WITH_H, LONG_WITH_H, FLAT], [`${H} ${CHAIN}`, H], FLAT, null],
+    ["1: H; 2: L; 3: L", [FLAT_WITH_H, LONG, LONG], [H, CHAIN], LONG, NOTE],
+    [
+      "1: H, short chain; 2: H, short chain; 3: no H, L for the first time",
+      [FLAT_WITH_H, FLAT_WITH_H, LONG],
+      [H, H],
+      LONG,
+      NOTE,
+    ],
+    ["1: flat", [FLAT], [], FLAT, null],
+  ])("%s", async (_, attempts, rejections, stored, note) => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const interviewer = scriptInterviewer(attempts.map((rows) => ticketsTurn(rows)));
+
+    const { tickets } = await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(attempts.length);
+    expect(interviewer.requests.slice(1).map(rejectionOf)).toEqual(rejections);
+    expect(tickets.map((ticket) => ticket.blockedBy)).toEqual(stored.map((row) => row.blockedBy));
+    const turn = await findLatestTurn({ sessionId, turnKind: "break-into-tickets" });
+    const recorded = turn!.runs[0]!.attempts;
+    const last = recorded[recorded.length - 1]!;
+    expect(last.kind).toBe("success");
+    if (note === null) {
+      expect(String(last.reason ?? "")).not.toContain("longest chain");
+    } else {
+      expect(last.reason).toBe(note);
+    }
+  });
+
+  it("a cycle: refused as today, and the chain check adds nothing", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const interviewer = scriptInterviewer([ticketsTurn(CYCLE), ticketsTurn(FLAT)]);
+    const expected = validateTicketSet(
+      (ticketsTurn(CYCLE) as { result: { tickets: ProposedTicket[] } }).result.tickets,
+      null,
+    ).reasons.join(" ");
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(expected).toMatch(/cycle/);
+    expect(rejectionOf(interviewer.requests[1])).toBe(expected);
+  });
+
+  it("notes uncovered stories and a long chain in one note", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const uncoveredLong = ticketsTurn(LONG.map((row) => ({ ...row, implements: [] })));
+    scriptInterviewer(Array.from({ length: MAX_TURN_RETRIES + 1 }, () => uncoveredLong));
+
+    await breakIntoTickets.run({ sessionId });
+
+    const turn = await findLatestTurn({ sessionId, turnKind: "break-into-tickets" });
+    const attempts = turn!.runs[0]!.attempts;
+    expect(attempts[attempts.length - 1]).toMatchObject({
+      kind: "success",
+      reason: `Accepted after the last retry, with user story 1 in no ticket's implements. ${NOTE}`,
+    });
+  });
+
+  it("the long-chain scenario is sent back once and its flatter retry is stored", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const interviewer = scriptInterviewer(longChainTurns().slice(-2));
+
+    const result = await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(2);
+    expect(rejectionOf(interviewer.requests[1])).toBe(CHAIN);
+    expect(result.tickets.map((ticket) => [ticket.number, ticket.slug, ticket.blockedBy])).toEqual([
+      [1, "build-the-workspace", []],
+      [2, "store-on-disk", [1]],
+      [3, "list-items", [2]],
+      [4, "edit-items", [2]],
+      [5, "delete-items", [2]],
+      [6, "export-items", [2]],
+    ]);
+    expect(result.waves).toEqual([[1], [2], [3, 4, 5, 6]]);
+  });
+});
+
+describe("seam: a set shaped as the chain paragraph describes is accepted at once", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+  const repos = useTempGitRepos();
+
+  const CHAIN_PARAGRAPH = [
+    "Keep chains of `blockedBy` short, so that tickets can be built side by side.",
+    "List a ticket in another's `blockedBy` only when that ticket uses its output:",
+    "code it calls, a file it creates, a table it reads. Build order alone is not",
+    "a reason, and neither is testing: each ticket writes its own tests, as above,",
+    "so no ticket waits for a tests-only ticket. When many tickets would change",
+    "the same file, such as a shared schema, a route table or a registration list,",
+    "make that change its own early ticket that the others list in `blockedBy`,",
+    "rather than chaining them one after another through that file.",
+  ].join("\n");
+
+  it.each([
+    ["with commits, no stories, no gate", true, false, false],
+    ["greenfield, stories, gate", false, true, true],
+    ["with commits, stories, gate", true, true, true],
+    ["greenfield, no stories, no gate", false, false, false],
+  ])("%s", async (_, commit, withStories, withGate) => {
+    const root = repos.create({ commit });
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+    });
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A local app that grills me about an idea until it is decided.",
+      projectId: project.id,
+    });
+    await confirm(session.id);
+    scriptInterviewer([
+      {
+        kind: "synthesize-spec",
+        result: { markdown: withStories ? aSpecWithStories(3) : NO_STORIES_SPEC },
+      },
+    ]);
+    await synthesizeSpec.run({ sessionId: session.id });
+    const sessionId = session.id;
+
+    // A first breakdown only to read the prompt the action sends.
+    const first = scriptInterviewer([
+      ticketsTurn([
+        {
+          number: 1,
+          slug: "set-up",
+          body: "Set up the runner so that `pnpm test` passes.",
+          implements: withStories ? [1, 2, 3] : [],
+        },
+      ]),
+    ]);
+    await breakIntoTickets.run({ sessionId });
+    const prompt = buildPrompt(first.requests[0] as BreakIntoTicketsRequest);
+    expect(prompt).toContain(CHAIN_PARAGRAPH);
+    expect(prompt.includes("## This repository has no commits yet")).toBe(!commit);
+    const listed = /^The spec numbers its user stories: (.*)\.$/m.exec(prompt)?.[1];
+    expect(listed).toBe(withStories ? "1-3" : undefined);
+    const stories = withStories ? [1, 2, 3] : [];
+
+    // Following the paragraph: the shared file is its own early ticket that
+    // the others list, a ticket lists another only because it uses its
+    // output, and a gate is listed by the ticket that needs it.
+    const shaped = ticketsTurn([
+      {
+        number: 1,
+        slug: "shared-schema",
+        body: commit
+          ? "Add the shared schema every other ticket reads."
+          : "Set up the project and its test runner, and the shared schema. Acceptance: `pnpm test` passes.",
+        implements: [],
+      },
+      { number: 2, slug: "store-items", blockedBy: [1], implements: stories },
+      { number: 3, slug: "list-items", blockedBy: [1], implements: [] },
+      { number: 4, slug: "edit-items", blockedBy: [1], implements: [] },
+      { number: 5, slug: "delete-items", blockedBy: [1], implements: [] },
+      {
+        number: 6,
+        slug: "export-items",
+        body: "Export the items, calling the store ticket 2 builds.",
+        blockedBy: withGate ? [2, 7] : [2],
+        implements: [],
+      },
+      ...(withGate
+        ? [
+            {
+              number: 7,
+              slug: "export-account",
+              body: "The owner opens the account; it is in place once API keys are issued.",
+              kind: "gate" as const,
+              waitsFor: "A live account on the export service, with API keys issued.",
+              implements: [],
+            },
+          ]
+        : []),
+    ]);
+    const second = scriptInterviewer([shaped]);
+
+    const { tickets } = await breakIntoTickets.run({ sessionId });
+
+    expect(second.requests).toHaveLength(1);
+    expect(tickets).toHaveLength(withGate ? 7 : 6);
   });
 });

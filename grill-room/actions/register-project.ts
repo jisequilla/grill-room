@@ -11,7 +11,7 @@ import {
 
 export default defineAction({
   description:
-    "Register a project sessions export into. The root is resolved to its git top-level and a folder outside any git repository is refused. Root and verify command are required; a blank working export folder or slug pattern falls back to the repository's declared tracker block when it has a valid one, otherwise to the fixed layout. The visibility flag is seeded from git check-ignore on the working export folder unless given. The delivery recipe is guessed from the repository's remotes (any remote gives \"pull-request\", none gives \"local-merge\") unless given.",
+    "Register a project sessions export into. The root is resolved to its git top-level and a folder outside any git repository is refused. Root and verify command are required; a blank working export folder or slug pattern falls back to the repository's declared tracker block when it has a valid one, otherwise to the fixed layout. The visibility flag is seeded from git check-ignore on the working export folder unless given. The delivery recipe is guessed from the repository's remotes (any remote gives \"pull-request\", none gives \"local-merge\") unless given. Tickets in flight, how many tickets the handoff lets run at once, defaults to 3.",
   schema: z.object({
     root: z
       .string()
@@ -65,6 +65,10 @@ export default defineAction({
       .describe(
         "Whether a second, fresh-context reviewer checks each ticket against its spec before it merges; defaults to true",
       ),
+    maxTicketsInFlight: z
+      .number()
+      .optional()
+      .describe("How many tickets the handoff lets run at once, a whole number from 1 to 10; defaults to 3"),
   }),
   run: async (input) => {
     const outcome = await registerProject(input);

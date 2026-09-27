@@ -111,6 +111,15 @@ export type ProjectVisibility = (typeof PROJECT_VISIBILITIES)[number];
 export const DELIVERY_RECIPES = ["pull-request", "local-merge"] as const;
 export type DeliveryRecipe = (typeof DELIVERY_RECIPES)[number];
 
+/**
+ * How many tickets the handoff lets run at once, per project. 1 is fully
+ * serial; above 10, one subscription's rate limit and one operator's relays
+ * run out long before a plan's width does.
+ */
+export const DEFAULT_MAX_TICKETS_IN_FLIGHT = 3;
+export const MIN_TICKETS_IN_FLIGHT = 1;
+export const MAX_TICKETS_IN_FLIGHT = 10;
+
 /** The slug pattern a project gets when none is given: the plain session slug. */
 export const DEFAULT_PROJECT_SLUG_PATTERN = "{slug}";
 

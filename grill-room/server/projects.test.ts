@@ -366,6 +366,41 @@ describe("registerProject", () => {
     });
   });
 
+  it("defaults tickets in flight to 3 and keeps a given value", async () => {
+    const omitted = registered(await registerProject({ root: repos.create(), ...required }));
+    expect(omitted.maxTicketsInFlight).toBe(3);
+
+    const nulled = registered(
+      await registerProject({ root: repos.create(), ...required, maxTicketsInFlight: null }),
+    );
+    expect(nulled.maxTicketsInFlight).toBe(3);
+
+    const given = registered(
+      await registerProject({ root: repos.create(), ...required, maxTicketsInFlight: 5 }),
+    );
+    expect(given.maxTicketsInFlight).toBe(5);
+    expect((await getProject(given.id))?.maxTicketsInFlight).toBe(5);
+  });
+
+  it.each([0, 11, -1, 2.5, Number.NaN])(
+    "refuses tickets in flight of %s at registration, and stores nothing",
+    async (value) => {
+      const outcome = await registerProject({
+        root: repos.create(),
+        ...required,
+        maxTicketsInFlight: value,
+      });
+
+      expect(outcome).toEqual({
+        refusal: {
+          errorCode: "invalid-max-tickets-in-flight",
+          message: `Tickets in flight must be a whole number from 1 to 10: ${String(value)}`,
+        },
+      });
+      expect(await listProjects()).toEqual([]);
+    },
+  );
+
   it("a row written before this column existed reads as pull-request with review on", async () => {
     const now = new Date().toISOString();
     const [row] = await getDb()
@@ -543,6 +578,40 @@ describe("updateProject", () => {
     const untouched = registered(await updateProject(project.id, { name: "Renamed" }));
     expect(untouched).toMatchObject({ deliveryRecipe: "pull-request", adversarialReview: false });
   });
+
+  it("changes tickets in flight and keeps it when omitted", async () => {
+    const project = await aProject();
+    expect(project.maxTicketsInFlight).toBe(3);
+
+    const two = registered(await updateProject(project.id, { maxTicketsInFlight: 2 }));
+    const { updatedAt: _before, maxTicketsInFlight: _was, ...rest } = project;
+    const { updatedAt: _after, maxTicketsInFlight, ...restAfter } = two;
+    expect(maxTicketsInFlight).toBe(2);
+    expect(restAfter).toEqual(rest);
+
+    expect(registered(await updateProject(project.id, { name: "Renamed" })).maxTicketsInFlight).toBe(2);
+    expect(
+      registered(await updateProject(project.id, { maxTicketsInFlight: null })).maxTicketsInFlight,
+    ).toBe(2);
+    expect(registered(await updateProject(project.id, { maxTicketsInFlight: 1 })).maxTicketsInFlight).toBe(1);
+    expect(registered(await updateProject(project.id, { maxTicketsInFlight: 10 })).maxTicketsInFlight).toBe(10);
+    expect((await getProject(project.id))?.maxTicketsInFlight).toBe(10);
+  });
+
+  it.each([0, 11, -1, 2.5, Number.NaN])(
+    "refuses tickets in flight outside 1 to 10, or not whole, and stores nothing: %s",
+    async (value) => {
+      const project = await aProject();
+
+      expect(await updateProject(project.id, { maxTicketsInFlight: value })).toEqual({
+        refusal: {
+          errorCode: "invalid-max-tickets-in-flight",
+          message: `Tickets in flight must be a whole number from 1 to 10: ${String(value)}`,
+        },
+      });
+      expect(await getProject(project.id)).toEqual(project);
+    },
+  );
 
   it("ignores a blank delivery recipe in a patch, keeping the existing value rather than re-guessing", async () => {
     const project = await aProject();

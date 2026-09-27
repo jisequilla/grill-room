@@ -25,8 +25,11 @@ import { eq } from "@agent-native/core/db/schema";
 
 import {
   DEFAULT_DURABLE_EXPORT_FOLDER,
+  DEFAULT_MAX_TICKETS_IN_FLIGHT,
   DEFAULT_PROJECT_SLUG_PATTERN,
   DELIVERY_RECIPES,
+  MAX_TICKETS_IN_FLIGHT,
+  MIN_TICKETS_IN_FLIGHT,
   PROJECT_TRACKER_KINDS,
   PROJECT_VISIBILITIES,
   type DeliveryRecipe,
@@ -66,6 +69,7 @@ export type ProjectErrorCode =
   | "invalid-tracker-kind"
   | "invalid-visibility"
   | "invalid-delivery-recipe"
+  | "invalid-max-tickets-in-flight"
   | "project-exists"
   | "project-not-found";
 
@@ -113,6 +117,8 @@ export interface ProjectInput {
   deliveryRecipe?: string | null;
   /** Defaults to true. */
   adversarialReview?: boolean | null;
+  /** Defaults to 3. */
+  maxTicketsInFlight?: number | null;
 }
 
 function blank(value: string | null | undefined): boolean {
@@ -664,6 +670,18 @@ async function validate(
     deliveryRecipe = checked;
   }
 
+  const maxTicketsInFlight = input.maxTicketsInFlight ?? DEFAULT_MAX_TICKETS_IN_FLIGHT;
+  if (
+    !Number.isInteger(maxTicketsInFlight) ||
+    maxTicketsInFlight < MIN_TICKETS_IN_FLIGHT ||
+    maxTicketsInFlight > MAX_TICKETS_IN_FLIGHT
+  ) {
+    return refuse(
+      "invalid-max-tickets-in-flight",
+      `Tickets in flight must be a whole number from ${MIN_TICKETS_IN_FLIGHT} to ${MAX_TICKETS_IN_FLIGHT}: ${String(maxTicketsInFlight)}`,
+    );
+  }
+
   const clash = await findByRoot(root);
   if (clash && clash.id !== existing?.id) {
     return refuse(
@@ -685,6 +703,7 @@ async function validate(
       visibility,
       deliveryRecipe,
       adversarialReview: input.adversarialReview ?? true,
+      maxTicketsInFlight,
       trackerCommandsJson,
       trackerDiagnostic,
     },
@@ -740,6 +759,7 @@ export async function updateProject(
     visibility: patch.visibility ?? existing.visibility,
     deliveryRecipe: sanitizedDeliveryRecipePatch(patch.deliveryRecipe, existing.deliveryRecipe),
     adversarialReview: patch.adversarialReview ?? existing.adversarialReview,
+    maxTicketsInFlight: patch.maxTicketsInFlight ?? existing.maxTicketsInFlight,
   };
 
   const outcome = await validate(merged, existing, { readTracker: false });

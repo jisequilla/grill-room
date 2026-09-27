@@ -1684,14 +1684,63 @@ describe("what the adapter sends to break a spec into tickets", () => {
       `  its tests, rather than leaving them to a tests-only ticket.\n\n${paragraph}`,
     );
     if (greenfield) {
-      expect(prompt).toContain(`${paragraph}\n\n## This repository has no commits yet`);
+      expect(prompt).toContain(
+        `${paragraph}\n\n${CHAIN_PARAGRAPH}\n\n## This repository has no commits yet`,
+      );
     } else {
-      expect(prompt.endsWith(paragraph)).toBe(true);
+      expect(prompt.endsWith(`${paragraph}\n\n${CHAIN_PARAGRAPH}`)).toBe(true);
+    }
+  });
+
+  const GATE_END = "agent can build, configure or test in the repository is a build ticket.";
+  const CHAIN_PARAGRAPH = [
+    "Keep chains of `blockedBy` short, so that tickets can be built side by side.",
+    "List a ticket in another's `blockedBy` only when that ticket uses its output:",
+    "code it calls, a file it creates, a table it reads. Build order alone is not",
+    "a reason, and neither is testing: each ticket writes its own tests, as above,",
+    "so no ticket waits for a tests-only ticket. When many tickets would change",
+    "the same file, such as a shared schema, a route table or a registration list,",
+    "make that change its own early ticket that the others list in `blockedBy`,",
+    "rather than chaining them one after another through that file.",
+  ].join("\n");
+
+  it.each([
+    ["no greenfield, no stories", false, [], null],
+    ["greenfield", true, [], "## This repository has no commits yet"],
+    ["stories", false, [1, 2], "## User stories"],
+    ["greenfield and stories", true, [1, 2], "## This repository has no commits yet"],
+  ] as const)("states how to keep chains short, after the gate paragraph, %s", async (_, greenfield, userStories, next) => {
+    const runner = recordingRunner([ok(anEnvelope({ structured_output: { tickets: [] } }))]);
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).breakIntoTickets({
+      kind: "break-into-tickets",
+      context: aContext(),
+      specMarkdown: "## Problem Statement\n\nExport the training log.",
+      greenfield,
+      verifyCommand: "pnpm test",
+      userStories: [...userStories],
+      rejectionReason: null,
+    });
+    const prompt = valueOf(runner.invocations[0]!.args, "-p") as string;
+
+    expect(prompt.split(CHAIN_PARAGRAPH)).toHaveLength(2);
+    if (next === null) {
+      expect(prompt.endsWith(`${GATE_END}\n\n${CHAIN_PARAGRAPH}`)).toBe(true);
+      expect(prompt.endsWith("rather than chaining them one after another through that file.")).toBe(true);
+    } else {
+      expect(prompt).toContain(`${GATE_END}\n\n${CHAIN_PARAGRAPH}\n\n${next}`);
+    }
+    if (greenfield && userStories.length > 0) {
+      expect(prompt.indexOf("## This repository has no commits yet")).toBeLessThan(
+        prompt.indexOf("## User stories"),
+      );
+    }
+    if (userStories.length > 0) {
+      expect(prompt.lastIndexOf("## ")).toBe(prompt.indexOf("## User stories"));
     }
   });
 
   describe("in a repository with no commits yet", () => {
-    const RULES_END = "agent can build, configure or test in the repository is a build ticket.";
+    const RULES_END = "rather than chaining them one after another through that file.";
 
     async function promptFor(greenfield: boolean, verifyCommand: string | null): Promise<string> {
       const runner = recordingRunner([ok(anEnvelope({ structured_output: { tickets: [] } }))]);
@@ -1796,7 +1845,7 @@ describe("what the adapter sends to break a spec into tickets", () => {
       );
     } else {
       expect(withStories).toContain(
-        "agent can build, configure or test in the repository is a build ticket.\n\n## User stories",
+        "rather than chaining them one after another through that file.\n\n## User stories",
       );
     }
   });

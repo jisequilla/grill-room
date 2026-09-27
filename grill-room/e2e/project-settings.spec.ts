@@ -95,6 +95,10 @@ test.describe("project settings", () => {
     await reviewSwitch.click();
     await expect(reviewSwitch).toHaveAttribute("aria-checked", "false");
 
+    const inFlight = page.getByTestId("project-max-tickets-in-flight");
+    await expect(inFlight).toHaveValue("3");
+    await inFlight.fill("2");
+
     // The dialog closes on the mutation's onSuccess callback, a tick before
     // the response promise it comes from actually settles — so waiting for
     // the dialog to hide is not enough to know the save has landed. Wait for
@@ -116,6 +120,7 @@ test.describe("project settings", () => {
     const saved = await savedResponse.json();
     expect(saved.deliveryRecipe).toBe("pull-request");
     expect(saved.adversarialReview).toBe(false);
+    expect(saved.maxTicketsInFlight).toBe(2);
 
     await page.reload();
 
@@ -132,6 +137,7 @@ test.describe("project settings", () => {
     await expect(
       page.getByTestId("project-adversarial-review"),
     ).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByTestId("project-max-tickets-in-flight")).toHaveValue("2");
 
     // The stored values are unchanged by the reload and reopen alone.
     const reloadedResponse = await request.get(
@@ -141,6 +147,95 @@ test.describe("project settings", () => {
     const reloaded = await reloadedResponse.json();
     expect(reloaded.deliveryRecipe).toBe("pull-request");
     expect(reloaded.adversarialReview).toBe(false);
+    expect(reloaded.maxTicketsInFlight).toBe(2);
+  });
+
+  test("refuses tickets in flight of 11 beside the field", async ({ page, request }) => {
+    const root = createFixtureRepo();
+    try {
+      await registerProject(request, {
+        root,
+        verifyCommand: "pnpm test",
+        workingExportFolder: ".scratch",
+        name: "In-flight refusal fixture",
+      });
+
+      await page.goto("/settings");
+      const row = page
+        .getByTestId("project-row")
+        .filter({ hasText: "In-flight refusal fixture" });
+      await row.getByRole("button", { name: "Edit" }).click();
+
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+
+      const inFlight = page.getByTestId("project-max-tickets-in-flight");
+      await inFlight.fill("11");
+      const refusedResponse = page.waitForResponse((response) =>
+        response.url().includes("/_agent-native/actions/update-project"),
+      );
+      await page.getByTestId("project-save").click();
+      await refusedResponse;
+
+      await expect(dialog.locator("#project-max-tickets-in-flight-hint")).toHaveText(
+        "Tickets in flight must be a whole number from 1 to 10.",
+      );
+      await expect(inFlight).toHaveAttribute("aria-invalid", "true");
+      await expect(dialog).toBeVisible();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a blank tickets in flight still saves and keeps the stored value", async ({
+    page,
+    request,
+  }) => {
+    const root = createFixtureRepo();
+    try {
+      const project = await registerProject(request, {
+        root,
+        verifyCommand: "pnpm test",
+        workingExportFolder: ".scratch",
+        name: "In-flight blank fixture",
+      });
+
+      await page.goto("/settings");
+      const row = page
+        .getByTestId("project-row")
+        .filter({ hasText: "In-flight blank fixture" });
+      await row.getByRole("button", { name: "Edit" }).click();
+
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+
+      const inFlight = page.getByTestId("project-max-tickets-in-flight");
+      await expect(inFlight).toHaveValue("3");
+      await inFlight.fill("");
+      await expect(page.getByTestId("project-save")).toBeEnabled();
+
+      const updateResponse = page.waitForResponse(
+        (response) =>
+          response.url().includes("/_agent-native/actions/update-project") &&
+          response.ok(),
+      );
+      await page.getByTestId("project-save").click();
+      await updateResponse;
+      await expect(dialog).toBeHidden();
+
+      const savedResponse = await request.get(
+        `/_agent-native/actions/get-project?id=${project.id}`,
+      );
+      expect(savedResponse.ok()).toBeTruthy();
+      expect((await savedResponse.json()).maxTicketsInFlight).toBe(3);
+
+      await page.reload();
+      await row.getByRole("button", { name: "Edit" }).click();
+      await expect(dialog).toBeVisible();
+      await expect(page.getByTestId("project-max-tickets-in-flight")).toHaveValue("3");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("shows the durable and working folders with their lifetimes, refuses overlapping roots under both, and saves a new durable folder across a reload", async ({

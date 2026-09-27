@@ -44,6 +44,7 @@ import type {
   ProjectVisibility,
   TicketKind,
 } from "../shared/session-constants.js";
+import { DEFAULT_MAX_TICKETS_IN_FLIGHT } from "../shared/session-constants.js";
 import { getDb, schema } from "./db/index.js";
 import { hashExportContent, openingSections, padTicketNumber, sanitizeTicketSlug } from "./export.js";
 // Type-only: erased at compile time, so this never becomes a runtime import.
@@ -55,6 +56,7 @@ import {
   computeWaves,
   describeTickets,
   type ImplicitEdge,
+  longestChain,
   uncoveredStories,
   type UserStory,
   userStories,
@@ -115,6 +117,8 @@ export interface HandoffSource {
     deliveryRecipe: DeliveryRecipe;
     adversarialReview: boolean;
     trackerCommandsJson: string | null;
+    /** How many tickets may run at once; absent means {@link DEFAULT_MAX_TICKETS_IN_FLIGHT}. */
+    maxTicketsInFlight?: number;
   };
   /**
    * The spec's user stories no ticket lists in its `implements`, ascending.
@@ -244,9 +248,9 @@ export interface RenderedHandoff {
  * A hash over every input the templates render from. The field list is fixed
  * and ordered here, so the same inputs always hash the same.
  *
- * `deliveryRecipe` and `adversarialReview` join the canonical object only
- * when they differ from the migration default (`pull-request`, `true`):
- * these two fields were added to every existing project by an additive
+ * `deliveryRecipe`, `adversarialReview` and `maxTicketsInFlight` join the
+ * canonical object only when they differ from the migration default
+ * (`pull-request`, `true`, 3): these fields were added to every existing project by an additive
  * migration, so a project still on the defaults must hash exactly as it did
  * before these fields existed, or every handoff stored before this change
  * goes stale on upgrade for nothing that actually changed.
@@ -278,6 +282,10 @@ export function handoffFingerprint(source: HandoffSource): string {
         ? {}
         : { deliveryRecipe: source.project.deliveryRecipe }),
       ...(source.project.adversarialReview === false ? { adversarialReview: false } : {}),
+      ...(source.project.maxTicketsInFlight === undefined ||
+      source.project.maxTicketsInFlight === DEFAULT_MAX_TICKETS_IN_FLIGHT
+        ? {}
+        : { maxTicketsInFlight: source.project.maxTicketsInFlight }),
       trackerCommandsJson: source.project.trackerCommandsJson,
     },
   };
@@ -460,11 +468,12 @@ function wavesSection(source: HandoffSource, exportFacts?: ExportFacts): string 
   const byNumber = new Map(source.tickets.map((ticket) => [ticket.number, ticket]));
   const checked = exportFacts?.waves !== undefined;
   const waves = exportFacts?.waves ?? source.waves;
+  const cap = maxTicketsInFlight(source);
   const lines = [
     "## Waves",
     "",
     checked
-      ? "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified."
+      ? `Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with ${cap === 1 ? "one" : `at most ${cap}`} at a time. Start a wave only once every ticket of the previous wave is merged and verified.`
       : "Tickets in one wave have no Blocked-by between them. Whether they change the same files was not checked, because the briefs are not grounded against the current code: run them one at a time, or ground the briefs first. Start a wave only once every ticket of the previous wave is merged and verified.",
   ];
   if (hasGates(source)) {
@@ -519,6 +528,68 @@ function wavesSection(source: HandoffSource, exportFacts?: ExportFacts): string 
     }
   });
   return lines.join("\n");
+}
+
+/** The project's in-flight cap, or the default when it has none. */
+function maxTicketsInFlight(source: HandoffSource): number {
+  return source.project.maxTicketsInFlight ?? DEFAULT_MAX_TICKETS_IN_FLIGHT;
+}
+
+/**
+ * The plan's shape, just before the waves: the longest chain of build tickets
+ * that must be built one after another, how many build tickets each wave
+ * holds, and how many tickets to run at once. It reads the same waves the
+ * Waves section shows, and when overlaps were checked the chain follows the
+ * orderings that separation added. Computed, never estimated.
+ */
+function executionPlanSection(source: HandoffSource, exportFacts?: ExportFacts): string {
+  const total = source.tickets.length;
+  const byNumber = new Map(source.tickets.map((ticket) => [ticket.number, ticket]));
+  const checked = exportFacts?.waves !== undefined;
+  const waves = exportFacts?.waves ?? source.waves;
+  const found = longestChain(source.tickets, exportFacts?.implicitEdges ?? []) ?? {
+    length: 0,
+    chain: [],
+  };
+  const path = found.chain
+    .map((number) => {
+      const label = padTicketNumber(number, total);
+      const ticket = byNumber.get(number);
+      return ticket && isGate(ticket) ? `gate ${label}` : label;
+    })
+    .join(" → ");
+  const chainText =
+    found.length === 0
+      ? "no build tickets."
+      : found.length === 1
+        ? `1 build ticket: ${path}.`
+        : `${found.length} build tickets, built one after another: ${path}.`;
+
+  const widths = waves
+    .map((wave) => {
+      const builds = wave.filter((number) => {
+        const ticket = byNumber.get(number);
+        return ticket !== undefined && !isGate(ticket);
+      }).length;
+      return builds === 0 ? "gate only" : `${builds}`;
+    })
+    .join(", ");
+
+  const cap = maxTicketsInFlight(source);
+  const why =
+    "Every ticket in flight draws on the same subscription's rate limit, and a rate-limited failure reads like a failed ticket; each one's reports also need your attention before it can merge.";
+  const capLine =
+    cap === 1
+      ? `- Run one ticket at a time. ${why}`
+      : `- Run at most ${cap} tickets at a time, even when a wave is wider. ${why}${checked ? "" : " Until the briefs are grounded, run one at a time, as Waves says."}`;
+
+  return [
+    "## Execution plan",
+    "",
+    `- Longest chain: ${chainText}`,
+    `- Wave widths, in build tickets: ${widths} (wave 1 first).`,
+    capLine,
+  ].join("\n");
 }
 
 /**
@@ -836,6 +907,7 @@ export function renderHandoffMarkdown(
       ...(facts.greenfield ? ["", greenfieldVerifyLine(source)] : []),
     ].join("\n"),
     beforeDelegatingSection(source, facts),
+    executionPlanSection(source, exportFacts),
     wavesSection(source, exportFacts),
     ...(source.uncoveredStories && source.uncoveredStories.length > 0
       ? [uncoveredStoriesSection(source.uncoveredStories)]
@@ -1353,6 +1425,7 @@ export async function loadHandoffSource(
         deliveryRecipe: project.deliveryRecipe,
         adversarialReview: project.adversarialReview,
         trackerCommandsJson: project.trackerCommandsJson,
+        maxTicketsInFlight: project.maxTicketsInFlight,
       },
       uncoveredStories: uncovered,
     },
