@@ -293,6 +293,7 @@ describe("preview-export and export-session", () => {
       ticketsExported: true,
       exportBlocked: false,
       exportBlockedReason: null,
+      bundlePath: "docs/features/grill-room",
     });
     expect(preview.files).toEqual([
       path.join(bundleDir, "HANDOFF.md"),
@@ -1528,6 +1529,7 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
     expect(plan.greenfield).toBe(row.greenfield);
     const bundleDir = path.join(root, ".scratch", "grill-room");
     const expectedBundlePath = row.effective === "ignored" ? bundleDir : ".scratch/grill-room";
+    expect(plan.bundlePath).toBe(expectedBundlePath);
     const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
     expect(handoff.content).toContain(`- Spec: \`${expectedBundlePath}/spec.md\``);
     expect(handoff.content).not.toContain("git could not say at export");

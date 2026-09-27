@@ -275,6 +275,8 @@ export interface ExportBundlePlan {
   bundleDir: string;
   /** The bundle directory relative to the project root, forward slashes: what a successful export stores on the session. */
   bundleFolder: string;
+  /** The exact string this plan substitutes for `{{BUNDLE}}` in HANDOFF.md and the briefs. */
+  bundlePath: string;
   /** Whether the bundle directory already exists, i.e. this export replaces an earlier one. */
   bundleExists: boolean;
   /** Every planned file, kept ones included: spec, issues in number order, then the manifest. */
@@ -689,6 +691,10 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     : null;
   const groundingCurrent = groundingForRender?.current === true;
 
+  // Hoisted above the `if (handoff)` block so `preview-export` can report
+  // what `{{BUNDLE}}` becomes for this plan even before a handoff exists.
+  const bundlePath = bundlePathFor(exportFacts.visibility, project.rootPath, bundleDir);
+
   const handoffFiles: { relativePath: string; content: string }[] = [];
   // Populated inside `if (handoff)` below, before HANDOFF.md's own content is
   // decided, so its wording can already see the final answer — including
@@ -696,8 +702,6 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   const groundedBriefs: number[] = [];
   const ungroundedBriefs: UngroundedBrief[] = [];
   if (handoff) {
-    const bundlePath = bundlePathFor(exportFacts.visibility, project.rootPath, bundleDir);
-
     // Export is the one place grounding reaches the handoff's text: it
     // applies here, not at generation time, because grounding happens after
     // the handoff exists and can go stale on its own — rendering at export
@@ -902,6 +906,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     folderName,
     bundleDir,
     bundleFolder,
+    bundlePath,
     bundleExists: await exists(bundleDir),
     files,
     removals,

@@ -58,6 +58,17 @@ function documentText(handoff: Handoff, key: string): string {
 }
 
 /**
+ * Fills every `{{BUNDLE}}` token in `markdown` with `bundlePath`, the same
+ * operation export's own `fillBundlePath` (`server/handoff.ts:366-368`)
+ * performs at export time. With no current plan (`bundlePath` null), the
+ * text is returned unchanged, token intact.
+ */
+export function viewedDocumentText(markdown: string, bundlePath: string | null): string {
+  if (bundlePath === null) return markdown;
+  return markdown.split("{{BUNDLE}}").join(bundlePath);
+}
+
+/**
  * The session's HANDOFF.md and per-ticket briefs: generate, read, edit, and
  * regenerate them. Regenerating keeps hand-edited briefs and asks first only
  * when it would lose an edit; "Regenerate, replacing edits" asks to rewrite
@@ -65,7 +76,13 @@ function documentText(handoff: Handoff, key: string): string {
  * when the exported copy is behind, and a note names kept briefs whose
  * ticket changed since.
  */
-export function HandoffSection({ sessionId }: { sessionId: string }) {
+export function HandoffSection({
+  sessionId,
+  bundlePath,
+}: {
+  sessionId: string;
+  bundlePath: string | null;
+}) {
   const t = useT();
   const [selected, setSelected] = useState(HANDOFF_DOC);
   const [draft, setDraft] = useState<string | null>(null);
@@ -263,7 +280,7 @@ export function HandoffSection({ sessionId }: { sessionId: string }) {
           {draft === null ? (
             <div className="rounded-xl border bg-card px-5 py-4" data-testid="handoff-document-view">
               <Markdown
-                text={documentText(handoff, activeKey)}
+                text={viewedDocumentText(documentText(handoff, activeKey), bundlePath)}
                 className="text-sm leading-relaxed text-foreground"
               />
             </div>
@@ -288,7 +305,11 @@ export function HandoffSection({ sessionId }: { sessionId: string }) {
             </div>
           )}
 
-          <p className="text-xs text-muted-foreground">{t("output.handoffBundleHint", { token: "{{BUNDLE}}" })}</p>
+          <p className="text-xs text-muted-foreground">
+            {bundlePath === null
+              ? t("output.handoffBundleHint", { token: "{{BUNDLE}}" })
+              : t("output.handoffBundleShownHint", { path: bundlePath, token: "{{BUNDLE}}" })}
+          </p>
         </div>
       )}
 

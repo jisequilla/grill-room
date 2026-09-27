@@ -85,6 +85,86 @@ describe("parseInline", () => {
   });
 });
 
+describe("links", () => {
+  it.each([
+    [
+      "[`{{BUNDLE}}/briefs/01-a.md`](briefs/01-a.md)",
+      [
+        {
+          type: "link",
+          href: "briefs/01-a.md",
+          children: [{ type: "code", value: "{{BUNDLE}}/briefs/01-a.md" }],
+        },
+      ],
+    ],
+    [
+      "see [the spec](spec.md) now",
+      [
+        { type: "text", value: "see " },
+        { type: "link", href: "spec.md", children: [{ type: "text", value: "the spec" }] },
+        { type: "text", value: " now" },
+      ],
+    ],
+    [
+      "[**bold** words](x.md)",
+      [
+        {
+          type: "link",
+          href: "x.md",
+          children: [
+            { type: "strong", children: [{ type: "text", value: "bold" }] },
+            { type: "text", value: " words" },
+          ],
+        },
+      ],
+    ],
+    [
+      "**[x](y)**",
+      [
+        {
+          type: "strong",
+          children: [{ type: "link", href: "y", children: [{ type: "text", value: "x" }] }],
+        },
+      ],
+    ],
+    ["`[x](y)`", [{ type: "code", value: "[x](y)" }]],
+    ["[x]", [{ type: "text", value: "[x]" }]],
+    ["[x] (y)", [{ type: "text", value: "[x] (y)" }]],
+    ["[](y)", [{ type: "text", value: "[](y)" }]],
+    ["[x]()", [{ type: "text", value: "[x]()" }]],
+    ["[x](a b)", [{ type: "text", value: "[x](a b)" }]],
+    ["[x](y", [{ type: "text", value: "[x](y" }]],
+    ["\\[x](y)", [{ type: "text", value: "[x](y)" }]],
+    ["[a [b]](c)", [{ type: "text", value: "[a [b]](c)" }]],
+    [
+      "[site](https://example.com)",
+      [{ type: "link", href: "https://example.com", children: [{ type: "text", value: "site" }] }],
+    ],
+    [
+      "[`npm` docs](https://docs.npmjs.com/cli)",
+      [
+        {
+          type: "link",
+          href: "https://docs.npmjs.com/cli",
+          children: [
+            { type: "code", value: "npm" },
+            { type: "text", value: " docs" },
+          ],
+        },
+      ],
+    ],
+    [
+      "[x](javascript:alert(1))",
+      [
+        { type: "link", href: "javascript:alert(1", children: [{ type: "text", value: "x" }] },
+        { type: "text", value: ")" },
+      ],
+    ],
+  ])("parses %s", (input, expected) => {
+    expect(parseInline(input)).toEqual(expected);
+  });
+});
+
 describe("parseMarkdown", () => {
   it("splits paragraphs on blank lines", () => {
     const blocks = parseMarkdown("First line.\nstill first.\n\nSecond.");
