@@ -84,8 +84,11 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `confirm-session` | Confirm a session whose done proposal is pending. Refuses outside `done-proposed`, refuses with the list of loose ends while any remain, and refuses while a turn is working. |
 | `synthesize-spec` | Synthesize the session's spec from its settled decisions, following the upstream to-spec template verbatim. Allowed only for a confirmed session with no turn working. Dispositioned decisions feed Out of Scope and Further Notes. Regenerating replaces the markdown and returns the spec row. |
 | `get-spec` | A session's spec, or null when none has been synthesized yet, plus a `ticketsCurrent` flag: whether any generated tickets still match it. |
-| `break-into-tickets` | Break the session's current spec into implementation tickets, replacing any it already has. Allowed only for a confirmed session with a current spec and no turn working. Refuses to replace tickets carrying a build record unless `force` is set. When the session's project repository has no commits yet (greenfield), the request carries that and the project's verify command: ticket 1 must be a build ticket that sets up that command and names it in its body as inline code (a gate as ticket 1 is refused instead), and every other build ticket must depend on ticket 1 through `blockedBy`, or the breakdown is sent back; a gate need not, though a build ticket may reach ticket 1 through one. A prerequisite outside the code (an account, a signed agreement, reviewed terms, or a spec condition such as a first part being used before a second is built) is a **gate**: a ticket of `kind` `gate` with a one-line `waitsFor` and no builder, listed in the `blockedBy` of every ticket that needs it. Refused: a gate whose `waitsFor` is not one non-empty line, a build ticket whose `waitsFor` is not null (a blank one is stored as null), and a gate no ticket lists in `blockedBy`. When the spec numbers its user stories (column-0 ordered-list items under `## User Stories`, numbers as written), the request carries them as `userStories` and each ticket cites the stories it builds in `implements`: a build ticket citing a number the spec does not have, or a gate citing any story, is refused; a story no build ticket cites is sent back too, except on the last attempt, where the set is accepted, the attempt log notes the uncovered stories, and HANDOFF.md lists them (see "Handoff" below). A ticket may cite none, such as a setup ticket. A spec with no numbered stories skips the check, and every ticket's `implements` is stored empty. The breakdown also checks its longest chain of build tickets that must be built one after another (a gate adds no length): a chain longer than `max(4, ceil(build tickets / 2))` is sent back once per breakdown, never on the last attempt, with the chain and the limit; after that the set is accepted and the attempt log notes the chain. Returns the same shape as `list-tickets`. |
+| `break-into-tickets` | Break the session's current spec into implementation tickets, replacing any it already has. Allowed only for a confirmed session with a current spec and no turn working. Refuses to replace tickets carrying a build record unless `force` is set. When the session's project repository has no commits yet (greenfield), the request carries that and the project's verify command: ticket 1 must be a build ticket that sets up that command and names it in its body as inline code (a gate as ticket 1 is refused instead), and every other build ticket must depend on ticket 1 through `blockedBy`, or the breakdown is sent back; a gate need not, though a build ticket may reach ticket 1 through one. A prerequisite outside the code (an account, a signed agreement, reviewed terms, or a spec condition such as a first part being used before a second is built) is a **gate**: a ticket of `kind` `gate` with a one-line `waitsFor` and no builder, listed in the `blockedBy` of every ticket that needs it. Refused: a gate whose `waitsFor` is not one non-empty line, a build ticket whose `waitsFor` is not null (a blank one is stored as null), and a gate no ticket lists in `blockedBy`. When the spec numbers its user stories (column-0 ordered-list items under `## User Stories`, numbers as written), the request carries them as `userStories` and each ticket cites the stories it builds in `implements`: a build ticket citing a number the spec does not have, or a gate citing any story, is refused; a story no build ticket cites is sent back too, except on the last attempt, where the set is accepted, the attempt log notes the uncovered stories, and HANDOFF.md lists them (see "Handoff" below). A ticket may cite none, such as a setup ticket. A spec with no numbered stories skips the check, and every ticket's `implements` is stored empty. The breakdown also checks its longest chain of build tickets that must be built one after another (a gate adds no length): a chain longer than `max(4, ceil(build tickets / 2))` is sent back once per breakdown, never on the last attempt, with the chain and the limit; after that the set is accepted and the attempt log notes the chain. Every accepted set is followed, inside the same turn, by the consistency check (its own `check-consistency` turn record; see "Consistency check" below). A failed check never costs the tickets: they are stored and returned, and the session reads `idle` with the check's error in `turnErrorCode`/`turnErrorMessage`. Above 40 tickets (`MAX_HANDOFF_SCOUT_TICKETS`) the check is skipped with no model call, noted as `too-many-tickets` the same way. A breakdown that exhausts its retries runs no check. Returns the same shape as `list-tickets`. |
 | `list-tickets` | A session's tickets in number order, each with `blockedBy` resolved to ticket numbers, its `kind` (`build` or `gate`), `waitsFor` (a gate's one line, null for a build ticket) and `implements` (the user story numbers it builds, ascending; null for tickets made before the story check), the same `ticketsCurrent` flag as `get-spec`, and `waves`: ticket numbers grouped by the topological layering of `blockedBy` (wave 1 has no blockers, each later wave's blockers are all in an earlier one), gates included. |
+| `check-consistency` | Re-run the consistency check on a session's current spec and tickets, as a turn of its own on the session's model, and return what `list-consistency-findings` returns. Refused before any turn with `not-confirmed`, `spec-missing`, `no-tickets`, `tickets-not-current` (tickets not current with the spec), `turn-in-progress`, or `too-many-tickets` above 40 tickets. See "Consistency check" below. |
+| `list-consistency-findings` | A session's reopen cards in number order (`kind`, `at`, `against`, `question`, `decisionKey`, `status` `open` or `dismissed`), with `checked` (any check accepted), `current` (that check judged today's tickets) and `turnId`. A session with no spec reads `{ findings: [], checked: false, current: false, turnId: null }`. |
+| `dismiss-consistency-finding` | Dismiss one open reopen card, given `findingId`; returns the session's cards. Refused with `finding-not-found` (404) and `not-open` (409). |
 | `set-ticket-blocked-by` | Edit which other tickets in the session block a ticket, given `ticketId` and the new `blockedBy` as ticket numbers. Refuses a self-reference, a number that is not a ticket in the session, or an edit that would create a cycle (`errorCode` `self-reference`, `unknown-ticket-number`, or `cycle`, the last naming every ticket on it). Never touches the spec's `ticketsGeneratedAt`. Returns the same shape as `list-tickets`. |
 | `register-project` | Register a repository sessions export into. The root (any folder inside the repo) is resolved to its git top-level with read-only `git rev-parse`; root and verify command are required, the rest default (slug pattern `{slug}`, tracker `markdown`, build-record logging off, adversarial review on, tickets in flight 3). A blank export folder or slug pattern falls back to the repo's declared tracker block (`docs/agents/issue-tracker.md` front matter — see "Declared tracker" below) when it has a valid one, otherwise export folder is required and slug pattern falls back to `{slug}`. The tracker's commands and diagnostic are stored on the project either way. The visibility flag is seeded from `git check-ignore` on the export folder unless given. The delivery recipe is guessed from the repo's remotes with read-only `git remote -v` unless given: any remote gives `pull-request`, none gives `local-merge`. Refusals carry a code: `root-required`, `verify-command-required`, `export-folder-required`, `folder-not-absolute`, `folder-not-found`, `folder-not-directory`, `not-a-git-repo`, `git-unavailable`, `export-folder-outside-root`, `export-folder-is-root`, `invalid-slug-pattern`, `invalid-delivery-recipe`, `invalid-max-tickets-in-flight`, `project-exists`. |
 | `update-project` | Edit a registered project. Omitted fields keep their value and the result is validated exactly as registration validates it; the visibility flag changes only when given. Never re-reads the declared tracker — its stored commands and diagnostic pass through unchanged. Can change the delivery recipe and the adversarial review switch directly; editing never re-guesses the recipe from the repo's remotes. Can change tickets in flight, how many tickets the handoff lets run at once: a whole number from 1 to 10, refused otherwise with `invalid-max-tickets-in-flight`. |
@@ -116,7 +119,8 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `use-fake-scenario` | Test only: choose the fake interviewer's scripted scenario for one session, replacing any queue it already has. Works only when `GRILL_ROOM_INTERVIEWER=fake`; refused with `fake-interviewer-only` otherwise and `unknown-scenario` for a name the fake does not have. See "Project scout" below for the `scout-project` scenario. |
 
 `request-next-round`, `submit-round`, `find-superseded`, `synthesize-spec`,
-`break-into-tickets`, `assess-readiness`, and `apply-reopen-batch` (one or two
+`break-into-tickets` (two turns: the breakdown and its consistency check),
+`check-consistency`, `assess-readiness`, and `apply-reopen-batch` (one or two
 turns per item)
 all wait on a Claude CLI turn, which takes about a minute and can take several.
 The client action hooks time out at 60 s by default, so UI code calling any of
@@ -318,6 +322,65 @@ stored commands and diagnostic pass through every ordinary edit unchanged, so
 editing the tracker file has no effect until `refresh-project-tracker` is
 called. Only that action then updates the export folder and slug pattern, and
 only when the newly-read tracker is valid.
+
+### Consistency check
+
+A builder who meets a statement that leaves something undecided picks an
+answer alone, and the owner finds out in review. The consistency check reads
+the finished spec and every ticket in one call and reports each such
+statement as a **reopen card**: one question for the owner. It runs
+automatically after every accepted `break-into-tickets`, inside the same turn
+with a `check-consistency` turn record of its own, and `check-consistency`
+repeats it on demand. It runs on the session's model with no tools, in a
+conversation of its own on every attempt (a retry carries the refused result
+as `previousResult`); the session's conversation is never touched.
+
+Six kinds, each with the example the prompt gives:
+
+- `unquantified-threshold`: a limit or duration with no value ("capped at N x
+  cadence").
+- `one-case-rule`: a rule stated for one case, its siblings unhandled ("a run
+  whose run_id starts with `wf_` gets a root span").
+- `spec-ticket-contradiction`: the spec and a ticket disagree; `against`
+  gives the other side, and one side must be in the spec, the other in a
+  ticket (a ticket-vs-ticket finding is refused).
+- `open-choice`: an "X or Y" left open ("Checkout or Payment Element").
+- `undefaulted-value`: a value called defined with no value ("a defined
+  timeout").
+- `unnamed-target`: a host or service named only by its role ("a staging
+  environment").
+
+**App computes, agent judges.** The model judges; `consistencyReasons`
+(`server/consistency.ts`) checks, against the request as sent and never the
+rendered prompt, that each quote occurs in the place the finding names
+(whitespace-insensitive, case and punctuation exact), that a spec section
+(named by its `## ` heading) or ticket number exists, that the fields match
+the kind, that `decisionKey` is null or a settled decision, that the question
+ends with `?`, and that no finding repeats another. A result breaking a rule
+is sent back with the reasons; on the last attempt the valid findings are
+kept, the rest dropped, and the attempt log says which. At most 20 findings.
+
+**Storage.** An accepted check replaces the session's cards
+(`gr_consistency_findings`) whole and stamps the spec with the
+`ticketsGeneratedAt` it judged (`consistency_checked_for`) and its turn. A
+card whose kind and quotes (normalised) match a card the owner dismissed is
+stored dismissed. A failed check writes nothing. `list-consistency-findings`
+reports `current` only while that stamp matches `ticketsGeneratedAt` and the
+tickets are current with the spec: re-synthesizing the spec, reopening a
+decision, or a breakdown whose check failed or was skipped makes the cards
+not current without touching them.
+
+**The cap.** One check covers at most 40 tickets (`MAX_HANDOFF_SCOUT_TICKETS`,
+counting gates). Above it, the check after a breakdown is skipped with no
+model call and no turn record, leaving the session `idle` with
+`turnErrorCode` `too-many-tickets` and the message
+`The breakdown has N tickets; one consistency check covers at most 40, so the check was skipped.`;
+an on-demand `check-consistency` is refused with `too-many-tickets` (409)
+before any turn.
+
+Answering a card (asking it in the interview), the output page's card list,
+and listing open cards in HANDOFF.md and the briefs are gr-1vd.2. Nothing
+else reads the cards yet: HANDOFF.md, briefs and export are unchanged.
 
 ### Exporting a session
 
