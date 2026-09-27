@@ -703,6 +703,7 @@ const messages = {
     consistencyChecking: "Checking…",
     consistencyCheckFailed: "Could not check the spec and tickets.",
     consistencyNone: "The consistency check found nothing the spec and tickets leave open.",
+    consistencyNotJudged: "The consistency check has not judged these tickets.",
     consistencyOutdated: "These cards came from an earlier spec or breakdown.",
     consistencyCardNumber: "#{{number}}",
     consistencyKindUnquantifiedThreshold: "Limit with no value",

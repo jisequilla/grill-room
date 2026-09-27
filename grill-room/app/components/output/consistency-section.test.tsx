@@ -1,5 +1,5 @@
 import { AgentNativeI18nProvider } from "@agent-native/core/client/i18n";
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { renderToStaticMarkup as renderBare } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -7,6 +7,7 @@ import { i18nCatalog } from "@/i18n";
 
 import {
   askedFindingIds,
+  ConsistencyAskConfirm,
   ConsistencyAskOptions,
   type ConsistencyCard,
   ConsistencyCardsView,
@@ -56,10 +57,15 @@ function aList(overrides: Partial<ConsistencyList> = {}): ConsistencyList {
 
 function render(
   list: ConsistencyList,
-  { hasTickets = true, working = false } = {},
+  { hasTickets = true, working = false, ticketsCurrent = true } = {},
 ): string {
   return renderToStaticMarkup(
-    <ConsistencyCardsView list={list} hasTickets={hasTickets} working={working} />,
+    <ConsistencyCardsView
+      list={list}
+      hasTickets={hasTickets}
+      ticketsCurrent={ticketsCurrent}
+      working={working}
+    />,
   );
 }
 
@@ -117,6 +123,7 @@ describe("ConsistencyCardsView", () => {
     expect(note).toContain('data-error-code="rate-limited"');
     expect(note).toContain('role="alert"');
     expect(note).not.toContain("destructive");
+    expect(note).toContain(">The consistency check did not run on these tickets<");
     expect(html).toContain("The Claude subscription is rate limited right now.");
     expect(html).toContain('data-testid="consistency-check-again"');
     expect(html).not.toContain('data-testid="consistency-unchecked"');
@@ -145,6 +152,7 @@ describe("ConsistencyCardsView", () => {
     const html = render(aList({ findings: [], checked: false, current: false, askable: false }));
 
     expect(html).toContain('data-testid="consistency-unchecked"');
+    expect(element(html, "consistency-unchecked")).toContain(">These tickets have not been checked.<");
     expect(html).toContain('data-testid="consistency-check-again"');
     expect(html).not.toContain('data-testid="consistency-none"');
   });
@@ -153,6 +161,7 @@ describe("ConsistencyCardsView", () => {
     const html = render(aList({ findings: [] }));
 
     expect(html).toContain('data-testid="consistency-none"');
+    expect(html).toContain("The consistency check found nothing the spec and tickets leave open.</div>");
     expect(html).not.toContain('data-testid="consistency-unchecked"');
     expect(html).not.toContain('data-testid="consistency-outdated"');
   });
@@ -197,6 +206,7 @@ describe("ConsistencyCardsView", () => {
     const card = cardOf(html, 2);
     expect(card).toContain('data-status="dismissed"');
     expect(card).toContain("bg-muted");
+    expect(card).toContain(">Dismissed</div>");
     expect(card).not.toContain("consistency-answer-2");
     expect(card).not.toContain("consistency-dismiss-2");
   });
@@ -226,13 +236,37 @@ describe("ConsistencyCardsView", () => {
 
   it("marks cards that are not current, and hides Answer and Dismiss unless they are askable", () => {
     const stillAskable = render(aList({ current: false, askable: true }));
-    expect(stillAskable).toContain('data-testid="consistency-outdated"');
+    expect(element(stillAskable, "consistency-outdated")).toContain(
+      ">These cards came from an earlier spec or breakdown.</p>",
+    );
     expect(stillAskable).toContain('data-testid="consistency-answer-1"');
 
     const outdated = render(aList({ current: false, askable: false }));
     expect(outdated).toContain('data-testid="consistency-outdated"');
     expect(outdated).not.toContain('data-testid="consistency-answer-1"');
     expect(outdated).not.toContain('data-testid="consistency-dismiss-1"');
+  });
+
+  it("offers Check again when the check has not judged the current tickets and left no note", () => {
+    const earlierCards = aList({ current: false, askable: false });
+    const html = render(earlierCards);
+    expect(element(html, "consistency-not-judged")).toContain(
+      ">The consistency check has not judged these tickets.<",
+    );
+    expect(html).toContain('data-testid="consistency-check-again"');
+
+    const noCards = render(aList({ findings: [], current: false, askable: false }));
+    expect(noCards).toContain('data-testid="consistency-not-judged"');
+    expect(noCards).toContain('data-testid="consistency-check-again"');
+
+    // Not while the tickets are out of date (the check would be refused), nor
+    // while the cards are askable, nor when the note already offers it.
+    expect(render(earlierCards, { ticketsCurrent: false })).not.toContain("consistency-check-again");
+    expect(render(aList({ current: false, askable: true }))).not.toContain("consistency-not-judged");
+    const withNote = render(
+      aList({ current: false, askable: false, note: { code: "rate-limited", message: "Later." } }),
+    );
+    expect(withNote).not.toContain("consistency-not-judged");
   });
 
   it("disables Answer, Dismiss and Check again while a turn is working", () => {
@@ -268,6 +302,32 @@ describe("the ask dialog", () => {
     expect(html).not.toContain("consistency-ask-option-4");
     expect(element(html, "consistency-ask-option-2")).toContain('data-state="checked"');
     expect(element(html, "consistency-ask-option-1")).toContain('data-state="unchecked"');
+  });
+
+  it("sends exactly the checked open cards when the confirm is pressed", () => {
+    const sent: string[][] = [];
+    const button = ConsistencyAskConfirm({
+      cards,
+      checked: new Set(["card-5", "card-2", "card-3"]),
+      disabled: false,
+      label: "Ask 2 questions",
+      pending: false,
+      onConfirm: (findingIds) => sent.push(findingIds),
+    }) as ReactElement<{ onClick: () => void; disabled: boolean }>;
+
+    expect(button.props.disabled).toBe(false);
+    button.props.onClick();
+    expect(sent).toEqual([["card-2", "card-5"]]);
+
+    const none = ConsistencyAskConfirm({
+      cards,
+      checked: new Set(),
+      disabled: false,
+      label: "Ask 0 questions",
+      pending: false,
+      onConfirm: () => {},
+    }) as ReactElement<{ disabled: boolean }>;
+    expect(none.props.disabled).toBe(true);
   });
 
   it("confirms exactly the checked open cards, in number order", () => {

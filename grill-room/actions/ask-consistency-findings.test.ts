@@ -37,8 +37,58 @@ import synthesizeSpec from "./synthesize-spec.js";
  */
 const core = vi.hoisted(() => ({
   titles: [] as string[],
+  /** The handle each `addDecisionCore` call was given. */
+  handles: [] as unknown[],
   badIdOnCall: null as number | null,
 }));
+
+/**
+ * Every transaction opened through `getDb()` hands its callback a recording
+ * wrapper of the real transaction, noting each table updated through it. The
+ * embedded database binds `getDb()` to an open transaction, so a write that
+ * went around the handle would still roll back with it here; only these
+ * records show whether the ask uses its transaction.
+ */
+const transactions = vi.hoisted(() => ({
+  handles: [] as unknown[],
+  cardUpdates: 0,
+}));
+
+vi.mock("../server/db/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../server/db/index.js")>();
+  // `getDb()` may hand back a lazy chain-recording proxy (itself a function)
+  // while the database starts: its members are passed through untouched.
+  const bind = <T extends object>(target: T, prop: string | symbol) => {
+    const value = Reflect.get(target, prop);
+    return typeof value === "function" && typeof target !== "function" ? value.bind(target) : value;
+  };
+  const getDb = () => {
+    const db = original.getDb();
+    return new Proxy(db, {
+      get(target, prop) {
+        if (prop !== "transaction") return bind(target, prop);
+        return (callback: (tx: unknown) => Promise<unknown>, ...rest: unknown[]) =>
+          (target.transaction as (...args: unknown[]) => Promise<unknown>)(
+            (tx: object) => {
+              const recording = new Proxy(tx, {
+                get(inner, innerProp) {
+                  if (innerProp !== "update") return bind(inner, innerProp);
+                  return (table: unknown) => {
+                    if (table === original.schema.consistencyFindings) transactions.cardUpdates += 1;
+                    return (inner as { update: (t: unknown) => unknown }).update(table);
+                  };
+                },
+              });
+              transactions.handles.push(recording);
+              return callback(recording);
+            },
+            ...rest,
+          );
+      },
+    });
+  };
+  return { ...original, getDb };
+});
 
 vi.mock("./add-decision.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("./add-decision.js")>();
@@ -46,6 +96,7 @@ vi.mock("./add-decision.js", async (importOriginal) => {
     ...original,
     addDecisionCore: async (...args: Parameters<typeof original.addDecisionCore>) => {
       core.titles.push(args[0].title);
+      core.handles.push(args[1]);
       const view = await original.addDecisionCore(...args);
       return core.badIdOnCall === core.titles.length
         ? { ...view!, id: "no-such-decision" }
@@ -190,7 +241,10 @@ describe("ask-consistency-findings", () => {
   afterEach(resetInterviewer);
   beforeEach(() => {
     core.titles = [];
+    core.handles = [];
     core.badIdOnCall = null;
+    transactions.handles = [];
+    transactions.cardUpdates = 0;
   });
 
   it("asks each card as a decision, in number order, and links it", async () => {
@@ -198,14 +252,21 @@ describe("ask-consistency-findings", () => {
     const before = await specRow(sessionId);
     expect(before.current).toBe(true);
     const interviewer = scriptInterviewer([]);
+    const [fifth, second] = [await cardId(sessionId, 5), await cardId(sessionId, 2)];
+    transactions.handles = [];
+    transactions.cardUpdates = 0;
 
     // Given out of number order on purpose.
     const list = await askConsistencyFindings.run({
-      findingIds: [await cardId(sessionId, 5), await cardId(sessionId, 2)],
+      findingIds: [fifth, second],
     });
 
     expect(core.titles).toEqual([SEVEN[1]!.question, SEVEN[4]!.question]);
     expect(interviewer.requests).toHaveLength(0);
+    // Both decisions and both card updates went through the ask's one transaction.
+    expect(transactions.handles).toHaveLength(1);
+    expect(core.handles).toEqual([transactions.handles[0], transactions.handles[0]]);
+    expect(transactions.cardUpdates).toBe(2);
 
     expect(list.findings.map((card) => [card.number, card.status])).toEqual([
       [1, "open"],
@@ -632,6 +693,42 @@ describe("ask-consistency-findings", () => {
           const sessionId = await aCheckedSession();
           scriptInterviewer([RATE_LIMITED]);
           await expect(checkConsistency.run({ sessionId })).rejects.toThrow();
+          return sessionId;
+        },
+        null,
+      ],
+      [
+        "an idle error the check did not leave (a supersession failure) on a breakdown from before the attempt stamp",
+        async () => {
+          const sessionId = await aCheckedSession({ check: RATE_LIMITED });
+          await getDb()
+            .update(schema.specs)
+            .set({ consistencyAttemptedFor: null })
+            .where(eq(schema.specs.sessionId, sessionId));
+          await getDb()
+            .update(schema.sessions)
+            .set({
+              turnStatus: "idle",
+              turnErrorCode: "supersession-failed",
+              turnErrorMessage: "Could not check for superseded answers.",
+            })
+            .where(eq(schema.sessions.id, sessionId));
+          return sessionId;
+        },
+        null,
+      ],
+      [
+        "an idle error while the accepted check's stamp matches the breakdown",
+        async () => {
+          const sessionId = await aCheckedSession();
+          await getDb()
+            .update(schema.sessions)
+            .set({
+              turnStatus: "idle",
+              turnErrorCode: "supersession-failed",
+              turnErrorMessage: "Could not check for superseded answers.",
+            })
+            .where(eq(schema.sessions.id, sessionId));
           return sessionId;
         },
         null,

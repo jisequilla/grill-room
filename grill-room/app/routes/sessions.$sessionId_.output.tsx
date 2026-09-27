@@ -153,8 +153,7 @@ export default function SessionOutputRoute() {
         onSettled={refresh}
       />
 
-      <Separator />
-
+      {/* Renders its own leading separator, and nothing at all without tickets. */}
       <ConsistencySection sessionId={id} working={working} onSettled={refresh} />
 
       <Separator />

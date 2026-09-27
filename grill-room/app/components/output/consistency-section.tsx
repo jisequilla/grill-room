@@ -21,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
@@ -184,6 +185,7 @@ function CardItem({
 export function ConsistencyCardsView({
   list,
   hasTickets,
+  ticketsCurrent = false,
   working,
   checking = false,
   dismissingId = null,
@@ -193,6 +195,8 @@ export function ConsistencyCardsView({
 }: {
   list: ConsistencyList;
   hasTickets: boolean;
+  /** Whether the tickets are current with the spec (`list-tickets`), so a check can run on them. */
+  ticketsCurrent?: boolean;
   working: boolean;
   checking?: boolean;
   dismissingId?: string | null;
@@ -247,6 +251,16 @@ export function ConsistencyCardsView({
         </div>
       ) : null}
 
+      {list.checked && !list.askable && !list.note && ticketsCurrent ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed px-4 py-3"
+          data-testid="consistency-not-judged"
+        >
+          <p className="text-sm text-muted-foreground">{t("output.consistencyNotJudged")}</p>
+          {checkAgain}
+        </div>
+      ) : null}
+
       {list.checked && list.current && cards.length === 0 ? (
         <div
           className="flex items-center gap-2.5 rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground"
@@ -279,6 +293,39 @@ export function ConsistencyCardsView({
         </ul>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * The dialog's confirm: asks exactly the checked open cards, in number order.
+ * Hook-free, so a test can call it and press it.
+ */
+export function ConsistencyAskConfirm({
+  cards,
+  checked,
+  disabled,
+  label,
+  pending,
+  onConfirm,
+}: {
+  cards: readonly ConsistencyCard[];
+  checked: ReadonlySet<string>;
+  disabled: boolean;
+  label: string;
+  pending: boolean;
+  onConfirm: (findingIds: string[]) => void;
+}) {
+  const findingIds = askedFindingIds(cards, checked);
+  return (
+    <Button
+      type="button"
+      disabled={findingIds.length === 0 || disabled}
+      onClick={() => onConfirm(findingIds)}
+      data-testid="consistency-ask-confirm"
+    >
+      {pending && <Spinner className="size-4" />}
+      {label}
+    </Button>
   );
 }
 
@@ -369,15 +416,18 @@ export function ConsistencySection({
     onSettled,
   });
 
-  if (!list) return null;
-
-  const findingIds = askedFindingIds(list.findings, checked);
+  // Nothing at all, separator included, while there are no tickets or the
+  // cards are loading: the route puts no separator of its own around it.
+  if (!list || !hasTickets) return null;
 
   return (
     <>
+      <Separator />
+
       <ConsistencyCardsView
         list={list}
         hasTickets={hasTickets}
+        ticketsCurrent={ticketsData?.ticketsCurrent ?? false}
         working={working}
         checking={check.isPending}
         dismissingId={dismiss.isPending ? (dismiss.variables?.findingId ?? null) : null}
@@ -408,17 +458,18 @@ export function ConsistencySection({
             <Button type="button" variant="ghost" onClick={() => setAsking(null)}>
               {t("workspace.cancel")}
             </Button>
-            <Button
-              type="button"
-              disabled={findingIds.length === 0 || ask.isPending || working}
-              onClick={() => ask.mutate({ findingIds })}
-              data-testid="consistency-ask-confirm"
-            >
-              {ask.isPending && <Spinner className="size-4" />}
-              {ask.isPending
-                ? t("output.consistencyAsking")
-                : t("output.consistencyAskConfirm", { count: findingIds.length })}
-            </Button>
+            <ConsistencyAskConfirm
+              cards={list.findings}
+              checked={checked}
+              disabled={ask.isPending || working}
+              pending={ask.isPending}
+              label={
+                ask.isPending
+                  ? t("output.consistencyAsking")
+                  : t("output.consistencyAskConfirm", { count: askedFindingIds(list.findings, checked).length })
+              }
+              onConfirm={(findingIds) => ask.mutate({ findingIds })}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

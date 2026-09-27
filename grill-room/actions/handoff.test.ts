@@ -30,6 +30,7 @@ import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 import askConsistencyFindings from "./ask-consistency-findings.js";
 import breakIntoTickets from "./break-into-tickets.js";
+import checkConsistency from "./check-consistency.js";
 import createSession from "./create-session.js";
 import dismissConsistencyFinding from "./dismiss-consistency-finding.js";
 import exportSession from "./export-session.js";
@@ -1181,6 +1182,24 @@ describe("reopen cards in the handoff", () => {
       true,
     ],
     [
+      "a breakdown from before the attempt stamp, checked on demand, then a card asked",
+      async () => {
+        const { session } = await aCheckedSession();
+        // What v76's backfill leaves for a breakdown whose check never succeeded.
+        await getDb()
+          .update(schema.specs)
+          .set({ consistencyAttemptedFor: null, consistencyCheckedFor: null, consistencySpecSha256: null })
+          .where(eq(schema.specs.sessionId, session.id));
+        scriptInterviewer([checkTurn(SEVEN)]);
+        await checkConsistency.run({ sessionId: session.id });
+        expect((await loadedSource(session.id)).openCards).toHaveLength(7);
+        await askConsistencyFindings.run({ findingIds: [await cardIdOf(session.id, 2)] });
+        return session.id;
+      },
+      [],
+      true,
+    ],
+    [
       "outdated: a card asked",
       async () => {
         const { session } = await aCheckedSession();
@@ -1197,6 +1216,21 @@ describe("reopen cards in the handoff", () => {
 
     expect((source.openCards ?? []).map((card) => card.number)).toEqual(numbers);
     expect(source.consistencyNotCurrent).toBe(notCurrent);
+  });
+
+  it("renders the not-judged paragraph once a card is asked, for a breakdown from before the attempt stamp checked on demand", async () => {
+    const { session } = await aCheckedSession();
+    await getDb()
+      .update(schema.specs)
+      .set({ consistencyAttemptedFor: null, consistencyCheckedFor: null, consistencySpecSha256: null })
+      .where(eq(schema.specs.sessionId, session.id));
+    scriptInterviewer([checkTurn(SEVEN)]);
+    await checkConsistency.run({ sessionId: session.id });
+    await askConsistencyFindings.run({ findingIds: [await cardIdOf(session.id, 2)] });
+
+    const generated = await generateHandoff.run({ sessionId: session.id });
+
+    expect(generated.markdown).toContain(NOT_JUDGED_LINE);
   });
 
   it("lists only open current cards", async () => {

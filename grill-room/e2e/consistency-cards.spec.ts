@@ -172,6 +172,28 @@ test("reopen cards are dismissed, listed in the handoff and its briefs, and aske
   await expect(
     treeRows.filter({ hasText: "Which does the booking payment use: Checkout or Payment Element?" }),
   ).toHaveCount(1);
+  // Only the checked cards were asked: none of the other open ones reached the tree.
+  for (const question of [
+    "How long after the benchmark ends must run data be kept?",
+    "Which root span does a run driven by hand get?",
+    "Does ticket 1 fill in Retention now, or is it left as a placeholder for a later ticket?",
+    "How long can an accepted booking stay unpaid before it times out?",
+  ]) {
+    await expect(treeRows.filter({ hasText: question })).toHaveCount(0);
+  }
+  const listed = await request.get(
+    `/_agent-native/actions/list-consistency-findings?sessionId=${encodeURIComponent(sessionId)}`,
+  );
+  const { findings } = (await listed.json()) as { findings: { number: number; status: string }[] };
+  expect(findings.map((card) => [card.number, card.status])).toEqual([
+    [1, "open"],
+    [2, "asked"],
+    [3, "open"],
+    [4, "open"],
+    [5, "asked"],
+    [6, "open"],
+    [7, "dismissed"],
+  ]);
 });
 
 test("a rate-limited check leaves its note beside the cards, and the handoff says the tickets were not judged", async ({

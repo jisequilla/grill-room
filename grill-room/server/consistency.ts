@@ -439,6 +439,9 @@ async function scan(
       .set({
         consistencyCheckedFor: spec.ticketsGeneratedAt,
         consistencySpecSha256: hashExportContent(spec.markdown),
+        // A no-op after any breakdown made since the attempt stamp existed;
+        // for one made before it, an on-demand check is its first attempt.
+        consistencyAttemptedFor: spec.ticketsGeneratedAt,
         consistencyTurnId: recorder?.turnId ?? null,
       })
       .where(eq(schema.specs.sessionId, session.id));
@@ -690,6 +693,9 @@ export async function listConsistencyFindings(
     session?.turnStatus === "idle" &&
     session.turnErrorCode != null &&
     spec.ticketsGeneratedAt != null &&
+    // Only an error the breakdown's own check left: another idle error
+    // (a done proposal's supersession failure) is not the check's note.
+    spec.consistencyAttemptedFor === spec.ticketsGeneratedAt &&
     spec.consistencyCheckedFor !== spec.ticketsGeneratedAt
       ? { code: session.turnErrorCode, message: session.turnErrorMessage ?? "" }
       : null;

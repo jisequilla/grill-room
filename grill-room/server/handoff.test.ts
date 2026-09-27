@@ -2120,6 +2120,18 @@ describe("questions the spec and tickets leave open", () => {
     expect(markdown.split("## Questions the spec and tickets leave open")).toHaveLength(2);
   });
 
+  it("renders a contradiction stored ticket side first with its spec side first", () => {
+    const card4 = scenarioOpenCards()[3]!;
+    const swapped: HandoffCard = { ...card4, at: card4.against!, against: card4.at };
+    expect(swapped.at.artefact).toBe("ticket");
+
+    const markdown = renderHandoffMarkdown({ ...aSource(), openCards: [swapped] });
+
+    expect(markdown).toContain(
+      '- Does ticket 1 fill in Retention now, or is it left as a placeholder for a later ticket? (spec, Implementation Decisions: "Retention is a placeholder for a later ticket."; ticket 01: "Fill in Retention")\n',
+    );
+  });
+
   it("renders the not-judged paragraph instead of the questions when both are given", () => {
     const markdown = renderHandoffMarkdown({
       ...aSource(),
