@@ -1885,6 +1885,8 @@ describe("what the adapter sends to break a spec into tickets", () => {
       "lists those tickets in its own `blockedBy`. Every other ticket has `kind`",
       '"build" and `waitsFor` null. Never make ordinary work a gate: anything an',
       "agent can build, configure or test in the repository is a build ticket.",
+      "Every gate must be in the `blockedBy` of at least one other ticket: a gate",
+      "that holds back no ticket is refused.",
     ].join("\n");
     expect(prompt).toContain(
       `  its tests, rather than leaving them to a tests-only ticket.\n\n${paragraph}`,
@@ -1898,7 +1900,7 @@ describe("what the adapter sends to break a spec into tickets", () => {
     }
   });
 
-  const GATE_END = "agent can build, configure or test in the repository is a build ticket.";
+  const GATE_END = "that holds back no ticket is refused.";
   const CHAIN_PARAGRAPH = [
     "Keep chains of `blockedBy` short, so that tickets can be built side by side.",
     "List a ticket in another's `blockedBy` only when that ticket uses its output:",
