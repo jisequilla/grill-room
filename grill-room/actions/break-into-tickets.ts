@@ -10,6 +10,8 @@ import { getInterviewer } from "../server/interviewer/index.js";
 import type { BreakIntoTicketsResult } from "../server/interviewer/index.js";
 import { getProject } from "../server/projects.js";
 import {
+  chainNote,
+  chainReason,
   numberRanges,
   storedImplements,
   storedWaitsFor,
@@ -138,6 +140,9 @@ export default defineAction({
 
         const interviewer = getInterviewer();
         let attemptsAsked = 0;
+        // A long chain is sent back at most once per breakdown, and never on
+        // the last attempt: after that it is accepted and noted below.
+        let chainSentBack = false;
 
         const accepted = await askUntilAccepted<BreakIntoTicketsResult>({
           conversationId: session!.conversationId,
@@ -169,16 +174,25 @@ export default defineAction({
           },
           // On the last attempt, stories no ticket cites no longer refuse the
           // set: it is accepted and the gap noted below. Every other reason
-          // still refuses it.
-          reasonsToRefuse: (result) => [
-            ...validateTicketSet(
-              result.tickets,
-              greenfield && verifyCommand !== null ? { verifyCommand } : null,
-            ).reasons,
-            ...storyReasons(result.tickets, stories, {
-              lastAttempt: attemptsAsked > MAX_TURN_RETRIES,
-            }),
-          ],
+          // still refuses it. A long chain is soft in the same way, and is
+          // sent back only once.
+          reasonsToRefuse: (result) => {
+            const reasons = [
+              ...validateTicketSet(
+                result.tickets,
+                greenfield && verifyCommand !== null ? { verifyCommand } : null,
+              ).reasons,
+              ...storyReasons(result.tickets, stories, {
+                lastAttempt: attemptsAsked > MAX_TURN_RETRIES,
+              }),
+            ];
+            const chain = chainReason(result.tickets);
+            if (chain !== null && !chainSentBack && attemptsAsked <= MAX_TURN_RETRIES) {
+              reasons.push(chain);
+              chainSentBack = true;
+            }
+            return reasons;
+          },
           exhausted: (lastReason) =>
             new TurnRejected(
               "invalid-tickets",
@@ -190,11 +204,16 @@ export default defineAction({
           accepted.result.tickets,
           stories.map((number) => ({ number })),
         ).map((story) => story.number);
+        // `noted` keeps only its last note, so both go in one call.
+        const notes: string[] = [];
         if (uncovered.length > 0) {
-          await recorder?.noted(
+          notes.push(
             `Accepted after the last retry, with ${uncovered.length === 1 ? "user story" : "user stories"} ${numberRanges(uncovered)} in no ticket's implements.`,
           );
         }
+        const chain = chainNote(accepted.result.tickets);
+        if (chain !== null) notes.push(chain);
+        if (notes.length > 0) await recorder?.noted(notes.join(" "));
 
         const now = new Date().toISOString();
         const idByNumber = new Map(

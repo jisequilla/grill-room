@@ -77,6 +77,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
   const [visibility, setVisibility] = useState<ProjectVisibility>("tracked");
   const [deliveryRecipe, setDeliveryRecipe] = useState<DeliveryRecipe>("pull-request");
   const [adversarialReview, setAdversarialReview] = useState(true);
+  const [maxTicketsInFlight, setMaxTicketsInFlight] = useState("");
   const [visibilitySeeded, setVisibilitySeeded] = useState(false);
   const [workingExportFolderSuggested, setWorkingExportFolderSuggested] = useState(false);
   const [slugPatternSuggested, setSlugPatternSuggested] = useState(false);
@@ -111,6 +112,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
     const seeded = seedDeliverySettings(project);
     setDeliveryRecipe(seeded.deliveryRecipe);
     setAdversarialReview(seeded.adversarialReview);
+    setMaxTicketsInFlight(String(seeded.maxTicketsInFlight));
     setTrackerDiagnostic(project?.trackerDiagnostic ?? null);
     setErrors({});
     verifyTouched.current = project !== null;
@@ -233,7 +235,13 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
     if (project) {
       update.mutate({
         id: project.id,
-        ...withDeliverySettings(fields, { deliveryRecipe, adversarialReview }),
+        ...withDeliverySettings(fields, {
+          deliveryRecipe,
+          adversarialReview,
+          // A blank field is left out, so the stored value is kept.
+          maxTicketsInFlight:
+            maxTicketsInFlight.trim().length > 0 ? Number(maxTicketsInFlight) : undefined,
+        }),
       });
     } else {
       register.mutate(fields);
@@ -257,7 +265,9 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
           <DialogTitle>{t(project ? "projects.editTitle" : "projects.addTitle")}</DialogTitle>
           <DialogDescription>{t("projects.description")}</DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4" data-testid="project-form">
+        {/* The registry validates every field; the browser's own number-range
+            check would stop a save before its refusal can show beside the field. */}
+        <form noValidate onSubmit={handleSubmit} className="space-y-4" data-testid="project-form">
           <div className="space-y-2">
             <Label htmlFor="project-root">{t("projects.rootLabel")}</Label>
             <Input
@@ -476,6 +486,12 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
               onDeliveryRecipeChange={setDeliveryRecipe}
               adversarialReview={adversarialReview}
               onAdversarialReviewChange={setAdversarialReview}
+              maxTicketsInFlight={maxTicketsInFlight}
+              onMaxTicketsInFlightChange={(value) => {
+                setMaxTicketsInFlight(value);
+                setErrors((current) => ({ ...current, maxTicketsInFlight: undefined }));
+              }}
+              maxTicketsInFlightError={errors.maxTicketsInFlight}
             />
           ) : null}
 

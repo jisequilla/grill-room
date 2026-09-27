@@ -561,4 +561,9 @@ ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS waits_for TEXT`,
     name: "tickets-implements-column",
     sql: `ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS implements_json TEXT`,
   },
+  {
+    version: 73,
+    name: "projects-max-tickets-in-flight-column",
+    sql: `ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS max_tickets_in_flight INTEGER NOT NULL DEFAULT 3`,
+  },
 ];

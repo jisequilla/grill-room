@@ -12,6 +12,7 @@ import {
 import {
   ATTEMPT_KINDS,
   DEFAULT_DURABLE_EXPORT_FOLDER,
+  DEFAULT_MAX_TICKETS_IN_FLIGHT,
   DEFAULT_PROJECT_SLUG_PATTERN,
   DECISION_ANSWER_KINDS,
   DECISION_DISPOSITION_TARGETS,
@@ -123,6 +124,10 @@ export const projects = table("gr_projects", {
     .default("pull-request"),
   /** Whether a second, fresh-context reviewer checks each ticket before it merges. */
   adversarialReview: boolean("adversarial_review").notNull().default(true),
+  /** How many tickets the handoff lets run at once. */
+  maxTicketsInFlight: integer("max_tickets_in_flight")
+    .notNull()
+    .default(DEFAULT_MAX_TICKETS_IN_FLIGHT),
   /**
    * The declared tracker's `commands` map, as JSON text, or null when no
    * tracker was found. Set at registration and by `refresh-project-tracker`

@@ -75,6 +75,10 @@ const messages = {
     deliveryRecipeLocalMergeHint: "Each ticket's branch is merged into main locally, no push.",
     adversarialReviewLabel: "Adversarial review",
     adversarialReviewHint: "A second agent reviews each ticket before it merges.",
+    maxTicketsInFlightLabel: "Tickets in flight",
+    maxTicketsInFlightHint:
+      "How many tickets the handoff lets run at once. Each one draws on the same rate limit and needs your attention before it merges.",
+    invalidMaxTicketsInFlight: "Tickets in flight must be a whole number from 1 to 10.",
     reviewOffMarker: "No review",
     detecting: "Checking the repository…",
     save: "Save",

@@ -11,7 +11,7 @@ import {
 
 export default defineAction({
   description:
-    "Edit a registered project. Omitted fields keep their value; the result is validated exactly as registration validates it, including resolving a changed root to its git top-level. The visibility flag changes only when given. The delivery recipe and the review switch change only when given; editing never re-guesses the recipe from the repository's remotes.",
+    "Edit a registered project. Omitted fields keep their value; the result is validated exactly as registration validates it, including resolving a changed root to its git top-level. The visibility flag changes only when given. The delivery recipe and the review switch change only when given; editing never re-guesses the recipe from the repository's remotes. Tickets in flight, how many tickets the handoff lets run at once, changes only when given and must be a whole number from 1 to 10.",
   schema: z.object({
     id: z.string().min(1).describe("Project id"),
     root: z
@@ -54,6 +54,10 @@ export default defineAction({
       .describe(
         "Whether a second, fresh-context reviewer checks each ticket against its spec before it merges",
       ),
+    maxTicketsInFlight: z
+      .number()
+      .optional()
+      .describe("How many tickets the handoff lets run at once, a whole number from 1 to 10"),
   }),
   run: async ({ id, ...patch }) => {
     const outcome = await updateProject(id, patch);

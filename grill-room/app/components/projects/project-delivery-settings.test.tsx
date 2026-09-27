@@ -19,13 +19,23 @@ import { DELIVERY_RECIPE_HINT_KEY } from "@/lib/projects";
 function render({
   deliveryRecipe = "pull-request" as const,
   adversarialReview = true,
-}: { deliveryRecipe?: "pull-request" | "local-merge"; adversarialReview?: boolean } = {}) {
+  maxTicketsInFlight = "3",
+  maxTicketsInFlightError,
+}: {
+  deliveryRecipe?: "pull-request" | "local-merge";
+  adversarialReview?: boolean;
+  maxTicketsInFlight?: string;
+  maxTicketsInFlightError?: string;
+} = {}) {
   return renderToStaticMarkup(
     <ProjectDeliverySettings
       deliveryRecipe={deliveryRecipe}
       onDeliveryRecipeChange={() => {}}
       adversarialReview={adversarialReview}
       onAdversarialReviewChange={() => {}}
+      maxTicketsInFlight={maxTicketsInFlight}
+      onMaxTicketsInFlightChange={() => {}}
+      maxTicketsInFlightError={maxTicketsInFlightError}
     />,
   );
 }
@@ -79,6 +89,28 @@ describe("ProjectDeliverySettings", () => {
 
     expect(html).toContain('for="project-adversarial-review"');
   });
+
+  it("renders the tickets in flight field, labelled and described by its hint", () => {
+    const html = render({ maxTicketsInFlight: "2" });
+
+    expect(html).toContain('data-testid="project-max-tickets-in-flight"');
+    expect(html).toContain('id="project-max-tickets-in-flight"');
+    expect(html).toContain('for="project-max-tickets-in-flight"');
+    expect(html).toContain('aria-describedby="project-max-tickets-in-flight-hint"');
+    expect(html).toContain('id="project-max-tickets-in-flight-hint"');
+    expect(html).toContain('type="number"');
+    expect(html).toContain('min="1"');
+    expect(html).toContain('max="10"');
+    expect(html).toContain('value="2"');
+    expect(html).toContain('aria-invalid="false"');
+  });
+
+  it("shows the field's error in place of its hint, and marks the input invalid", () => {
+    const html = render({ maxTicketsInFlightError: "Tickets in flight must be a whole number from 1 to 10." });
+
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain("Tickets in flight must be a whole number from 1 to 10.");
+  });
 });
 
 describe("seedDeliverySettings", () => {
@@ -86,27 +118,40 @@ describe("seedDeliverySettings", () => {
     expect(seedDeliverySettings(null)).toEqual({
       deliveryRecipe: "pull-request",
       adversarialReview: true,
+      maxTicketsInFlight: 3,
     });
   });
 
   it("reads both fields from the project being edited", () => {
     expect(
-      seedDeliverySettings({ deliveryRecipe: "local-merge", adversarialReview: false }),
-    ).toEqual({ deliveryRecipe: "local-merge", adversarialReview: false });
+      seedDeliverySettings({
+        deliveryRecipe: "local-merge",
+        adversarialReview: false,
+        maxTicketsInFlight: 5,
+      }),
+    ).toEqual({ deliveryRecipe: "local-merge", adversarialReview: false, maxTicketsInFlight: 5 });
 
     expect(
-      seedDeliverySettings({ deliveryRecipe: "pull-request", adversarialReview: true }),
-    ).toEqual({ deliveryRecipe: "pull-request", adversarialReview: true });
+      seedDeliverySettings({
+        deliveryRecipe: "pull-request",
+        adversarialReview: true,
+        maxTicketsInFlight: 1,
+      }),
+    ).toEqual({ deliveryRecipe: "pull-request", adversarialReview: true, maxTicketsInFlight: 1 });
   });
 
   it("falls back to the defaults for a project missing either field", () => {
     expect(seedDeliverySettings({})).toEqual({
       deliveryRecipe: "pull-request",
       adversarialReview: true,
+      maxTicketsInFlight: 3,
     });
-    expect(seedDeliverySettings({ deliveryRecipe: null, adversarialReview: null })).toEqual({
+    expect(
+      seedDeliverySettings({ deliveryRecipe: null, adversarialReview: null, maxTicketsInFlight: null }),
+    ).toEqual({
       deliveryRecipe: "pull-request",
       adversarialReview: true,
+      maxTicketsInFlight: 3,
     });
   });
 });
@@ -122,6 +167,30 @@ describe("withDeliverySettings", () => {
       verifyCommand: "pnpm test",
       deliveryRecipe: "local-merge",
       adversarialReview: false,
+    });
+  });
+
+  it("sends tickets in flight only when it is defined", () => {
+    const fields = { name: "Grill Room" };
+
+    const without = withDeliverySettings(fields, {
+      deliveryRecipe: "pull-request",
+      adversarialReview: true,
+      maxTicketsInFlight: undefined,
+    });
+    expect(Object.keys(without)).not.toContain("maxTicketsInFlight");
+
+    expect(
+      withDeliverySettings(fields, {
+        deliveryRecipe: "pull-request",
+        adversarialReview: true,
+        maxTicketsInFlight: 2,
+      }),
+    ).toEqual({
+      name: "Grill Room",
+      deliveryRecipe: "pull-request",
+      adversarialReview: true,
+      maxTicketsInFlight: 2,
     });
   });
 

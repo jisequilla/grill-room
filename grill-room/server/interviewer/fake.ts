@@ -265,6 +265,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   "handoff-scout": { turns: handoffScoutTurns() },
   "gate-ticket": { turns: gateTicketTurns() },
   "uncovered-story": { turns: uncoveredStoryTurns() },
+  "long-chain": { turns: longChainTurns() },
   ...(demoScenario ? { [DEMO_SCENARIO]: demoScenario } : {}),
 };
 
@@ -1044,6 +1045,43 @@ export function uncoveredStoryTurns(): ScriptedTurn[] {
     },
   };
   return [...turns.slice(0, -1), breakdown, breakdown, breakdown];
+}
+
+/**
+ * {@link cannedInterviewTurns} with its breakdown replaced by two: the first
+ * chains six build tickets one after another, which is sent back as a long
+ * chain, and the retry lets tickets 3 to 6 each wait only for ticket 2, which
+ * is accepted. What `long-chain` schedules.
+ */
+export function longChainTurns(): ScriptedTurn[] {
+  const titles: [string, string][] = [
+    ["build-the-workspace", "The workspace"],
+    ["store-on-disk", "Storing on disk"],
+    ["list-items", "Listing items"],
+    ["edit-items", "Editing items"],
+    ["delete-items", "Deleting items"],
+    ["export-items", "Exporting items"],
+  ];
+  const breakdown = (blockedBy: (number: number) => number[]): ScriptedTurn => ({
+    kind: "break-into-tickets",
+    result: {
+      tickets: titles.map(([slug, title], index) => ({
+        number: index + 1,
+        slug,
+        title,
+        body: `Build ${title.toLowerCase()}.`,
+        blockedBy: blockedBy(index + 1),
+        kind: "build" as const,
+        waitsFor: null,
+        implements: index === 0 ? [1] : [],
+      })),
+    },
+  });
+  return [
+    ...cannedInterviewTurns().slice(0, -1),
+    breakdown((number) => (number === 1 ? [] : [number - 1])),
+    breakdown((number) => (number === 1 ? [] : number === 2 ? [1] : [2])),
+  ];
 }
 
 export function refusalThenSuccessTurns(): ScriptedTurn[] {

@@ -672,6 +672,116 @@ export function storyReasons(
   return reasons;
 }
 
+/**
+ * The longest run of build tickets that must be built one after another. The
+ * edges are every in-set `blockedBy` entry plus every in-set `extraEdges`
+ * entry (`ticket` waits for `waitsFor`). A gate adds no length but stays on
+ * the chain, and on a tie the walk back prefers a gate, so an outside wait on
+ * the path shows. Null when the edges form a cycle.
+ */
+export function longestChain(
+  tickets: readonly { number: number; blockedBy: readonly number[]; kind?: TicketKind }[],
+  extraEdges: readonly { ticket: number; waitsFor: number }[] = [],
+): { length: number; chain: number[] } | null {
+  const byNumber = new Map<number, { blockedBy: number[]; gate: boolean }>();
+  for (const ticket of tickets) {
+    byNumber.set(ticket.number, { blockedBy: [], gate: ticket.kind === "gate" });
+  }
+  for (const ticket of tickets) {
+    const blockers = byNumber.get(ticket.number)!.blockedBy;
+    for (const blocker of ticket.blockedBy) {
+      if (byNumber.has(blocker) && !blockers.includes(blocker)) blockers.push(blocker);
+    }
+  }
+  for (const edge of extraEdges) {
+    const blockers = byNumber.get(edge.ticket)?.blockedBy;
+    if (blockers && byNumber.has(edge.waitsFor) && !blockers.includes(edge.waitsFor)) {
+      blockers.push(edge.waitsFor);
+    }
+  }
+  if (numbersOnCycles(byNumber).length > 0) return null;
+
+  const depths = new Map<number, number>();
+  function depthOf(number: number): number {
+    const known = depths.get(number);
+    if (known !== undefined) return known;
+    const ticket = byNumber.get(number)!;
+    const own = ticket.gate ? 0 : 1;
+    const depth = Math.max(0, ...ticket.blockedBy.map(depthOf)) + own;
+    depths.set(number, depth);
+    return depth;
+  }
+
+  let end: number | null = null;
+  for (const [number, ticket] of byNumber) {
+    if (ticket.gate) continue;
+    if (
+      end === null ||
+      depthOf(number) > depthOf(end) ||
+      (depthOf(number) === depthOf(end) && number < end)
+    ) {
+      end = number;
+    }
+  }
+  if (end === null) return { length: 0, chain: [] };
+
+  const chain = [end];
+  let current = end;
+  while (byNumber.get(current)!.blockedBy.length > 0) {
+    const [next] = [...byNumber.get(current)!.blockedBy].sort((a, b) => {
+      const byDepth = depthOf(b) - depthOf(a);
+      if (byDepth !== 0) return byDepth;
+      const byGate = Number(byNumber.get(b)!.gate) - Number(byNumber.get(a)!.gate);
+      if (byGate !== 0) return byGate;
+      return a - b;
+    });
+    chain.unshift(next!);
+    current = next!;
+  }
+  return { length: depthOf(end), chain };
+}
+
+/** The longest chain a set of `builds` build tickets may have before it is long. */
+export function chainLimit(builds: number): number {
+  return Math.max(4, Math.ceil(builds / 2));
+}
+
+/** A proposed set's longest chain, when it is long: over `chainLimit`. */
+function longChainOf(
+  tickets: readonly ProposedTicket[],
+): { length: number; path: string; builds: number; limit: number } | null {
+  const found = longestChain(tickets);
+  if (found === null) return null;
+  const builds = tickets.filter((ticket) => ticket.kind !== "gate").length;
+  const limit = chainLimit(builds);
+  if (found.length <= limit) return null;
+  const gates = new Set(
+    tickets.filter((ticket) => ticket.kind === "gate").map((ticket) => ticket.number),
+  );
+  const path = found.chain
+    .map((number) => (gates.has(number) ? `gate ${number}` : `${number}`))
+    .join(" → ");
+  return { length: found.length, path, builds, limit };
+}
+
+/**
+ * Why a proposed set's dependency chain is too long, written for the
+ * interviewer; null when it is not long, or when the set has a cycle (refused
+ * elsewhere). `break-into-tickets` sends it back at most once.
+ */
+export function chainReason(tickets: readonly ProposedTicket[]): string | null {
+  const long = longChainOf(tickets);
+  if (long === null) return null;
+  return `The longest chain of tickets that must be built one after another is ${long.length} build tickets (${long.path}), in a set of ${long.builds} build tickets; keep it to ${long.limit} or fewer. List a ticket in \`blockedBy\` only when it uses that ticket's output, and give a file that many tickets change its own early ticket, so more tickets can be built side by side.`;
+}
+
+/** The attempt-log note for a set accepted with a long chain; null otherwise. */
+export function chainNote(tickets: readonly ProposedTicket[]): string | null {
+  const long = longChainOf(tickets);
+  if (long === null) return null;
+  return `Accepted with the longest chain at ${long.length} build tickets (${long.path}), over the limit of ${long.limit} for a set of ${long.builds} build tickets.`;
+}
+
 /** The facts `ticketsAreCurrent` needs from a session's spec. */
 export interface SpecCurrencyFacts {
   current: boolean;
