@@ -77,6 +77,19 @@ describe("get-build-summary", () => {
     ]);
   });
 
+  it("leaves gate tickets out", async () => {
+    const { sessionId, ticketIds } = await aSessionWithTickets(3);
+    await getDb()
+      .update(schema.tickets)
+      .set({ kind: "gate", waitsFor: "A live account on the payment platform, with API keys issued." })
+      .where(eq(schema.tickets.id, ticketIds[1]!));
+
+    const summary = await getBuildSummary.run({ sessionId });
+
+    expect(summary.tickets).toBe(2);
+    expect(summary.records.map((record) => record.ticket.number)).toEqual([1, 3]);
+  });
+
   it("computes counts, pass rate, per-model grouping and ordering, and the records list", async () => {
     const { sessionId, ticketIds } = await aSessionWithTickets(4);
 

@@ -655,6 +655,8 @@ const messages = {
     ticketStatusInProgress: "In progress",
     ticketStatusDone: "Done",
     ticketWave: "Wave {{wave}}",
+    ticketGate: "Gate",
+    ticketWaitsFor: "Wait for",
     editBlockedBy: "Edit blockers",
     editBlockedByNoOthers: "No other tickets in this session",
     editBlockedByFailed: "Could not update this ticket's blockers.",

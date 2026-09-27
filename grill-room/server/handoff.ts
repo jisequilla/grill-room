@@ -42,6 +42,7 @@ import type {
   DeliveryRecipe,
   ProjectTrackerKind,
   ProjectVisibility,
+  TicketKind,
 } from "../shared/session-constants.js";
 import { getDb, schema } from "./db/index.js";
 import { hashExportContent, openingSections, padTicketNumber, sanitizeTicketSlug } from "./export.js";
@@ -69,6 +70,20 @@ export interface HandoffTicket {
   title: string;
   body: string;
   blockedBy: readonly number[];
+  /** `gate` for a prerequisite outside the code, which gets no brief. Absent means `build`. */
+  kind?: TicketKind;
+  /** What a gate waits for; null or absent for a build ticket. */
+  waitsFor?: string | null;
+}
+
+/** Whether a ticket is a gate: absent `kind` means a build ticket. */
+function isGate(ticket: Pick<HandoffTicket, "kind">): boolean {
+  return ticket.kind === "gate";
+}
+
+/** Whether any ticket is a gate. With none, every text renders as it did before gates existed. */
+function hasGates(source: HandoffSource): boolean {
+  return source.tickets.some(isGate);
 }
 
 /** Everything the templates render from, and nothing else. */
@@ -437,6 +452,12 @@ function wavesSection(source: HandoffSource, exportFacts?: ExportFacts): string 
       ? "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified."
       : "Tickets in one wave have no Blocked-by between them. Whether they change the same files was not checked, because the briefs are not grounded against the current code: run them one at a time, or ground the briefs first. Start a wave only once every ticket of the previous wave is merged and verified.",
   ];
+  if (hasGates(source)) {
+    lines.push(
+      "",
+      "A ticket marked (gate) is not code and has no brief: nothing is delegated for it. Ask the owner whether what it waits for is in place, and once it is, mark the gate met. A met gate counts as merged and verified for starting the next wave, and no ticket blocked by a gate starts before the gate is met.",
+    );
+  }
 
   if (checked) {
     const waveOf = new Map(waves.flatMap((wave, index) => wave.map((number) => [number, index] as const)));
@@ -461,6 +482,17 @@ function wavesSection(source: HandoffSource, exportFacts?: ExportFacts): string 
       if (!ticket) continue;
       const { label, fileStem } = ticketNames(ticket, total);
       const blockers = blockerLabels(ticket, total);
+      if (isGate(ticket)) {
+        lines.push(
+          `- **${label} ${ticket.title}** (gate${blockers.length > 0 ? `; blocked by ${blockers.join(", ")}` : ""})`,
+          `  - Wait for: ${ticket.waitsFor ?? ""}`,
+          `  - Ticket: \`${BUNDLE_TOKEN}/issues/${fileStem}.md\``,
+        );
+        if (source.project.trackerKind === "markdown") {
+          lines.push("  - Status: ready-for-human");
+        }
+        continue;
+      }
       lines.push(
         `- **${label} ${ticket.title}**${blockers.length > 0 ? ` (blocked by ${blockers.join(", ")})` : ""}`,
         `  - Ticket: \`${BUNDLE_TOKEN}/issues/${fileStem}.md\``,
@@ -669,6 +701,12 @@ function trackingSection(source: HandoffSource): string {
       "Create one bead per ticket. Claim a bead before delegating its ticket, and close it only after you have verified and merged the change, naming the merge in the close comment. Recover state with `bd ready` and `git log`, never from memory.",
       "",
     ];
+    if (hasGates(source)) {
+      lines.push(
+        "A gate gets a bead too. Close it once the owner confirms that what it waits for is in place, with a comment saying what was confirmed.",
+        "",
+      );
+    }
     if (hasCommands) {
       lines.push("The repository's declared tracker commands:", "", ...commandsList(commands));
     } else {
@@ -687,14 +725,23 @@ function trackingSection(source: HandoffSource): string {
     "",
     `This repository tracks tickets as plain markdown. Each ticket above carries a \`Status:\` line: set it to \`in-progress\` when you delegate the ticket and to \`${doneStatus}\` once you have verified and merged it.`,
   ];
+  if (hasGates(source)) {
+    lines.push(
+      "",
+      "A gate's `Status:` line reads `ready-for-human`; set it to `met` once the owner confirms that what it waits for is in place.",
+    );
+  }
   if (hasCommands) {
     lines.push("", "The repository's declared tracker commands:", "", ...commandsList(commands));
   }
   return lines.join("\n");
 }
 
-function buildRecordSection(source: HandoffSource): string {
-  const commands = source.tickets.map((ticket) =>
+/** One command per build ticket; null when there is none, since a gate has no build record. */
+function buildRecordSection(source: HandoffSource): string | null {
+  const buildTickets = source.tickets.filter((ticket) => !isGate(ticket));
+  if (buildTickets.length === 0) return null;
+  const commands = buildTickets.map((ticket) =>
     [
       "pnpm action set-build-record",
       `--sessionId ${source.session.id} --ticketNumber ${ticket.number}`,
@@ -717,6 +764,7 @@ export function renderHandoffMarkdown(
   exportFacts?: ExportFacts,
 ): string {
   const facts = factsFor(source, exportFacts);
+  const briefsPerTicket = hasGates(source) ? "one per ticket except gates" : "one per ticket";
   const sections = [
     `# Handoff: ${source.session.title}`,
     ...openingSections(source.spec.markdown, source.session.idea),
@@ -730,8 +778,8 @@ export function renderHandoffMarkdown(
       `- Spec: \`${BUNDLE_TOKEN}/spec.md\``,
       `- Tickets: \`${BUNDLE_TOKEN}/issues/\``,
       groundingCurrent
-        ? `- Briefs: \`${BUNDLE_TOKEN}/briefs/\`, one per ticket, grounded and ready to paste as a delegation prompt`
-        : `- Briefs: \`${BUNDLE_TOKEN}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled`,
+        ? `- Briefs: \`${BUNDLE_TOKEN}/briefs/\`, ${briefsPerTicket}, grounded and ready to paste as a delegation prompt`
+        : `- Briefs: \`${BUNDLE_TOKEN}/briefs/\`, ${briefsPerTicket}, each ready to paste as a delegation prompt once its two slots are filled`,
       `- Grill Room session: \`${source.session.id}\``,
     ].join("\n"),
     [
@@ -748,7 +796,8 @@ export function renderHandoffMarkdown(
   ];
   if (source.project.adversarialReview) sections.push(reviewingSection(source));
   sections.push(recordingSection(), trackingSection(source));
-  if (source.project.buildRecordLogging) sections.push(buildRecordSection(source));
+  const buildRecords = source.project.buildRecordLogging ? buildRecordSection(source) : null;
+  if (buildRecords !== null) sections.push(buildRecords);
   return `${sections.join("\n\n")}\n`;
 }
 
@@ -774,6 +823,7 @@ function bundleAccess(facts: ExportFacts, fileStem: string): string {
  */
 function ticketsNotReachingOne(tickets: readonly HandoffTicket[]): number[] {
   return tickets
+    .filter((ticket) => !isGate(ticket))
     .map((ticket) => ticket.number)
     .filter((number) => number !== 1 && !transitiveBlockers(number, tickets).includes(1));
 }
@@ -800,7 +850,8 @@ function greenfieldVerifyLine(source: HandoffSource): string {
   const setUp = `This repository has no commits yet, so this command does not exist until ticket ${first} sets it up.`;
   const nonReaching = ticketsNotReachingOne(source.tickets).map((number) => padTicketNumber(number, total));
   if (nonReaching.length === 0) {
-    return `${setUp} Ticket ${first}'s acceptance includes it passing, and every other ticket waits for ticket ${first}.`;
+    const others = hasGates(source) ? "every other build ticket" : "every other ticket";
+    return `${setUp} Ticket ${first}'s acceptance includes it passing, and ${others} waits for ticket ${first}.`;
   }
   const acceptance = `Ticket ${first}'s acceptance includes it passing.`;
   if (nonReaching.length === 1) {
@@ -1071,7 +1122,6 @@ export function renderBrief(
   const grounding = options.grounding ?? null;
   const total = source.tickets.length;
   const { label, fileStem } = ticketNames(ticket, total);
-  const blockers = blockerLabels(ticket, total);
   const verify = source.project.verifyCommand;
   const prTitle =
     source.project.trackerKind === "beads"
@@ -1085,7 +1135,7 @@ export function renderBrief(
     [
       "## The ticket",
       "",
-      `Blocked by: ${blockers.length > 0 ? `${blockers.join(", ")} (merged before this brief was delegated)` : "none"}`,
+      `Blocked by: ${blockedByLine(source, ticket)}`,
       "",
       `### ${label} ${ticket.title}`,
       "",
@@ -1110,6 +1160,24 @@ export function renderBrief(
   return `${sections.filter((section): section is string => section !== null).join("\n\n")}\n`;
 }
 
+/**
+ * A brief's blockers: build tickets merged before it was delegated, then
+ * gates met before it was, each list ascending and padded.
+ */
+function blockedByLine(source: HandoffSource, ticket: HandoffTicket): string {
+  const total = source.tickets.length;
+  const gateNumbers = new Set(source.tickets.filter(isGate).map((other) => other.number));
+  const sorted = [...ticket.blockedBy].sort((a, b) => a - b);
+  const builds = sorted.filter((number) => !gateNumbers.has(number)).map((n) => padTicketNumber(n, total));
+  const gates = sorted.filter((number) => gateNumbers.has(number)).map((n) => padTicketNumber(n, total));
+  const parts: string[] = [];
+  if (builds.length > 0) parts.push(`${builds.join(", ")} (merged before this brief was delegated)`);
+  if (gates.length > 0) {
+    parts.push(`${gates.length === 1 ? "gate" : "gates"} ${gates.join(", ")} (met before this brief was delegated)`);
+  }
+  return parts.length > 0 ? parts.join("; ") : "none";
+}
+
 export interface RenderHandoffOptions {
   /** The session's grounding, current or stale; null or omitted when it has none. */
   grounding?: HandoffGrounding | null;
@@ -1120,7 +1188,9 @@ export function renderHandoff(source: HandoffSource, options: RenderHandoffOptio
   const groundingCurrent = (options.grounding ?? null)?.current === true;
   return {
     markdown: renderHandoffMarkdown(source, groundingCurrent),
-    briefs: source.tickets.map((ticket) => ({
+    // A gate has no builder, so it gets no brief. Padding still counts every
+    // ticket, so a brief's name matches its issue file.
+    briefs: source.tickets.filter((ticket) => !isGate(ticket)).map((ticket) => ({
       ticketNumber: ticket.number,
       relativePath: `briefs/${ticketNames(ticket, total).fileStem}.md`,
       markdown: renderBrief(source, ticket, { grounding: options.grounding }),
@@ -1212,6 +1282,8 @@ export async function loadHandoffSource(
         title: ticket.title,
         body: ticket.body,
         blockedBy: ticket.blockedBy,
+        kind: ticket.kind,
+        waitsFor: ticket.waitsFor,
       })),
       waves: waves.waves,
       project: {
@@ -1422,24 +1494,21 @@ export function regenerateHandoff(
  * The baseline a brief carries after `update-handoff` replaces its text.
  * Saving an edited brief while the handoff is current marks it reviewed: its
  * baseline moves to today's render, so it stays edited but is no longer
- * outdated. A text saved back to its baseline keeps it only while that
- * baseline is still today's render; a brief kept through a regeneration and
- * saved back to its old generated text is a reviewed edit like any other.
- * Anything else (a legacy row, a stale handoff, no source, a ticket that is
- * gone) leaves the baseline alone.
+ * outdated. A text saved back to a baseline that is still today's render
+ * therefore keeps it and is not an edit, while a brief kept through a
+ * regeneration and saved back to its old generated text is a reviewed edit
+ * like any other. Anything else (a legacy row, a stale handoff, no source, a
+ * ticket that is gone) leaves the baseline alone.
  */
 export function baselineAfterEdit(
   brief: StoredHandoffBrief,
-  markdown: string,
   context: { legacy: boolean; current: boolean; source: HandoffSource | null },
 ): string | undefined {
   const old = brief.generatedSha256;
   if (context.legacy || old === undefined || !context.current || context.source === null) return old;
   const ticket = context.source.tickets.find((candidate) => candidate.number === brief.ticketNumber);
   if (!ticket) return old;
-  const today = hashExportContent(renderBrief(context.source, ticket));
-  if (hashExportContent(markdown) === old && old === today) return old;
-  return today;
+  return hashExportContent(renderBrief(context.source, ticket));
 }
 
 /** Writes a regenerated handoff over the session's row (or creates it), with today's fingerprint. */

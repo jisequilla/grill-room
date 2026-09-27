@@ -2,6 +2,7 @@ import { defineAction, fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
+import { blockersThroughGates } from "../shared/ticket-gates.js";
 import {
   currentBriefGrounding,
   reasonsToRefuseHandoffGrounding,
@@ -96,7 +97,12 @@ export default defineAction({
         { errorCode: "handoff-stale", statusCode: 409 },
       );
     }
-    const { tickets } = loaded.source;
+    // A gate is not code, so it is never grounded: the scout sees only the
+    // build tickets, each blocked by what its gates are blocked by.
+    const blockersOf = blockersThroughGates(loaded.source.tickets);
+    const tickets = loaded.source.tickets
+      .filter((ticket) => blockersOf.has(ticket.number))
+      .map((ticket) => ({ ...ticket, blockedBy: blockersOf.get(ticket.number)! }));
 
     if (tickets.length > MAX_HANDOFF_SCOUT_TICKETS) {
       fail(
@@ -124,7 +130,7 @@ export default defineAction({
       number: ticket.number,
       title: ticket.title,
       body: ticket.body,
-      blockedBy: [...ticket.blockedBy].sort((a, b) => a - b),
+      blockedBy: ticket.blockedBy,
     }));
 
     // Like the project scout, the handoff scout runs in a conversation of its

@@ -2,7 +2,7 @@ import { DEMO_SCENARIO, loadDemoScenario } from "./demo-scenario.js";
 import { InterviewerError } from "./errors.js";
 import { observeCall, schemaIssuesReason, type CallResult } from "./observe.js";
 import { resultSchemas } from "./schemas.js";
-import type { RequestKind, ResultFor } from "./schemas.js";
+import type { RequestKind, ResultFor, ResultInputFor } from "./schemas.js";
 import type {
   AssessReadinessRequest,
   BreakIntoTicketsRequest,
@@ -57,11 +57,11 @@ interface ScriptedTurnBase {
   resumeFallback?: true | string;
 }
 
-/** A well-formed turn. `result` is typed against the kind's schema. */
+/** A well-formed turn. `result` is typed against the kind's schema, before its defaults apply: the fake parses it as the adapter does. */
 export type ScriptedResult = {
   [Kind in RequestKind]: ScriptedTurnBase & {
     kind: Kind;
-    result: ResultFor<Kind>;
+    result: ResultInputFor<Kind>;
     conversationId?: string;
   };
 }[RequestKind];
@@ -263,6 +263,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   "scout-project": { turns: scoutProjectTurns() },
   "scout-project-readiness": { turns: scoutProjectReadinessTurns() },
   "handoff-scout": { turns: handoffScoutTurns() },
+  "gate-ticket": { turns: gateTicketTurns() },
   ...(demoScenario ? { [DEMO_SCENARIO]: demoScenario } : {}),
 };
 
@@ -961,6 +962,52 @@ export function restatementTurns(): ScriptedTurn[] {
  * one turn `askUntilAccepted` runs, so the attempt log shows the refusal and
  * the success as two attempts of the same turn.
  */
+/**
+ * {@link cannedInterviewTurns} with its breakdown replaced by one holding a
+ * gate: ticket 1 builds the workspace, ticket 2 is a gate on a payment
+ * account, and ticket 3 waits for both. What `gate-ticket` schedules.
+ */
+export function gateTicketTurns(): ScriptedTurn[] {
+  const turns = cannedInterviewTurns();
+  return [
+    ...turns.slice(0, -1),
+    {
+      kind: "break-into-tickets",
+      result: {
+        tickets: [
+          {
+            number: 1,
+            slug: "build-the-workspace",
+            title: "Build the workspace",
+            body: "Build the workspace shell.",
+            blockedBy: [],
+            kind: "build",
+            waitsFor: null,
+          },
+          {
+            number: 2,
+            slug: "payment-account",
+            title: "Payment account is live",
+            body: "The owner opens the account; it is in place once API keys are issued.",
+            blockedBy: [],
+            kind: "gate",
+            waitsFor: "A live account on the payment platform, with API keys issued.",
+          },
+          {
+            number: 3,
+            slug: "store-on-disk",
+            title: "Store the data on disk",
+            body: "Persist the workspace's data.",
+            blockedBy: [1, 2],
+            kind: "build",
+            waitsFor: null,
+          },
+        ],
+      },
+    },
+  ];
+}
+
 export function refusalThenSuccessTurns(): ScriptedTurn[] {
   return [
     { kind: "propose-round", result: treeRuleViolation.cycle() },

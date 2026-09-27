@@ -130,6 +130,27 @@ describe("set-build-record", () => {
     ).rejects.toThrow(/Ticket not found: session .+, number 99/);
   });
 
+  it("refuses a gate ticket", async () => {
+    const { sessionId, ticketIds } = await aSessionWithTickets(2);
+    await getDb()
+      .update(schema.tickets)
+      .set({ kind: "gate", waitsFor: "A live account on the payment platform, with API keys issued." })
+      .where(eq(schema.tickets.id, ticketIds[1]!));
+
+    const attempt = setBuildRecord.run({
+      sessionId,
+      ticketNumber: 2,
+      model: "sonnet",
+      firstAttemptPassed: true,
+    });
+
+    await expect(attempt).rejects.toMatchObject({ errorCode: "gate_ticket", statusCode: 409 });
+    await expect(attempt).rejects.toThrow(
+      "Ticket 2 is a gate: nothing is built for it, so it has no build record.",
+    );
+    expect(await getBuildRecord.run({ ticketId: ticketIds[1]! })).toBeNull();
+  });
+
   it("refuses an empty model", async () => {
     const { ticketIds } = await aSessionWithTickets(1);
 

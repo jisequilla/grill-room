@@ -290,11 +290,67 @@ describe("turn-attempts-usage-columns migration", () => {
   });
 });
 
+describe("tickets-kind-columns migration", () => {
+  beforeEach(dropSchema);
+
+  it("reads an existing ticket as a build with no waitsFor, and round-trips a gate, on a database at the previous version", async () => {
+    const migration = appMigrations.find((entry) => entry.name === "tickets-kind-columns")!;
+    const before = appMigrations.filter((entry) => entry.version < migration.version);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    const buildId = randomUUID();
+    const gateId = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [sessionId, "Grill Room", "An idea.", now, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_tickets (id, session_id, number, slug, title, body, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [buildId, sessionId, 1, "build-the-workspace", "Build the workspace", "", now, now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const existing = await getDbExec().execute({
+      sql: `SELECT kind, waits_for FROM gr_tickets WHERE id = ?`,
+      args: [buildId],
+    });
+    expect(existing.rows).toEqual([{ kind: "build", waits_for: null }]);
+
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_tickets (id, session_id, number, slug, title, body, kind, waits_for, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        gateId,
+        sessionId,
+        2,
+        "payment-account",
+        "Payment account is live",
+        "",
+        "gate",
+        "A live account on the payment platform, with API keys issued.",
+        now,
+        now,
+      ],
+    });
+    const gate = await getDbExec().execute({
+      sql: `SELECT kind, waits_for FROM gr_tickets WHERE id = ?`,
+      args: [gateId],
+    });
+    expect(gate.rows).toEqual([
+      { kind: "gate", waits_for: "A live account on the payment platform, with API keys issued." },
+    ]);
+  });
+});
+
 describe("handoffs-markdown-generated-sha256 migration", () => {
   beforeEach(dropSchema);
 
-  it("adds a nullable markdown_generated_sha256 to handoffs on a database at v69, leaving an existing handoff without one", async () => {
-    const before = appMigrations.filter((migration) => migration.version <= 69);
+  it("adds a nullable markdown_generated_sha256 to handoffs on a database at v70, leaving an existing handoff without one", async () => {
+    const before = appMigrations.filter((migration) => migration.version <= 70);
     await applyMigrations(before, MIGRATIONS_TABLE);
 
     const now = new Date().toISOString();

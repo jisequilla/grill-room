@@ -1650,8 +1650,46 @@ describe("what the adapter sends to break a spec into tickets", () => {
     );
   });
 
+  it.each([
+    ["without greenfield", false],
+    ["with greenfield", true],
+  ] as const)("states when to make a gate, right after the rules, %s", async (_, greenfield) => {
+    const runner = recordingRunner([ok(anEnvelope({ structured_output: { tickets: [] } }))]);
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).breakIntoTickets({
+      kind: "break-into-tickets",
+      context: aContext(),
+      specMarkdown: "## Problem Statement\n\nExport the training log.",
+      greenfield,
+      verifyCommand: "pnpm test",
+      rejectionReason: null,
+    });
+    const prompt = valueOf(runner.invocations[0]!.args, "-p") as string;
+
+    const paragraph = [
+      "Some of what the tickets need is not code: an account with an outside",
+      "service, a signed agreement, terms reviewed by a lawyer, or a condition the",
+      "spec sets before later work may start, such as a first part being used",
+      "before a second part is built. Make each such prerequisite a gate: a ticket",
+      'with `kind` "gate", a one-line `waitsFor` naming exactly what it waits for,',
+      "and a body saying who provides it and how to tell it is in place. A gate has",
+      "no builder and changes no files. List it in the `blockedBy` of every ticket",
+      "that cannot start or go live without it; a gate that waits for built work",
+      "lists those tickets in its own `blockedBy`. Every other ticket has `kind`",
+      '"build" and `waitsFor` null. Never make ordinary work a gate: anything an',
+      "agent can build, configure or test in the repository is a build ticket.",
+    ].join("\n");
+    expect(prompt).toContain(
+      `  its tests, rather than leaving them to a tests-only ticket.\n\n${paragraph}`,
+    );
+    if (greenfield) {
+      expect(prompt).toContain(`${paragraph}\n\n## This repository has no commits yet`);
+    } else {
+      expect(prompt.endsWith(paragraph)).toBe(true);
+    }
+  });
+
   describe("in a repository with no commits yet", () => {
-    const RULES_END = "  its tests, rather than leaving them to a tests-only ticket.";
+    const RULES_END = "agent can build, configure or test in the repository is a build ticket.";
 
     async function promptFor(greenfield: boolean, verifyCommand: string | null): Promise<string> {
       const runner = recordingRunner([ok(anEnvelope({ structured_output: { tickets: [] } }))]);
@@ -1684,8 +1722,8 @@ describe("what the adapter sends to break a spec into tickets", () => {
         "run from the repository root, runs and passes.",
         "Ticket 1's body names that command in its acceptance, written as inline",
         "code: `pnpm test`.",
-        "Every other ticket depends on ticket 1, directly or through another",
-        "ticket's `blockedBy`.",
+        "Ticket 1 is a build ticket. Every other build ticket depends on ticket 1,",
+        "directly or through another ticket's `blockedBy`; a gate need not.",
       ].join("\n");
       expect(plain).toContain(RULES_END);
       expect(greenfield).toBe(plain.replace(RULES_END, `${RULES_END}\n\n${section}`));

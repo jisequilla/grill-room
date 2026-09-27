@@ -69,6 +69,8 @@ interface TicketSpec {
   number: number;
   slug: string;
   blockedBy?: number[];
+  kind?: "build" | "gate";
+  waitsFor?: string;
 }
 
 function ticketsTurn(tickets: TicketSpec[]): ScriptedTurn {
@@ -523,6 +525,37 @@ describe("regenerating a handoff with edits", () => {
         "HANDOFF.md was edited since it was generated, and regenerating rewrites it. Confirm to overwrite the edits.",
     });
     expect(await storedHandoff(session.id)).toEqual(before);
+  });
+
+  it("an edited brief whose ticket number is now a gate counts as gone: outdated, and M2 on regeneration", async () => {
+    const { session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    await editBrief(session.id, 3, "# My brief 3\n");
+    scriptInterviewer([
+      ticketsTurn([
+        THREE_TICKETS[0]!,
+        { number: 2, slug: "store-on-disk", blockedBy: [1, 3] },
+        { number: 3, slug: "payment-account", kind: "gate", waitsFor: "A live payment account." },
+      ]),
+    ]);
+    await breakIntoTickets.run({ sessionId: session.id });
+
+    const { handoff } = await getHandoff.run({ sessionId: session.id });
+    expect(handoff).toMatchObject({ editedBriefs: [3], outdatedBriefs: [3] });
+
+    const before = await storedHandoff(session.id);
+    await expect(generateHandoff.run({ sessionId: session.id })).rejects.toMatchObject({
+      errorCode: "handoff-edited",
+      message:
+        "The edited brief briefs/03-export-it.md has no ticket any more, so regenerating removes it. Confirm to overwrite the edits.",
+    });
+    expect(await storedHandoff(session.id)).toEqual(before);
+
+    const overwritten = await generateHandoff.run({ sessionId: session.id, overwriteEdits: true });
+    expect(overwritten.briefs.map((brief) => brief.ticketNumber)).toEqual([1, 2]);
+    expect(overwritten).toMatchObject({ editedBriefs: [], outdatedBriefs: [] });
+    const row = await storedHandoff(session.id);
+    expect(row.briefs.map((brief) => brief.ticketNumber)).toEqual([1, 2]);
   });
 
   it("row 8: an unedited brief whose ticket is gone is dropped without asking", async () => {

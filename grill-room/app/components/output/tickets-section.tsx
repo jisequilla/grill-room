@@ -249,6 +249,14 @@ export function TicketsSection({
                           <Badge variant={STATUS_VARIANT[ticket.status]}>
                             {t(TICKET_STATUS_LABEL_KEY[ticket.status])}
                           </Badge>
+                          {ticket.kind === "gate" ? (
+                            <Badge
+                              variant="outline"
+                              data-testid={`ticket-kind-${ticket.number}`}
+                            >
+                              {t("output.ticketGate")}
+                            </Badge>
+                          ) : null}
                           {waveByNumber.has(ticket.number) ? (
                             <Badge
                               variant="outline"
@@ -264,6 +272,14 @@ export function TicketsSection({
                         <p className="font-mono text-xs text-muted-foreground">
                           {ticket.slug}
                         </p>
+                        {ticket.kind === "gate" ? (
+                          <p
+                            className="text-xs text-muted-foreground"
+                            data-testid={`ticket-waits-for-${ticket.number}`}
+                          >
+                            {t("output.ticketWaitsFor")}: {ticket.waitsFor}
+                          </p>
+                        ) : null}
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-xs text-muted-foreground">
                             {t("output.ticketBlockedBy")}:{" "}

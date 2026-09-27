@@ -84,8 +84,8 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `confirm-session` | Confirm a session whose done proposal is pending. Refuses outside `done-proposed`, refuses with the list of loose ends while any remain, and refuses while a turn is working. |
 | `synthesize-spec` | Synthesize the session's spec from its settled decisions, following the upstream to-spec template verbatim. Allowed only for a confirmed session with no turn working. Dispositioned decisions feed Out of Scope and Further Notes. Regenerating replaces the markdown and returns the spec row. |
 | `get-spec` | A session's spec, or null when none has been synthesized yet, plus a `ticketsCurrent` flag: whether any generated tickets still match it. |
-| `break-into-tickets` | Break the session's current spec into implementation tickets, replacing any it already has. Allowed only for a confirmed session with a current spec and no turn working. Refuses to replace tickets carrying a build record unless `force` is set. When the session's project repository has no commits yet (greenfield), the request carries that and the project's verify command: ticket 1 must set up that command and name it in its body as inline code, and every other ticket must depend on ticket 1 through `blockedBy`, or the breakdown is sent back. Returns the same shape as `list-tickets`. |
-| `list-tickets` | A session's tickets in number order, each with `blockedBy` resolved to ticket numbers, the same `ticketsCurrent` flag as `get-spec`, and `waves`: ticket numbers grouped by the topological layering of `blockedBy` (wave 1 has no blockers, each later wave's blockers are all in an earlier one). |
+| `break-into-tickets` | Break the session's current spec into implementation tickets, replacing any it already has. Allowed only for a confirmed session with a current spec and no turn working. Refuses to replace tickets carrying a build record unless `force` is set. When the session's project repository has no commits yet (greenfield), the request carries that and the project's verify command: ticket 1 must be a build ticket that sets up that command and names it in its body as inline code (a gate as ticket 1 is refused instead), and every other build ticket must depend on ticket 1 through `blockedBy`, or the breakdown is sent back; a gate need not, though a build ticket may reach ticket 1 through one. A prerequisite outside the code (an account, a signed agreement, reviewed terms, or a spec condition such as a first part being used before a second is built) is a **gate**: a ticket of `kind` `gate` with a one-line `waitsFor` and no builder, listed in the `blockedBy` of every ticket that needs it. Refused: a gate whose `waitsFor` is not one non-empty line, a build ticket whose `waitsFor` is not null (a blank one is stored as null), and a gate no ticket lists in `blockedBy`. Returns the same shape as `list-tickets`. |
+| `list-tickets` | A session's tickets in number order, each with `blockedBy` resolved to ticket numbers, its `kind` (`build` or `gate`) and `waitsFor` (a gate's one line, null for a build ticket), the same `ticketsCurrent` flag as `get-spec`, and `waves`: ticket numbers grouped by the topological layering of `blockedBy` (wave 1 has no blockers, each later wave's blockers are all in an earlier one), gates included. |
 | `set-ticket-blocked-by` | Edit which other tickets in the session block a ticket, given `ticketId` and the new `blockedBy` as ticket numbers. Refuses a self-reference, a number that is not a ticket in the session, or an edit that would create a cycle (`errorCode` `self-reference`, `unknown-ticket-number`, or `cycle`, the last naming every ticket on it). Never touches the spec's `ticketsGeneratedAt`. Returns the same shape as `list-tickets`. |
 | `register-project` | Register a repository sessions export into. The root (any folder inside the repo) is resolved to its git top-level with read-only `git rev-parse`; root and verify command are required, the rest default (slug pattern `{slug}`, tracker `markdown`, build-record logging off, adversarial review on). A blank export folder or slug pattern falls back to the repo's declared tracker block (`docs/agents/issue-tracker.md` front matter — see "Declared tracker" below) when it has a valid one, otherwise export folder is required and slug pattern falls back to `{slug}`. The tracker's commands and diagnostic are stored on the project either way. The visibility flag is seeded from `git check-ignore` on the export folder unless given. The delivery recipe is guessed from the repo's remotes with read-only `git remote -v` unless given: any remote gives `pull-request`, none gives `local-merge`. Refusals carry a code: `root-required`, `verify-command-required`, `export-folder-required`, `folder-not-absolute`, `folder-not-found`, `folder-not-directory`, `not-a-git-repo`, `git-unavailable`, `export-folder-outside-root`, `export-folder-is-root`, `invalid-slug-pattern`, `invalid-delivery-recipe`, `project-exists`. |
 | `update-project` | Edit a registered project. Omitted fields keep their value and the result is validated exactly as registration validates it; the visibility flag changes only when given. Never re-reads the declared tracker — its stored commands and diagnostic pass through unchanged. Can change the delivery recipe and the adversarial review switch directly; editing never re-guesses the recipe from the repo's remotes. |
@@ -102,14 +102,14 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, every file the export will write as an absolute path (spec.md, intent.md, decisions.md when the tree holds decisions or out-of-scope items, HANDOFF.md and briefs/NN-slug.md when a handoff exists, and the manifest), `handoffIncluded`, the files the previous manifest lists that the plan drops, the project's tracker diagnostic, and the export gate as `exportBlocked`/`exportBlockedReason` (`handoff-missing` or `handoff-stale`, null once clear) — the same gate `export-session` refuses on, reported here without refusing so the UI can explain it first. `plannedWrites` and `plannedRemovals` repeat every planned write and removal as `{ path, relativePath, edited }`: `edited` is true when the file on disk no longer matches the hash the previous manifest recorded for it, or was never written by Grill Room at all — see "Exporting a session" below for the guard. Also reports the session's brief grounding as `groundingState` (`absent`, `current` or `stale`) and `groundingStaleReason` (`head-moved` or `handoff-changed`, null while current or absent) — informational, like the other gate: it never blocks export — plus `groundedBriefs` (ticket numbers this plan actually writes grounded) and `ungroundedBriefs` (every other brief, as `{ ticket, reason }` — `edited`, `no-grounding`, `not-covered`, or `kept` — see "Grounding the briefs" below). Built by the same plan `export-session` writes, so the two cannot disagree; export-session checks for edits again when it writes, so this preview is not a lock. |
 | `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<workingExportFolder>/<folderName>/spec.md`, `intent.md`, `decisions.md` (when the tree holds decisions or out-of-scope items), `issues/NN-slug.md` per ticket (tickets only when current), and `HANDOFF.md` plus `briefs/NN-slug.md` from the session's generated handoff, re-rendered fresh with the session's current brief grounding wherever the text is eligible (recording that export on the handoff), creating missing folders. Also writes a provenance manifest (`.grill-room-export.json`: session id, export revision, scout commit, HEAD at export, and a CRLF-insensitive sha256 of every file written). Re-export removes files the previous manifest lists that the new export no longer writes. Edited files are kept: a planned write or removal already on disk that no longer matches the hash the previous manifest recorded, or that the previous manifest never listed, is neither overwritten nor removed unless its bundle-relative path is in `overridePaths` (a version-1 manifest's files are trusted as unedited once). The check is repeated from disk at write time, so a file edited after `preview-export` is kept unless overridden. An override resolving outside the bundle is refused with `override-outside-bundle`. Refuses, writing nothing, with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, `export-outside-root` when any path resolves (through symlinks) outside the real project root, `handoff-missing` when the session has no handoff, or `handoff-stale` when its handoff no longer matches today's spec, tickets or project; `preview-export` reports the same gate as `exportBlocked`/`exportBlockedReason` without refusing, and marks each edited file, so the UI can explain both before the operator tries. Returns `written`, `removed` and `kept` as absolute paths, `groundedBriefs` (ticket numbers actually written grounded) and `ungroundedBriefs` (every other brief written, as `{ ticket, reason }` — `edited`, `no-grounding`, `not-covered`, or `kept` when the hash guard left an already-edited copy on disk instead of writing the grounded text), plus a post-export visibility report — see "Exporting a session" below and "Grounding the briefs" below. |
 | `get-export-visibility` | Classify every file a session's export wrote (or would write) as `tracked`, `ignored`, `untracked`, or `unchecked` ("could not check": git could not tell) in the project's repository, given the same `sessionId` and `slug` as `preview-export`/`export-session`. Read-only and side-effect-free, so the UI can re-check without exporting again. See "Exporting a session" below. |
-| `generate-handoff` | Generate or regenerate a session's handoff from deterministic templates (no model call): `HANDOFF.md` plus one brief per ticket. Regenerating rewrites every unedited text and keeps each hand-edited brief whose ticket still exists, word for word. Refuses with `no-project`, `project-not-found`, `spec-missing`, `no-tickets` or `ticket-cycle`, and with `handoff-edited` when keeping an edit is impossible (HANDOFF.md was edited, an edited brief's ticket is gone, or a legacy handoff carries edits) unless `overwriteEdits` is true, which rewrites everything. See "Handoff" below. |
+| `generate-handoff` | Generate or regenerate a session's handoff from deterministic templates (no model call): `HANDOFF.md` plus one brief per ticket, except a gate, which gets none. Regenerating rewrites every unedited text and keeps each hand-edited brief whose build ticket still exists, word for word. Refuses with `no-project`, `project-not-found`, `spec-missing`, `no-tickets` or `ticket-cycle`, and with `handoff-edited` when keeping an edit is impossible (HANDOFF.md was edited, an edited brief's ticket is gone, or a legacy handoff carries edits) unless `overwriteEdits` is true, which rewrites everything. See "Handoff" below. |
 | `get-handoff` | A session's handoff (HANDOFF.md, briefs by ticket number, timestamps) or null, with `stale` (its inputs changed since generation), `exportStale` (edited or regenerated after the last export that included it), `handoffEdited`, `editedBriefs`, `outdatedBriefs` (see "Handoff" below), `canGenerate`, and `cannotGenerateReason`. |
 | `update-handoff` | Edit a generated handoff: replace HANDOFF.md's `markdown` and/or `briefs` by `ticketNumber`. Marks it edited. Saving an edited brief while the handoff is current marks it reviewed, dropping it from `outdatedBriefs`. Refuses with `handoff-missing` or `brief-not-found`. |
-| `ground-briefs` | Ground a session's handoff briefs in its project's code: one handoff scout turn (turn kind `handoff-scout`, always on sonnet, read-only over the project root, a conversation of its own) covering every ticket at once, reporting per ticket the files to create or edit, the existing files it builds on, cited codebase facts, what it needs from each blocker with the check that proves it, and the test and command that prove it. The result is checked against the handoff and the working tree before it is stored, replacing any earlier grounding. Refused with `no-project`, `not-a-repo`, `handoff-missing`, `handoff-stale`, `turn-working`, `too-many-tickets` or `too-many-blockers` (the last two before any turn is spent); a grounding refused three times fails the turn with `invalid-brief-grounding`. See "Grounding the briefs" below. |
+| `ground-briefs` | Ground a session's handoff briefs in its project's code: one handoff scout turn (turn kind `handoff-scout`, always on sonnet, read-only over the project root, a conversation of its own) covering every build ticket at once (a gate is never grounded, and a build ticket blocked through a gate is sent that gate's own blockers instead), reporting per ticket the files to create or edit, the existing files it builds on, cited codebase facts, what it needs from each blocker with the check that proves it, and the test and command that prove it. The result is checked against the handoff and the working tree before it is stored, replacing any earlier grounding. Refused with `no-project`, `not-a-repo`, `handoff-missing`, `handoff-stale`, `turn-working`, `too-many-tickets` or `too-many-blockers` (the last two before any turn is spent, counting build tickets and their blockers through gates); a grounding refused three times fails the turn with `invalid-brief-grounding`. See "Grounding the briefs" below. |
 | `get-brief-grounding` | A session's brief grounding or null: the scout's result per ticket, the commit and handoff fingerprint it was made for, the model, when it ran, its turn record, `current`, and `staleReason` (`handoff-changed` or `head-moved`, null while current). |
-| `set-build-record` | Create or edit a ticket's build record — model, whether the first attempt passed, whether it was escalated, what the prompt was missing, and free notes — identifying the ticket by `ticketId` or by `sessionId` + `ticketNumber`. Optionally updates the ticket's `status` in the same call. See "Logging a build from an agent" below. |
+| `set-build-record` | Create or edit a ticket's build record — model, whether the first attempt passed, whether it was escalated, what the prompt was missing, and free notes — identifying the ticket by `ticketId` or by `sessionId` + `ticketNumber`. Optionally updates the ticket's `status` in the same call. A gate is refused with `gate_ticket` (409): nothing is built for it. See "Logging a build from an agent" below. |
 | `get-build-record` | One ticket's build record, or null when none has been logged yet. |
-| `get-build-summary` | A session's build records summarized: ticket and recorded counts, first-attempt pass rate, escalations, a per-model breakdown, and every ticket with its build record or null — one call for the whole build records table. |
+| `get-build-summary` | A session's build records summarized: ticket and recorded counts, first-attempt pass rate, escalations, a per-model breakdown, and every build ticket with its build record or null — one call for the whole build records table. Gates are left out of both the records and the ticket count. |
 | `navigate` | Move the UI to a view or path, through application state. |
 | `view-screen` | What the user is looking at. Call it first when the visible context matters. |
 | `provider-api-request` | Call Slack's Web API through the workspace connection. |
@@ -470,6 +470,25 @@ session, and is readable and editable in the output page's Handoff block.
   present); markdown projects get a `Status:` line per ticket instead.
   Build-record commands, with the session id and ticket numbers filled in,
   appear only when the project logs build records.
+- **Gates.** A gate ticket gets no brief: nothing is delegated for it, so
+  `generate-handoff` stores none, `get-handoff` shows none, `update-handoff`
+  refuses its number with `brief-not-found`, and export writes no
+  `briefs/NN-…` for it (brief names still pad by every ticket, so each
+  matches its issue file). Its issue file is written, since other tickets'
+  `Blocked by:` lines name it: `Status: ready-for-human` and a
+  `Wait for: <waitsFor>` line after `Blocked by:`. In the Waves it reads
+  `- **NN Title** (gate)` (or `(gate; blocked by …)`), then `Wait for:`, its
+  ticket file and, on a markdown tracker, `Status: ready-for-human`. With
+  any gate, the Waves intro adds a paragraph telling the orchestrator to ask
+  the owner and mark the gate met, the Briefs line reads "one per ticket
+  except gates", the beads tracking section gives a gate a bead closed on
+  the owner's confirmation, the markdown one says a gate's `Status:` is set
+  to `met`, build-record commands cover build tickets only (the section is
+  left out when there is none), and the greenfield line says every other
+  *build* ticket waits for ticket 01, never naming a gate as not reaching
+  it. A brief's `Blocked by:` line lists its build blockers, then
+  `gate NN` / `gates NN, NN` "(met before this brief was delegated)". With
+  no gate, every text is as it was.
 - `briefs/NN-slug.md` (the same `NN-slug` as the ticket file) holds the
   ticket text, its blockers, the verify command, the file-boundary and
   git/worktree rules, the report format, and "report, then stop", plus two
@@ -513,12 +532,13 @@ handoff stays current.
 CRLF-insensitive sha256 of the text Grill Room generated for it (the
 ungrounded render): `markdownGeneratedSha256` for HANDOFF.md, and
 `generatedSha256` on each entry of `briefsJson`. A text is **edited** when it
-no longer hashes to its baseline, so a text saved back to exactly what Grill
-Room generates for it today is not an edit. An edited brief is **outdated** when its ticket is
-gone, or when what Grill Room would generate for it today (its ticket, the
-project, the template) differs from what it was baselined on; nothing is
-outdated while today's inputs cannot be read. `get-handoff` reports these as
-`handoffEdited`, `editedBriefs` and `outdatedBriefs`.
+no longer hashes to its baseline. A brief saved back to the text its baseline
+was taken from is not an edit, while that baseline is still today's render.
+An edited brief is **outdated** when its ticket is gone, or when what Grill
+Room would generate for it today (its ticket, the project, the template)
+differs from what it was baselined on; nothing is outdated while today's
+inputs cannot be read. `get-handoff` reports these as `handoffEdited`,
+`editedBriefs` and `outdatedBriefs`.
 
 Regenerating without `overwriteEdits` never loses an edit. Every unedited text
 is rewritten with a new baseline; every edited brief whose ticket still exists
@@ -531,10 +551,10 @@ gone. `overwriteEdits` rewrites everything with fresh baselines. Saving an
 edited brief through `update-handoff` while the handoff is current marks it
 reviewed: its baseline moves to today's render. That includes a kept brief
 saved back to the older text it was generated with: it stays edited, since
-it differs from today's render. A **legacy** handoff, stored
-before baselines existed (`markdownGeneratedSha256` null), reports no edits,
-refuses to regenerate while `editedAt` is set unless confirmed, and gains
-baselines on its first successful regeneration. In the Handoff block,
+it differs from today's render. A **legacy** handoff, stored before
+baselines existed (`markdownGeneratedSha256` null), reports no edits, refuses
+to regenerate while `editedAt` is set unless confirmed, and gains baselines
+on its first successful regeneration. In the Handoff block,
 `regenerate-handoff` always tries the keeping regeneration and opens the
 overwrite dialog only on `handoff-edited`; `regenerate-handoff-replace`, shown
 while `editedAt` is set, opens it directly; and `handoff-outdated-edits` names
@@ -565,7 +585,13 @@ available from the Handoff block regardless.
 
 ### Grounding the briefs
 
-`ground-briefs` fills in what a brief's slots leave to the orchestrator. It
+`ground-briefs` fills in what a brief's slots leave to the orchestrator. A
+gate has no brief, so it is never grounded: the scout sees only the build
+tickets, and each one's blockers are its own with every gate replaced by
+that gate's blockers, recursively (`blockersThroughGates`,
+`shared/ticket-gates.ts`, which the Ground briefs button counts with too).
+Rendering walks through a gate unchanged: it has no grounding entry, so it
+never creates a file and never moves in `separateOverlaps`. It
 runs a handoff scout over the project at its current commit, through the turn
 lock and turn records like every other turn, and stores the accepted result in
 `gr_brief_groundings`, one row per session, with the commit it read, the

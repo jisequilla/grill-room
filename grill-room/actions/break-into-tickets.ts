@@ -9,7 +9,7 @@ import { headCommit } from "../server/export-bundle.js";
 import { getInterviewer } from "../server/interviewer/index.js";
 import type { BreakIntoTicketsResult } from "../server/interviewer/index.js";
 import { getProject } from "../server/projects.js";
-import { validateTicketSet } from "../server/tickets.js";
+import { storedWaitsFor, validateTicketSet } from "../server/tickets.js";
 import {
   askUntilAccepted,
   decisionSnapshots,
@@ -183,6 +183,8 @@ export default defineAction({
             title: ticket.title,
             body: ticket.body,
             status: "ready" as const,
+            kind: ticket.kind,
+            waitsFor: ticket.kind === "gate" ? storedWaitsFor(ticket) : null,
             blockedByJson: JSON.stringify(
               ticket.blockedBy.flatMap((number) => {
                 const id = idByNumber.get(number);

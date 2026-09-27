@@ -54,7 +54,7 @@ export default defineAction({
           statusCode: 404,
         });
       }
-      const baseline = baselineAfterEdit(brief, edit.markdown, context);
+      const baseline = baselineAfterEdit(brief, context);
       brief.markdown = edit.markdown;
       if (baseline !== undefined) brief.generatedSha256 = baseline;
     }

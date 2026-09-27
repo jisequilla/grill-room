@@ -1876,3 +1876,117 @@ describe("export after a regeneration that kept an edited brief", () => {
     }
   });
 });
+
+describe("gates", () => {
+  useTestDatabase();
+
+  const ACCOUNT = "A live account on the payment platform, with API keys issued.";
+  const GATE_BODY = "The owner opens the account; it is in place once API keys are issued.";
+
+  /** One grounded ticket that changes `files`, with nothing it builds on. */
+  function groundedTicket(number: number, files: string[]) {
+    const base = aHandoffScoutResult().tickets[0]!;
+    return {
+      ...base,
+      number,
+      filesToChange: files.map((file) => ({ path: file, change: "edit" as const })),
+      buildsOn: [],
+    };
+  }
+
+  /**
+   * 01 build; 02 a gate; 03 build, unblocked; 04 build blocked by 01 and the
+   * gate. 01 and 03 both change `src/shared/store.ts`, so separating them
+   * adds an edge in the gate's own wave.
+   */
+  async function aSessionWithGate() {
+    const { root, project } = await aProject();
+    const session = await aSession("Grill Room", project.id);
+    const first = await insertTicket(session.id, { number: 1, slug: "build-the-workspace" });
+    const gate = await insertTicket(session.id, {
+      number: 2,
+      slug: "payment-account",
+      title: "Payment account is live",
+      body: GATE_BODY,
+      kind: "gate",
+      waitsFor: ACCOUNT,
+    });
+    await insertTicket(session.id, { number: 3, slug: "list-the-store" });
+    await insertTicket(session.id, {
+      number: 4,
+      slug: "take-payments",
+      blockedByJson: JSON.stringify([first, gate]),
+    });
+    await insertSpec(session.id, { ticketsCurrent: true });
+    await generateHandoff.run({ sessionId: session.id });
+
+    const loaded = await loadHandoffSource(session.id);
+    if (!("source" in loaded)) throw new Error("expected a handoff source");
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+    await storeBriefGrounding({
+      sessionId: session.id,
+      result: aHandoffScoutResult({
+        tickets: [
+          groundedTicket(1, ["src/shared/store.ts", "src/workspace.ts"]),
+          groundedTicket(3, ["src/shared/store.ts", "src/list.ts"]),
+          groundedTicket(4, ["src/payments.ts"]),
+        ],
+      }),
+      commitRead: head,
+      handoffFingerprint: handoffFingerprint(loaded.source),
+      model: "sonnet",
+      turnId: null,
+      ranAt: new Date().toISOString(),
+    });
+    return { root, session, bundleDir: path.join(root, ".scratch", "grill-room") };
+  }
+
+  it("writes the gate's issue file, with its wait", async () => {
+    const { session, bundleDir } = await aSessionWithGate();
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    expect(await fs.readFile(path.join(bundleDir, "issues", "02-payment-account.md"), "utf8")).toBe(
+      `# 02 Payment account is live\n\nStatus: ready-for-human\nBlocked by: none\nWait for: ${ACCOUNT}\n\n${GATE_BODY}`,
+    );
+    expect(await fs.readFile(path.join(bundleDir, "issues", "04-take-payments.md"), "utf8")).toBe(
+      "# 04 Ticket 4\n\nStatus: ready-for-agent\nBlocked by: 01, 02\n\nDo the work of ticket 4.",
+    );
+  });
+
+  it("plans and writes no brief for the gate, and never names it among grounded or ungrounded briefs", async () => {
+    const { session, bundleDir } = await aSessionWithGate();
+
+    const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
+    expect(preview.plannedWrites.map((write) => write.relativePath).filter((p) => p.startsWith("briefs/"))).toEqual([
+      "briefs/01-build-the-workspace.md",
+      "briefs/03-list-the-store.md",
+      "briefs/04-take-payments.md",
+    ]);
+    expect(preview.groundedBriefs.sort()).toEqual([1, 3, 4]);
+    expect(preview.ungroundedBriefs).toEqual([]);
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    expect(result.groundedBriefs.sort()).toEqual([1, 3, 4]);
+    expect(result.ungroundedBriefs).toEqual([]);
+    expect((await fs.readdir(path.join(bundleDir, "briefs"))).sort()).toEqual([
+      "01-build-the-workspace.md",
+      "03-list-the-store.md",
+      "04-take-payments.md",
+    ]);
+  });
+
+  it("carries the gate's wait in HANDOFF.md, and adds no implicit edge involving it", async () => {
+    const { session, bundleDir } = await aSessionWithGate();
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    const handoff = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoff).toContain(`- **02 Payment account is live** (gate)\n  - Wait for: ${ACCOUNT}\n`);
+    expect(handoff).toContain("- Ticket 03 waits for ticket 01: both change `src/shared/store.ts`.");
+    expect(handoff).not.toMatch(/Ticket 02 waits for|waits for ticket 02/);
+    const wave1 = handoff.slice(handoff.indexOf("### Wave 1"), handoff.indexOf("### Wave 2"));
+    expect(wave1).toContain("**02 Payment account is live** (gate)");
+  });
+});

@@ -1183,3 +1183,45 @@ describe("planExport: an own answer restated", () => {
     expect(entry).toMatchObject({ answer: ORIGINAL, operatorNotes: NOTES });
   });
 });
+
+describe("planExport: a gate's ticket file", () => {
+  const ACCOUNT = "A live account on the payment platform, with API keys issued.";
+
+  function ticketFiles() {
+    return planExport({
+      sessionTitle: "Grill Room",
+      idea: "An idea.",
+      specMarkdown: "## Problem\n\nA spec.",
+      tickets: [
+        { number: 1, slug: "build-the-workspace", title: "Build the workspace", body: "Build it.", blockedBy: [] },
+        {
+          number: 2,
+          slug: "payment-account",
+          title: "Payment account is live",
+          body: "The owner opens the account; it is in place once API keys are issued.",
+          blockedBy: [1],
+          kind: "gate",
+          waitsFor: ACCOUNT,
+        },
+        { number: 3, slug: "store-on-disk", title: "Store on disk", body: "Store it.", blockedBy: [2, 1], kind: "build", waitsFor: null },
+      ],
+      decisions: [],
+      readiness: null,
+      scoutReport: null,
+    }).files.filter((file) => file.relativePath.startsWith("issues/"));
+  }
+
+  it("gives a gate a ready-for-human status and a Wait for line", () => {
+    expect(ticketFiles().find((file) => file.relativePath === "issues/02-payment-account.md")?.content).toBe(
+      `# 02 Payment account is live\n\nStatus: ready-for-human\nBlocked by: 01\nWait for: ${ACCOUNT}\n\nThe owner opens the account; it is in place once API keys are issued.`,
+    );
+  });
+
+  it("leaves a build ticket's file as it was", () => {
+    expect(ticketFiles().map((file) => [file.relativePath, file.content])).toEqual([
+      ["issues/01-build-the-workspace.md", "# 01 Build the workspace\n\nStatus: ready-for-agent\nBlocked by: none\n\nBuild it."],
+      expect.anything(),
+      ["issues/03-store-on-disk.md", "# 03 Store on disk\n\nStatus: ready-for-agent\nBlocked by: 01, 02\n\nStore it."],
+    ]);
+  });
+});

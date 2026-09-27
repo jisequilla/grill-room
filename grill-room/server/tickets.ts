@@ -9,7 +9,7 @@
  * ordering and cycle-naming rules are exact enough to state as unit cases
  * without an action's setup around them.
  */
-import type { TicketStatus } from "./db/schema.js";
+import type { TicketKind, TicketStatus } from "./db/schema.js";
 import { parseStringArray } from "./tree.js";
 
 /** A ticket as the interviewer proposes it: `blockedBy` holds ticket numbers. */
@@ -19,6 +19,10 @@ export interface ProposedTicket {
   title: string;
   body: string;
   blockedBy: readonly number[];
+  /** `gate` for a prerequisite outside the code, which has no builder. */
+  kind: TicketKind;
+  /** What a gate waits for, in one line; null (or blank) for a build ticket. */
+  waitsFor: string | null;
 }
 
 export interface TicketSetValidation {
@@ -73,8 +77,10 @@ export function numbersOnCycles(
  * Refused: a ticket number used more than once, numbers that do not run from
  * 1 to the ticket count with no gaps, a slug that is not lowercase letters,
  * digits and hyphens, a slug used by more than one ticket, a `blockedBy` entry
- * naming a number outside this set, a ticket that blocks itself, and a
- * `blockedBy` graph that contains a cycle.
+ * naming a number outside this set, a ticket that blocks itself, a gate
+ * whose `waitsFor` is not one non-empty line, a build ticket that waits for
+ * something, a gate no ticket lists in `blockedBy`, and a `blockedBy` graph
+ * that contains a cycle.
  *
  * The cycle check only runs once numbers and links resolve cleanly — a
  * dangling or duplicated number makes the graph meaningless to walk.
@@ -149,6 +155,8 @@ export function validateTicketSet(
     }
   }
 
+  reasons.push(...gateReasons(tickets));
+
   if (reasons.length > 0) return { ok: false, reasons };
 
   const byNumber = new Map(tickets.map((ticket) => [ticket.number, ticket]));
@@ -166,6 +174,58 @@ export function validateTicketSet(
   return { ok: reasons.length === 0, reasons };
 }
 
+/**
+ * A gate waits for something outside the code, named in one line, and holds
+ * back the tickets that list it in `blockedBy`. A build ticket waits for
+ * nothing: a blank `waitsFor` on one is read as none. Reasons are grouped by
+ * rule, then ordered by ticket number within each rule.
+ */
+function gateReasons(tickets: readonly ProposedTicket[]): string[] {
+  const byNumber = [...tickets].sort((a, b) => a.number - b.number);
+  const reasons: string[] = [];
+
+  for (const ticket of byNumber) {
+    if (ticket.kind === "gate" && !isOneLine(ticket.waitsFor)) {
+      reasons.push(
+        `Ticket ${ticket.number} is a gate, so its \`waitsFor\` must say in one line what it waits for.`,
+      );
+    }
+  }
+
+  for (const ticket of byNumber) {
+    if (ticket.kind === "build" && storedWaitsFor(ticket) !== null) {
+      reasons.push(
+        `Ticket ${ticket.number} is a build ticket, so its \`waitsFor\` must be null. Only a gate waits for something outside the code.`,
+      );
+    }
+  }
+
+  for (const ticket of byNumber) {
+    if (
+      ticket.kind === "gate" &&
+      !tickets.some(
+        (other) => other.number !== ticket.number && other.blockedBy.includes(ticket.number),
+      )
+    ) {
+      reasons.push(
+        `Ticket ${ticket.number} is a gate that no ticket lists in \`blockedBy\`. A gate exists to hold back the tickets that need it: list it in their \`blockedBy\`.`,
+      );
+    }
+  }
+
+  return reasons;
+}
+
+function isOneLine(text: string | null): boolean {
+  return text !== null && text.trim() !== "" && !/[\r\n]/.test(text);
+}
+
+/** What a ticket's `waitsFor` is stored as: trimmed, and null when blank. */
+export function storedWaitsFor(ticket: { waitsFor: string | null }): string | null {
+  const trimmed = ticket.waitsFor?.trim() ?? "";
+  return trimmed === "" ? null : trimmed;
+}
+
 /** The verify command a greenfield breakdown's ticket 1 sets up. */
 export interface GreenfieldRules {
   verifyCommand: string;
@@ -176,8 +236,10 @@ export interface GreenfieldRules {
  * up and every other ticket waits for it: ticket 1's body names the command as
  * single-backtick inline code (skipped for a command that itself contains a
  * backtick, which cannot be written that way), and every other ticket reaches
- * ticket 1 through `blockedBy`, directly or transitively. Only called on a set
- * whose numbers and links resolve and hold no cycle.
+ * ticket 1 through `blockedBy`, directly or transitively. Ticket 1 must be a
+ * build ticket; a gate need not reach it, though the walk still passes
+ * through a gate. Only called on a set whose numbers and links resolve and
+ * hold no cycle.
  */
 function greenfieldReasons(
   byNumber: ReadonlyMap<number, ProposedTicket>,
@@ -186,7 +248,11 @@ function greenfieldReasons(
   const reasons: string[] = [];
 
   const first = byNumber.get(1);
-  if (first && !verifyCommand.includes("`") && !first.body.includes(`\`${verifyCommand}\``)) {
+  if (first?.kind === "gate") {
+    reasons.push(
+      "Ticket 1 is a gate. This repository has no commits yet, so ticket 1 must be a build ticket that sets up the verify command.",
+    );
+  } else if (first && !verifyCommand.includes("`") && !first.body.includes(`\`${verifyCommand}\``)) {
     reasons.push(
       `Ticket 1 does not name the verify command. This repository has no commits yet, so ticket 1 sets that command up, and its body must name it in its acceptance, written as inline code: \`${verifyCommand}\`.`,
     );
@@ -204,7 +270,7 @@ function greenfieldReasons(
   }
 
   for (const number of [...byNumber.keys()].sort((a, b) => a - b)) {
-    if (number !== 1 && !reaches(number)) {
+    if (number !== 1 && byNumber.get(number)!.kind !== "gate" && !reaches(number)) {
       reasons.push(
         `Ticket ${number} does not depend on ticket 1. This repository has no commits yet and ticket 1 sets up the verify command, so every other ticket must list 1 in its \`blockedBy\`, directly or through another ticket's \`blockedBy\`.`,
       );
@@ -409,6 +475,8 @@ export interface StoredTicket {
   status: TicketStatus;
   /** JSON array of ticket ids — `blockedByJson` stores ids, not numbers. */
   blockedByJson: string;
+  kind: TicketKind;
+  waitsFor: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -422,6 +490,9 @@ export interface TicketView {
   body: string;
   status: TicketStatus;
   blockedBy: number[];
+  kind: TicketKind;
+  /** What a gate waits for; always null for a build ticket. */
+  waitsFor: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -445,6 +516,8 @@ export function describeTickets(
         const number = numberById.get(id);
         return number === undefined ? [] : [number];
       }),
+      kind: row.kind,
+      waitsFor: row.waitsFor,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }));
