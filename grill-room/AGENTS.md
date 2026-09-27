@@ -468,8 +468,9 @@ session, and is readable and editable in the output page's Handoff block.
   section is absent and the lifecycle text has no review step. Beads
   projects get bead commands (the declared tracker's stored commands when
   present); markdown projects get a `Status:` line per ticket instead.
-  Build-record commands, with the session id and ticket numbers filled in,
-  appear only when the project logs build records.
+  A build-record command, with the session id filled in and the ticket
+  number left as a placeholder, appears only when the project logs build
+  records.
 - **Gates.** A gate ticket gets no brief: nothing is delegated for it, so
   `generate-handoff` stores none, `get-handoff` shows none, `update-handoff`
   refuses its number with `brief-not-found`, and export writes no
@@ -483,9 +484,9 @@ session, and is readable and editable in the output page's Handoff block.
   the owner and mark the gate met, the Briefs line reads "one per ticket
   except gates", the beads tracking section gives a gate a bead closed on
   the owner's confirmation, the markdown one says a gate's `Status:` is set
-  to `met`, build-record commands cover build tickets only (the section is
-  left out when there is none), and the greenfield line says every other
-  *build* ticket waits for ticket 01, never naming a gate as not reaching
+  to `met`, the build-record section names the gates that get no record (it
+  is left out only when every ticket is a gate), and the greenfield line
+  says every other *build* ticket waits for ticket 01, never naming a gate as not reaching
   it. A brief's `Blocked by:` line lists its build blockers, then
   `gate NN` / `gates NN, NN` "(met before this brief was delegated)". With
   no gate, every text is as it was.

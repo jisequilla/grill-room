@@ -116,6 +116,27 @@ function aSourceWithGate(
   };
 }
 
+/** One top-level section, from its heading up to the next one. */
+function section(markdown: string, heading: string): string {
+  const start = markdown.indexOf(heading);
+  expect(start).toBeGreaterThan(-1);
+  const end = markdown.indexOf("\n## ", start + 1);
+  return markdown.slice(start, end === -1 ? undefined : end).trimEnd();
+}
+
+/** The exact `## Build records` section: one command template, session id filled in. */
+function buildRecordTemplate(sessionId: string): string {
+  return [
+    "## Build records",
+    "",
+    "Log each ticket's outcome in Grill Room once it closes. Run this command from the Grill Room app folder (it reaches its running dev server), once per ticket: set `<ticket-number>` to the ticket's number and fill in the other placeholders.",
+    "",
+    "```bash",
+    `pnpm action set-build-record --sessionId ${sessionId} --ticketNumber <ticket-number> --model <model> --firstAttemptPassed <true|false> --escalated <true|false> --promptMissing "<what the brief was missing>" --ticketStatus done`,
+    "```",
+  ].join("\n");
+}
+
 describe("HANDOFF.md", () => {
   it("renders the tracked variant", () => {
     const { markdown } = renderHandoff(aSource());
@@ -260,18 +281,25 @@ describe("HANDOFF.md", () => {
     expect(markdownKind.markdown).toContain("- `close`: `bd close {id}`");
   });
 
-  it("includes build-record commands with the session id and ticket numbers only when the toggle is on", () => {
+  it("gives one build-record command template with the session id filled in, only when the toggle is on", () => {
     const off = renderHandoff(aSource({ buildRecordLogging: false }));
     expect(off.markdown).not.toContain("## Build records");
     expect(off.markdown).not.toContain("set-build-record");
 
     const on = renderHandoff(aSource({ buildRecordLogging: true }));
-    expect(on.markdown).toContain("## Build records");
-    for (const number of [1, 2, 3]) {
-      expect(on.markdown).toContain(
-        `pnpm action set-build-record --sessionId session-123 --ticketNumber ${number} `,
-      );
-    }
+    expect(section(on.markdown, "## Build records")).toBe(buildRecordTemplate("session-123"));
+  });
+
+  it("renders the same template for one ticket as for three", () => {
+    const three = renderHandoff(aSource({ buildRecordLogging: true }));
+    const oneTicketSource: HandoffSource = {
+      ...aSource({ buildRecordLogging: true }),
+      tickets: [aSource().tickets[0]],
+      waves: [[1]],
+    };
+    const one = renderHandoff(oneTicketSource);
+
+    expect(section(one.markdown, "## Build records")).toBe(section(three.markdown, "## Build records"));
   });
 });
 
@@ -1608,12 +1636,72 @@ describe("gates", () => {
   });
 
   describe("build records", () => {
-    it("has one command per build ticket only", () => {
-      const records = section(renderHandoffMarkdown(aSourceWithGate({ buildRecordLogging: true })), "## Build records");
+    const ONE_GATE_LINE = "Ticket 02 is a gate and gets no build record: `set-build-record` refuses its number.";
+    const TWO_GATES_LINE =
+      "Tickets 02 and 04 are gates and get no build record: `set-build-record` refuses their numbers.";
+    const THREE_GATES_LINE =
+      "Tickets 02, 04 and 06 are gates and get no build record: `set-build-record` refuses their numbers.";
+    const PADDED_GATE_LINE = "Ticket 005 is a gate and gets no build record: `set-build-record` refuses its number.";
 
-      expect(records).toContain("--ticketNumber 1 ");
-      expect(records).toContain("--ticketNumber 3 ");
-      expect(records).not.toContain("--ticketNumber 2 ");
+    function buildTicket(number: number): HandoffSource["tickets"][number] {
+      return { id: `t${number}`, number, slug: `ticket-${number}`, title: `Ticket ${number}`, body: "Do it.", blockedBy: [] };
+    }
+
+    function gateTicket(number: number): HandoffSource["tickets"][number] {
+      return {
+        id: `t${number}`,
+        number,
+        slug: `gate-${number}`,
+        title: `Gate ${number}`,
+        body: "Wait for it.",
+        blockedBy: [],
+        kind: "gate" as const,
+        waitsFor: PAYMENT_ACCOUNT,
+      };
+    }
+
+    it("gives the template, then names the gate that gets no record", () => {
+      const markdown = renderHandoffMarkdown(aSourceWithGate({ buildRecordLogging: true }));
+      const records = section(markdown, "## Build records");
+
+      expect(records).toBe([buildRecordTemplate("session-123"), "", ONE_GATE_LINE].join("\n"));
+    });
+
+    it("names two gates in the plural", () => {
+      const source: HandoffSource = {
+        ...aSource({ buildRecordLogging: true }),
+        tickets: [buildTicket(1), gateTicket(2), buildTicket(3), gateTicket(4)],
+        waves: [[1], [2], [3], [4]],
+      };
+      const records = section(renderHandoffMarkdown(source), "## Build records");
+
+      expect(records).toBe([buildRecordTemplate("session-123"), "", TWO_GATES_LINE].join("\n"));
+    });
+
+    it("names three gates, joined with a final 'and'", () => {
+      const source: HandoffSource = {
+        ...aSource({ buildRecordLogging: true }),
+        tickets: [buildTicket(1), gateTicket(2), buildTicket(3), gateTicket(4), buildTicket(5), gateTicket(6)],
+        waves: [[1], [2], [3], [4], [5], [6]],
+      };
+      const records = section(renderHandoffMarkdown(source), "## Build records");
+
+      expect(records).toBe([buildRecordTemplate("session-123"), "", THREE_GATES_LINE].join("\n"));
+    });
+
+    it("pads a gate's number to three digits once the set holds 100 tickets", () => {
+      const tickets = Array.from({ length: 100 }, (_, index) => {
+        const number = index + 1;
+        return number === 5 ? gateTicket(number) : buildTicket(number);
+      });
+      const source: HandoffSource = {
+        ...aSource({ buildRecordLogging: true }),
+        tickets,
+        waves: [tickets.map((ticket) => ticket.number)],
+      };
+      const records = section(renderHandoffMarkdown(source), "## Build records");
+
+      expect(records).toBe([buildRecordTemplate("session-123"), "", PADDED_GATE_LINE].join("\n"));
     });
 
     it("is left out when every ticket is a gate", () => {
@@ -1624,6 +1712,12 @@ describe("gates", () => {
       };
 
       expect(renderHandoffMarkdown(onlyGates)).not.toContain("## Build records");
+    });
+
+    it.each(["beads", "markdown"] as const)("renders the same template on a %s tracker", (trackerKind) => {
+      const markdown = renderHandoffMarkdown(aSource({ trackerKind, buildRecordLogging: true }));
+
+      expect(section(markdown, "## Build records")).toBe(buildRecordTemplate("session-123"));
     });
   });
 

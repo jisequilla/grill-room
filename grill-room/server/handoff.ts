@@ -752,25 +752,45 @@ function trackingSection(source: HandoffSource): string {
   return lines.join("\n");
 }
 
-/** One command per build ticket; null when there is none, since a gate has no build record. */
+/**
+ * One command template, with the session id filled in and `<ticket-number>`
+ * as a placeholder for every ticket; null when there is none, since a gate
+ * has no build record. Names the gates that get no record, when there are
+ * any.
+ */
 function buildRecordSection(source: HandoffSource): string | null {
   const buildTickets = source.tickets.filter((ticket) => !isGate(ticket));
   if (buildTickets.length === 0) return null;
-  const commands = buildTickets.map((ticket) =>
-    [
-      "pnpm action set-build-record",
-      `--sessionId ${source.session.id} --ticketNumber ${ticket.number}`,
-      '--model <model> --firstAttemptPassed <true|false> --escalated <true|false>',
-      '--promptMissing "<what the brief was missing>" --ticketStatus done',
-    ].join(" "),
-  );
-  return [
+  const command = [
+    "pnpm action set-build-record",
+    `--sessionId ${source.session.id} --ticketNumber <ticket-number>`,
+    '--model <model> --firstAttemptPassed <true|false> --escalated <true|false>',
+    '--promptMissing "<what the brief was missing>" --ticketStatus done',
+  ].join(" ");
+  const lines = [
     "## Build records",
     "",
-    "Log each ticket's outcome in Grill Room once it closes. Run these from the Grill Room app folder (they reach its running dev server); fill in the placeholders.",
+    "Log each ticket's outcome in Grill Room once it closes. Run this command from the Grill Room app folder (it reaches its running dev server), once per ticket: set `<ticket-number>` to the ticket's number and fill in the other placeholders.",
     "",
-    codeBlock(commands.join("\n")),
-  ].join("\n");
+    codeBlock(command),
+  ];
+  const gates = source.tickets.filter(isGate);
+  if (gates.length > 0) {
+    const total = source.tickets.length;
+    const numbers = gates.map((gate) => padTicketNumber(gate.number, total));
+    const plural = numbers.length > 1;
+    const ticketWord = plural ? "Tickets" : "Ticket";
+    const be = plural ? "are" : "is";
+    const gateWord = plural ? "gates" : "a gate";
+    const get = plural ? "get" : "gets";
+    const possessive = plural ? "their" : "its";
+    const number = plural ? "numbers" : "number";
+    lines.push(
+      "",
+      `${ticketWord} ${joinList(numbers)} ${be} ${gateWord} and ${get} no build record: \`set-build-record\` refuses ${possessive} ${number}.`,
+    );
+  }
+  return lines.join("\n");
 }
 
 function uncoveredStoriesSection(stories: readonly UserStory[]): string {
