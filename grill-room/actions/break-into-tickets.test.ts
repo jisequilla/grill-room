@@ -1853,4 +1853,43 @@ describe("the consistency check after a breakdown", () => {
     });
     expect((await listConsistencyFindings.run({ sessionId })).current).toBe(true);
   });
+
+  describe("stamps the attempt whatever the check's outcome", () => {
+    async function specStamps(sessionId: string) {
+      const [spec] = await getDb()
+        .select()
+        .from(schema.specs)
+        .where(eq(schema.specs.sessionId, sessionId))
+        .limit(1);
+      return spec!;
+    }
+
+    it.each<[string, () => ScriptedTurn[], boolean]>([
+      ["the check passes", () => [twoGoodTickets, { kind: "check-consistency", result: { findings: [aFinding] } }], true],
+      ["the check is rate limited", () => [twoGoodTickets, rateLimitedTurn("check-consistency")], false],
+      ["the check is skipped above 40 tickets", () => [flat(MAX_HANDOFF_SCOUT_TICKETS + 1)], false],
+    ])("when %s", async (_, turns, checked) => {
+      const sessionId = await aConfirmedSessionWithSpec();
+      scriptInterviewer(turns());
+
+      await breakIntoTickets.run({ sessionId });
+
+      const spec = await specStamps(sessionId);
+      expect(spec.ticketsGeneratedAt).not.toBeNull();
+      expect(spec.consistencyAttemptedFor).toBe(spec.ticketsGeneratedAt);
+      expect(spec.consistencyCheckedFor).toBe(checked ? spec.ticketsGeneratedAt : null);
+    });
+
+    it("writes nothing for a breakdown that exhausts its retries", async () => {
+      const sessionId = await aConfirmedSessionWithSpec();
+      const bad = ticketsTurn([{ number: 1, slug: "one", blockedBy: [1] }]);
+      scriptInterviewer([bad, bad, bad]);
+
+      await expect(breakIntoTickets.run({ sessionId })).rejects.toThrow();
+
+      const spec = await specStamps(sessionId);
+      expect(spec.consistencyAttemptedFor).toBeNull();
+      expect(spec.ticketsGeneratedAt).toBeNull();
+    });
+  });
 });

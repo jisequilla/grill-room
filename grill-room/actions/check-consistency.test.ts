@@ -25,6 +25,7 @@ import {
 import { MAX_TURN_RETRIES } from "../server/turn.js";
 import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
+import askConsistencyFindings from "./ask-consistency-findings.js";
 import breakIntoTickets from "./break-into-tickets.js";
 import checkConsistency from "./check-consistency.js";
 import createSession from "./create-session.js";
@@ -350,7 +351,14 @@ describe("check-consistency", () => {
 
       const second = await findLatestTurn({ sessionId, turnKind: "check-consistency" });
       expect(second!.id).not.toBe(first!.id);
-      expect(list).toEqual({ findings: [], checked: true, current: true, turnId: second!.id });
+      expect(list).toEqual({
+        findings: [],
+        checked: true,
+        current: true,
+        askable: true,
+        note: null,
+        turnId: second!.id,
+      });
       const spec = await specRow(sessionId);
       expect(spec.consistencyCheckedFor).toBe(spec.ticketsGeneratedAt);
       expect(spec.consistencyTurnId).toBe(second!.id);
@@ -450,6 +458,37 @@ describe("check-consistency", () => {
       expect(list.findings.map((finding) => finding.question)).toEqual([SEVEN[3]!.question]);
     });
 
+    it("stores a finding matching an asked card open", async () => {
+      const sessionId = await aSessionWithTickets({ check: checkTurn(SEVEN) });
+      const { findings } = await listConsistencyFindings.run({ sessionId });
+      await askConsistencyFindings.run({ findingIds: [findings[1]!.id] });
+      await dismissConsistencyFinding.run({ findingId: findings[4]!.id });
+      // Asking sent the session back to the interview: confirm it again,
+      // synthesize, and break into tickets, whose check reports the same seven.
+      await confirm(sessionId);
+      scriptInterviewer([
+        { kind: "synthesize-spec", result: { markdown: consistencySpecMarkdown() } },
+        { kind: "break-into-tickets", result: { tickets: consistencyTickets() } },
+        checkTurn(SEVEN),
+      ]);
+      await synthesizeSpec.run({ sessionId });
+      await breakIntoTickets.run({ sessionId });
+
+      const list = await listConsistencyFindings.run({ sessionId });
+
+      expect(list.findings.map((finding) => finding.status)).toEqual([
+        "open",
+        "open",
+        "open",
+        "open",
+        "dismissed",
+        "open",
+        "open",
+      ]);
+      expect(list.findings[1]!.decision).toBeNull();
+      expect(list.current).toBe(true);
+    });
+
     it("stores a finding matching an open card open, as a fresh card", async () => {
       const sessionId = await aSessionWithTickets();
       scriptInterviewer([checkTurn(SEVEN)]);
@@ -531,6 +570,8 @@ describe("check-consistency", () => {
         findings: [],
         checked: false,
         current: false,
+        askable: false,
+        note: null,
         turnId: null,
       });
 
@@ -731,6 +772,19 @@ describe("check-consistency", () => {
       await expect(
         dismissConsistencyFinding.run({ findingId: findings[0]!.id }),
       ).rejects.toMatchObject({ errorCode: "not-open", statusCode: 409 });
+    });
+
+    it("refuses an asked card", async () => {
+      const sessionId = await aSessionWithTickets({ check: checkTurn(SEVEN) });
+      const { findings } = await listConsistencyFindings.run({ sessionId });
+      await askConsistencyFindings.run({ findingIds: [findings[1]!.id] });
+      const before = await listConsistencyFindings.run({ sessionId });
+
+      const refusal = dismissConsistencyFinding.run({ findingId: findings[1]!.id });
+
+      await expect(refusal).rejects.toMatchObject({ errorCode: "not-open", statusCode: 409 });
+      await expect(refusal).rejects.toThrow("Finding 2 is already asked.");
+      expect(await listConsistencyFindings.run({ sessionId })).toEqual(before);
     });
   });
 

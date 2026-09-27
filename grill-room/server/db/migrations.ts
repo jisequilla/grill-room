@@ -590,4 +590,13 @@ ALTER TABLE gr_specs ADD COLUMN IF NOT EXISTS consistency_turn_id TEXT REFERENCE
     name: "consistency-findings-session-index",
     sql: `CREATE INDEX IF NOT EXISTS gr_idx_consistency_findings_session ON gr_consistency_findings(session_id)`,
   },
+  {
+    version: 76,
+    name: "consistency-findings-decision-column",
+    sql: `ALTER TABLE gr_consistency_findings ADD COLUMN IF NOT EXISTS decision_id TEXT REFERENCES gr_decisions(id) ON DELETE SET NULL;
+ALTER TABLE gr_specs ADD COLUMN IF NOT EXISTS consistency_attempted_for TEXT;
+ALTER TABLE gr_specs ADD COLUMN IF NOT EXISTS consistency_spec_sha256 TEXT;
+UPDATE gr_specs SET consistency_attempted_for = consistency_checked_for WHERE consistency_attempted_for IS NULL;
+UPDATE gr_specs SET consistency_spec_sha256 = encode(sha256(convert_to(replace(markdown, E'\\r\\n', E'\\n'), 'UTF8')), 'hex') WHERE consistency_checked_for IS NOT NULL AND consistency_spec_sha256 IS NULL`,
+  },
 ];

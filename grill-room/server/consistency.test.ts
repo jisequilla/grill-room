@@ -1,13 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  cardsAskable,
+  cardsCurrent,
   consistencyReasons,
+  decisionBody,
   keepValidFindings,
   normaliseQuote,
   specSections,
   type ConsistencyFacts,
 } from "./consistency.js";
-import { consistencySpecMarkdown, consistencyTickets } from "./interviewer/fake.js";
+import { hashExportContent } from "./export.js";
+import {
+  consistencyFindingsResult,
+  consistencySpecMarkdown,
+  consistencyTickets,
+} from "./interviewer/fake.js";
 import {
   checkConsistencyResultSchema,
   type ConsistencyFinding,
@@ -498,5 +506,84 @@ describe("keepValidFindings", () => {
 
   it("drops nothing when every finding is valid", () => {
     expect(keepValidFindings({ findings: [aFinding()] }, [[]]).dropped).toBeNull();
+  });
+});
+
+describe("decisionBody", () => {
+  const LEAD =
+    "The consistency check found that the spec and tickets leave this open, so a builder would otherwise decide it alone.";
+  const cards = consistencyFindingsResult().findings;
+
+  it.each<[string, number, string]>([
+    [
+      "a spec threshold from a decision",
+      1,
+      `${LEAD}\n\nKind: unquantified-threshold\nSpec, section "Implementation Decisions": "must outlast the benchmark horizon"\nCame from decision: storage`,
+    ],
+    [
+      "a ticket threshold",
+      2,
+      `${LEAD}\n\nKind: unquantified-threshold\nTicket 2: "capped at N x cadence"`,
+    ],
+    [
+      "a contradiction, spec then ticket",
+      4,
+      `${LEAD}\n\nKind: spec-ticket-contradiction\nSpec, section "Implementation Decisions": "Retention is a placeholder for a later ticket."\nTicket 1: "Fill in Retention"`,
+    ],
+    [
+      "a quote with backticks",
+      3,
+      `${LEAD}\n\nKind: one-case-rule\nSpec, section "Implementation Decisions": "A run whose run_id starts with \`wf_\` gets a root span."`,
+    ],
+  ])("card %s (%i)", (_, number, body) => {
+    expect(decisionBody(cards[number - 1]!)).toBe(body);
+  });
+});
+
+describe("cardsAskable and cardsCurrent", () => {
+  const markdown = consistencySpecMarkdown();
+  const hash = hashExportContent(markdown);
+  const EARLIER = "2026-09-27T09:00:00.000Z";
+  const BREAKDOWN = "2026-09-27T10:00:00.000Z";
+  const LATER = "2026-09-27T11:00:00.000Z";
+  const spec: {
+    consistencyCheckedFor: string | null;
+    consistencySpecSha256: string | null;
+    ticketsGeneratedAt: string | null;
+    markdown: string;
+    current: boolean;
+    updatedAt: string;
+  } = {
+    consistencyCheckedFor: BREAKDOWN,
+    consistencySpecSha256: hash,
+    ticketsGeneratedAt: BREAKDOWN,
+    markdown,
+    current: true,
+    updatedAt: EARLIER,
+  };
+
+  it.each<[string, Partial<typeof spec>, boolean, boolean]>([
+    ["never checked", { consistencyCheckedFor: null, consistencySpecSha256: null }, false, false],
+    ["current: this breakdown's check, this markdown", {}, true, true],
+    ["this breakdown's check failed or was skipped", { consistencyCheckedFor: null }, false, false],
+    ["the last accepted check judged an earlier breakdown", { consistencyCheckedFor: EARLIER }, false, false],
+    [
+      "a decision reopened or a card asked: the spec is not current and updated_at moved",
+      { current: false, updatedAt: LATER },
+      true,
+      false,
+    ],
+    [
+      "re-synthesized with different markdown",
+      { markdown: `${markdown}\nOne more line.\n`, updatedAt: LATER },
+      false,
+      false,
+    ],
+    ["re-synthesized byte-identical", { updatedAt: LATER }, true, false],
+    ["a CRLF copy of the judged markdown", { markdown: markdown.replace(/\n/g, "\r\n") }, true, true],
+  ])("%s", (_, change, askable, current) => {
+    const row = { ...spec, ...change };
+    expect(cardsAskable(row)).toBe(askable);
+    expect(cardsCurrent(row)).toBe(current);
   });
 });

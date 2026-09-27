@@ -14,17 +14,31 @@ import {
   renderHandoffMarkdown,
 } from "../server/handoff.js";
 import {
+  consistencyFindingsResult,
+  consistencySpecMarkdown,
+  consistencyTickets,
+} from "../server/interviewer/fake.js";
+import {
+  type ConsistencyFinding,
+  rateLimitedTurn,
   resetInterviewer,
   scriptInterviewer,
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
+import { aHandoffScoutResult } from "../server/interviewer/test-fixtures.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
+import askConsistencyFindings from "./ask-consistency-findings.js";
 import breakIntoTickets from "./break-into-tickets.js";
+import checkConsistency from "./check-consistency.js";
 import createSession from "./create-session.js";
+import dismissConsistencyFinding from "./dismiss-consistency-finding.js";
 import exportSession from "./export-session.js";
 import generateHandoff from "./generate-handoff.js";
 import getHandoff from "./get-handoff.js";
+import getSession from "./get-session.js";
+import groundBriefs from "./ground-briefs.js";
+import listConsistencyFindings from "./list-consistency-findings.js";
 import listTickets from "./list-tickets.js";
 import previewExport from "./preview-export.js";
 import registerProject from "./register-project.js";
@@ -1019,5 +1033,291 @@ describe("handoff export", () => {
     expect(result.removed).toContain(droppedBrief);
     await expect(fs.access(droppedBrief)).rejects.toThrow();
     await fs.access(path.join(bundleDir, "briefs", "02-store-on-disk.md"));
+  });
+});
+
+const SEVEN = consistencyFindingsResult().findings;
+
+function checkTurn(findings: ConsistencyFinding[]): ScriptedTurn {
+  return { kind: "check-consistency", result: { findings } };
+}
+
+/**
+ * A confirmed session in a fresh project, with a settled `storage` decision,
+ * the `consistency-findings` scenario's spec and tickets, and `check` after
+ * the breakdown (the scenario's seven findings by default).
+ */
+async function aCheckedSession(
+  options: {
+    check?: ScriptedTurn | null;
+    markdown?: string;
+    tickets?: ScriptedTurn;
+    files?: Record<string, string>;
+  } = {},
+) {
+  const root = repos.create({ files: options.files });
+  const project = await registerProject.run({
+    root,
+    verifyCommand: "pnpm test",
+    workingExportFolder: ".scratch",
+    visibility: "tracked",
+  });
+  const session = await createSession.run({
+    title: "Run store",
+    idea: "A run store that keeps benchmark data for the monitor.",
+    projectId: project.id,
+  });
+  const now = new Date().toISOString();
+  await getDb().insert(schema.decisions).values({
+    id: `d-storage-${session.id}`,
+    sessionId: session.id,
+    key: "storage",
+    questionTitle: "Where does the data live?",
+    questionBody: "",
+    offeredChoicesJson: "[]",
+    dependsOnJson: "[]",
+    introducedBy: "interviewer",
+    answerKind: "accepted-recommendation",
+    currentAnswer: "On disk",
+    settledAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await confirmSession(session.id);
+  const check = options.check === undefined ? checkTurn(SEVEN) : options.check;
+  scriptInterviewer([
+    { kind: "synthesize-spec", result: { markdown: options.markdown ?? consistencySpecMarkdown() } },
+    options.tickets ?? { kind: "break-into-tickets", result: { tickets: consistencyTickets() } },
+    ...(check ? [check] : []),
+  ]);
+  await synthesizeSpec.run({ sessionId: session.id });
+  await breakIntoTickets.run({ sessionId: session.id });
+  return { root, project, session };
+}
+
+async function confirmSession(sessionId: string): Promise<void> {
+  await getDb()
+    .update(schema.sessions)
+    .set({ state: "confirmed" })
+    .where(eq(schema.sessions.id, sessionId));
+}
+
+async function cardIdOf(sessionId: string, number: number): Promise<string> {
+  const { findings } = await listConsistencyFindings.run({ sessionId });
+  return findings.find((card) => card.number === number)!.id;
+}
+
+async function loadedSource(sessionId: string) {
+  const loaded = await loadHandoffSource(sessionId);
+  if (!("source" in loaded)) throw new Error("expected a source");
+  return loaded.source;
+}
+
+const NOT_JUDGED_LINE =
+  "The consistency check has not judged these tickets: it failed, it was skipped because the breakdown has more tickets than one check covers, or it ran on an earlier spec or breakdown.";
+
+describe("reopen cards in the handoff", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  it.each<[string, () => Promise<string>, number[], boolean]>([
+    [
+      "never checked: a spec row with both stamps null",
+      async () => {
+        const { session } = await aCheckedSession();
+        await getDb()
+          .update(schema.specs)
+          .set({ consistencyAttemptedFor: null, consistencyCheckedFor: null, consistencySpecSha256: null })
+          .where(eq(schema.specs.sessionId, session.id));
+        return session.id;
+      },
+      [],
+      false,
+    ],
+    [
+      "current with open cards",
+      async () => (await aCheckedSession()).session.id,
+      [1, 2, 3, 4, 5, 6, 7],
+      false,
+    ],
+    [
+      "current with no cards",
+      async () => (await aCheckedSession({ check: checkTurn([]) })).session.id,
+      [],
+      false,
+    ],
+    [
+      "the check failed: rate limited",
+      async () =>
+        (await aCheckedSession({ check: rateLimitedTurn("check-consistency") })).session.id,
+      [],
+      true,
+    ],
+    [
+      "the check was skipped: 41 tickets",
+      async () =>
+        (
+          await aCheckedSession({
+            markdown: SPEC_MARKDOWN,
+            tickets: ticketsTurn(
+              Array.from({ length: 41 }, (_, index) => ({ number: index + 1, slug: `ticket-${index + 1}` })),
+            ),
+            check: null,
+          })
+        ).session.id,
+      [],
+      true,
+    ],
+    [
+      "outdated: the spec synthesized again after an accepted check",
+      async () => {
+        const { session } = await aCheckedSession();
+        scriptInterviewer([
+          { kind: "synthesize-spec", result: { markdown: `${consistencySpecMarkdown()}\nOne more line.\n` } },
+        ]);
+        await synthesizeSpec.run({ sessionId: session.id });
+        return session.id;
+      },
+      [],
+      true,
+    ],
+    [
+      "a breakdown from before the attempt stamp, checked on demand, then a card asked",
+      async () => {
+        const { session } = await aCheckedSession();
+        // What v76's backfill leaves for a breakdown whose check never succeeded.
+        await getDb()
+          .update(schema.specs)
+          .set({ consistencyAttemptedFor: null, consistencyCheckedFor: null, consistencySpecSha256: null })
+          .where(eq(schema.specs.sessionId, session.id));
+        scriptInterviewer([checkTurn(SEVEN)]);
+        await checkConsistency.run({ sessionId: session.id });
+        expect((await loadedSource(session.id)).openCards).toHaveLength(7);
+        await askConsistencyFindings.run({ findingIds: [await cardIdOf(session.id, 2)] });
+        return session.id;
+      },
+      [],
+      true,
+    ],
+    [
+      "outdated: a card asked",
+      async () => {
+        const { session } = await aCheckedSession();
+        await askConsistencyFindings.run({ findingIds: [await cardIdOf(session.id, 2)] });
+        return session.id;
+      },
+      [],
+      true,
+    ],
+  ])("reads the consistency state from the stamps: %s", async (_, setup, numbers, notCurrent) => {
+    const sessionId = await setup();
+
+    const source = await loadedSource(sessionId);
+
+    expect((source.openCards ?? []).map((card) => card.number)).toEqual(numbers);
+    expect(source.consistencyNotCurrent).toBe(notCurrent);
+  });
+
+  it("renders the not-judged paragraph once a card is asked, for a breakdown from before the attempt stamp checked on demand", async () => {
+    const { session } = await aCheckedSession();
+    await getDb()
+      .update(schema.specs)
+      .set({ consistencyAttemptedFor: null, consistencyCheckedFor: null, consistencySpecSha256: null })
+      .where(eq(schema.specs.sessionId, session.id));
+    scriptInterviewer([checkTurn(SEVEN)]);
+    await checkConsistency.run({ sessionId: session.id });
+    await askConsistencyFindings.run({ findingIds: [await cardIdOf(session.id, 2)] });
+
+    const generated = await generateHandoff.run({ sessionId: session.id });
+
+    expect(generated.markdown).toContain(NOT_JUDGED_LINE);
+  });
+
+  it("lists only open current cards", async () => {
+    const { session } = await aCheckedSession();
+    await dismissConsistencyFinding.run({ findingId: await cardIdOf(session.id, 7) });
+
+    const withDismissed = await loadedSource(session.id);
+    expect(withDismissed.openCards).toEqual(
+      SEVEN.slice(0, 6).map((finding, index) => ({
+        number: index + 1,
+        kind: finding.kind,
+        at: finding.at,
+        against: finding.against,
+        question: finding.question,
+      })),
+    );
+
+    // Made not current by a re-synthesis: no card at all, the open ones included.
+    scriptInterviewer([
+      { kind: "synthesize-spec", result: { markdown: `${consistencySpecMarkdown()}\nOne more line.\n` } },
+    ]);
+    await synthesizeSpec.run({ sessionId: session.id });
+    expect((await loadedSource(session.id)).openCards).toEqual([]);
+
+    // An asked card is left out: asking makes the rest not current too.
+    const other = await aCheckedSession();
+    await askConsistencyFindings.run({ findingIds: [await cardIdOf(other.session.id, 2)] });
+    expect((await loadedSource(other.session.id)).openCards).toEqual([]);
+  });
+
+  it("dismissing a card makes the handoff stale, and keeps an edited brief as outdated", async () => {
+    const { session } = await aCheckedSession();
+    const generated = await generateHandoff.run({ sessionId: session.id });
+    expect(generated.markdown).toContain("## Questions the spec and tickets leave open");
+    expect(generated.briefs.find((brief) => brief.ticketNumber === 2)!.markdown).toContain(
+      '- What is N, the number of cadences polling is capped at? ("capped at N x cadence")',
+    );
+    await editBrief(session.id, 2, MY_BRIEF_2);
+    expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(false);
+
+    await dismissConsistencyFinding.run({ findingId: await cardIdOf(session.id, 2) });
+
+    expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(true);
+    expect(await previewExport.run({ sessionId: session.id })).toMatchObject({
+      exportBlocked: true,
+      exportBlockedReason: "handoff-stale",
+    });
+
+    const regenerated = await generateHandoff.run({ sessionId: session.id });
+    expect(regenerated).toMatchObject({ stale: false, editedBriefs: [2], outdatedBriefs: [2] });
+    const row = await storedHandoff(session.id);
+    expect(row.briefs.find((brief) => brief.ticketNumber === 2)!.markdown).toBe(MY_BRIEF_2);
+    expect(row.markdown).not.toContain("What is N, the number of cadences");
+    // An unedited brief of a quoted ticket regenerates with what is still open.
+    expect(row.briefs.find((brief) => brief.ticketNumber === 3)!.markdown).toContain(
+      "## Open questions on this ticket",
+    );
+  });
+
+  it("the not-judged paragraph survives a turn that clears the session's error", async () => {
+    const { session } = await aCheckedSession({
+      markdown: SPEC_MARKDOWN,
+      tickets: ticketsTurn([
+        { number: 1, slug: "ticket-1" },
+        { number: 2, slug: "ticket-2", blockedBy: [1] },
+      ]),
+      check: rateLimitedTurn("check-consistency"),
+      files: {
+        "src/ingest/metrics.ts": Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n") + "\n",
+        "src/ingest/queue.ts": Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n") + "\n",
+        "docs/adr/0003-queue.md": Array.from({ length: 9 }, (_, i) => `line ${i + 1}`).join("\n") + "\n",
+      },
+    });
+    expect(await getSession.run({ id: session.id })).toMatchObject({ turnErrorCode: "rate-limited" });
+    const generated = await generateHandoff.run({ sessionId: session.id });
+    expect(generated.markdown).toContain(NOT_JUDGED_LINE);
+
+    scriptInterviewer([{ kind: "handoff-scout", result: aHandoffScoutResult() }]);
+    await groundBriefs.run({ sessionId: session.id });
+
+    expect(await getSession.run({ id: session.id })).toMatchObject({
+      turnStatus: "idle",
+      turnErrorCode: null,
+    });
+    const { handoff } = await getHandoff.run({ sessionId: session.id });
+    expect(handoff?.stale).toBe(false);
+    expect(handoff!.markdown).toContain(NOT_JUDGED_LINE);
+    expect((await loadedSource(session.id)).consistencyNotCurrent).toBe(true);
   });
 });

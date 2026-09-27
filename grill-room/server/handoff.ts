@@ -45,12 +45,13 @@ import type {
   TicketKind,
 } from "../shared/session-constants.js";
 import { DEFAULT_MAX_TICKETS_IN_FLIGHT } from "../shared/session-constants.js";
+import { cardsCurrent } from "./consistency.js";
 import { getDb, schema } from "./db/index.js";
 import { hashExportContent, openingSections, padTicketNumber, sanitizeTicketSlug } from "./export.js";
 // Type-only: erased at compile time, so this never becomes a runtime import.
 // `server/brief-grounding.ts` already imports this module at runtime, and a
 // runtime import back into it would be a cycle.
-import type { HandoffScoutResult } from "./interviewer/index.js";
+import type { ConsistencyPlace, HandoffScoutResult } from "./interviewer/index.js";
 import { getProject } from "./projects.js";
 import {
   computeWaves,
@@ -128,6 +129,30 @@ export interface HandoffSource {
    * only with values it already hashes.
    */
   uncoveredStories?: readonly UserStory[] | null;
+  /**
+   * The session's open reopen cards, in number order, while the consistency
+   * check that stored them is current (`cardsCurrent`); empty or absent
+   * otherwise. HANDOFF.md lists them, and each brief the ones quoting its
+   * ticket. They enter the fingerprint only when non-empty.
+   */
+  openCards?: readonly HandoffCard[];
+  /**
+   * True when a consistency check was attempted for this session but does not
+   * judge its current tickets: it failed, was skipped above the ticket cap, or
+   * its cards are from an earlier spec or breakdown. Read from the spec's
+   * stored stamps only, never the session's error fields. Absent or false
+   * hashes as before.
+   */
+  consistencyNotCurrent?: boolean;
+}
+
+/** An open reopen card, as the handoff renders it. */
+export interface HandoffCard {
+  number: number;
+  kind: string;
+  at: ConsistencyPlace;
+  against: ConsistencyPlace | null;
+  question: string;
 }
 
 export interface HandoffBrief {
@@ -288,6 +313,20 @@ export function handoffFingerprint(source: HandoffSource): string {
         : { maxTicketsInFlight: source.project.maxTicketsInFlight }),
       trackerCommandsJson: source.project.trackerCommandsJson,
     },
+    // Each only when not the default, as above: a session with no open
+    // current card and no not-current check hashes exactly as before.
+    ...(source.openCards && source.openCards.length > 0
+      ? {
+          openCards: source.openCards.map((card) => ({
+            number: card.number,
+            kind: card.kind,
+            at: card.at,
+            against: card.against,
+            question: card.question,
+          })),
+        }
+      : {}),
+    ...(source.consistencyNotCurrent === true ? { consistencyNotCurrent: true } : {}),
   };
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
@@ -874,6 +913,67 @@ function uncoveredStoriesSection(stories: readonly UserStory[]): string {
   ].join("\n");
 }
 
+/** A card's place in HANDOFF.md: the spec section, or the ticket padded as its issue file is. */
+function handoffCardPlace(place: ConsistencyPlace, totalTickets: number): string {
+  return place.artefact === "spec"
+    ? `spec, ${place.section}: "${place.quote}"`
+    : `ticket ${padTicketNumber(place.ticket!, totalTickets)}: "${place.quote}"`;
+}
+
+/** A card's places, a contradiction's spec side first. */
+function handoffCardPlaces(card: HandoffCard): ConsistencyPlace[] {
+  if (card.against === null) return [card.at];
+  return card.at.artefact === "ticket" && card.against.artefact === "spec"
+    ? [card.against, card.at]
+    : [card.at, card.against];
+}
+
+const OPEN_QUESTIONS_HEADING = "## Questions the spec and tickets leave open";
+
+/** The open-questions section, or the not-judged paragraph in its place; null when neither applies. */
+function openQuestionsSection(source: HandoffSource): string | null {
+  if (source.consistencyNotCurrent === true) {
+    return [
+      OPEN_QUESTIONS_HEADING,
+      "",
+      'The consistency check has not judged these tickets: it failed, it was skipped because the breakdown has more tickets than one check covers, or it ran on an earlier spec or breakdown. So nothing here lists what the spec and tickets leave a builder to decide. Before delegating a ticket, read it for a limit with no value, a rule stated for one case only, an "X or Y" left open, a value called defined with no default, or a target named only by its role, and get the owner\'s answer to each.',
+    ].join("\n");
+  }
+  const cards = source.openCards ?? [];
+  if (cards.length === 0) return null;
+  const total = source.tickets.length;
+  return [
+    OPEN_QUESTIONS_HEADING,
+    "",
+    "The consistency check found these statements, which leave a builder to decide something the owner never decided. Before delegating a ticket a question quotes, get the owner's answer and put it in the delegation prompt; the question is also in that ticket's brief. Answer the rest before calling the feature done.",
+    "",
+    ...cards.map(
+      (card) =>
+        `- ${card.question} (${handoffCardPlaces(card)
+          .map((place) => handoffCardPlace(place, total))
+          .join("; ")})`,
+    ),
+  ].join("\n");
+}
+
+/** The open cards quoting this ticket, each with this ticket's side; null when none does. */
+function briefOpenQuestionsSection(source: HandoffSource, ticket: HandoffTicket): string | null {
+  const quoting = (source.openCards ?? []).flatMap((card) => {
+    const side = [card.at, card.against].find(
+      (place) => place !== null && place.artefact === "ticket" && place.ticket === ticket.number,
+    );
+    return side ? [`- ${card.question} ("${side.quote}")`] : [];
+  });
+  if (quoting.length === 0) return null;
+  return [
+    "## Open questions on this ticket",
+    "",
+    "The consistency check found that this ticket leaves these questions to the owner. Do not choose an answer yourself: if your prompt does not give you the owner's answer to one, stop and report the question instead of building around it.",
+    "",
+    ...quoting,
+  ].join("\n");
+}
+
 export function renderHandoffMarkdown(
   source: HandoffSource,
   groundingCurrent = false,
@@ -912,6 +1012,7 @@ export function renderHandoffMarkdown(
     ...(source.uncoveredStories && source.uncoveredStories.length > 0
       ? [uncoveredStoriesSection(source.uncoveredStories)]
       : []),
+    ...[openQuestionsSection(source)].filter((section): section is string => section !== null),
     lifecycleSection(source, groundingCurrent),
   ];
   if (source.project.adversarialReview) sections.push(reviewingSection(source));
@@ -1261,6 +1362,7 @@ export function renderBrief(
       "",
       ticket.body,
     ].join("\n"),
+    briefOpenQuestionsSection(source, ticket),
     fileBoundariesSection(source, ticket, grounding),
     codebaseFactsSection(ticket, grounding),
     buildsOnSection(source, ticket, grounding),
@@ -1396,6 +1498,29 @@ export async function loadHandoffSource(
           stories,
         );
 
+  // From the stored stamps alone, never the session's error fields: every
+  // turn clears those, grounding's own included, and the handoff would go
+  // stale for nothing.
+  const current = cardsCurrent(spec);
+  const openCards: HandoffCard[] = current
+    ? (
+        await db
+          .select()
+          .from(schema.consistencyFindings)
+          .where(eq(schema.consistencyFindings.sessionId, sessionId))
+          .orderBy(schema.consistencyFindings.number)
+      )
+        .filter((row) => row.status === "open")
+        .map((row) => ({
+          number: row.number,
+          kind: row.kind,
+          at: JSON.parse(row.atJson) as ConsistencyPlace,
+          against: row.againstJson ? (JSON.parse(row.againstJson) as ConsistencyPlace) : null,
+          question: row.question,
+        }))
+    : [];
+  const consistencyNotCurrent = spec.consistencyAttemptedFor != null && !current;
+
   return {
     source: {
       session: { id: session.id, title: session.title, idea: session.idea },
@@ -1428,6 +1553,8 @@ export async function loadHandoffSource(
         maxTicketsInFlight: project.maxTicketsInFlight,
       },
       uncoveredStories: uncovered,
+      openCards,
+      consistencyNotCurrent,
     },
   };
 }

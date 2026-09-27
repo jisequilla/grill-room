@@ -6,6 +6,7 @@ import { useIsMutating, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router";
 
 import { BuildRecordsSection } from "@/components/output/build-records-section";
+import { ConsistencySection } from "@/components/output/consistency-section";
 import { ExportSection } from "@/components/output/export-section";
 import { GenerateAllAction } from "@/components/output/generate-all-action";
 import { GroundBriefsControl } from "@/components/output/ground-briefs-control";
@@ -151,6 +152,9 @@ export default function SessionOutputRoute() {
         activeTurn={activeTurn ?? null}
         onSettled={refresh}
       />
+
+      {/* Renders its own leading separator, and nothing at all without tickets. */}
+      <ConsistencySection sessionId={id} working={working} onSettled={refresh} />
 
       <Separator />
 
