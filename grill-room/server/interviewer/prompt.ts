@@ -487,6 +487,18 @@ function renderTask(
         "  regenerated interface gains;",
         "- a unit of code and its tests: the ticket that builds the code writes",
         "  its tests, rather than leaving them to a tests-only ticket.",
+        "",
+        "Some of what the tickets need is not code: an account with an outside",
+        "service, a signed agreement, terms reviewed by a lawyer, or a condition the",
+        "spec sets before later work may start, such as a first part being used",
+        "before a second part is built. Make each such prerequisite a gate: a ticket",
+        "with `kind` \"gate\", a one-line `waitsFor` naming exactly what it waits for,",
+        "and a body saying who provides it and how to tell it is in place. A gate has",
+        "no builder and changes no files. List it in the `blockedBy` of every ticket",
+        "that cannot start or go live without it; a gate that waits for built work",
+        "lists those tickets in its own `blockedBy`. Every other ticket has `kind`",
+        "\"build\" and `waitsFor` null. Never make ordinary work a gate: anything an",
+        "agent can build, configure or test in the repository is a build ticket.",
         ...(request.greenfield && request.verifyCommand !== null
           ? ["", greenfieldTicketsSection(request.verifyCommand)]
           : []),
@@ -497,7 +509,7 @@ function renderTask(
 /**
  * The break-into-tickets rules for a repository with no commits: ticket 1
  * sets up the runner behind the verify command, and every other ticket waits
- * for it. `validateTicketSet` checks the same two rules. A command that
+ * for it; a gate need not. `validateTicketSet` checks the same rules. A command that
  * itself contains a backtick cannot be written as single-backtick inline
  * code, so for it the prompt asks for no inline form and the check skips the
  * body rule.
@@ -522,8 +534,8 @@ function greenfieldTicketsSection(verifyCommand: string): string {
     "Ticket 1 sets up the project and its test runner so that this command,",
     "run from the repository root, runs and passes.",
     ...namesIt,
-    "Every other ticket depends on ticket 1, directly or through another",
-    "ticket's `blockedBy`.",
+    "Ticket 1 is a build ticket. Every other build ticket depends on ticket 1,",
+    "directly or through another ticket's `blockedBy`; a gate need not.",
   ].join("\n");
 }
 

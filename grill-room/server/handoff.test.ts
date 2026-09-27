@@ -83,6 +83,38 @@ function aSource(overrides: Partial<HandoffSource["project"]> = {}): HandoffSour
   };
 }
 
+const PAYMENT_ACCOUNT = "A live account on the payment platform, with API keys issued.";
+
+/**
+ * Like {@link aSource}, with a gate: 01 and 03 are build tickets, 02 is a
+ * gate on a payment account, and 03 is blocked by 01 and the gate. The gate
+ * is blocked by `gateBlockedBy` (none by default).
+ */
+function aSourceWithGate(
+  overrides: Partial<HandoffSource["project"]> = {},
+  gateBlockedBy: number[] = [],
+): HandoffSource {
+  const base = aSource(overrides);
+  return {
+    ...base,
+    tickets: [
+      { id: "t1", number: 1, slug: "register-projects", title: "Register projects", body: "Build the registry.", blockedBy: [] },
+      {
+        id: "t2",
+        number: 2,
+        slug: "payment-account",
+        title: "Payment account is live",
+        body: "The owner opens the account; it is in place once API keys are issued.",
+        blockedBy: gateBlockedBy,
+        kind: "gate",
+        waitsFor: PAYMENT_ACCOUNT,
+      },
+      { id: "t3", number: 3, slug: "export-bundle", title: "Export the bundle", body: "Write the bundle.", blockedBy: [1, 2], kind: "build", waitsFor: null },
+    ],
+    waves: gateBlockedBy.length > 0 ? [[1], [2], [3]] : [[1, 2], [3]],
+  };
+}
+
 describe("HANDOFF.md", () => {
   it("renders the tracked variant", () => {
     const { markdown } = renderHandoff(aSource());
@@ -1400,6 +1432,251 @@ describe("the waves section at export", () => {
         renderHandoffMarkdown(source, false, { ...plain, waves: source.waves, implicitEdges: [] }),
       );
       expect(checkedWithoutGroundedWording).toContain(CHECKED_LINE);
+    });
+  });
+});
+
+describe("gates", () => {
+  const GATE_INTRO =
+    "A ticket marked (gate) is not code and has no brief: nothing is delegated for it. Ask the owner whether what it waits for is in place, and once it is, mark the gate met. A met gate counts as merged and verified for starting the next wave, and no ticket blocked by a gate starts before the gate is met.";
+  const CHECKED_LINE =
+    "Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most two at a time. Start a wave only once every ticket of the previous wave is merged and verified.";
+  const NOT_CHECKED_LINE =
+    "Tickets in one wave have no Blocked-by between them. Whether they change the same files was not checked, because the briefs are not grounded against the current code: run them one at a time, or ground the briefs first. Start a wave only once every ticket of the previous wave is merged and verified.";
+  const plain = { visibility: "tracked" as const, greenfield: false };
+
+  /** One top-level section, from its heading up to the next one. */
+  function section(markdown: string, heading: string): string {
+    const start = markdown.indexOf(heading);
+    expect(start).toBeGreaterThan(-1);
+    const end = markdown.indexOf("\n## ", start + 1);
+    return markdown.slice(start, end === -1 ? undefined : end).trimEnd();
+  }
+
+  /** The same source with every gate turned into a plain build ticket. */
+  function withoutGates(source: HandoffSource): HandoffSource {
+    return {
+      ...source,
+      tickets: source.tickets.map(({ kind: _kind, waitsFor: _waitsFor, ...ticket }) => ticket),
+    };
+  }
+
+  describe("the waves entry", () => {
+    it("renders a gate with its wait, its ticket file and a ready-for-human status, on a markdown tracker", () => {
+      const markdown = renderHandoffMarkdown(aSourceWithGate());
+
+      expect(markdown).toContain(
+        [
+          "- **02 Payment account is live** (gate)",
+          `  - Wait for: ${PAYMENT_ACCOUNT}`,
+          `  - Ticket: \`${BUNDLE_TOKEN}/issues/02-payment-account.md\``,
+          "  - Status: ready-for-human",
+          "",
+        ].join("\n"),
+      );
+    });
+
+    it("names a gate's own blockers after the word gate", () => {
+      const markdown = renderHandoffMarkdown(aSourceWithGate({}, [1]));
+
+      expect(markdown).toContain("- **02 Payment account is live** (gate; blocked by 01)\n");
+    });
+
+    it("leaves the Status line out on a beads tracker", () => {
+      const waves = section(renderHandoffMarkdown(aSourceWithGate({ trackerKind: "beads" })), "## Waves");
+
+      expect(waves).toContain(
+        [
+          "- **02 Payment account is live** (gate)",
+          `  - Wait for: ${PAYMENT_ACCOUNT}`,
+          `  - Ticket: \`${BUNDLE_TOKEN}/issues/02-payment-account.md\``,
+          "",
+        ].join("\n"),
+      );
+      expect(waves).not.toContain("Status:");
+    });
+
+    it("gives a gate no Brief line", () => {
+      const waves = section(renderHandoffMarkdown(aSourceWithGate()), "## Waves");
+
+      expect(waves).not.toContain("briefs/02-");
+      expect(waves).toContain(`  - Brief: [\`${BUNDLE_TOKEN}/briefs/01-register-projects.md\`]`);
+      expect(waves).toContain(`  - Brief: [\`${BUNDLE_TOKEN}/briefs/03-export-bundle.md\`]`);
+    });
+
+    it("lists a gate among a build ticket's blockers as it does any other", () => {
+      const markdown = renderHandoffMarkdown(aSourceWithGate());
+
+      expect(markdown).toContain("- **03 Export the bundle** (blocked by 01, 02)\n");
+    });
+  });
+
+  describe("the waves intro", () => {
+    it("follows the not-checked intro with the gate paragraph", () => {
+      const waves = section(renderHandoffMarkdown(aSourceWithGate()), "## Waves");
+
+      expect(waves.startsWith(`## Waves\n\n${NOT_CHECKED_LINE}\n\n${GATE_INTRO}\n\n### Wave 1`)).toBe(true);
+    });
+
+    it("follows the checked intro with the gate paragraph, before the implicit edges", () => {
+      const waves = section(
+        renderHandoffMarkdown(aSourceWithGate(), false, {
+          ...plain,
+          waves: [[1, 2], [3]],
+          implicitEdges: [{ ticket: 3, waitsFor: 1, sharedPaths: ["server/export.ts"] }],
+        }),
+        "## Waves",
+      );
+
+      expect(
+        waves.startsWith(
+          `## Waves\n\n${CHECKED_LINE}\n\n${GATE_INTRO}\n\n- Ticket 03 waits for ticket 01: both change \`server/export.ts\`.`,
+        ),
+      ).toBe(true);
+    });
+
+    it("has no gate paragraph without gates", () => {
+      expect(renderHandoffMarkdown(aSource())).not.toContain(GATE_INTRO);
+    });
+  });
+
+  describe("where things are", () => {
+    it.each([
+      ["ungrounded", false, "each ready to paste as a delegation prompt once its two slots are filled"],
+      ["grounded", true, "grounded and ready to paste as a delegation prompt"],
+    ])("says one brief per ticket except gates, %s", (_, groundingCurrent, rest) => {
+      expect(renderHandoffMarkdown(aSourceWithGate(), groundingCurrent)).toContain(
+        `- Briefs: \`${BUNDLE_TOKEN}/briefs/\`, one per ticket except gates, ${rest}`,
+      );
+      expect(renderHandoffMarkdown(aSource(), groundingCurrent)).toContain(
+        `- Briefs: \`${BUNDLE_TOKEN}/briefs/\`, one per ticket, ${rest}`,
+      );
+    });
+  });
+
+  describe("tracking", () => {
+    it("gives a gate a bead too, after the first paragraph", () => {
+      const tracking = section(renderHandoffMarkdown(aSourceWithGate({ trackerKind: "beads" })), "## Tracking with beads");
+
+      expect(tracking).toContain(
+        [
+          "never from memory.",
+          "",
+          "A gate gets a bead too. Close it once the owner confirms that what it waits for is in place, with a comment saying what was confirmed.",
+          "",
+          "- `bd ready`: find work that is ready",
+        ].join("\n"),
+      );
+    });
+
+    it("tells a markdown tracker how a gate's Status line is met", () => {
+      const tracking = section(renderHandoffMarkdown(aSourceWithGate()), "## Tracking in this file");
+
+      expect(tracking).toContain(
+        [
+          "once you have verified and merged it.",
+          "",
+          "A gate's `Status:` line reads `ready-for-human`; set it to `met` once the owner confirms that what it waits for is in place.",
+        ].join("\n"),
+      );
+    });
+
+    it.each(["beads", "markdown"] as const)("says nothing of gates on a %s tracker without them", (trackerKind) => {
+      const markdown = renderHandoffMarkdown(aSource({ trackerKind }));
+
+      expect(markdown).not.toContain("A gate gets a bead too.");
+      expect(markdown).not.toContain("A gate's `Status:` line");
+    });
+  });
+
+  describe("build records", () => {
+    it("has one command per build ticket only", () => {
+      const records = section(renderHandoffMarkdown(aSourceWithGate({ buildRecordLogging: true })), "## Build records");
+
+      expect(records).toContain("--ticketNumber 1 ");
+      expect(records).toContain("--ticketNumber 3 ");
+      expect(records).not.toContain("--ticketNumber 2 ");
+    });
+
+    it("is left out when every ticket is a gate", () => {
+      const source = aSourceWithGate({ buildRecordLogging: true });
+      const onlyGates: HandoffSource = {
+        ...source,
+        tickets: source.tickets.map((ticket) => ({ ...ticket, kind: "gate" as const, waitsFor: PAYMENT_ACCOUNT })),
+      };
+
+      expect(renderHandoffMarkdown(onlyGates)).not.toContain("## Build records");
+    });
+  });
+
+  describe("the verify command in a repository with no commits yet", () => {
+    it("says every other build ticket waits for ticket 01, and never names a gate as not reaching it", () => {
+      const verify = section(
+        renderHandoffMarkdown(aSourceWithGate(), false, { visibility: "tracked", greenfield: true }),
+        "## Verify command",
+      );
+
+      expect(verify.endsWith(
+        "This repository has no commits yet, so this command does not exist until ticket 01 sets it up. Ticket 01's acceptance includes it passing, and every other build ticket waits for ticket 01.",
+      )).toBe(true);
+    });
+  });
+
+  it.each(["## Delegation lifecycle", "## Reviewing a ticket", "## What to record per ticket"])(
+    "leaves %s unchanged",
+    (heading) => {
+      const source = aSourceWithGate({ buildRecordLogging: true });
+
+      expect(section(renderHandoffMarkdown(source), heading)).toBe(
+        section(renderHandoffMarkdown(withoutGates(source)), heading),
+      );
+    },
+  );
+
+  it("renders no brief for a gate", () => {
+    const { briefs } = renderHandoff(aSourceWithGate());
+
+    expect(briefs.map((brief) => [brief.ticketNumber, brief.relativePath])).toEqual([
+      [1, "briefs/01-register-projects.md"],
+      [3, "briefs/03-export-bundle.md"],
+    ]);
+  });
+
+  describe("the brief's Blocked by line", () => {
+    /** 01 and 02 build tickets, 03 and 04 gates, 05 the brief under test. */
+    function aSourceBlockedBy(blockedBy: number[]): HandoffSource {
+      const base = aSource();
+      const ticket = (number: number, kind: "build" | "gate", blockers: number[] = []) => ({
+        id: `t${number}`,
+        number,
+        slug: `ticket-${number}`,
+        title: `Ticket ${number}`,
+        body: `Do ticket ${number}.`,
+        blockedBy: blockers,
+        kind,
+        waitsFor: kind === "gate" ? PAYMENT_ACCOUNT : null,
+      });
+      return {
+        ...base,
+        tickets: [ticket(1, "build"), ticket(2, "build"), ticket(3, "gate"), ticket(4, "gate"), ticket(5, "build", blockedBy)],
+        waves: [[1, 2, 3, 4], [5]],
+      };
+    }
+
+    it.each<[string, number[], string]>([
+      ["none", [], "Blocked by: none"],
+      ["builds 01, 02", [2, 1], "Blocked by: 01, 02 (merged before this brief was delegated)"],
+      ["gate 03", [3], "Blocked by: gate 03 (met before this brief was delegated)"],
+      ["gates 03, 04", [4, 3], "Blocked by: gates 03, 04 (met before this brief was delegated)"],
+      [
+        "builds 01, 02 and gate 03",
+        [3, 2, 1],
+        "Blocked by: 01, 02 (merged before this brief was delegated); gate 03 (met before this brief was delegated)",
+      ],
+    ])("%s", (_, blockedBy, line) => {
+      const source = aSourceBlockedBy(blockedBy);
+
+      expect(renderBrief(source, source.tickets[4]!).split("\n")).toContain(line);
     });
   });
 });

@@ -6,7 +6,7 @@ import { getDb, schema } from "../server/db/index.js";
 
 export default defineAction({
   description:
-    "Summarize a session's build records across its tickets: first-attempt pass rate and escalations at a glance, broken down by model, plus every ticket of the session with its build record or null. One call feeds the whole build records UI table.",
+    "Summarize a session's build records across its tickets: first-attempt pass rate and escalations at a glance, broken down by model, plus every build ticket of the session with its build record or null. Gate tickets are left out: nothing is built for a gate. One call feeds the whole build records UI table.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
   }),
@@ -22,11 +22,14 @@ export default defineAction({
 
     if (!session) fail(`Session not found: ${sessionId}`, { statusCode: 404 });
 
-    const ticketRows = await db
-      .select()
-      .from(schema.tickets)
-      .where(eq(schema.tickets.sessionId, sessionId))
-      .orderBy(schema.tickets.number);
+    // A gate has no builder, so it has no build record to count.
+    const ticketRows = (
+      await db
+        .select()
+        .from(schema.tickets)
+        .where(eq(schema.tickets.sessionId, sessionId))
+        .orderBy(schema.tickets.number)
+    ).filter((ticket) => ticket.kind !== "gate");
 
     const ticketIds = ticketRows.map((ticket) => ticket.id);
     const buildRecordRows =

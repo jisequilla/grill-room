@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  breakIntoTicketsResultSchema,
   citation,
   handoffScoutContractSchema,
   handoffScoutResultSchema,
@@ -424,5 +425,48 @@ describe("the handoff scout schema", () => {
     };
 
     expect(scoutProjectResultSchema.safeParse(outside).success).toBe(false);
+  });
+});
+
+describe("break-into-tickets: kind and waitsFor default, and the CLI schema requires them", () => {
+  it("parses a ticket with neither field as a build that waits for nothing", () => {
+    const parsed = breakIntoTicketsResultSchema.parse({
+      tickets: [{ number: 1, slug: "a-ticket", title: "A ticket", body: "", blockedBy: [] }],
+    });
+
+    expect(parsed.tickets[0]).toMatchObject({ kind: "build", waitsFor: null });
+  });
+
+  it("parses a gate with what it waits for", () => {
+    const parsed = breakIntoTicketsResultSchema.parse({
+      tickets: [
+        {
+          number: 1,
+          slug: "payment-account",
+          title: "Payment account is live",
+          body: "",
+          blockedBy: [],
+          kind: "gate",
+          waitsFor: "A live account on the payment platform, with API keys issued.",
+        },
+      ],
+    });
+
+    expect(parsed.tickets[0]).toMatchObject({
+      kind: "gate",
+      waitsFor: "A live account on the payment platform, with API keys issued.",
+    });
+  });
+
+  it("lists both as required properties of a ticket in the schema the command line receives", () => {
+    const schema = jsonSchemaFor("break-into-tickets") as {
+      properties: {
+        tickets: { items: { required: string[]; properties: Record<string, unknown> } };
+      };
+    };
+    const ticket = schema.properties.tickets.items;
+
+    expect(ticket.required).toEqual(expect.arrayContaining(["kind", "waitsFor"]));
+    expect(ticket.properties.kind).toMatchObject({ enum: ["build", "gate"] });
   });
 });

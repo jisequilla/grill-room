@@ -545,4 +545,10 @@ ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS cli_api_duration_ms BIGINT
 ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS session_id TEXT;
 ALTER TABLE gr_turn_attempts ADD COLUMN IF NOT EXISTS tool_calls_json TEXT`,
   },
+  {
+    version: 70,
+    name: "tickets-kind-columns",
+    sql: `ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'build';
+ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS waits_for TEXT`,
+  },
 ];
