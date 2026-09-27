@@ -123,9 +123,19 @@ function PathList({
 export function ExportSection({
   sessionId,
   projectId,
+  onBundlePathChange,
 }: {
   sessionId: string;
   projectId: string | null;
+  /**
+   * Reports the bundle path (what `{{BUNDLE}}` becomes) of the preview
+   * currently shown on screen, or `null` whenever that preview is not
+   * current: the slug is blank, the project is null, the query is disabled
+   * or errored, or the query is showing placeholder data while the next
+   * preview loads. `preview.data?.bundlePath` alone would keep reporting the
+   * previous plan's path through that placeholder window.
+   */
+  onBundlePathChange?: (bundlePath: string | null) => void;
 }) {
   const t = useT();
   const queryClient = useQueryClient();
@@ -197,6 +207,23 @@ export function ExportSection({
       setRecheckingVisibility(false);
     }
   }
+
+  // Sits above the early return below so this hook always runs, whatever
+  // `projectId` is: an effect skipped on some renders and not others would
+  // change this component's hook order.
+  useEffect(() => {
+    if (!onBundlePathChange) return;
+    const current =
+      projectId !== null && !slugBlank && !preview.isError && !preview.isPlaceholderData;
+    onBundlePathChange(current ? (preview.data?.bundlePath ?? null) : null);
+  }, [
+    onBundlePathChange,
+    projectId,
+    slugBlank,
+    preview.isError,
+    preview.isPlaceholderData,
+    preview.data,
+  ]);
 
   if (projectId === null) {
     return (

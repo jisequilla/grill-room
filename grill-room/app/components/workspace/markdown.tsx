@@ -41,6 +41,25 @@ function Inline({ nodes }: { nodes: readonly InlineNode[] }) {
                 <Inline nodes={node.children} />
               </em>
             );
+          case "link":
+            if (/^https?:\/\//i.test(node.href)) {
+              return (
+                <a
+                  key={index}
+                  href={node.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-2"
+                >
+                  <Inline nodes={node.children} />
+                </a>
+              );
+            }
+            return (
+              <Fragment key={index}>
+                <Inline nodes={node.children} />
+              </Fragment>
+            );
         }
       })}
     </>

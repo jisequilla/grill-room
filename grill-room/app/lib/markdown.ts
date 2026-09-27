@@ -18,7 +18,8 @@ export type InlineNode =
   | { type: "text"; value: string }
   | { type: "code"; value: string }
   | { type: "strong"; children: InlineNode[] }
-  | { type: "emphasis"; children: InlineNode[] };
+  | { type: "emphasis"; children: InlineNode[] }
+  | { type: "link"; href: string; children: InlineNode[] };
 
 export interface ParagraphNode {
   type: "paragraph";
@@ -267,6 +268,30 @@ export function parseInline(text: string): InlineNode[] {
         nodes.push({ type: "code", value: text.slice(index + run, close).trim() });
         index = close + run;
         continue;
+      }
+    }
+
+    if (char === "[") {
+      const closeLabel = text.indexOf("]", index + 1);
+      const label = closeLabel !== -1 ? text.slice(index + 1, closeLabel) : "";
+      const validLabel = label.length > 0 && !label.includes("[") && !label.includes("]");
+
+      if (validLabel && text[closeLabel + 1] === "(") {
+        const destStart = closeLabel + 2;
+        const closeDest = text.indexOf(")", destStart);
+        const destination = closeDest !== -1 ? text.slice(destStart, closeDest) : "";
+        const validDestination = destination.length > 0 && !/\s/.test(destination);
+
+        if (validDestination) {
+          flush();
+          nodes.push({
+            type: "link",
+            href: destination,
+            children: parseInline(label),
+          });
+          index = closeDest + 1;
+          continue;
+        }
       }
     }
 
