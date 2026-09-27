@@ -1281,6 +1281,21 @@ describe("user stories", () => {
     expect(rejectionOf(interviewer.requests[1])).toBe(expected);
   });
 
+  it("stores a ticket's implements deduplicated and ascending", async () => {
+    const sessionId = await aConfirmedSessionWithSpec(aSpecWithStories(3));
+    const interviewer = scriptInterviewer([
+      ticketsTurn([
+        { number: 1, slug: "one", implements: [3, 1, 3] },
+        { number: 2, slug: "two", implements: [2] },
+      ]),
+    ]);
+
+    const { tickets } = await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(1);
+    expect(tickets.map((ticket) => ticket.implements)).toEqual([[1, 3], [2]]);
+  });
+
   it("puts the story reasons after the ticket set's own reasons", async () => {
     const sessionId = await aConfirmedSessionWithSpec(aSpecWithStories(62));
     const interviewer = scriptInterviewer([

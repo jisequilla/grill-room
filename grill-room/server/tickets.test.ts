@@ -4,6 +4,7 @@ import { collisionKey } from "./brief-grounding.js";
 import {
   computeWaves,
   numberRanges,
+  parseImplements,
   separateOverlaps,
   userStories,
   type ImplicitEdge,
@@ -255,6 +256,11 @@ describe("userStories", () => {
       [{ number: 1, text: "One." }],
     ],
     [
+      "stopping at the next level-1 heading",
+      "## User Stories\n\n1. One.\n\n# Appendix\n\n2. Two.",
+      [{ number: 1, text: "One." }],
+    ],
+    [
       "past a level-3 subheading",
       "## User Stories\n\n1. One.\n\n### Admin\n\n2. Two.",
       [
@@ -285,5 +291,18 @@ describe("numberRanges", () => {
     [[1, 3, 3, 9, 10, 11], "1, 3, 9-11"],
   ])("writes %j as %s", (numbers, expected) => {
     expect(numberRanges(numbers)).toBe(expected);
+  });
+});
+
+describe("parseImplements", () => {
+  it.each<[string, string | null, number[] | null]>([
+    ["a NULL column", null, null],
+    ["an empty array", "[]", []],
+    ["an array of story numbers", "[1,3]", [1, 3]],
+    ["an array holding non-positive, fractional and non-number entries", '[0,-2,1.5,"4",null,5]', [5]],
+    ["text that is not JSON", "not json", []],
+    ["JSON that is not an array", '{"implements":[1]}', []],
+  ])("reads %s", (_, json, expected) => {
+    expect(parseImplements(json)).toEqual(expected);
   });
 });

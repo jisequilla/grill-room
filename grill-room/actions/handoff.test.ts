@@ -253,6 +253,19 @@ describe("handoff generation", () => {
     expect(markdown).not.toContain("## Stories no ticket implements");
   });
 
+  it("renders no stories section when any one ticket was made before the check", async () => {
+    const session = await aSessionWithAnUncoveredStory();
+    const [first] = (await listTickets.run({ sessionId: session.id })).tickets;
+    await getDb()
+      .update(schema.tickets)
+      .set({ implementsJson: null })
+      .where(eq(schema.tickets.id, first!.id));
+
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+
+    expect(markdown).not.toContain("## Stories no ticket implements");
+  });
+
   it("renders no stories section for tickets made before the check", async () => {
     const session = await aSessionWithAnUncoveredStory();
     await getDb()
