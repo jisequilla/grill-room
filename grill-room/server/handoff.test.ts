@@ -1096,6 +1096,38 @@ describe("export-time facts", () => {
       expect(markdown).toContain(IGNORED_NOTE);
       expect(markdown).not.toContain("which git tracks");
     });
+
+    it.each([false, true])(
+      "tracked, unchecked (greenfield %s): follows the flag, and says so",
+      (greenfield) => {
+        const markdown = renderHandoffMarkdown(aSource(), false, {
+          visibility: "tracked",
+          greenfield,
+          visibilityUnchecked: true,
+        });
+        expect(markdown).toContain(
+          `Paths below are relative to the repository root (\`${ROOT}\`). The bundle lives in \`.scratch\`; git could not say at export whether it ignores that folder, so these paths follow the project's visibility flag, \`tracked\`.`,
+        );
+        expect(markdown).not.toContain("which git tracks");
+        expect(markdown).not.toContain("which git ignores");
+      },
+    );
+
+    it.each([false, true])(
+      "ignored, unchecked (greenfield %s): follows the flag, and says so",
+      (greenfield) => {
+        const markdown = renderHandoffMarkdown(aSource(), false, {
+          visibility: "ignored",
+          greenfield,
+          visibilityUnchecked: true,
+        });
+        expect(markdown).toContain(
+          `Paths below are absolute, into the main checkout at \`${ROOT}\`. The bundle lives in \`.scratch\`; git could not say at export whether it ignores that folder, so these paths follow the project's visibility flag, \`ignored\`.`,
+        );
+        expect(markdown).not.toContain("which git tracks");
+        expect(markdown).not.toContain("which git ignores");
+      },
+    );
   });
 
   describe("beforeDelegatingSection", () => {

@@ -506,6 +506,8 @@ function renderTask(
         "lists those tickets in its own `blockedBy`. Every other ticket has `kind`",
         "\"build\" and `waitsFor` null. Never make ordinary work a gate: anything an",
         "agent can build, configure or test in the repository is a build ticket.",
+        "Every gate must be in the `blockedBy` of at least one other ticket: a gate",
+        "that holds back no ticket is refused.",
         "",
         "Keep chains of `blockedBy` short, so that tickets can be built side by side.",
         "List a ticket in another's `blockedBy` only when that ticket uses its output:",

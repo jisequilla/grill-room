@@ -619,9 +619,11 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   // ignore rule changes after registration, and nothing else looks at
   // whether the repository has commits.
   const head = await headCommit(project.rootPath);
+  const measured = await measuredVisibility(project.rootPath, bundleFolder);
   const exportFacts: ExportFacts = {
-    visibility: (await measuredVisibility(project.rootPath, bundleFolder)) ?? project.visibility,
+    visibility: measured ?? project.visibility,
     greenfield: head === null,
+    ...(measured === null ? { visibilityUnchecked: true } : {}),
   };
 
   // Hoisted so the handoff block below can work out, per brief, whether the

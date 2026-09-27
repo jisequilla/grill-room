@@ -643,9 +643,11 @@ session, and is readable and editable in the output page's Handoff block.
   create it. The stored visibility flag still
   decides the wording of the handoff generated and shown in the app, is
   part of its staleness fingerprint, feeds the settings page and the
-  mismatch warning, and is export's fallback when git gives no answer.
-  The Output page's viewer shows them filled with the path the export
-  section currently plans, and its editor keeps the token.
+  mismatch warning, and is export's fallback when git gives no answer;
+  HANDOFF.md's path note then says git could not check and that the paths
+  follow the flag. The Output page's viewer shows bundle paths filled with
+  the path the export section currently plans, and its editor keeps the
+  token.
 
 **Stories no ticket implements.** When a breakdown was accepted on its last
 attempt with user stories no ticket cites, HANDOFF.md gains a section of
@@ -780,7 +782,9 @@ with the reasons:
   blockers, directly or through their own blockers (the blocker lands first,
   so ticket 3 may extend a test file its blocker ticket 1 creates);
 - a file marked `create` resolves inside the project root (through symlinks),
-  does not exist yet, and is not ignored by git (`git check-ignore`);
+  does not exist yet, and is not ignored by git (`git check-ignore`), and no
+  folder on its way is a symbolic link, which git cannot track through
+  (refused naming the link and where it points);
 - no path is marked `create` by more than one ticket, with paths compared as
   a case-insensitive file system would (NFC, case-folded, no trailing
   slash). The first creator keeps it — the ticket in the earliest wave of
