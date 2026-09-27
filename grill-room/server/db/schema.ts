@@ -488,6 +488,19 @@ export const specs = table("gr_specs", {
    * are different: "never checked" against "checked and clean".
    */
   consistencyCheckedFor: text("consistency_checked_for"),
+  /**
+   * The `ticketsGeneratedAt` of the last breakdown whose consistency check
+   * was attempted or skipped, whatever its outcome; null when no breakdown
+   * has run one. Set with `consistencyCheckedFor` it tells "never checked"
+   * from "checked, but not these tickets".
+   */
+  consistencyAttemptedFor: text("consistency_attempted_for"),
+  /**
+   * The CRLF-insensitive sha256 of the spec markdown the last accepted check
+   * judged (`hashExportContent`). Its cards can be asked only while the spec
+   * still says exactly this.
+   */
+  consistencySpecSha256: text("consistency_spec_sha256"),
   /** The turn of the last accepted consistency check. */
   consistencyTurnId: text("consistency_turn_id").references(() => turns.id, {
     onDelete: "set null",
@@ -496,8 +509,11 @@ export const specs = table("gr_specs", {
   updatedAt: text("updated_at").notNull(),
 });
 
-/** Whether the owner still has to answer a reopen card, or dismissed it. */
-export const CONSISTENCY_FINDING_STATUSES = ["open", "dismissed"] as const;
+/**
+ * Whether the owner still has to answer a reopen card, dismissed it, or asked
+ * it in the interview as a decision (`decisionId`).
+ */
+export const CONSISTENCY_FINDING_STATUSES = ["open", "dismissed", "asked"] as const;
 export type ConsistencyFindingStatus =
   (typeof CONSISTENCY_FINDING_STATUSES)[number];
 
@@ -524,6 +540,10 @@ export const consistencyFindings = table(
     question: text("question").notNull(),
     /** The settled decision the words came from, or null. */
     decisionKey: text("decision_key"),
+    /** The decision an `asked` card was added to the interview as; null otherwise, or once that decision is gone. */
+    decisionId: text("decision_id").references(() => decisions.id, {
+      onDelete: "set null",
+    }),
     status: text("status", { enum: CONSISTENCY_FINDING_STATUSES })
       .notNull()
       .default("open"),

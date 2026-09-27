@@ -350,7 +350,14 @@ describe("check-consistency", () => {
 
       const second = await findLatestTurn({ sessionId, turnKind: "check-consistency" });
       expect(second!.id).not.toBe(first!.id);
-      expect(list).toEqual({ findings: [], checked: true, current: true, turnId: second!.id });
+      expect(list).toEqual({
+        findings: [],
+        checked: true,
+        current: true,
+        askable: true,
+        note: null,
+        turnId: second!.id,
+      });
       const spec = await specRow(sessionId);
       expect(spec.consistencyCheckedFor).toBe(spec.ticketsGeneratedAt);
       expect(spec.consistencyTurnId).toBe(second!.id);
@@ -531,6 +538,8 @@ describe("check-consistency", () => {
         findings: [],
         checked: false,
         current: false,
+        askable: false,
+        note: null,
         turnId: null,
       });
 

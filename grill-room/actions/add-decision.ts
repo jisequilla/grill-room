@@ -5,7 +5,7 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { returnSessionToInterviewing } from "../server/session-state.js";
+import { type DbHandle, returnSessionToInterviewing } from "../server/session-state.js";
 import { describeDecisions } from "../server/tree.js";
 
 /** A short, readable key from the title, with a random suffix so it never collides. */
@@ -24,15 +24,21 @@ function generateKey(title: string): string {
  * The action below is this and nothing else. It is exported because a batch of
  * reopens can carry decisions to add once its items are applied
  * (`server/reopen-batch.ts`), and those have to arrive by exactly the same
- * route as one added from the workspace.
+ * route as one added from the workspace. So does a reopen card asked in the
+ * interview (`ask-consistency-findings`), which passes its transaction as `db`
+ * so that every query here, the session's return to interviewing included,
+ * commits or rolls back with its own writes. Without `db` it uses the app's
+ * database, exactly as before.
  */
-export async function addDecisionCore(input: {
-  sessionId: string;
-  title: string;
-  body: string;
-}) {
+export async function addDecisionCore(
+  input: {
+    sessionId: string;
+    title: string;
+    body: string;
+  },
+  db: DbHandle = getDb(),
+) {
   const { sessionId, title, body } = input;
-  const db = getDb();
 
   const [session] = await db
     .select()
@@ -49,7 +55,7 @@ export async function addDecisionCore(input: {
   // summary is dropped, and — leaving `confirmed` — its spec is marked not
   // current.
   if (session.state !== "interviewing") {
-    await returnSessionToInterviewing(session, now);
+    await returnSessionToInterviewing(session, now, db);
   }
 
   const [row] = await db

@@ -14,6 +14,16 @@ import { eq } from "@agent-native/core/db/schema";
 
 import { getDb, schema } from "./db/index.js";
 
+/**
+ * A database handle: the app's database, or a transaction on it. Both
+ * functions here take one as an optional last argument, defaulting to
+ * `getDb()`, so a caller that must write atomically can pass its transaction.
+ */
+export type DbHandle = Pick<
+  ReturnType<typeof getDb>,
+  "select" | "insert" | "update" | "delete"
+>;
+
 /** A session, as this transition needs it: its id and the state it is leaving. */
 type SessionLeavingState = Pick<
   typeof schema.sessions.$inferSelect,
@@ -29,16 +39,15 @@ type SessionLeavingState = Pick<
 export async function returnSessionToInterviewing(
   session: SessionLeavingState,
   now: string,
+  db: DbHandle = getDb(),
 ): Promise<void> {
-  const db = getDb();
-
   await db
     .update(schema.sessions)
     .set({ state: "interviewing", doneSummary: null, updatedAt: now })
     .where(eq(schema.sessions.id, session.id));
 
   if (session.state === "confirmed") {
-    await markSpecNotCurrent(session.id, now);
+    await markSpecNotCurrent(session.id, now, db);
   }
 }
 
@@ -51,8 +60,9 @@ export async function returnSessionToInterviewing(
 export async function markSpecNotCurrent(
   sessionId: string,
   now: string,
+  db: DbHandle = getDb(),
 ): Promise<void> {
-  await getDb()
+  await db
     .update(schema.specs)
     .set({ current: false, updatedAt: now })
     .where(eq(schema.specs.sessionId, sessionId));

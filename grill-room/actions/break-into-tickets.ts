@@ -266,6 +266,9 @@ export default defineAction({
           .set({
             ticketsGeneratedAt: now,
             ticketsTurnId: recorder?.turnId ?? null,
+            // The check below is attempted or skipped for this breakdown,
+            // whatever it then does: "checked, but not these tickets".
+            consistencyAttemptedFor: now,
           })
           .where(eq(schema.specs.sessionId, sessionId));
 

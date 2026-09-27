@@ -268,6 +268,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   "uncovered-story": { turns: uncoveredStoryTurns() },
   "long-chain": { turns: longChainTurns() },
   "consistency-findings": { turns: consistencyFindingsTurns() },
+  "consistency-check-rate-limited": { turns: consistencyCheckRateLimitedTurns() },
   ...(demoScenario ? { [DEMO_SCENARIO]: demoScenario } : {}),
 };
 
@@ -1291,6 +1292,19 @@ export function consistencyFindingsTurns(): ScriptedTurn[] {
     }),
     { kind: "check-consistency", result: misquoted },
     { kind: "check-consistency", result: accepted },
+  ];
+}
+
+/**
+ * `consistency-findings` with the check that follows the breakdown rate
+ * limited: the tickets are stored and the session is left idle with the
+ * check's note. A port error stops the retry loop, so one turn is enough.
+ * What `consistency-check-rate-limited` schedules.
+ */
+export function consistencyCheckRateLimitedTurns(): ScriptedTurn[] {
+  return [
+    ...consistencyFindingsTurns().filter((turn) => turn.kind !== "check-consistency"),
+    rateLimitedTurn("check-consistency"),
   ];
 }
 

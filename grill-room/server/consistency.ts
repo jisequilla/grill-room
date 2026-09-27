@@ -26,6 +26,8 @@ import { randomUUID } from "node:crypto";
 import { eq } from "@agent-native/core/db/schema";
 
 import { getDb, schema } from "./db/index.js";
+import type { ConsistencyFindingStatus } from "./db/schema.js";
+import { hashExportContent } from "./export.js";
 import { getInterviewer, isInterviewerError } from "./interviewer/index.js";
 import type {
   CheckConsistencyResult,
@@ -34,7 +36,7 @@ import type {
   ConsistencyTicket,
 } from "./interviewer/index.js";
 import { numberRanges, ticketsAreCurrent } from "./tickets.js";
-import { deriveTreeStates, treeFacts } from "./tree.js";
+import { type DerivedDecisionState, deriveTreeStates, treeFacts } from "./tree.js";
 import {
   askUntilAccepted,
   decisionSnapshots,
@@ -436,6 +438,7 @@ async function scan(
       .update(schema.specs)
       .set({
         consistencyCheckedFor: spec.ticketsGeneratedAt,
+        consistencySpecSha256: hashExportContent(spec.markdown),
         consistencyTurnId: recorder?.turnId ?? null,
       })
       .where(eq(schema.specs.sessionId, session.id));
@@ -518,6 +521,78 @@ export async function runConsistencyTurn(sessionId: string): Promise<void> {
   });
 }
 
+/** The spec row's fields the card tests read. */
+type CardsSpec = Pick<
+  typeof schema.specs.$inferSelect,
+  | "consistencyCheckedFor"
+  | "consistencySpecSha256"
+  | "ticketsGeneratedAt"
+  | "markdown"
+  | "current"
+  | "updatedAt"
+>;
+
+/**
+ * Whether the stored cards judged the tickets and the spec text as they are
+ * now, so one can still be asked in the interview: the check's stamp is this
+ * breakdown's, and the spec's markdown hashes to what the check judged. It
+ * reads neither `current` nor `updatedAt`: asking one card marks the spec not
+ * current, and every other card of that check must stay askable.
+ */
+export function cardsAskable(spec: CardsSpec): boolean {
+  return (
+    spec.consistencyCheckedFor != null &&
+    spec.consistencyCheckedFor === spec.ticketsGeneratedAt &&
+    spec.consistencySpecSha256 === hashExportContent(spec.markdown)
+  );
+}
+
+/**
+ * Whether the stored cards judged the session's current tickets: askable,
+ * and the tickets are current with a current spec (`ticketsAreCurrent`, what
+ * `get-spec` and `list-tickets` report). Current implies askable.
+ */
+export function cardsCurrent(spec: CardsSpec): boolean {
+  return cardsAskable(spec) && ticketsAreCurrent(spec);
+}
+
+/** A card's place, as a line of the decision body it is asked with. */
+function decisionBodyPlace(place: ConsistencyPlace): string {
+  return place.artefact === "spec"
+    ? `Spec, section "${place.section}": "${place.quote}"`
+    : `Ticket ${place.ticket}: "${place.quote}"`;
+}
+
+/**
+ * The body of the decision a card is asked as: why it is asked, its kind, the
+ * quote and its place (both sides of a contradiction, `at` first), and the
+ * settled decision the words came from, when it names one.
+ */
+export function decisionBody(card: {
+  kind: string;
+  at: ConsistencyPlace;
+  against: ConsistencyPlace | null;
+  decisionKey: string | null;
+}): string {
+  return [
+    "The consistency check found that the spec and tickets leave this open, so a builder would otherwise decide it alone.",
+    "",
+    `Kind: ${card.kind}`,
+    decisionBodyPlace(card.at),
+    ...(card.against ? [decisionBodyPlace(card.against)] : []),
+    ...(card.decisionKey !== null ? [`Came from decision: ${card.decisionKey}`] : []),
+  ].join("\n");
+}
+
+/** The decision an asked card was added as, as the card list shows it. */
+export interface ReopenCardDecision {
+  id: string;
+  key: string;
+  state: DerivedDecisionState;
+  /** Its answer while settled; null otherwise. */
+  answer: string | null;
+}
+
 /** One reopen card, as the actions return it. */
 export interface ReopenCard {
   id: string;
@@ -527,28 +602,62 @@ export interface ReopenCard {
   against: ConsistencyPlace | null;
   question: string;
   decisionKey: string | null;
-  status: "open" | "dismissed";
+  status: ConsistencyFindingStatus;
+  /** The decision an asked card became, while it exists; null otherwise. */
+  decision: ReopenCardDecision | null;
 }
 
-/**
- * A session's reopen cards in number order, whether a check has been
- * accepted at all (`checked`), and whether the cards judged today's tickets
- * (`current`): the stamp matches `ticketsGeneratedAt` and the tickets are
- * current with the spec.
- */
-export async function listConsistencyFindings(sessionId: string): Promise<{
+/** Why the last breakdown's check did not judge its tickets, while no later turn has cleared it. */
+export interface ConsistencyNote {
+  code: string;
+  message: string;
+}
+
+export interface ConsistencyFindingsList {
   findings: ReopenCard[];
   checked: boolean;
   current: boolean;
+  askable: boolean;
+  note: ConsistencyNote | null;
   turnId: string | null;
-}> {
+}
+
+/**
+ * A session's reopen cards in number order; whether a check has been
+ * accepted at all (`checked`); whether the cards judged today's tickets
+ * (`current`, {@link cardsCurrent}); whether they can still be asked
+ * (`askable`, {@link cardsAskable}); and the note the last breakdown left when
+ * its check failed or was skipped, until a later turn clears it.
+ */
+export async function listConsistencyFindings(
+  sessionId: string,
+): Promise<ConsistencyFindingsList> {
   const db = getDb();
   const [spec] = await db
     .select()
     .from(schema.specs)
     .where(eq(schema.specs.sessionId, sessionId))
     .limit(1);
-  if (!spec) return { findings: [], checked: false, current: false, turnId: null };
+  if (!spec) {
+    return {
+      findings: [],
+      checked: false,
+      current: false,
+      askable: false,
+      note: null,
+      turnId: null,
+    };
+  }
+
+  const [session] = await db
+    .select({
+      turnStatus: schema.sessions.turnStatus,
+      turnErrorCode: schema.sessions.turnErrorCode,
+      turnErrorMessage: schema.sessions.turnErrorMessage,
+    })
+    .from(schema.sessions)
+    .where(eq(schema.sessions.id, sessionId))
+    .limit(1);
 
   const rows = await db
     .select()
@@ -556,7 +665,35 @@ export async function listConsistencyFindings(sessionId: string): Promise<{
     .where(eq(schema.consistencyFindings.sessionId, sessionId))
     .orderBy(schema.consistencyFindings.number);
 
-  const checked = spec.consistencyCheckedFor != null;
+  const decisionRows = rows.some((row) => row.decisionId !== null)
+    ? await db
+        .select()
+        .from(schema.decisions)
+        .where(eq(schema.decisions.sessionId, sessionId))
+        .orderBy(schema.decisions.createdAt, schema.decisions.id)
+    : [];
+  const states = deriveTreeStates(treeFacts(decisionRows));
+  const decisionById = new Map(decisionRows.map((row) => [row.id, row]));
+  const decisionOf = (decisionId: string | null): ReopenCardDecision | null => {
+    const row = decisionId === null ? undefined : decisionById.get(decisionId);
+    if (!row) return null;
+    const state = states.get(row.id)!;
+    return {
+      id: row.id,
+      key: portKey(row),
+      state,
+      answer: state === "settled" ? row.currentAnswer : null,
+    };
+  };
+
+  const note =
+    session?.turnStatus === "idle" &&
+    session.turnErrorCode != null &&
+    spec.ticketsGeneratedAt != null &&
+    spec.consistencyCheckedFor !== spec.ticketsGeneratedAt
+      ? { code: session.turnErrorCode, message: session.turnErrorMessage ?? "" }
+      : null;
+
   return {
     findings: rows.map((row) => ({
       id: row.id,
@@ -567,12 +704,12 @@ export async function listConsistencyFindings(sessionId: string): Promise<{
       question: row.question,
       decisionKey: row.decisionKey,
       status: row.status,
+      decision: decisionOf(row.decisionId),
     })),
-    checked,
-    current:
-      checked &&
-      spec.consistencyCheckedFor === spec.ticketsGeneratedAt &&
-      ticketsAreCurrent(spec),
+    checked: spec.consistencyCheckedFor != null,
+    current: cardsCurrent(spec),
+    askable: cardsAskable(spec),
+    note,
     turnId: spec.consistencyTurnId,
   };
 }
