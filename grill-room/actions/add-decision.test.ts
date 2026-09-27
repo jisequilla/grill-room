@@ -235,9 +235,40 @@ describe("add-decision", () => {
       const committed = await aConfirmedSessionWithSpec();
       const rolledBack = await aConfirmedSessionWithSpec();
 
+      // Every query goes through the handle it is given: the embedded
+      // database runs one connection, so a query that skipped the handle
+      // would still land inside the transaction, and only this record shows it.
+      const through: string[] = [];
       await getDb().transaction(async (tx) => {
-        await addDecisionCore({ sessionId: committed, title: "Kept?", body: "" }, tx);
+        const name = (table: unknown) =>
+          table === schema.sessions
+            ? "sessions"
+            : table === schema.specs
+              ? "specs"
+              : table === schema.decisions
+                ? "decisions"
+                : "other";
+        const recording = {
+          select: ((...args: Parameters<typeof tx.select>) => {
+            through.push("select");
+            return tx.select(...args);
+          }) as typeof tx.select,
+          insert: ((table: Parameters<typeof tx.insert>[0]) => {
+            through.push(`insert ${name(table)}`);
+            return tx.insert(table);
+          }) as typeof tx.insert,
+          update: ((table: Parameters<typeof tx.update>[0]) => {
+            through.push(`update ${name(table)}`);
+            return tx.update(table);
+          }) as typeof tx.update,
+          delete: ((table: Parameters<typeof tx.delete>[0]) => {
+            through.push(`delete ${name(table)}`);
+            return tx.delete(table);
+          }) as typeof tx.delete,
+        };
+        await addDecisionCore({ sessionId: committed, title: "Kept?", body: "" }, recording);
       });
+      expect(through).toEqual(["select", "update sessions", "update specs", "insert decisions"]);
       await expect(
         getDb().transaction(async (tx) => {
           await addDecisionCore({ sessionId: rolledBack, title: "Dropped?", body: "" }, tx);
