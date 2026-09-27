@@ -237,6 +237,48 @@ function resolvesInside(realRoot: string, candidate: string): boolean {
   }
 }
 
+interface SymlinkedAncestor {
+  /** Repo-relative, forward slashes. */
+  link: string;
+  /** Repo-relative, forward slashes; null when the link is dangling. */
+  target: string | null;
+}
+
+/**
+ * The shallowest folder on `candidate`'s way down from `realRoot` that is a
+ * symbolic link, or null when none of its existing ancestors is one. Walks
+ * the path's folders from the root down, lstat-ing each existing ancestor,
+ * and stops at the first that does not exist (nothing further to find).
+ */
+function symlinkedAncestor(realRoot: string, candidate: string): SymlinkedAncestor | null {
+  const segments = path
+    .relative(realRoot, candidate)
+    .split(path.sep)
+    .filter((segment) => segment.length > 0)
+    .slice(0, -1);
+
+  let current = realRoot;
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    let stat;
+    try {
+      stat = lstatSync(current);
+    } catch {
+      return null;
+    }
+    if (stat.isSymbolicLink()) {
+      const link = path.relative(realRoot, current).split(path.sep).join("/");
+      try {
+        const target = path.relative(realRoot, realpathSync(current)).split(path.sep).join("/");
+        return { link, target };
+      } catch {
+        return { link, target: null };
+      }
+    }
+  }
+  return null;
+}
+
 /** Whether a path has a `.git` segment: git's own folder, which it never tracks. */
 function isInsideGitDir(candidate: string): boolean {
   return candidate
@@ -791,10 +833,23 @@ export async function reasonsToRefuseHandoffGrounding(
           `Ticket ${ticket.number} marks ${file.path} as create, but it already exists; mark it edit, or name a new path.`,
         );
       } else {
-        toCheckIgnored.push({
-          ticket: ticket.number,
-          path: path.relative(realRoot, resolved).split(path.sep).join("/"),
-        });
+        const symlinked = symlinkedAncestor(realRoot, resolved);
+        if (symlinked !== null) {
+          const under =
+            symlinked.target === null
+              ? "a real folder"
+              : symlinked.target === ""
+                ? "the project root"
+                : symlinked.target;
+          reasons.push(
+            `Ticket ${ticket.number} marks ${file.path} as create, but ${symlinked.link} is a symbolic link, and git cannot track a path through one; plan it under ${under} instead.`,
+          );
+        } else {
+          toCheckIgnored.push({
+            ticket: ticket.number,
+            path: path.relative(realRoot, resolved).split(path.sep).join("/"),
+          });
+        }
       }
     }
   }

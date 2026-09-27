@@ -1,5 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -470,6 +477,95 @@ describe("ground-briefs", () => {
       );
       expect(reason).toMatch(
         /Ticket 1 marks linked\/escape\.ts as create, but it resolves outside the project/,
+      );
+    });
+
+    it("a create under a symlinked folder inside the root names the link and its target", async () => {
+      const root = aFixtureRepo();
+      mkdirSync(path.join(root, "real-src"));
+      symlinkSync(path.join(root, "real-src"), path.join(root, "linked"));
+      const { session } = await aSessionWithHandoff({ root });
+
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(1, (ticket) => {
+          ticket.filesToChange.push({ path: "linked/new.ts", change: "create" });
+        }),
+      );
+      expect(reason).toContain(
+        "Ticket 1 marks linked/new.ts as create, but linked is a symbolic link, and git cannot track a path through one; plan it under real-src instead.",
+      );
+    });
+
+    it("a create under a nested symlinked folder names the shallowest link", async () => {
+      const root = aFixtureRepo();
+      mkdirSync(path.join(root, "src", "real"), { recursive: true });
+      symlinkSync(path.join(root, "src", "real"), path.join(root, "src", "linked"));
+      const { session } = await aSessionWithHandoff({ root });
+
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(1, (ticket) => {
+          ticket.filesToChange.push({ path: "src/linked/deep/new.ts", change: "create" });
+        }),
+      );
+      expect(reason).toContain(
+        "Ticket 1 marks src/linked/deep/new.ts as create, but src/linked is a symbolic link, and git cannot track a path through one; plan it under src/real instead.",
+      );
+    });
+
+    it("a create under a symlink to the root", async () => {
+      const root = aFixtureRepo();
+      symlinkSync(root, path.join(root, "self"));
+      const { session } = await aSessionWithHandoff({ root });
+
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(1, (ticket) => {
+          ticket.filesToChange.push({ path: "self/new.ts", change: "create" });
+        }),
+      );
+      expect(reason).toContain(
+        "Ticket 1 marks self/new.ts as create, but self is a symbolic link, and git cannot track a path through one; plan it under the project root instead.",
+      );
+    });
+
+    it("a create under a dangling symlink", async () => {
+      const root = aFixtureRepo();
+      symlinkSync(path.join(root, "missing-dir"), path.join(root, "gone"));
+      const { session } = await aSessionWithHandoff({ root });
+
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(1, (ticket) => {
+          ticket.filesToChange.push({ path: "gone/new.ts", change: "create" });
+        }),
+      );
+      expect(reason).toContain(
+        "Ticket 1 marks gone/new.ts as create, but gone is a symbolic link, and git cannot track a path through one; plan it under a real folder instead.",
+      );
+    });
+
+    it("a symlinked create does not hide an ignored one in the same set", async () => {
+      const root = aFixtureRepo();
+      mkdirSync(path.join(root, "real-src"));
+      symlinkSync(path.join(root, "real-src"), path.join(root, "linked"));
+      const { session } = await aSessionWithHandoff({ root });
+
+      const reason = await refusedThenAccepted(
+        session.id,
+        withTicket(1, (ticket) => {
+          ticket.filesToChange.push(
+            { path: "linked/new.ts", change: "create" },
+            { path: "dist/x.js", change: "create" },
+          );
+        }),
+      );
+      expect(reason).toContain(
+        "Ticket 1 marks linked/new.ts as create, but linked is a symbolic link, and git cannot track a path through one; plan it under real-src instead.",
+      );
+      expect(reason).toContain(
+        "Ticket 1 marks dist/x.js as create, but git ignores that path, so the repository would never track it; plan a path git tracks.",
       );
     });
 
