@@ -482,9 +482,60 @@ export const specs = table("gr_specs", {
   ticketsTurnId: text("tickets_turn_id").references(() => turns.id, {
     onDelete: "set null",
   }),
+  /**
+   * The `ticketsGeneratedAt` the last accepted consistency check judged, or
+   * null when no check has been accepted. Null and a stamp with zero findings
+   * are different: "never checked" against "checked and clean".
+   */
+  consistencyCheckedFor: text("consistency_checked_for"),
+  /** The turn of the last accepted consistency check. */
+  consistencyTurnId: text("consistency_turn_id").references(() => turns.id, {
+    onDelete: "set null",
+  }),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+/** Whether the owner still has to answer a reopen card, or dismissed it. */
+export const CONSISTENCY_FINDING_STATUSES = ["open", "dismissed"] as const;
+export type ConsistencyFindingStatus =
+  (typeof CONSISTENCY_FINDING_STATUSES)[number];
+
+/**
+ * A reopen card: one finding of a session's last accepted consistency check,
+ * something the spec or its tickets leave a builder to decide alone. Every
+ * accepted check replaces the session's rows whole. See
+ * `server/consistency.ts`.
+ */
+export const consistencyFindings = table(
+  "gr_consistency_findings",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    /** 1-based, in the order the check reported them. */
+    number: integer("number").notNull(),
+    kind: text("kind").notNull(),
+    /** Where the words are, as JSON: `{ artefact, section, ticket, quote }`. */
+    atJson: text("at_json").notNull(),
+    /** The other side of a spec-ticket contradiction, as JSON; null otherwise. */
+    againstJson: text("against_json"),
+    question: text("question").notNull(),
+    /** The settled decision the words came from, or null. */
+    decisionKey: text("decision_key"),
+    status: text("status", { enum: CONSISTENCY_FINDING_STATUSES })
+      .notNull()
+      .default("open"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (consistencyFindingsTable) => ({
+    sessionIdx: index("gr_idx_consistency_findings_session").on(
+      consistencyFindingsTable.sessionId,
+    ),
+  }),
+);
 
 /** One implementation ticket broken out of a session's confirmed spec. */
 export const tickets = table(

@@ -669,6 +669,7 @@ describe("project context on every turn", () => {
         "review-stale",
         "synthesize-spec",
         "break-into-tickets",
+        "check-consistency",
       ]),
     );
     for (const request of interviewer.requests) {

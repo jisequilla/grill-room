@@ -1,6 +1,7 @@
 import { numberRanges } from "../tickets.js";
 import { interviewerInstructions, loadSpecTemplate } from "./instructions.js";
 import {
+  MAX_CONSISTENCY_FINDINGS,
   MAX_HANDOFF_SCOUT_BUILDS_ON,
   MAX_HANDOFF_SCOUT_BUILDS_ON_FILES,
   MAX_HANDOFF_SCOUT_FACTS,
@@ -12,6 +13,8 @@ import {
 } from "./schemas.js";
 import type {
   AssessReadinessRequest,
+  CheckConsistencyRequest,
+  ConsistencyTicket,
   DecisionSnapshot,
   HandoffScoutRequest,
   HandoffScoutTicket,
@@ -236,7 +239,10 @@ function renderRetryWithPreviousResult(
 function renderTask(
   request: Exclude<
     InterviewerRequest,
-    AssessReadinessRequest | ScoutProjectRequest | HandoffScoutRequest
+    | AssessReadinessRequest
+    | ScoutProjectRequest
+    | HandoffScoutRequest
+    | CheckConsistencyRequest
   >,
 ): string {
   switch (request.kind) {
@@ -1076,6 +1082,107 @@ function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
     .trimEnd();
 }
 
+/** The consistency check's opening line. Like {@link OPENING_LINE}, it cannot be read as an option. */
+const CONSISTENCY_OPENING_LINE =
+  "You are checking a finished spec and its implementation tickets inside the Grill Room app, before a builder reads them. The design tree the spec was written from comes first, then the spec, then the tickets, then your task.";
+
+function renderConsistencyTicket(ticket: ConsistencyTicket): string[] {
+  return [
+    "",
+    `### Ticket ${ticket.number}: ${ticket.title}`,
+    `Kind: ${ticket.kind}`,
+    ...(ticket.kind === "gate" ? [`Waits for: ${ticket.waitsFor ?? ""}`] : []),
+    "",
+    ...fenced(ticket.body, "markdown"),
+  ];
+}
+
+/**
+ * What the consistency check is asked. `consistencyReasons`
+ * (`server/consistency.ts`) is the check behind it: a finding shaped as this
+ * section describes, examples included, passes it.
+ */
+function consistencyTaskSection(): string[] {
+  return [
+    "## Your task: find what a builder would have to decide alone",
+    "",
+    "A builder who meets a statement that leaves something undecided picks an",
+    "answer on their own, and the owner finds out in review. Find every such",
+    "statement in the spec and the tickets above, and turn each into one question",
+    "for the owner.",
+    "",
+    "The six kinds of finding, each with an example:",
+    "",
+    '- `unquantified-threshold`: a limit, bound or duration with no value. "Run',
+    '  data must outlast the benchmark horizon" names no horizon; "capped at N x',
+    '  cadence" gives no N.',
+    "- `one-case-rule`: a rule stated for one case, leaving its sibling cases",
+    '  unhandled. "A run whose run_id starts with `wf_` gets a root span" says',
+    "  nothing about runs driven by hand.",
+    "- `spec-ticket-contradiction`: the spec and a ticket say different things",
+    '  about the same point. The spec calls Retention "a placeholder for a later',
+    '  ticket" while a ticket says to fill it in.',
+    '- `open-choice`: an "X or Y" the text leaves open. "Use Checkout or Payment',
+    '  Element" never says which.',
+    "- `undefaulted-value`: a value called defined, configurable or set, with no",
+    '  value and no default. "Unpaid accepted bookings follow a defined timeout"',
+    "  gives no timeout.",
+    "- `unnamed-target`: a host, service, account or place named only by its",
+    '  role. "Deployable to a staging environment" names no host.',
+    "",
+    `Return one entry in \`findings\` for each, at most ${MAX_CONSISTENCY_FINDINGS}:`,
+    "",
+    "- `kind`: one of the six kinds above.",
+    '- `at`: where the text is. In the spec: `artefact` "spec", `section` the',
+    '  heading of the spec section it sits under, exactly as written after "## ",',
+    '  and `ticket` null. In a ticket: `artefact` "ticket", `ticket` its number,',
+    "  and `section` null.",
+    "- `at.quote`: the words that leave the question open, copied exactly: the",
+    "  same words, case, punctuation and markup. Quote a phrase or a sentence, not",
+    "  a paragraph.",
+    "- `against`: for a `spec-ticket-contradiction` only, the other side, in the",
+    "  same form as `at`: one side in the spec and the other in a ticket. Null for",
+    "  every other kind.",
+    "- `question`: one question the owner can answer in a sentence, ending with",
+    '  "?". Ask for the missing value or choice itself: "How long after the',
+    '  benchmark ends must run data be kept?", not "Should the horizon be',
+    '  defined?".',
+    "- `decisionKey`: the key of the settled decision in the tree above that the",
+    "  text comes from, or null when none does.",
+    "",
+    "Be conservative. A value given anywhere in the spec, the tickets or the tree",
+    'is not missing: "a defined timeout" is not a finding when a decision sets it',
+    "to 48 hours. Detail a builder can settle alone without changing what the",
+    "owner gets, such as a name or a file layout, is not a finding. An empty list",
+    "is the right answer when nothing is left open.",
+  ];
+}
+
+/**
+ * The consistency check reads the finished spec and tickets, not the
+ * interview: it carries none of the grilling method, only the tree the spec
+ * came from, the spec, every ticket, and the task.
+ */
+function buildConsistencyPrompt(request: CheckConsistencyRequest): string {
+  return [
+    CONSISTENCY_OPENING_LINE,
+    "",
+    renderContext(request.context),
+    "",
+    "## The spec",
+    "",
+    ...fenced(request.specMarkdown, "markdown"),
+    "",
+    "## The tickets",
+    ...request.tickets.flatMap(renderConsistencyTicket),
+    "",
+    ...consistencyTaskSection(),
+    renderRetryWithPreviousResult(request.rejectionReason, request.previousResult),
+  ]
+    .join("\n")
+    .trimEnd();
+}
+
 /**
  * Builds the prompt for one turn.
  *
@@ -1089,6 +1196,7 @@ export function buildPrompt(
   if (request.kind === "assess-readiness") return buildReadinessPrompt(request);
   if (request.kind === "scout-project") return buildScoutPrompt(request);
   if (request.kind === "handoff-scout") return buildHandoffScoutPrompt(request);
+  if (request.kind === "check-consistency") return buildConsistencyPrompt(request);
 
   const preamble = primed
     ? [

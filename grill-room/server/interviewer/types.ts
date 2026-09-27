@@ -3,6 +3,7 @@ import type { InterviewerErrorCode } from "./errors.js";
 import type {
   AssessReadinessResult,
   BreakIntoTicketsResult,
+  CheckConsistencyResult,
   FindSupersededResult,
   HandoffScoutResult,
   OfferedChoice,
@@ -371,6 +372,36 @@ export interface HandoffScoutRequest extends RequestBase {
   previousResult: HandoffScoutResult | null;
 }
 
+/** One ticket as a consistency check reads it: its words, and a gate's wait. */
+export interface ConsistencyTicket {
+  number: number;
+  title: string;
+  body: string;
+  kind: "build" | "gate";
+  /** A gate's one line; null for a build ticket. */
+  waitsFor: string | null;
+}
+
+/**
+ * Find what a spec and its tickets leave a builder to decide alone, in one
+ * call over both. Runs on the session's model, in a conversation of its own
+ * (`context.conversationId` is always null) and with no tools
+ * (`context.docsFolder` is always null): everything it judges is in the
+ * prompt.
+ */
+export interface CheckConsistencyRequest extends RequestBase {
+  kind: "check-consistency";
+  specMarkdown: string;
+  /** Every ticket, in number order. */
+  tickets: ConsistencyTicket[];
+  /**
+   * On a retry, the result the app refused last; null on the first attempt.
+   * The check never resumes a conversation, so a retry starts fresh and this
+   * is how it sees the answer it is correcting.
+   */
+  previousResult: CheckConsistencyResult | null;
+}
+
 /** A request that reads a whole project: sonnet, read-only, a conversation of its own. */
 export type ProjectScoutRequest = ScoutProjectRequest | HandoffScoutRequest;
 
@@ -382,7 +413,8 @@ export type InterviewerRequest =
   | BreakIntoTicketsRequest
   | AssessReadinessRequest
   | ScoutProjectRequest
-  | HandoffScoutRequest;
+  | HandoffScoutRequest
+  | CheckConsistencyRequest;
 
 /** Whether a request reads a whole project, as the project and handoff scouts do. */
 export function isProjectScoutRequest(
@@ -540,4 +572,8 @@ export interface Interviewer {
     request: HandoffScoutRequest,
     observer?: ModelCallObserver,
   ): Promise<InterviewerTurn<HandoffScoutResult>>;
+  checkConsistency(
+    request: CheckConsistencyRequest,
+    observer?: ModelCallObserver,
+  ): Promise<InterviewerTurn<CheckConsistencyResult>>;
 }

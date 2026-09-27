@@ -3,11 +3,17 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   type BreakIntoTicketsRequest,
+  MAX_HANDOFF_SCOUT_TICKETS,
   resetInterviewer,
   scriptInterviewer,
   type ScriptedTurn,
+  setInterviewer,
 } from "../server/interviewer/index.js";
-import { longChainTurns } from "../server/interviewer/fake.js";
+import {
+  createFakeInterviewer,
+  longChainTurns,
+  rateLimitedTurn,
+} from "../server/interviewer/fake.js";
 import { buildPrompt } from "../server/interviewer/prompt.js";
 import { type ProposedTicket, validateTicketSet } from "../server/tickets.js";
 import { MAX_TURN_RETRIES } from "../server/turn.js";
@@ -19,6 +25,7 @@ import createSession from "./create-session.js";
 import getSession from "./get-session.js";
 import getSpec from "./get-spec.js";
 import getTurn from "./get-turn.js";
+import listConsistencyFindings from "./list-consistency-findings.js";
 import listTickets from "./list-tickets.js";
 import registerProject from "./register-project.js";
 import synthesizeSpec from "./synthesize-spec.js";
@@ -563,7 +570,7 @@ describe("break-into-tickets in a repository with no commits yet", () => {
 
       const { tickets } = await breakIntoTickets.run({ sessionId });
 
-      expect(interviewer.requests).toHaveLength(1);
+      expect(interviewer.requests).toHaveLength(2);
       expect(tickets.map((ticket) => ticket.number)).toEqual(rows.map((row) => row.number));
     });
 
@@ -616,7 +623,7 @@ describe("break-into-tickets in a repository with no commits yet", () => {
 
         await breakIntoTickets.run({ sessionId });
 
-        expect(interviewer.requests).toHaveLength(2);
+        expect(interviewer.requests).toHaveLength(3);
         const reason = rejectionOf(interviewer.requests[1]);
         for (const text of expected) expect(reason).toContain(text);
         for (const text of notExpected) expect(reason).not.toContain(text);
@@ -631,7 +638,7 @@ describe("break-into-tickets in a repository with no commits yet", () => {
 
         await breakIntoTickets.run({ sessionId });
 
-        expect(interviewer.requests).toHaveLength(1);
+        expect(interviewer.requests).toHaveLength(2);
       },
     );
 
@@ -724,7 +731,7 @@ describe("break-into-tickets in a repository with no commits yet", () => {
 
       await breakIntoTickets.run({ sessionId });
 
-      expect(interviewer.requests).toHaveLength(1);
+      expect(interviewer.requests).toHaveLength(2);
     });
 
     it.each<[string, Row[], string]>([
@@ -760,7 +767,7 @@ describe("break-into-tickets in a repository with no commits yet", () => {
 
       await breakIntoTickets.run({ sessionId });
 
-      expect(interviewer.requests).toHaveLength(2);
+      expect(interviewer.requests).toHaveLength(3);
       expect(rejectionOf(interviewer.requests[1])).toBe(expected);
     });
   });
@@ -791,7 +798,7 @@ describe("break-into-tickets in a repository with no commits yet", () => {
 
       await breakIntoTickets.run({ sessionId });
 
-      expect(second.requests).toHaveLength(1);
+      expect(second.requests).toHaveLength(2);
       expect((await listTickets.run({ sessionId })).tickets.map((ticket) => ticket.slug)).toEqual([
         "set-up-the-runner",
         "build-the-workspace",
@@ -872,7 +879,7 @@ describe("gates", () => {
 
     const { tickets } = await breakIntoTickets.run({ sessionId });
 
-    expect(interviewer.requests).toHaveLength(1);
+    expect(interviewer.requests).toHaveLength(2);
     expect(tickets.map((ticket) => ticket.number)).toEqual(rows.map((row) => row.number));
   });
 
@@ -939,7 +946,7 @@ describe("gates", () => {
 
     await breakIntoTickets.run({ sessionId });
 
-    expect(interviewer.requests).toHaveLength(2);
+    expect(interviewer.requests).toHaveLength(3);
     expect(rejectionOf(interviewer.requests[1])).toBe(expected);
   });
 });
@@ -1032,7 +1039,7 @@ describe("seam: gates shaped as the prompt describes pass the check", () => {
 
     await breakIntoTickets.run({ sessionId });
 
-    expect(second.requests).toHaveLength(1);
+    expect(second.requests).toHaveLength(2);
     expect(
       (await listTickets.run({ sessionId })).tickets.map((ticket) => [ticket.number, ticket.kind]),
     ).toEqual([
@@ -1233,7 +1240,7 @@ describe("user stories", () => {
 
     const { tickets } = await breakIntoTickets.run({ sessionId });
 
-    expect(interviewer.requests).toHaveLength(1);
+    expect(interviewer.requests).toHaveLength(2);
     expect(tickets.map((ticket) => [ticket.number, ticket.implements])).toEqual(stored);
   });
 
@@ -1279,7 +1286,7 @@ describe("user stories", () => {
 
     await breakIntoTickets.run({ sessionId });
 
-    expect(interviewer.requests).toHaveLength(2);
+    expect(interviewer.requests).toHaveLength(3);
     expect(rejectionOf(interviewer.requests[1])).toBe(expected);
   });
 
@@ -1294,7 +1301,7 @@ describe("user stories", () => {
 
     const { tickets } = await breakIntoTickets.run({ sessionId });
 
-    expect(interviewer.requests).toHaveLength(1);
+    expect(interviewer.requests).toHaveLength(2);
     expect(tickets.map((ticket) => ticket.implements)).toEqual([[1, 3], [2]]);
   });
 
@@ -1321,7 +1328,7 @@ describe("user stories", () => {
 
     const { tickets } = await breakIntoTickets.run({ sessionId });
 
-    expect(interviewer.requests).toHaveLength(MAX_TURN_RETRIES + 1);
+    expect(interviewer.requests).toHaveLength(MAX_TURN_RETRIES + 2);
     expect(tickets.map((ticket) => [ticket.slug, ticket.implements])).toEqual([["one", []]]);
     const turn = await findLatestTurn({ sessionId, turnKind: "break-into-tickets" });
     expect(turn?.outcome).toBe("succeeded");
@@ -1385,7 +1392,7 @@ describe("user stories", () => {
 
     const { tickets } = await breakIntoTickets.run({ sessionId });
 
-    expect(interviewer.requests).toHaveLength(1);
+    expect(interviewer.requests).toHaveLength(2);
     expect(tickets.map((ticket) => ticket.implements)).toEqual([[], [], []]);
     const prompt = buildPrompt(interviewer.requests[0] as BreakIntoTicketsRequest);
     expect(prompt).not.toContain("## User stories");
@@ -1465,7 +1472,7 @@ describe("seam: a set shaped as the user stories section describes passes the ch
 
     await breakIntoTickets.run({ sessionId });
 
-    expect(second.requests).toHaveLength(1);
+    expect(second.requests).toHaveLength(2);
     expect(
       (await listTickets.run({ sessionId })).tickets.map((ticket) => [ticket.number, ticket.implements]),
     ).toEqual([
@@ -1525,8 +1532,8 @@ describe("the longest chain", () => {
 
     const { tickets } = await breakIntoTickets.run({ sessionId });
 
-    expect(interviewer.requests).toHaveLength(attempts.length);
-    expect(interviewer.requests.slice(1).map(rejectionOf)).toEqual(rejections);
+    expect(interviewer.requests).toHaveLength(attempts.length + 1);
+    expect(interviewer.requests.slice(1, -1).map(rejectionOf)).toEqual(rejections);
     expect(tickets.map((ticket) => ticket.blockedBy)).toEqual(stored.map((row) => row.blockedBy));
     const turn = await findLatestTurn({ sessionId, turnKind: "break-into-tickets" });
     const recorded = turn!.runs[0]!.attempts;
@@ -1574,7 +1581,7 @@ describe("the longest chain", () => {
 
     const result = await breakIntoTickets.run({ sessionId });
 
-    expect(interviewer.requests).toHaveLength(2);
+    expect(interviewer.requests).toHaveLength(3);
     expect(rejectionOf(interviewer.requests[1])).toBe(CHAIN);
     expect(result.tickets.map((ticket) => [ticket.number, ticket.slug, ticket.blockedBy])).toEqual([
       [1, "build-the-workspace", []],
@@ -1690,7 +1697,159 @@ describe("seam: a set shaped as the chain paragraph describes is accepted at onc
 
     const { tickets } = await breakIntoTickets.run({ sessionId });
 
-    expect(second.requests).toHaveLength(1);
+    expect(second.requests).toHaveLength(2);
     expect(tickets).toHaveLength(withGate ? 7 : 6);
+  });
+});
+
+describe("the consistency check after a breakdown", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  /** Build tickets 1 to `count`, none blocked, each building GOOD_SPEC_MARKDOWN's one story. */
+  function flat(count: number): ScriptedTurn {
+    return ticketsTurn(
+      Array.from({ length: count }, (_, index) => ({
+        number: index + 1,
+        slug: `ticket-${index + 1}`,
+      })),
+    );
+  }
+
+  const aFinding = {
+    kind: "undefaulted-value" as const,
+    at: {
+      artefact: "spec" as const,
+      section: "Implementation Decisions",
+      ticket: null,
+      quote: "The shape is a workspace.",
+    },
+    against: null,
+    question: "Which workspace layout?",
+    decisionKey: null,
+  };
+
+  it("makes one check-consistency request after the breakdown's, and stores its cards", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const interviewer = scriptInterviewer([
+      twoGoodTickets,
+      { kind: "check-consistency", result: { findings: [aFinding] } },
+    ]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "break-into-tickets",
+      "check-consistency",
+    ]);
+    expect(interviewer.remaining).toBe(0);
+    const list = await listConsistencyFindings.run({ sessionId });
+    expect(list).toMatchObject({ checked: true, current: true });
+    expect(list.findings.map((finding) => finding.question)).toEqual(["Which workspace layout?"]);
+    const check = await findLatestTurn({ sessionId, turnKind: "check-consistency" });
+    const breakdown = await findLatestTurn({ sessionId, turnKind: "break-into-tickets" });
+    expect(check?.outcome).toBe("succeeded");
+    expect(breakdown?.outcome).toBe("succeeded");
+    expect(await getSession.run({ id: sessionId })).toMatchObject({
+      turnStatus: "idle",
+      turnErrorCode: null,
+    });
+  });
+
+  it("makes none after a breakdown that exhausts its retries", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const bad = ticketsTurn([{ number: 1, slug: "one", blockedBy: [1] }]);
+    const interviewer = scriptInterviewer([bad, bad, bad]);
+
+    await expect(breakIntoTickets.run({ sessionId })).rejects.toThrow(/does not validate 3 times/);
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "break-into-tickets",
+      "break-into-tickets",
+      "break-into-tickets",
+    ]);
+    expect(await findLatestTurn({ sessionId, turnKind: "check-consistency" })).toBeNull();
+  });
+
+  it("keeps the tickets, and leaves the session idle with the error, when the pass is rate-limited", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    scriptInterviewer([twoGoodTickets, rateLimitedTurn("check-consistency", "Rate limited, try later.")]);
+
+    const { tickets } = await breakIntoTickets.run({ sessionId });
+
+    expect(tickets.map((ticket) => ticket.slug)).toEqual(["build-the-workspace", "store-on-disk"]);
+    expect((await listTickets.run({ sessionId })).tickets).toHaveLength(2);
+    expect(await getSession.run({ id: sessionId })).toMatchObject({
+      turnStatus: "idle",
+      turnErrorCode: "rate-limited",
+      turnErrorMessage: "Rate limited, try later.",
+    });
+    expect(await findLatestTurn({ sessionId, turnKind: "check-consistency" })).toMatchObject({
+      outcome: "rate-limited",
+    });
+    expect(await findLatestTurn({ sessionId, turnKind: "break-into-tickets" })).toMatchObject({
+      outcome: "succeeded",
+    });
+    expect(await listConsistencyFindings.run({ sessionId })).toMatchObject({
+      checked: false,
+      current: false,
+    });
+  });
+
+  it("keeps the tickets and stores a plain failure when the pass throws", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const fake = createFakeInterviewer([twoGoodTickets]);
+    setInterviewer({
+      ...fake,
+      breakIntoTickets: fake.breakIntoTickets,
+      checkConsistency: () => Promise.reject(new Error("The check broke.")),
+    });
+
+    const { tickets } = await breakIntoTickets.run({ sessionId });
+
+    expect(tickets).toHaveLength(2);
+    expect(await getSession.run({ id: sessionId })).toMatchObject({
+      turnStatus: "idle",
+      turnErrorCode: "failed",
+      turnErrorMessage: "The tickets were stored, but the consistency check that follows them failed.",
+    });
+    expect(await findLatestTurn({ sessionId, turnKind: "check-consistency" })).toMatchObject({
+      outcome: "failed",
+    });
+  });
+
+  it("skips the check above the ticket cap and notes it on the session", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const interviewer = scriptInterviewer([flat(MAX_HANDOFF_SCOUT_TICKETS + 1)]);
+
+    const { tickets } = await breakIntoTickets.run({ sessionId });
+
+    expect(tickets).toHaveLength(41);
+    expect(interviewer.requests.map((request) => request.kind)).toEqual(["break-into-tickets"]);
+    expect(await findLatestTurn({ sessionId, turnKind: "check-consistency" })).toBeNull();
+    expect(await getSession.run({ id: sessionId })).toMatchObject({
+      turnStatus: "idle",
+      turnErrorCode: "too-many-tickets",
+      turnErrorMessage:
+        "The breakdown has 41 tickets; one consistency check covers at most 40, so the check was skipped.",
+    });
+    expect((await listConsistencyFindings.run({ sessionId })).current).toBe(false);
+  });
+
+  it("checks a breakdown at the ticket cap", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const interviewer = scriptInterviewer([flat(MAX_HANDOFF_SCOUT_TICKETS)]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "break-into-tickets",
+      "check-consistency",
+    ]);
+    expect(await getSession.run({ id: sessionId })).toMatchObject({
+      turnStatus: "idle",
+      turnErrorCode: null,
+    });
+    expect((await listConsistencyFindings.run({ sessionId })).current).toBe(true);
   });
 });
