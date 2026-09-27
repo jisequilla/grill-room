@@ -364,7 +364,8 @@ kept, the rest dropped, and the attempt log says which. At most 20 findings.
 (`gr_consistency_findings`) whole and stamps the spec with the
 `ticketsGeneratedAt` it judged (`consistency_checked_for`) and its turn. A
 card whose kind and quotes (normalised) match a card the owner dismissed is
-stored dismissed. A failed check writes nothing. `list-consistency-findings`
+stored dismissed. A contradiction's two sides count as a pair in either
+order, both for this match and for the repeat rule. A failed check writes nothing. `list-consistency-findings`
 reports `current` only while that stamp matches `ticketsGeneratedAt` and the
 tickets are current with the spec: re-synthesizing the spec, reopening a
 decision, or a breakdown whose check failed or was skipped makes the cards

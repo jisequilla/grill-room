@@ -168,13 +168,38 @@ function placeReasons(
 
 /** Two findings of the same kind quoting the same words at the same place. */
 function sameFinding(a: ConsistencyFinding, b: ConsistencyFinding): boolean {
-  return (
-    a.kind === b.kind &&
-    a.at.artefact === b.at.artefact &&
-    a.at.section === b.at.section &&
-    a.at.ticket === b.at.ticket &&
-    normaliseQuote(a.at.quote) === normaliseQuote(b.at.quote)
-  );
+  if (a.kind !== b.kind) return false;
+  const [aFirst, aSecond] = orderedSides(a);
+  const [bFirst, bSecond] = orderedSides(b);
+  if (placeKey(aFirst) !== placeKey(bFirst)) return false;
+  // A contradiction is its pair of sides; every other kind is its `at`.
+  return a.kind !== "spec-ticket-contradiction" || placeKey(aSecond) === placeKey(bSecond);
+}
+
+/** A place as a comparable key: where it is, and its quote normalised. */
+function placeKey(place: ConsistencyPlace | null): string {
+  return place === null
+    ? "null"
+    : JSON.stringify([place.artefact, place.section, place.ticket, normaliseQuote(place.quote)]);
+}
+
+/**
+ * A finding's two sides in a fixed order. The check accepts a spec-ticket
+ * contradiction either way round, so its spec side always comes first here:
+ * the same contradiction reported with its sides swapped is the same finding.
+ */
+function orderedSides<Place extends { artefact: string }>(finding: {
+  kind: string;
+  at: Place;
+  against: Place | null;
+}): [Place, Place | null] {
+  const { at, against } = finding;
+  return finding.kind === "spec-ticket-contradiction" &&
+    against !== null &&
+    at.artefact === "ticket" &&
+    against.artefact === "spec"
+    ? [against, at]
+    : [at, against];
 }
 
 /**
@@ -252,16 +277,20 @@ export function keepValidFindings(
   };
 }
 
-/** A stored finding's dismissal match key: its kind and both quotes, normalised. */
+/**
+ * A stored finding's dismissal match key: its kind and both quotes,
+ * normalised, with a contradiction's spec side first whichever side is `at`.
+ */
 function matchKey(finding: {
   kind: string;
-  at: { quote: string };
-  against: { quote: string } | null;
+  at: ConsistencyPlace;
+  against: ConsistencyPlace | null;
 }): string {
+  const [first, second] = orderedSides(finding);
   return JSON.stringify([
     finding.kind,
-    normaliseQuote(finding.at.quote),
-    normaliseQuote(finding.against?.quote ?? ""),
+    normaliseQuote(first.quote),
+    normaliseQuote(second?.quote ?? ""),
   ]);
 }
 

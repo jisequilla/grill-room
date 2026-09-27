@@ -1749,6 +1749,7 @@ describe("the consistency check after a breakdown", () => {
     const check = await findLatestTurn({ sessionId, turnKind: "check-consistency" });
     const breakdown = await findLatestTurn({ sessionId, turnKind: "break-into-tickets" });
     expect(check?.outcome).toBe("succeeded");
+    expect(check?.model).toBe((await getSession.run({ id: sessionId })).model);
     expect(breakdown?.outcome).toBe("succeeded");
     expect(await getSession.run({ id: sessionId })).toMatchObject({
       turnStatus: "idle",

@@ -430,11 +430,6 @@ describe("what the adapter sends for a find-superseded check", () => {
   });
 });
 
-/**
- * The docs-folder turn is the one place the app points the model at the user's
- * own filesystem. These assertions are the security contract: what it may use,
- * where it may use it, and what it can never reach.
- */
 describe("what the adapter sends for a consistency check", () => {
   const SPEC = "## Implementation Decisions\n\n- Run data must outlast the benchmark horizon.";
   const aResult = (): CheckConsistencyResult => ({
@@ -505,7 +500,7 @@ describe("what the adapter sends for a consistency check", () => {
     '  value and no default. "Unpaid accepted bookings follow a defined timeout"',
     "  gives no timeout.",
     "- `unnamed-target`: a host, service, account or place named only by its",
-    '  role. "Deployable to a staging environment" names no host.',
+    '  role. "deployable to a staging environment" names no host.',
     "",
     "Return one entry in `findings` for each, at most 20:",
     "",
@@ -516,7 +511,8 @@ describe("what the adapter sends for a consistency check", () => {
     "  and `section` null.",
     "- `at.quote`: the words that leave the question open, copied exactly: the",
     "  same words, case, punctuation and markup. Quote a phrase or a sentence, not",
-    "  a paragraph.",
+    "  a paragraph. Keep the case the text has: a phrase taken from mid-sentence",
+    "  starts in lower case, even where an example above starts with a capital.",
     "- `against`: for a `spec-ticket-contradiction` only, the other side, in the",
     "  same form as `at`: one side in the spec and the other in a ticket. Null for",
     "  every other kind.",
@@ -622,6 +618,11 @@ describe("what the adapter sends for a consistency check", () => {
   });
 });
 
+/**
+ * The docs-folder turn is the one place the app points the model at the user's
+ * own filesystem. These assertions are the security contract: what it may use,
+ * where it may use it, and what it can never reach.
+ */
 describe("what the adapter sends for a readiness judgment", () => {
   it("constrains the output to the readiness schema, with every tool disabled", async () => {
     const runner = recordingRunner([

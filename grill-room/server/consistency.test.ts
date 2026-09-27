@@ -8,7 +8,13 @@ import {
   type ConsistencyFacts,
 } from "./consistency.js";
 import { consistencySpecMarkdown, consistencyTickets } from "./interviewer/fake.js";
-import type { ConsistencyFinding, ConsistencyPlace } from "./interviewer/index.js";
+import {
+  checkConsistencyResultSchema,
+  type ConsistencyFinding,
+  type ConsistencyPlace,
+  jsonSchemaFor,
+  MAX_CONSISTENCY_FINDINGS,
+} from "./interviewer/schemas.js";
 
 const FIXTURE_FACTS: ConsistencyFacts = {
   specMarkdown: consistencySpecMarkdown(),
@@ -19,6 +25,20 @@ const FIXTURE_FACTS: ConsistencyFacts = {
     waitsFor: waitsFor ?? null,
   })),
   settledKeys: ["storage"],
+};
+
+/** The fixture, with a gate ticket 5 whose words are only in its `waitsFor`. */
+const GATE_FACTS: ConsistencyFacts = {
+  ...FIXTURE_FACTS,
+  tickets: [
+    ...FIXTURE_FACTS.tickets,
+    {
+      number: 5,
+      title: "Get an account",
+      body: "The owner provides it.",
+      waitsFor: "A staging account from the owner",
+    },
+  ],
 };
 
 /** A spec and a ticket holding none of the prompt task section's examples. */
@@ -216,6 +236,18 @@ describe("consistencyReasons", () => {
       [[]],
     ],
     [
+      "a ticket quote from another ticket",
+      [aFinding({ at: inTicket(3, "capped at N x cadence") })],
+      FIXTURE_FACTS,
+      [[MISQUOTE("capped at N x cadence", "ticket 3")]],
+    ],
+    [
+      "a quote from a gate's waitsFor (D7)",
+      [aFinding({ kind: "unnamed-target", at: inTicket(5, "A staging account from the owner") })],
+      GATE_FACTS,
+      [[]],
+    ],
+    [
       "a ticket not in the breakdown",
       [aFinding({ at: inTicket(7, "capped at N x cadence") })],
       FIXTURE_FACTS,
@@ -331,6 +363,42 @@ describe("consistencyReasons", () => {
       [[], [], ["Finding 3 repeats finding 1. Report each finding once."]],
     ],
     [
+      "a contradiction repeated with its sides swapped",
+      [
+        aFinding({
+          kind: "spec-ticket-contradiction",
+          at: inSpec("Retention is a placeholder for a later ticket."),
+          against: inTicket(1, "Fill in Retention"),
+        }),
+        aFinding({
+          kind: "spec-ticket-contradiction",
+          at: inTicket(1, "Fill in  Retention"),
+          against: inSpec("Retention is a placeholder for a later ticket."),
+          question: "Now or later?",
+        }),
+      ],
+      FIXTURE_FACTS,
+      [[], ["Finding 2 repeats finding 1. Report each finding once."]],
+    ],
+    [
+      "two contradictions sharing a spec side but not a ticket side",
+      [
+        aFinding({
+          kind: "spec-ticket-contradiction",
+          at: inSpec("Retention is a placeholder for a later ticket."),
+          against: inTicket(1, "Fill in Retention"),
+        }),
+        aFinding({
+          kind: "spec-ticket-contradiction",
+          at: inSpec("Retention is a placeholder for a later ticket."),
+          against: inTicket(1, "delete run data once it is older than the retention window"),
+          question: "Is the window set now?",
+        }),
+      ],
+      FIXTURE_FACTS,
+      [[], []],
+    ],
+    [
       "a finding with several faults",
       [
         aFinding({
@@ -378,6 +446,24 @@ describe("consistencyReasons", () => {
     expect(reasons).toEqual([
       ["Finding 1's `against` names ticket 9, which is not in the breakdown. The tickets are 1-4."],
     ]);
+  });
+});
+
+describe("the result schema's finding cap (D8)", () => {
+  const findings = (count: number) =>
+    Array.from({ length: count }, (_, index) => aFinding({ question: `Question ${index + 1}?` }));
+
+  it(`accepts ${MAX_CONSISTENCY_FINDINGS} findings and refuses ${MAX_CONSISTENCY_FINDINGS + 1}`, () => {
+    expect(MAX_CONSISTENCY_FINDINGS).toBe(20);
+    expect(checkConsistencyResultSchema.safeParse({ findings: findings(20) }).success).toBe(true);
+    expect(checkConsistencyResultSchema.safeParse({ findings: findings(21) }).success).toBe(false);
+  });
+
+  it("hands the command line a schema that caps findings at 20", () => {
+    const schema = jsonSchemaFor("check-consistency") as {
+      properties: { findings: { maxItems?: number } };
+    };
+    expect(schema.properties.findings.maxItems).toBe(20);
   });
 });
 

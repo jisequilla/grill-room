@@ -1,7 +1,7 @@
 import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { normaliseQuote } from "../server/consistency.js";
+import { normaliseQuote, specSections } from "../server/consistency.js";
 import {
   consistencyFindingsResult,
   consistencySpecMarkdown,
@@ -266,6 +266,34 @@ describe("check-consistency", () => {
       expect(list.findings.map((finding) => finding.question)).toEqual([SEVEN[0]!.question]);
     });
 
+    it("rejects a decision key the tree holds but has reopened, and asks again", async () => {
+      const sessionId = await aSessionWithTickets();
+      await reopenDecision.run({ decisionId: `d-storage-${sessionId}` });
+      await confirm(sessionId);
+      scriptInterviewer([
+        { kind: "synthesize-spec", result: { markdown: consistencySpecMarkdown() } },
+        { kind: "break-into-tickets", result: { tickets: consistencyTickets() } },
+      ]);
+      await synthesizeSpec.run({ sessionId });
+      await breakIntoTickets.run({ sessionId });
+      const [fromStorage] = SEVEN;
+      expect(fromStorage!.decisionKey).toBe("storage");
+      const interviewer = scriptInterviewer([
+        checkTurn([fromStorage!]),
+        checkTurn([{ ...fromStorage!, decisionKey: null }]),
+      ]);
+
+      const list = await checkConsistency.run({ sessionId });
+
+      expect((interviewer.requests[0] as CheckConsistencyRequest).context.decisions).toContainEqual(
+        expect.objectContaining({ key: "storage" }),
+      );
+      expect((interviewer.requests[1] as CheckConsistencyRequest).rejectionReason).toBe(
+        'Finding 1 names decision "storage", which is not a settled decision of this tree. Give a settled decision\'s key, or null.',
+      );
+      expect(list.findings.map((finding) => finding.decisionKey)).toEqual([null]);
+    });
+
     it("after the last retry, keeps the valid findings and notes the dropped ones", async () => {
       const sessionId = await aSessionWithTickets();
       const invalid = { ...SEVEN[1]!, at: inTicket(2, "capped at M x cadence") };
@@ -351,6 +379,75 @@ describe("check-consistency", () => {
         "open",
         "open",
       ]);
+    });
+
+    it("stores a dismissed contradiction that recurs with its sides swapped dismissed", async () => {
+      const sessionId = await aSessionWithTickets();
+      scriptInterviewer([checkTurn(SEVEN)]);
+      const first = await checkConsistency.run({ sessionId });
+      const contradiction = first.findings[3]!;
+      expect(contradiction.kind).toBe("spec-ticket-contradiction");
+      await dismissConsistencyFinding.run({ findingId: contradiction.id });
+      const swapped = SEVEN.map((finding, index) =>
+        index === 3 ? { ...finding, at: finding.against!, against: finding.at } : finding,
+      );
+      scriptInterviewer([checkTurn(swapped)]);
+
+      const list = await checkConsistency.run({ sessionId });
+
+      expect(list.findings[3]).toMatchObject({
+        at: SEVEN[3]!.against,
+        against: SEVEN[3]!.at,
+        status: "dismissed",
+      });
+    });
+
+    it.each<[string, (finding: ConsistencyFinding) => ConsistencyFinding, number]>([
+      [
+        "another kind at the dismissed quote",
+        (finding) => ({ ...finding, kind: "unnamed-target" }),
+        4,
+      ],
+      [
+        "a contradiction with another `against` quote",
+        (finding) => ({
+          ...finding,
+          against: inTicket(1, "delete run data once it is older than the retention window"),
+        }),
+        3,
+      ],
+    ])("stores %s open", async (_, change, index) => {
+      const sessionId = await aSessionWithTickets();
+      scriptInterviewer([checkTurn(SEVEN)]);
+      const first = await checkConsistency.run({ sessionId });
+      await dismissConsistencyFinding.run({ findingId: first.findings[index]!.id });
+      const changed = SEVEN.map((finding, position) =>
+        position === index ? change(finding) : finding,
+      );
+      scriptInterviewer([checkTurn(changed)]);
+
+      const list = await checkConsistency.run({ sessionId });
+
+      expect(list.findings).toHaveLength(7);
+      expect(list.findings.map((finding) => finding.status)).toEqual(SEVEN.map(() => "open"));
+    });
+
+    it("stores one card for a contradiction reported in both orders", async () => {
+      const sessionId = await aSessionWithTickets();
+      const both = [
+        SEVEN[3]!,
+        { ...SEVEN[3]!, at: SEVEN[3]!.against!, against: SEVEN[3]!.at, question: "Now or later?" },
+      ];
+      const interviewer = scriptInterviewer(
+        Array.from({ length: MAX_TURN_RETRIES + 1 }, () => checkTurn(both)),
+      );
+
+      const list = await checkConsistency.run({ sessionId });
+
+      expect((interviewer.requests[1] as CheckConsistencyRequest).rejectionReason).toBe(
+        "Finding 2 repeats finding 1. Report each finding once.",
+      );
+      expect(list.findings.map((finding) => finding.question)).toEqual([SEVEN[3]!.question]);
     });
 
     it("stores a finding matching an open card open, as a fresh card", async () => {
@@ -571,6 +668,21 @@ describe("check-consistency", () => {
       expect(after.turnStatus).toBe(before.turnStatus);
     });
 
+    it("checks the ticket cap last: stale tickets over the cap are refused as not current", async () => {
+      const sessionId = await aSessionWithTickets({
+        markdown: GOOD_SPEC_MARKDOWN,
+        tickets: flatTickets(MAX_HANDOFF_SCOUT_TICKETS + 1),
+      });
+      scriptInterviewer([{ kind: "synthesize-spec", result: { markdown: GOOD_SPEC_MARKDOWN } }]);
+      await synthesizeSpec.run({ sessionId });
+      const interviewer = scriptInterviewer([]);
+
+      await expect(checkConsistency.run({ sessionId })).rejects.toMatchObject({
+        errorCode: "tickets-not-current",
+      });
+      expect(interviewer.requests).toHaveLength(0);
+    });
+
     it("checks exactly as many tickets as one check covers", async () => {
       const sessionId = await aSessionWithTickets({
         markdown: GOOD_SPEC_MARKDOWN,
@@ -674,110 +786,152 @@ describe("check-consistency", () => {
   });
 
   describe("seam: every finding shaped as the prompt describes passes the check", () => {
-    it("accepts one finding of every kind, both contradiction orders and both decision keys, at once", async () => {
-      const sessionId = await aSessionWithSpec();
-      const breakdown = scriptInterviewer([
-        { kind: "break-into-tickets", result: { tickets: consistencyTickets() } },
-      ]);
-      await breakIntoTickets.run({ sessionId });
-      const sent = breakdown.requests.find(
-        (request): request is CheckConsistencyRequest => request.kind === "check-consistency",
-      )!;
-      const prompt = buildPrompt(sent);
+    /** The fixture's tickets, and a gate ticket 5 that ticket 4 waits for. */
+    const withGate: Ticket[] = [
+      ...consistencyTickets().map((ticket) =>
+        ticket.number === 4 ? { ...ticket, blockedBy: [1, 2, 3, 5] } : ticket,
+      ),
+      {
+        number: 5,
+        slug: "staging-account",
+        title: "Get a staging account",
+        body: "The owner provides a staging account.",
+        blockedBy: [],
+        implements: [],
+        kind: "gate",
+        waitsFor: "An account on the staging host, from the owner",
+      },
+    ];
 
-      // The section names as the model reads them: every "## " heading
-      // inside the fenced spec under "## The spec".
-      const lines = prompt.split("\n");
-      const specStart = lines.indexOf("## The spec") + 2;
-      const fence = lines[specStart]!.replace("markdown", "");
-      const specEnd = lines.indexOf(fence, specStart + 1);
-      const sections = lines
-        .slice(specStart + 1, specEnd)
-        .flatMap((line) => (line.startsWith("## ") ? [line.slice(3)] : []));
-      const section = sections.find((name) => name === "Implementation Decisions")!;
-      expect(section).toBeDefined();
-      // The one settled decision in the prompt's tree.
-      expect(prompt).toContain("[storage]");
+    /** Each kind's example, exactly as the task section quotes it. */
+    const EXAMPLES = {
+      threshold: "Run data must outlast the benchmark horizon",
+      cap: "capped at N x cadence",
+      oneCase: "A run whose run_id starts with `wf_` gets a root span",
+      placeholder: "a placeholder for a later ticket",
+      choice: "Use Checkout or Payment Element",
+      timeout: "Unpaid accepted bookings follow a defined timeout",
+      target: "deployable to a staging environment",
+    };
 
-      const spec = (quote: string): ConsistencyPlace => ({
-        artefact: "spec",
-        section,
-        ticket: null,
-        quote,
-      });
-      const ticket = (number: number, quote: string): ConsistencyPlace => ({
-        artefact: "ticket",
-        section: null,
-        ticket: number,
-        quote,
-      });
-      const shaped: ConsistencyFinding[] = [
-        {
-          kind: "unquantified-threshold",
-          at: spec("Run data must outlast the benchmark horizon"),
-          against: null,
-          question: "How long after the benchmark ends must run data be kept?",
-          decisionKey: null,
-        },
-        {
-          kind: "unquantified-threshold",
-          at: ticket(2, "capped at N x cadence"),
-          against: null,
-          question: "What is N?",
-          decisionKey: "storage",
-        },
-        {
-          kind: "one-case-rule",
-          at: spec("A run whose run_id starts with `wf_` gets a root span"),
-          against: null,
-          question: "Which root span does a run driven by hand get?",
-          decisionKey: null,
-        },
-        {
-          kind: "spec-ticket-contradiction",
-          at: spec("a placeholder for a later ticket"),
-          against: ticket(1, "Fill in Retention"),
-          question: "Is Retention filled in now or later?",
-          decisionKey: null,
-        },
-        {
-          kind: "spec-ticket-contradiction",
-          at: ticket(1, "Fill in Retention"),
-          against: spec("a placeholder for a later ticket"),
-          question: "Does ticket 1 fill in Retention now?",
-          decisionKey: null,
-        },
-        {
-          kind: "open-choice",
-          at: ticket(3, "Use Checkout or Payment Element"),
-          against: null,
-          question: "Which does the booking payment use: Checkout or Payment Element?",
-          decisionKey: null,
-        },
-        {
-          kind: "undefaulted-value",
-          at: spec("Unpaid accepted bookings follow a defined timeout"),
-          against: null,
-          question: "How long can an accepted booking stay unpaid?",
-          decisionKey: null,
-        },
-        {
-          // The example opens its sentence with "Deployable"; the ticket's
-          // own words, which the quote must copy, have it in lower case.
-          kind: "unnamed-target",
-          at: ticket(4, "deployable to a staging environment"),
-          against: null,
-          question: "Which host is the staging environment?",
-          decisionKey: null,
-        },
-      ];
-      const interviewer = scriptInterviewer([checkTurn(shaped)]);
+    it.each<[string, boolean]>([
+      ["with the spec side first", true],
+      ["with the ticket side first", false],
+    ])(
+      "accepts one finding of every kind, quoting the examples verbatim, %s, at once",
+      async (_, specFirst) => {
+        const sessionId = await aSessionWithSpec();
+        const breakdown = scriptInterviewer([
+          { kind: "break-into-tickets", result: { tickets: withGate } },
+        ]);
+        await breakIntoTickets.run({ sessionId });
+        const sent = breakdown.requests.find(
+          (request): request is CheckConsistencyRequest => request.kind === "check-consistency",
+        )!;
+        const prompt = buildPrompt(sent);
 
-      const list = await checkConsistency.run({ sessionId });
+        // Every example is quoted as the prompt gives it.
+        for (const example of Object.values(EXAMPLES)) {
+          expect(normaliseQuote(prompt)).toContain(`"${example}"`);
+        }
+        // The section names as the model reads them: every "## " heading
+        // inside the fenced spec under "## The spec", the same the check reads.
+        const lines = prompt.split("\n");
+        const specStart = lines.indexOf("## The spec") + 2;
+        const fence = lines[specStart]!.replace("markdown", "");
+        const specEnd = lines.indexOf(fence, specStart + 1);
+        const sections = lines
+          .slice(specStart + 1, specEnd)
+          .flatMap((line) => (line.startsWith("## ") ? [line.slice(3)] : []));
+        expect(sections).toEqual(
+          specSections(consistencySpecMarkdown()).map((found) => found.name),
+        );
+        const section = sections.find((name) => name === "Implementation Decisions")!;
+        // The one settled decision in the prompt's tree.
+        expect(prompt).toContain("[storage]");
+        expect(prompt).toContain("Waits for: An account on the staging host, from the owner");
 
-      expect(interviewer.requests).toHaveLength(1);
-      expect(list.findings).toHaveLength(shaped.length);
-      expect(new Set(list.findings.map((finding) => finding.kind)).size).toBe(6);
-    });
+        const spec = (quote: string): ConsistencyPlace => ({
+          artefact: "spec",
+          section,
+          ticket: null,
+          quote,
+        });
+        const ticket = (number: number, quote: string): ConsistencyPlace => ({
+          artefact: "ticket",
+          section: null,
+          ticket: number,
+          quote,
+        });
+        const [placeholder, fillIn] = [spec(EXAMPLES.placeholder), ticket(1, "Fill in Retention")];
+        const shaped: ConsistencyFinding[] = [
+          {
+            kind: "unquantified-threshold",
+            at: spec(EXAMPLES.threshold),
+            against: null,
+            question: "How long after the benchmark ends must run data be kept?",
+            decisionKey: null,
+          },
+          {
+            kind: "unquantified-threshold",
+            at: ticket(2, EXAMPLES.cap),
+            against: null,
+            question: "What is N?",
+            decisionKey: "storage",
+          },
+          {
+            kind: "one-case-rule",
+            at: spec(EXAMPLES.oneCase),
+            against: null,
+            question: "Which root span does a run driven by hand get?",
+            decisionKey: null,
+          },
+          {
+            kind: "spec-ticket-contradiction",
+            at: specFirst ? placeholder : fillIn,
+            against: specFirst ? fillIn : placeholder,
+            question: "Is Retention filled in now or later?",
+            decisionKey: null,
+          },
+          {
+            kind: "open-choice",
+            at: ticket(3, EXAMPLES.choice),
+            against: null,
+            question: "Which does the booking payment use: Checkout or Payment Element?",
+            decisionKey: null,
+          },
+          {
+            kind: "undefaulted-value",
+            at: spec(EXAMPLES.timeout),
+            against: null,
+            question: "How long can an accepted booking stay unpaid?",
+            decisionKey: null,
+          },
+          {
+            kind: "unnamed-target",
+            at: ticket(4, EXAMPLES.target),
+            against: null,
+            question: "Which host is the staging environment?",
+            decisionKey: null,
+          },
+          {
+            // A gate's words are its title, its body and its `waitsFor` (D7).
+            kind: "unnamed-target",
+            at: ticket(5, "An account on the staging host"),
+            against: null,
+            question: "Which account, on which host?",
+            decisionKey: null,
+          },
+        ];
+        const interviewer = scriptInterviewer([checkTurn(shaped)]);
+
+        const list = await checkConsistency.run({ sessionId });
+
+        expect(interviewer.requests).toHaveLength(1);
+        expect(list.findings).toHaveLength(shaped.length);
+        expect(new Set(list.findings.map((finding) => finding.kind)).size).toBe(6);
+      },
+    );
   });
 });
+
