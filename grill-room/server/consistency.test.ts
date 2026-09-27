@@ -230,6 +230,18 @@ describe("consistencyReasons", () => {
       [[]],
     ],
     [
+      "a mid-sentence ticket quote that keeps its capital",
+      [aFinding({ kind: "open-choice", at: inTicket(3, "Checkout or Payment Element") })],
+      FIXTURE_FACTS,
+      [[]],
+    ],
+    [
+      "the same mid-sentence quote lower-cased",
+      [aFinding({ kind: "open-choice", at: inTicket(3, "checkout or Payment Element") })],
+      FIXTURE_FACTS,
+      [[MISQUOTE("checkout or Payment Element", "ticket 3")]],
+    ],
+    [
       "a ticket quote from its title",
       [aFinding({ kind: "open-choice", at: inTicket(3, "Take booking payments") })],
       FIXTURE_FACTS,

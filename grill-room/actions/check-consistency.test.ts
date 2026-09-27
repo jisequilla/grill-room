@@ -915,6 +915,15 @@ describe("check-consistency", () => {
             decisionKey: null,
           },
           {
+            // A phrase from mid-sentence that opens on a capitalised word
+            // keeps its capital: the case rule is the text's, letter by letter.
+            kind: "open-choice",
+            at: ticket(3, "Checkout or Payment Element"),
+            against: null,
+            question: "Checkout or Payment Element: which one?",
+            decisionKey: null,
+          },
+          {
             // A gate's words are its title, its body and its `waitsFor` (D7).
             kind: "unnamed-target",
             at: ticket(5, "An account on the staging host"),
