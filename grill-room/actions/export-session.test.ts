@@ -1530,6 +1530,7 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
     const expectedBundlePath = row.effective === "ignored" ? bundleDir : ".scratch/grill-room";
     const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
     expect(handoff.content).toContain(`- Spec: \`${expectedBundlePath}/spec.md\``);
+    expect(handoff.content).not.toContain("git could not say at export");
     const brief = plan.files.find((file) => file.relativePath === "briefs/01-build-the-workspace.md")!;
     expect(brief.content).toContain(`\`${expectedBundlePath}/spec.md\``);
   });
@@ -1545,6 +1546,9 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
     expect(plan.greenfield).toBe(true);
     const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
     expect(handoff.content).toContain("- Spec: `.scratch/grill-room/spec.md`");
+    expect(handoff.content).toContain(
+      "git could not say at export whether it ignores that folder, so these paths follow the project's visibility flag, `tracked`",
+    );
   });
 
   it("root no longer a git repository, stored ignored: falls back to the stored flag, absolute paths", async () => {
@@ -1559,8 +1563,25 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
     const bundleDir = path.join(root, ".scratch", "grill-room");
     const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
     expect(handoff.content).toContain(`- Spec: \`${bundleDir}/spec.md\``);
+    expect(handoff.content).toContain(
+      "git could not say at export whether it ignores that folder, so these paths follow the project's visibility flag, `ignored`",
+    );
     const brief = plan.files.find((file) => file.relativePath === "briefs/01-build-the-workspace.md")!;
     expect(brief.content).toContain(`the spec at \`${bundleDir}/spec.md\``);
+  });
+
+  it("export folder is a symlink, stored tracked: the path note says git could not check", async () => {
+    const { root, session } = await aHandoffSession({ visibility: "tracked" });
+    await fs.mkdir(path.join(root, "actual-export"));
+    await fs.symlink("actual-export", path.join(root, ".scratch"));
+
+    const plan = await planExportBundle({ sessionId: session.id, slug: "grill-room" });
+
+    expect(plan.effectiveVisibility).toBe("tracked");
+    const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
+    expect(handoff.content).toContain(
+      "git could not say at export whether it ignores that folder, so these paths follow the project's visibility flag, `tracked`",
+    );
   });
 
   it("checks the bundle folder itself: a negation that un-ignores it wins over its ignored parent's contents", async () => {

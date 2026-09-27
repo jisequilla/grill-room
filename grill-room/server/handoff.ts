@@ -172,6 +172,11 @@ export interface ExportFacts {
   visibility: ProjectVisibility;
   greenfield: boolean;
   /**
+   * True when git gave no answer at export, so `visibility` is the stored
+   * flag rather than something git measured. Absent otherwise.
+   */
+  visibilityUnchecked?: boolean;
+  /**
    * Present exactly when the brief grounding is current: the waves in which
    * no two tickets change the same file, and the orderings that separation
    * added. Absent, HANDOFF says overlaps were not checked.
@@ -403,6 +408,18 @@ function inlineCode(value: string): string {
 
 function pathsNote(source: HandoffSource, facts: ExportFacts): string {
   const { project } = source;
+  if (facts.visibilityUnchecked) {
+    if (facts.visibility === "tracked") {
+      return [
+        `Paths below are relative to the repository root (\`${project.rootPath}\`).`,
+        `The bundle lives in \`${project.workingExportFolder}\`; git could not say at export whether it ignores that folder, so these paths follow the project's visibility flag, \`tracked\`.`,
+      ].join(" ");
+    }
+    return [
+      `Paths below are absolute, into the main checkout at \`${project.rootPath}\`.`,
+      `The bundle lives in \`${project.workingExportFolder}\`; git could not say at export whether it ignores that folder, so these paths follow the project's visibility flag, \`ignored\`.`,
+    ].join(" ");
+  }
   if (facts.visibility === "tracked" && facts.greenfield) {
     return [
       `Paths below are relative to the repository root (\`${project.rootPath}\`).`,
