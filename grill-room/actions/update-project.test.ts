@@ -19,6 +19,18 @@ describe("update-project", () => {
     });
   }
 
+  it("register-project stores a given tickets in flight", async () => {
+    const project = await registerProject.run({
+      root: repos.create(),
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+      maxTicketsInFlight: 5,
+    });
+
+    expect(project.maxTicketsInFlight).toBe(5);
+    expect((await getProject.run({ id: project.id })).maxTicketsInFlight).toBe(5);
+  });
+
   it("update-project refuses tickets in flight of 11 with status 400 and its code", async () => {
     const project = await aProject();
 
@@ -35,18 +47,24 @@ describe("update-project", () => {
 
     // The framework turns a numeric string such as "3" into 3 before the
     // schema checks it, as it does for every field; text that is no number
-    // is refused by the schema.
+    // is refused by the schema. The action route answers 400 for exactly
+    // this message prefix ("Invalid action parameters"), and the refusal
+    // carries no registry code.
     const refused = await Promise.resolve()
       .then(() =>
         updateProject.run({ id: project.id, maxTicketsInFlight: "three" as unknown as number }),
       )
       .then(
         () => null,
-        (error: unknown) => error as { errorCode?: string },
+        (error: unknown) => error as Error & { errorCode?: string; statusCode?: number },
       );
-    expect(refused).not.toBeNull();
-    expect(refused?.errorCode).not.toBe("invalid-max-tickets-in-flight");
-    expect((await getProject.run({ id: project.id })).maxTicketsInFlight).toBe(3);
+    expect(refused).toBeInstanceOf(Error);
+    expect(refused!.message).toMatch(
+      /^Invalid action parameters — maxTicketsInFlight: Invalid input: expected number, received string\./,
+    );
+    expect(refused!.errorCode).toBeUndefined();
+    expect(refused!.statusCode).toBeUndefined();
+    expect(await getProject.run({ id: project.id })).toEqual(project);
   });
 
   it("changes tickets in flight, and get-project reports it", async () => {

@@ -1637,6 +1637,19 @@ describe("what the adapter sends to break a spec into tickets", () => {
     const prompt = valueOf(runner.invocations[0]!.args, "-p") as string;
 
     expect(prompt).toContain("## Your task: break the spec into tickets");
+    // The opening never makes build order a dependency: numbering is just
+    // numbering, and `blockedBy` names the tickets whose output a ticket uses.
+    expect(prompt).toContain(
+      [
+        "complete it. Number them 1, 2, 3 and so on. Give",
+        "each a short kebab-case `slug`, a title, and a body that states what to",
+        "build and how it will be judged. In `blockedBy`, list the numbers of the",
+        "tickets whose output this ticket uses; leave it empty for tickets that",
+        "can start at once.",
+      ].join("\n"),
+    );
+    expect(prompt).not.toContain("in the order they should be built");
+    expect(prompt).not.toContain("must land first");
     expect(prompt).toContain(
       [
         "Each ticket must leave the build green on its own, since its builder",

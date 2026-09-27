@@ -496,6 +496,18 @@ describe("named scenarios for every request kind", () => {
     expect(interviewer.remainingFor(session.id)).toBe(0);
   });
 
+  it("long-chain is registered by name and ends with the long breakdown and its flatter retry", () => {
+    const session = "long-chain-session";
+    const interviewer = useScenario(session, "long-chain");
+    const turns = fakeScenarios["long-chain"]!.turns;
+
+    expect(interviewer.remainingFor(session)).toBe(turns.length);
+    expect(turns.slice(-2).map((turn) => turn.kind)).toEqual([
+      "break-into-tickets",
+      "break-into-tickets",
+    ]);
+  });
+
   it("refusal-then-success scripts one refused attempt and the accepted retry, in the same turn", async () => {
     const session = await aSession();
     const interviewer = useScenario(session.id, "refusal-then-success");

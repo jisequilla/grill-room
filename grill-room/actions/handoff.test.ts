@@ -11,6 +11,7 @@ import {
   parseBriefs,
   renderBrief,
   renderHandoff,
+  renderHandoffMarkdown,
 } from "../server/handoff.js";
 import {
   resetInterviewer,
@@ -337,6 +338,26 @@ describe("handoff generation", () => {
 
     await updateProject.run({ id: project.id, adversarialReview: false });
     expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(true);
+  });
+
+  it("renders the project's tickets in flight in the cap line and the checked Waves intro", async () => {
+    const { session, project } = await aReadySession();
+    await updateProject.run({ id: project.id, maxTicketsInFlight: 2 });
+
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+    expect(markdown).toContain("\n- Run at most 2 tickets at a time, even when a wave is wider.");
+
+    const loaded = await loadHandoffSource(session.id);
+    if (!("source" in loaded)) throw new Error("expected a handoff source");
+    expect(loaded.source.project.maxTicketsInFlight).toBe(2);
+    const checked = renderHandoffMarkdown(loaded.source, false, {
+      visibility: "tracked",
+      greenfield: false,
+      waves: loaded.source.waves,
+      implicitEdges: [],
+    });
+    expect(checked).toContain("\n- Run at most 2 tickets at a time, even when a wave is wider.");
+    expect(checked).toContain("in its own worktree; start with at most 2 at a time.");
   });
 
   it("refuses to regenerate over edits without confirmation, and overwrites them with it", async () => {

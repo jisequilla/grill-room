@@ -1946,6 +1946,19 @@ describe("execution plan", () => {
     expect(lineOf(renderHandoffMarkdown(source), "- Wave widths")).toBe(line);
   });
 
+  it("the wave widths line follows the waves the overlap separation shows", () => {
+    const source = withTickets([{ number: 1 }, { number: 2 }, { number: 3 }], [[1, 2, 3]]);
+    const markdown = renderHandoffMarkdown(source, false, {
+      ...plain,
+      waves: [[1, 2], [3]],
+      implicitEdges: [{ ticket: 3, waitsFor: 1, sharedPaths: ["a.ts"] }],
+    });
+
+    expect(lineOf(markdown, "- Wave widths")).toBe(
+      "- Wave widths, in build tickets: 2, 1 (wave 1 first).",
+    );
+  });
+
   it.each<[string, number | undefined, boolean, string]>([
     ["absent, checked", undefined, true, `- Run at most 3 tickets at a time, even when a wave is wider. ${WHY}`],
     ["3, checked", 3, true, `- Run at most 3 tickets at a time, even when a wave is wider. ${WHY}`],
