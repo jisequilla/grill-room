@@ -1,5 +1,5 @@
 import { eq } from "@agent-native/core/db/schema";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   resetInterviewer,
@@ -8,8 +8,11 @@ import {
 import { anAssessReadinessResult } from "../server/interviewer/test-fixtures.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import assessReadiness from "./assess-readiness.js";
+import addDecision from "./add-decision.js";
 import createSession from "./create-session.js";
+import listLooseEnds from "./list-loose-ends.js";
 import listSessions from "./list-sessions.js";
+import reopenDecision from "./reopen-decision.js";
 
 describe("list-sessions", () => {
   useTestDatabase();
@@ -108,6 +111,180 @@ describe("list-sessions", () => {
       [ready.id]: "ready",
       [notReady.id]: "not-ready",
       [stale.id]: null,
+    });
+  });
+
+  describe("looseEndCount", () => {
+    async function insertDecision(
+      sessionId: string,
+      overrides: Partial<typeof schema.decisions.$inferInsert> & {
+        id: string;
+        key: string;
+        questionTitle: string;
+      },
+    ) {
+      const now = new Date().toISOString();
+      await getDb()
+        .insert(schema.decisions)
+        .values({
+          sessionId,
+          questionBody: "",
+          offeredChoicesJson: "[]",
+          dependsOnJson: "[]",
+          introducedBy: "interviewer",
+          createdAt: now,
+          updatedAt: now,
+          ...overrides,
+        });
+    }
+
+    async function insertSettled(sessionId: string, id: string) {
+      await insertDecision(sessionId, {
+        id,
+        key: `${id}-key`,
+        questionTitle: id,
+        answerKind: "own-answer",
+        currentAnswer: "An answer",
+        settledAt: new Date().toISOString(),
+      });
+    }
+
+    async function insertLooseEnd(
+      sessionId: string,
+      id: string,
+      answerKind: "unknown" | "deferred",
+    ) {
+      await insertDecision(sessionId, {
+        id,
+        key: `${id}-key`,
+        questionTitle: id,
+        answerKind,
+        currentAnswer: answerKind === "unknown" ? "Not sure" : null,
+      });
+    }
+
+    async function countOf(sessionId: string) {
+      const row = (await listSessions.run({})).find(
+        (session) => session.id === sessionId,
+      );
+      return row?.looseEndCount;
+    }
+
+    it("is 0 for a session with no decisions", async () => {
+      const session = await createSession.run({ title: "Empty", idea: "One" });
+      expect(await countOf(session.id)).toBe(0);
+    });
+
+    it("is 0 for a session whose decisions are all settled", async () => {
+      const session = await createSession.run({ title: "Settled", idea: "One" });
+      await insertSettled(session.id, "d-a");
+      await insertSettled(session.id, "d-b");
+      expect(await countOf(session.id)).toBe(0);
+    });
+
+    it("counts an unknown and a deferred decision but not a settled one", async () => {
+      const session = await createSession.run({ title: "Mixed", idea: "One" });
+      await insertLooseEnd(session.id, "d-unknown", "unknown");
+      await insertLooseEnd(session.id, "d-deferred", "deferred");
+      await insertSettled(session.id, "d-settled");
+      expect(await countOf(session.id)).toBe(2);
+    });
+
+    it("puts each session's count on its own session", async () => {
+      const one = await createSession.run({ title: "One", idea: "One" });
+      const three = await createSession.run({ title: "Three", idea: "Three" });
+      await insertLooseEnd(one.id, "d-1", "unknown");
+      await insertLooseEnd(three.id, "d-3a", "unknown");
+      await insertLooseEnd(three.id, "d-3b", "deferred");
+      await insertLooseEnd(three.id, "d-3c", "deferred");
+
+      expect(await countOf(one.id)).toBe(1);
+      expect(await countOf(three.id)).toBe(3);
+    });
+
+    it("equals the length of list-loose-ends for a session with every loose-end category", async () => {
+      const session = await createSession.run({ title: "Every", idea: "One" });
+      const now = new Date().toISOString();
+      await insertLooseEnd(session.id, "d-unknown", "unknown");
+      await insertLooseEnd(session.id, "d-deferred", "deferred");
+      await insertDecision(session.id, {
+        id: "d-proto",
+        key: "proto-key",
+        questionTitle: "Needs a prototype",
+        answerKind: "prototype-flagged",
+      });
+      await insertDecision(session.id, {
+        id: "d-pushed",
+        key: "pushed-key",
+        questionTitle: "Pushed back",
+        answerKind: "pushed-back",
+        currentAnswer: "Too vague",
+      });
+      await insertDecision(session.id, {
+        id: "d-pushed-withdrawn",
+        key: "pushed-withdrawn-key",
+        questionTitle: "Pushed back, withdrawn",
+        answerKind: "pushed-back",
+        currentAnswer: "Too vague",
+        withdrawnAt: now,
+      });
+      await insertDecision(session.id, {
+        id: "d-never",
+        key: "never-key",
+        questionTitle: "Never answered",
+      });
+      await insertSettled(session.id, "d-settled");
+      await insertDecision(session.id, {
+        id: "d-base",
+        key: "base-key",
+        questionTitle: "Base",
+        answerKind: "own-answer",
+        currentAnswer: "A workspace",
+        settledAt: now,
+      });
+      await insertDecision(session.id, {
+        id: "d-dependent",
+        key: "dependent-key",
+        questionTitle: "Dependent",
+        answerKind: "own-answer",
+        currentAnswer: "On disk",
+        settledAt: now,
+        dependsOnJson: JSON.stringify(["d-base"]),
+      });
+      await addDecision.run({ sessionId: session.id, title: "Unplaced", body: "" });
+      await reopenDecision.run({ decisionId: "d-base" });
+
+      const expected = (await listLooseEnds.run({ sessionId: session.id })).length;
+
+      expect(expected).toBeGreaterThan(5);
+      expect(await countOf(session.id)).toBe(expected);
+    });
+
+    it("reads the decisions table once, however many sessions there are", async () => {
+      await createSession.run({ title: "A", idea: "One" });
+      await createSession.run({ title: "B", idea: "Two" });
+      await createSession.run({ title: "C", idea: "Three" });
+
+      const db = getDb();
+      const originalSelect = db.select.bind(db);
+      const tablesRead: unknown[] = [];
+      const spy = vi.spyOn(db, "select").mockImplementation(((...args: unknown[]) => {
+        const builder = (originalSelect as (...a: unknown[]) => any)(...args);
+        const originalFrom = builder.from.bind(builder);
+        builder.from = (table: unknown, ...rest: unknown[]) => {
+          tablesRead.push(table);
+          return originalFrom(table, ...rest);
+        };
+        return builder;
+      }) as typeof db.select);
+
+      try {
+        await listSessions.run({});
+      } finally {
+        spy.mockRestore();
+      }
+
+      expect(tablesRead.filter((table) => table === schema.decisions)).toHaveLength(1);
     });
   });
 });

@@ -143,7 +143,7 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
   // scoped to the header rather than an accessible heading name.
   await expect(page.locator("header")).toContainText("Sessions");
 
-  await page.getByRole("button", { name: "New session" }).click();
+  await page.getByTestId("header-new-session").click();
   await expect(
     page.getByRole("heading", { name: "New session" }),
   ).toBeVisible();

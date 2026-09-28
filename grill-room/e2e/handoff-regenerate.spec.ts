@@ -73,7 +73,7 @@ test("keeps an edited brief on regeneration, names it outdated, and replaces it 
 }) => {
   // ---- Session list -> create a session ---------------------------------
   await page.goto("/");
-  await page.getByRole("button", { name: "New session" }).click();
+  await page.getByTestId("header-new-session").click();
   await expect(page.getByRole("heading", { name: "New session" })).toBeVisible();
 
   await page.getByLabel("Title").fill("Handoff regenerate e2e");

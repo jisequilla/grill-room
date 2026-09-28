@@ -13,7 +13,7 @@ export async function createSession(
   { title, idea }: { title: string; idea: string },
 ): Promise<string> {
   await page.goto("/");
-  await page.getByRole("button", { name: "New session" }).click();
+  await page.getByTestId("header-new-session").click();
   await expect(
     page.getByRole("heading", { name: "New session" }),
   ).toBeVisible();

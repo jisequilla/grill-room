@@ -490,9 +490,9 @@ Sidebar
   Projects                              registry and project pages
   RECENT                                5 most recent unconfirmed sessions,
     • Offline training log   owed 1       each with a state dot and an owed count
-    • Decisions.md export    2/6
+    • Decisions.md export    owed 2
   ────────
-  footer: workspace / account menu      (Database and Observability live here)
+  footer: Settings · Database links, then the workspace / account menu (Observability lives there)
 ```
 
 - `/` shows the Sessions list: a project filter (All · each project ·

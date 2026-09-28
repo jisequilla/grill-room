@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 const IDEA = "An idea that must not be lost";
 
 async function openDialog(page: Page) {
-  await page.getByRole("button", { name: "New session" }).click();
+  await page.getByTestId("header-new-session").click();
   await expect(
     page.getByRole("heading", { name: "New session" }),
   ).toBeVisible();

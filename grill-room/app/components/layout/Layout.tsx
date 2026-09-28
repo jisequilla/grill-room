@@ -11,6 +11,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 
+import { NewSessionProvider } from "@/components/sessions/new-session-context";
+
 import { Sidebar } from "./Sidebar";
 
 const Header = lazy(() =>
@@ -88,34 +90,40 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <HeaderActionsProvider>
-      <div className="agent-layout-shell chat-layout-shell flex h-screen w-full overflow-hidden bg-background text-foreground">
-        <div
-          data-collapsed={sidebarCollapsed ? "true" : "false"}
-          className="agent-layout-left-drawer hidden md:block"
-        >
-          <Sidebar
-            collapsed={sidebarCollapsed}
-            onCollapsedChange={setSidebarCollapsed}
-          />
-        </div>
-        <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-          <SheetContent
-            side="left"
-            className="w-[var(--chat-sidebar-width)] p-0"
+      <NewSessionProvider>
+        <div className="agent-layout-shell chat-layout-shell flex h-screen w-full overflow-hidden bg-background text-foreground">
+          <div
+            data-collapsed={sidebarCollapsed ? "true" : "false"}
+            className="agent-layout-left-drawer hidden md:block"
           >
-            <SheetTitle className="sr-only">
-              {t("navigation.navigation")}
-            </SheetTitle>
-            <SheetDescription className="sr-only">
-              {t("navigation.navigationDescription")}
-            </SheetDescription>
-            <Sidebar collapsed={false} collapsible={false} />
-          </SheetContent>
-        </Sheet>
-        <div className="agent-layout-main-surface flex min-w-0 flex-1 overflow-hidden">
-          {contentFrame}
+            <Sidebar
+              collapsed={sidebarCollapsed}
+              onCollapsedChange={setSidebarCollapsed}
+            />
+          </div>
+          <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+            <SheetContent
+              side="left"
+              className="w-[var(--chat-sidebar-width)] p-0"
+            >
+              <SheetTitle className="sr-only">
+                {t("navigation.navigation")}
+              </SheetTitle>
+              <SheetDescription className="sr-only">
+                {t("navigation.navigationDescription")}
+              </SheetDescription>
+              <Sidebar
+                collapsed={false}
+                collapsible={false}
+                onNavigate={() => setMobileSidebarOpen(false)}
+              />
+            </SheetContent>
+          </Sheet>
+          <div className="agent-layout-main-surface flex min-w-0 flex-1 overflow-hidden">
+            {contentFrame}
+          </div>
         </div>
-      </div>
+      </NewSessionProvider>
     </HeaderActionsProvider>
   );
 }
