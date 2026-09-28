@@ -67,7 +67,7 @@ test.describe("project settings", () => {
       name: "Settings fixture",
     });
 
-    await page.goto("/settings");
+    await page.goto("/projects");
     const row = page
       .getByTestId("project-row")
       .filter({ hasText: "Settings fixture" });
@@ -160,7 +160,7 @@ test.describe("project settings", () => {
         name: "In-flight refusal fixture",
       });
 
-      await page.goto("/settings");
+      await page.goto("/projects");
       const row = page
         .getByTestId("project-row")
         .filter({ hasText: "In-flight refusal fixture" });
@@ -200,7 +200,7 @@ test.describe("project settings", () => {
         name: "In-flight blank fixture",
       });
 
-      await page.goto("/settings");
+      await page.goto("/projects");
       const row = page
         .getByTestId("project-row")
         .filter({ hasText: "In-flight blank fixture" });
@@ -251,7 +251,7 @@ test.describe("project settings", () => {
         name: "Folders fixture",
       });
 
-      await page.goto("/settings");
+      await page.goto("/projects");
       const row = page
         .getByTestId("project-row")
         .filter({ hasText: "Folders fixture" });
@@ -321,5 +321,12 @@ test.describe("project settings", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  test("Settings links to the Projects page", async ({ page }) => {
+    await page.goto("/settings");
+    await page.getByTestId("settings-projects-link").click();
+    await expect(page).toHaveURL(/\/projects$/);
+    await expect(page.getByTestId("projects-section")).toBeVisible();
   });
 });
