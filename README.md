@@ -15,6 +15,10 @@ than asserted, and that record is the most reusable thing here.
 
 An experiment, not a maintained product.
 
+[![Grill Room in 36 seconds](docs/media/intro.webp)](video/out/grill-room-16x9.mp4)
+
+Grill Room in 36 seconds; the image links to the video with sound. A vertical cut is in [`video/out/grill-room-9x16.mp4`](video/out/grill-room-9x16.mp4).
+
 ## What came out of it
 
 | | |
