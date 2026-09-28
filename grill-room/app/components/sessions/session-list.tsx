@@ -142,7 +142,7 @@ export function SessionList({
                 </span>
                 {projectName ? (
                   <span
-                    className="max-w-[10rem] shrink-0 truncate font-mono text-xs text-muted-foreground"
+                    className="hidden max-w-[10rem] shrink-0 truncate font-mono text-xs text-muted-foreground sm:block"
                     data-testid="session-project"
                   >
                     {projectName}
