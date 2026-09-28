@@ -187,6 +187,7 @@ const messages = {
     modelOpus: "Opus",
     modelSonnet: "Sonnet",
     cancel: "Cancel",
+    discardDraft: "Discard draft",
     create: "Create",
     creating: "Creating…",
     createFailed: "Could not create the session.",
