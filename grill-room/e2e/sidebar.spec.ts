@@ -56,9 +56,16 @@ test("the sidebar carries the mark, New session, Projects, Recent and footer lin
   ).toContainText(/owed [1-9]\d*/);
 
   // ---- Footer links ---------------------------------------------------------
-  await page.locator("aside").getByRole("link", { name: "Settings" }).click();
+  const footer = () => page.locator("aside").getByTestId("sidebar-footer");
+  const topNav = () =>
+    page.locator("aside").locator('nav[aria-label="Navigation"]');
+  for (const name of ["Settings", "Database"]) {
+    await expect(footer().getByRole("link", { name })).toBeVisible();
+    await expect(topNav().getByRole("link", { name })).toHaveCount(0);
+  }
+  await footer().getByRole("link", { name: "Settings" }).click();
   await page.waitForURL(/\/settings$/);
-  await page.locator("aside").getByRole("link", { name: "Database" }).click();
+  await footer().getByRole("link", { name: "Database" }).click();
   await page.waitForURL(/\/database$/);
 
   // ---- Collapsed: Recent goes, the links stay ---------------------------------
@@ -68,8 +75,11 @@ test("the sidebar carries the mark, New session, Projects, Recent and footer lin
   await expanded.getByRole("button", { name: "Collapse Sidebar" }).click();
   await expect(expanded.getByText("Recent", { exact: true })).toHaveCount(0);
   await expect(expanded.getByTestId("recent-session")).toHaveCount(0);
-  for (const name of ["Projects", "Settings", "Database"]) {
-    await expect(expanded.getByRole("link", { name })).toBeVisible();
+  await expect(expanded.getByRole("link", { name: "Projects" })).toBeVisible();
+  for (const name of ["Settings", "Database"]) {
+    await expect(
+      expanded.getByTestId("sidebar-footer").getByRole("link", { name }),
+    ).toBeVisible();
   }
   await expect(expanded.getByRole("button", { name: "New session" })).toBeVisible();
 });

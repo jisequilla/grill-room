@@ -318,7 +318,10 @@ export function Sidebar({
       </nav>
 
       <div className="mt-auto shrink-0 p-2">
-        <div className={collapsed ? "flex justify-center pb-1" : "pb-1"}>
+        <div
+          data-testid="sidebar-footer"
+          className={collapsed ? "flex justify-center pb-1" : "pb-1"}
+        >
           <NavItems collapsed={collapsed} items={FOOTER_ITEMS} small />
         </div>
         <OrgSwitcher
