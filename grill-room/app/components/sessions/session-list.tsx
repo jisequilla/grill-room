@@ -118,7 +118,10 @@ export function SessionList({
         </ToggleGroup>
       ) : null}
       {sessions.length > 0 && visible.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid="session-filter-empty"
+        >
           {t("projects.filterEmpty")}
         </p>
       ) : null}

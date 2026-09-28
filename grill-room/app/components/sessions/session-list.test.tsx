@@ -130,8 +130,15 @@ describe("SessionList", () => {
   it("shows no filter-empty message when there are no sessions at all", () => {
     const html = render([], [{ id: "p1", name: "Alpha" }]);
 
-    expect(html).not.toContain("No sessions match this filter.");
+    expect(html).not.toContain("session-filter-empty");
     expect(rows(html).size).toBe(0);
+  });
+
+  it("shows no filter-empty message while the default filter keeps every session", () => {
+    const html = render([A, B], [{ id: "p1", name: "Alpha" }]);
+
+    expect(html).not.toContain("session-filter-empty");
+    expect(rows(html).size).toBe(2);
   });
 });
 
