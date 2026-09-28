@@ -68,8 +68,8 @@ test.describe("projects pages", () => {
 
     // Sessions tab: only this project's sessions.
     await page.getByTestId("project-tab-sessions").click();
-    await expect(page.getByText(assignedTitle)).toBeVisible();
-    await expect(page.getByText(unassignedTitle)).toHaveCount(0);
+    await expect(page.locator("main").getByText(assignedTitle)).toBeVisible();
+    await expect(page.locator("main").getByText(unassignedTitle)).toHaveCount(0);
 
     // Settings tab: the fields, and Edit opens the form on this project.
     await page.getByTestId("project-tab-settings").click();
