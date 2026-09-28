@@ -1,53 +1,86 @@
-import { AgentNativeIcon } from "@agent-native/core/client/agent-native-icon";
+import { useActionQuery } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { openCommandMenu } from "@agent-native/core/client/navigation";
 import { OrgSwitcher } from "@agent-native/core/client/org";
 import {
   IconDatabase,
-  IconFlame,
+  IconFolders,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
+  IconListDetails,
+  IconPlus,
   IconSearch,
   IconSettings,
 } from "@tabler/icons-react";
 import { NavLink } from "react-router";
 
+import { GrateMark } from "@/components/brand/grate-mark";
+import { useNewSession } from "@/components/sessions/new-session-context";
+import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { APP_NAME, APP_TITLE } from "@/lib/app-config";
+import { APP_NAME } from "@/lib/app-config";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
   collapsed?: boolean;
   collapsible?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
+  /** Called when a control opens something over the page, so a sheet hosting the sidebar can close first. */
+  onNavigate?: () => void;
 }
 
+const RECENT_LIMIT = 5;
+
 const NAV_ITEMS = [
-  { to: "/", labelKey: "navigation.sessions", icon: IconFlame, end: true },
   {
-    to: "/database",
-    labelKey: "navigation.database",
-    icon: IconDatabase,
+    to: "/",
+    labelKey: "navigation.sessions",
+    icon: IconListDetails,
+    end: true,
+  },
+  {
+    to: "/projects",
+    labelKey: "navigation.projects",
+    icon: IconFolders,
     end: false,
   },
+] as const;
+
+const FOOTER_ITEMS = [
   {
     to: "/settings",
     labelKey: "navigation.settings",
     icon: IconSettings,
     end: false,
   },
+  {
+    to: "/database",
+    labelKey: "navigation.database",
+    icon: IconDatabase,
+    end: false,
+  },
 ] as const;
 
-function NavItems({ collapsed }: { collapsed: boolean }) {
+type NavEntry = (typeof NAV_ITEMS)[number] | (typeof FOOTER_ITEMS)[number];
+
+function NavItems({
+  collapsed,
+  items,
+  small = false,
+}: {
+  collapsed: boolean;
+  items: readonly NavEntry[];
+  small?: boolean;
+}) {
   const t = useT();
 
   return (
     <ul className={cn("flex flex-col", collapsed ? "gap-1" : "gap-0.5 px-2")}>
-      {NAV_ITEMS.map(({ to, labelKey, icon: Icon, end }) => {
+      {items.map(({ to, labelKey, icon: Icon, end }) => {
         const label = t(labelKey);
         const link = (
           <NavLink
@@ -59,7 +92,9 @@ function NavItems({ collapsed }: { collapsed: boolean }) {
                 isActive && "bg-sidebar-accent text-sidebar-accent-foreground",
                 collapsed
                   ? "size-10 justify-center rounded-md"
-                  : "h-10 w-full gap-3 rounded-lg px-3 text-sm font-medium",
+                  : small
+                    ? "h-8 w-full gap-3 rounded-lg px-3 text-xs font-medium"
+                    : "h-10 w-full gap-3 rounded-lg px-3 text-sm font-medium",
               )
             }
             aria-label={collapsed ? label : undefined}
@@ -86,12 +121,69 @@ function NavItems({ collapsed }: { collapsed: boolean }) {
   );
 }
 
+function RecentSessions() {
+  const t = useT();
+  const { data: sessions } = useActionQuery("list-sessions", {});
+  const recent = (sessions ?? [])
+    .filter((session) => session.state !== "confirmed")
+    .slice(0, RECENT_LIMIT);
+
+  if (recent.length === 0) return null;
+
+  return (
+    <section className="mt-3 min-h-0 px-2">
+      <h2 className="px-3 pb-1 font-mono text-xs uppercase tracking-wide text-muted-foreground">
+        {t("navigation.recent")}
+      </h2>
+      <ul className="flex flex-col gap-0.5">
+        {recent.map((session) => (
+          <li key={session.id}>
+            <NavLink
+              to={`/sessions/${session.id}`}
+              data-testid="recent-session"
+              className={({ isActive }) =>
+                cn(
+                  "flex h-8 w-full items-center gap-2 rounded-lg px-3 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                  isActive && "bg-sidebar-accent text-sidebar-accent-foreground",
+                )
+              }
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  session.state === "done-proposed"
+                    ? "bg-owed"
+                    : "bg-frontier",
+                )}
+              />
+              <span className="min-w-0 flex-1 truncate">{session.title}</span>
+              {session.looseEndCount > 0 ? (
+                <span className="shrink-0 font-mono text-xs text-owed">
+                  {t("navigation.owedCount", { count: session.looseEndCount })}
+                </span>
+              ) : null}
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function Sidebar({
   collapsed = false,
   collapsible = true,
   onCollapsedChange,
+  onNavigate,
 }: SidebarProps) {
   const t = useT();
+  const newSession = useNewSession();
+  const openNewSession = () => {
+    onNavigate?.();
+    newSession.open();
+  };
+  const newSessionLabel = t("navigation.newSession");
   const ToggleIcon = collapsed
     ? IconLayoutSidebarLeftExpand
     : IconLayoutSidebarLeftCollapse;
@@ -155,14 +247,14 @@ export function Sidebar({
             <NavLink
               to="/"
               end
-              className="flex min-w-0 flex-1 items-center gap-3 rounded outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
             >
-              <AgentNativeIcon
+              <GrateMark
                 aria-hidden="true"
-                className="h-3.5 w-6 shrink-0 text-sidebar-accent-foreground"
+                className="size-5 shrink-0 text-sidebar-accent-foreground"
               />
-              <span className="truncate text-sm font-semibold text-sidebar-accent-foreground">
-                {APP_TITLE}
+              <span className="truncate font-mono text-[15px] font-medium text-sidebar-accent-foreground">
+                grill room
               </span>
             </NavLink>
             {searchButton}
@@ -171,18 +263,67 @@ export function Sidebar({
         )}
       </div>
 
+      {collapsed ? (
+        <NavLink
+          to="/"
+          end
+          aria-label="Grill Room"
+          className="mx-auto flex size-10 items-center justify-center rounded-md text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+        >
+          <GrateMark aria-hidden="true" className="size-5" />
+        </NavLink>
+      ) : null}
+
+      <div className={cn("shrink-0", collapsed ? "flex justify-center py-1" : "px-2 pb-2 pt-1")}>
+        {collapsed ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                data-testid="sidebar-new-session"
+                aria-label={newSessionLabel}
+                onClick={openNewSession}
+                className="size-10"
+              >
+                <IconPlus className="size-4 text-primary" strokeWidth={2} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{newSessionLabel}</TooltipContent>
+          </Tooltip>
+        ) : (
+          <Button
+            type="button"
+            variant="secondary"
+            data-testid="sidebar-new-session"
+            onClick={openNewSession}
+            className="w-full justify-start gap-3 px-3"
+          >
+            <IconPlus className="size-4 text-primary" strokeWidth={2} />
+            {newSessionLabel}
+          </Button>
+        )}
+      </div>
+
       <nav
         aria-label={t("navigation.navigation")}
         className={cn(
-          "flex min-h-0 flex-1 flex-col",
+          "flex min-h-0 flex-1 flex-col overflow-y-auto",
           collapsed ? "items-center gap-1 px-1 py-2" : "pt-1",
         )}
       >
-        <NavItems collapsed={collapsed} />
-        {collapsed ? searchButton : null}
+        <NavItems collapsed={collapsed} items={NAV_ITEMS} />
+        {collapsed ? searchButton : <RecentSessions />}
       </nav>
 
       <div className="mt-auto shrink-0 p-2">
+        <div
+          data-testid="sidebar-footer"
+          className={collapsed ? "flex justify-center pb-1" : "pb-1"}
+        >
+          <NavItems collapsed={collapsed} items={FOOTER_ITEMS} small />
+        </div>
         <OrgSwitcher
           reserveSpace
           compact={collapsed}

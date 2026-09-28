@@ -100,7 +100,7 @@ test("reports a file exported through a symlinked folder as \"could not check\",
 }) => {
   // ---- Session list -> create a session ---------------------------------
   await page.goto("/");
-  await page.getByRole("button", { name: "New session" }).click();
+  await page.getByTestId("header-new-session").click();
   await expect(page.getByRole("heading", { name: "New session" })).toBeVisible();
 
   await page.getByLabel("Title").fill("Unchecked visibility e2e");

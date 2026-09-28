@@ -88,7 +88,7 @@ test("demo: the whole app, from idea to export", async ({ page, request }) => {
 
   // ---- New session: the idea the recording was grilled against -----------
   await page.goto("/");
-  await page.getByRole("button", { name: "New session" }).click();
+  await page.getByTestId("header-new-session").click();
   await expect(
     page.getByRole("heading", { name: "New session" }),
   ).toBeVisible();

@@ -52,7 +52,7 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | Action | Purpose |
 | --- | --- |
 | `create-session` | Start a grilling session from a loose idea, defaulting the interviewer model to the global default. Optionally names the registered project it exports into (`projectId`); refused with `project-not-found` for an unknown one. |
-| `list-sessions` | Every session with its title, state, last activity, and `readinessVerdict` (`ready`, `not-ready`, or null when the current idea has not been judged), most recently active first. |
+| `list-sessions` | Every session with its title, state, last activity, and `readinessVerdict` (`ready`, `not-ready`, or null when the current idea has not been judged), and `looseEndCount`, how many loose ends `list-loose-ends` would list for it, most recently active first. |
 | `get-session` | One session by id, so resuming lands where it left off; carries a derived `modelLocked` flag. |
 | `update-session-idea` | Replace a session's idea before its first round: trimmed, refused empty (`idea-required`). Clears the stored readiness judgment. Refused with `has-rounds` once any round exists and `turn-working` while a turn is working. Returns the session. |
 | `assess-readiness` | Ask the interviewer whether a session's idea is ready to be grilled, store the judgment, and return it. Refused with `has-rounds`, `turn-working`, or `wrong-session-state` outside interviewing. Never blocks starting the interview. See "Idea readiness" below. |

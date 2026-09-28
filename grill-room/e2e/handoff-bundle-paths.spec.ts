@@ -66,7 +66,7 @@ test("shows brief links as the planned bundle path, and follows the export slug"
 }) => {
   // ---- Session list -> create a session ---------------------------------
   await page.goto("/");
-  await page.getByRole("button", { name: "New session" }).click();
+  await page.getByTestId("header-new-session").click();
   await expect(page.getByRole("heading", { name: "New session" })).toBeVisible();
 
   await page.getByLabel("Title").fill("Handoff bundle paths e2e");
