@@ -1,0 +1,19 @@
+{
+  "name": "grill-room-video",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "music": "node music/make-music.mjs",
+    "render:16x9": "hyperframes render --composition index.html --output out/grill-room-16x9.mp4",
+    "render:9x16": "hyperframes render --composition cuts/vertical.html --output out/grill-room-9x16.mp4"
+  },
+  "devDependencies": {
+    "@fontsource-variable/ibm-plex-sans": "5.3.0",
+    "@fontsource-variable/jetbrains-mono": "5.3.0",
+    "gsap": "3.15.0",
+    "hyperframes": "0.8.86"
+  }
+}

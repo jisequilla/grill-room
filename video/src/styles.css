@@ -1,0 +1,1010 @@
+/* Ember on the Ledger, dark (.dark in grill-room/app/global.css). */
+:root {
+  --background: #151311;
+  --foreground: #ece7e1;
+  --card: #1d1a17;
+  --primary: #f26b38;
+  --primary-foreground: #1a0d07;
+  --muted: #26221e;
+  --muted-foreground: #a39a91;
+  --accent: #2e2924;
+  --border: #35302a;
+  --input: #6e655c;
+  --settled: #5fbf8a;
+  --owed: #e0a93b;
+  --repo: #86adce;
+  --frontier: #f58a5e;
+  --settled-rgb: 95 191 138;
+  --owed-rgb: 224 169 59;
+  --repo-rgb: 134 173 206;
+  --primary-rgb: 242 107 56;
+  --radius: 8px;
+  --sans: "IBM Plex Sans Variable", "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+.frame {
+  position: relative;
+  overflow: hidden;
+  background: var(--background);
+}
+
+.landscape.frame {
+  width: 1920px;
+  height: 1080px;
+}
+
+.portrait.frame {
+  width: 1080px;
+  height: 1920px;
+}
+
+.scene {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* ---------- Split scenes: caption + stage ---------- */
+
+.landscape .split {
+  display: grid;
+  grid-template-columns: 650px 1fr;
+  column-gap: 50px;
+  align-items: center;
+  padding: 90px 110px 90px 120px;
+}
+
+.portrait .split {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 210px 72px 0;
+}
+
+.caption .step {
+  font-family: var(--mono);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.caption .step::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--primary);
+}
+
+.caption h2 {
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--foreground);
+  text-wrap: balance;
+}
+
+.caption h2 .line {
+  display: block;
+}
+
+.landscape .caption .step {
+  font-size: 26px;
+  margin-bottom: 32px;
+}
+
+.landscape .caption h2 {
+  font-size: 76px;
+  line-height: 1.06;
+}
+
+.portrait .caption {
+  min-height: 330px;
+}
+
+.portrait .caption .step {
+  font-size: 30px;
+  margin-bottom: 28px;
+}
+
+.portrait .caption h2 {
+  font-size: 84px;
+  line-height: 1.04;
+}
+
+.stage-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.portrait .stage-wrap {
+  flex: 1;
+  align-items: center;
+  padding: 24px 0 250px;
+}
+
+/* The stage is authored at the app's own pixel sizes and zoomed up for the frame. */
+.stage {
+  position: relative;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.landscape .stage {
+  width: 620px;
+  zoom: 1.6;
+}
+
+.portrait .stage {
+  width: 460px;
+  zoom: 2.03;
+}
+
+/* ---------- App anatomy ---------- */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  position: relative;
+  overflow: hidden;
+}
+
+.label {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.meta {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--muted-foreground);
+}
+
+.stamp {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 3px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.stamp .glyph {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.stamp.settled {
+  color: var(--settled);
+  background: rgb(var(--settled-rgb) / 0.1);
+  border-color: rgb(var(--settled-rgb) / 0.3);
+}
+
+.stamp.settled .glyph {
+  background: var(--settled);
+}
+
+.stamp.frontier {
+  color: var(--frontier);
+  background: rgb(var(--primary-rgb) / 0.1);
+  border-color: rgb(var(--primary-rgb) / 0.35);
+}
+
+.stamp.frontier .glyph {
+  border: 2px solid var(--frontier);
+  box-shadow: inset 0 0 0 1.5px var(--card);
+  background: var(--frontier);
+}
+
+.stamp.owed {
+  color: var(--owed);
+  background: rgb(var(--owed-rgb) / 0.1);
+  border-color: rgb(var(--owed-rgb) / 0.3);
+}
+
+.stamp.owed .glyph {
+  border: 1.5px solid var(--owed);
+}
+
+.stamp.repo {
+  color: var(--repo);
+  background: rgb(var(--repo-rgb) / 0.1);
+  border-color: rgb(var(--repo-rgb) / 0.3);
+}
+
+.stamp.rec {
+  color: var(--frontier);
+  background: rgb(var(--primary-rgb) / 0.1);
+  border-color: rgb(var(--primary-rgb) / 0.35);
+}
+
+.stamp-swap {
+  position: relative;
+  display: inline-grid;
+}
+
+.stamp-swap > * {
+  grid-area: 1 / 1;
+  justify-self: end;
+}
+
+.btn {
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  border-radius: 6px;
+  padding: 8px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.btn.primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.btn.outline {
+  border: 1px solid var(--input);
+  color: var(--foreground);
+}
+
+.hairline {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 2px;
+  width: 100%;
+  background: var(--primary);
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+
+/* ---------- Scene 1: the guesses ---------- */
+
+.hook {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hook .q {
+  position: absolute;
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--muted-foreground);
+  line-height: 1;
+}
+
+.hook .q.owed {
+  color: var(--owed);
+}
+
+.hook h1 {
+  position: relative;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  text-align: center;
+  text-wrap: balance;
+  padding: 0 72px;
+}
+
+.landscape .hook h1 {
+  font-size: 112px;
+  line-height: 1.05;
+  max-width: 1500px;
+}
+
+.portrait .hook h1 {
+  font-size: 108px;
+  line-height: 1.04;
+}
+
+/* ---------- Scene 2: new session ---------- */
+
+.session-card {
+  padding: 24px;
+}
+
+.session-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.session-head .title {
+  font-size: 25px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.mark-sm {
+  width: 22px;
+  height: 22px;
+  color: var(--foreground);
+}
+
+.field-label {
+  margin-bottom: 8px;
+}
+
+.field {
+  border: 1px solid var(--input);
+  border-radius: 6px;
+  padding: 12px 14px;
+  min-height: 108px;
+  font-size: 18px;
+  line-height: 28px;
+  background: var(--background);
+}
+
+.field .ch {
+  display: none;
+}
+
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 22px;
+  background: var(--primary);
+  vertical-align: -4px;
+  margin-left: 1px;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20px;
+  gap: 12px;
+}
+
+.segmented {
+  display: flex;
+  gap: 6px;
+}
+
+.segmented span {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.segmented span.on {
+  border-color: var(--foreground);
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+.working {
+  margin-top: 14px;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ---------- Scene 3: a round ---------- */
+
+.round-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.round-card {
+  padding: 14px 18px;
+  margin-bottom: 12px;
+}
+
+.round-card.frontier-card {
+  border-color: rgb(var(--primary-rgb) / 0.4);
+}
+
+.q-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.idx {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.frontier-card .idx {
+  box-shadow: 0 0 0 2px var(--primary);
+  color: var(--frontier);
+}
+
+.q-title {
+  flex: 1;
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.choices {
+  overflow: hidden;
+}
+
+.choices-inner {
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.choice {
+  border: 1px solid var(--input);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.choice.rec {
+  border-color: rgb(var(--primary-rgb) / 0.5);
+}
+
+.choice .check {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: none;
+}
+
+.band {
+  background: var(--muted);
+  border-radius: 6px;
+  padding: 10px 12px 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.band p {
+  flex: 1;
+  color: var(--foreground);
+}
+
+.answer {
+  overflow: hidden;
+  height: 0;
+}
+
+.answer-band {
+  margin-top: 10px;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: rgb(var(--settled-rgb) / 0.1);
+  border: 1px solid rgb(var(--settled-rgb) / 0.3);
+}
+
+.answer-band .label {
+  color: var(--settled);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.answer-band .label svg {
+  width: 13px;
+  height: 13px;
+}
+
+.answer-band .text {
+  font-size: 15px;
+  line-height: 22px;
+  margin-top: 2px;
+}
+
+.submit-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 4px;
+}
+
+.segs {
+  display: flex;
+  gap: 5px;
+}
+
+.seg {
+  width: 26px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border);
+  position: relative;
+  overflow: hidden;
+}
+
+.seg i {
+  position: absolute;
+  inset: 0;
+  background: var(--settled);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.count {
+  flex: 1;
+  font-size: 14px;
+  color: var(--muted-foreground);
+  display: inline-grid;
+}
+
+.count > span {
+  grid-area: 1 / 1;
+}
+
+.submit {
+  opacity: 0.45;
+}
+
+/* ---------- Scene 4: design tree ---------- */
+
+.tree {
+  padding: 8px 0 0;
+}
+
+.tree-head {
+  margin-bottom: 10px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  font-size: 15px;
+  line-height: 22px;
+  position: relative;
+}
+
+.tree-row .name {
+  flex: 1;
+}
+
+.tree-row .indent {
+  flex: none;
+  display: flex;
+  gap: 0;
+  align-self: stretch;
+}
+
+.tree-row .indent i {
+  width: 20px;
+  position: relative;
+}
+
+.tree-row .indent i::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: -8px;
+  bottom: -8px;
+  border-left: 1px solid var(--border);
+}
+
+.tree-row .indent i.elbow::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  width: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.tree-foot {
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding: 10px 16px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.tree-foot .count {
+  flex: none;
+}
+
+/* ---------- Scene 5: done panel and spec ---------- */
+
+.done-card {
+  padding: 22px 24px;
+}
+
+.lede {
+  display: inline-grid;
+}
+
+.lede > div {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lede svg {
+  width: 15px;
+  height: 15px;
+}
+
+.lede .ok {
+  color: var(--settled);
+}
+
+.summary {
+  font-size: 23px;
+  line-height: 31px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin: 12px 0 14px;
+  text-wrap: balance;
+}
+
+.tally {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.tally b {
+  font-weight: 500;
+  color: var(--settled);
+}
+
+.confirm-bar {
+  border-top: 1px solid var(--border);
+  margin-top: 18px;
+  padding-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 14px;
+  color: var(--muted-foreground);
+}
+
+.btn-swap {
+  display: inline-grid;
+}
+
+.btn-swap > * {
+  grid-area: 1 / 1;
+  justify-self: end;
+}
+
+.spec-wrap {
+  display: grid;
+  align-items: center;
+}
+
+.spec-wrap > * {
+  grid-area: 1 / 1;
+}
+
+.spec-page {
+  padding: 22px 26px 24px;
+}
+
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 14px;
+}
+
+.status-line .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--settled);
+}
+
+.doc h1 {
+  font-size: 25px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin-bottom: 8px;
+}
+
+.doc h3 {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  margin-top: 12px;
+}
+
+.doc p,
+.doc li {
+  font-size: 14.5px;
+  line-height: 22px;
+  color: #d6cfc7;
+}
+
+.doc ol {
+  list-style: none;
+}
+
+.doc li {
+  display: flex;
+  gap: 8px;
+}
+
+.doc li .n {
+  font-family: var(--mono);
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+/* ---------- Scene 6: tickets and handoff ---------- */
+
+.tickets-wrap {
+  display: grid;
+  align-items: center;
+}
+
+.tickets-wrap > * {
+  grid-area: 1 / 1;
+}
+
+.waves {
+  display: grid;
+  gap: 12px;
+}
+
+.landscape .waves {
+  grid-template-columns: repeat(3, 1fr);
+  align-items: start;
+}
+
+.portrait .waves {
+  grid-template-columns: 1fr;
+}
+
+.wave .label {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+  white-space: nowrap;
+}
+
+.wave-tickets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.portrait .wave-tickets {
+  flex-direction: row;
+}
+
+.portrait .wave-tickets .ticket {
+  flex: 1;
+}
+
+.ticket {
+  padding: 10px 12px;
+}
+
+.ticket .num {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--frontier);
+}
+
+.ticket .t {
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 600;
+  margin: 2px 0 8px;
+}
+
+.chip {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.handoff {
+  padding: 20px 24px 14px;
+}
+
+.handoff .file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--repo);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 14px;
+}
+
+.handoff .plan {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 22px;
+  color: #d6cfc7;
+}
+
+.handoff .plan span {
+  color: var(--muted-foreground);
+}
+
+.brief {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 20px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.brief:last-child {
+  border-bottom: none;
+}
+
+.brief .path {
+  flex: 1;
+  color: var(--repo);
+}
+
+/* ---------- Scene 7: end card ---------- */
+
+.end {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.lockup {
+  display: flex;
+  align-items: center;
+}
+
+.landscape .lockup {
+  gap: 44px;
+}
+
+.portrait .lockup {
+  flex-direction: column;
+  gap: 48px;
+}
+
+.mark-lg {
+  color: var(--foreground);
+  overflow: visible;
+}
+
+.landscape .mark-lg {
+  width: 176px;
+  height: 176px;
+}
+
+.portrait .mark-lg {
+  width: 240px;
+  height: 240px;
+}
+
+.wordmark {
+  font-family: var(--mono);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--foreground);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.landscape .wordmark {
+  font-size: 150px;
+}
+
+.portrait .wordmark {
+  font-size: 150px;
+}
+
+.wordmark .ch {
+  display: inline-block;
+}
+
+.tagline {
+  font-weight: 500;
+  color: var(--muted-foreground);
+  letter-spacing: -0.01em;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.landscape .tagline {
+  font-size: 58px;
+  margin-top: 64px;
+}
+
+.portrait .tagline {
+  font-size: 68px;
+  line-height: 1.15;
+  margin-top: 88px;
+  padding: 0 80px;
+}
