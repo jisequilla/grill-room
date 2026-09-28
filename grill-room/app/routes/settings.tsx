@@ -10,9 +10,10 @@ import {
 import { TeamPage } from "@agent-native/core/client/team-page";
 import { useSetPageTitle } from "@agent-native/toolkit/app-shell";
 import { useMemo } from "react";
+import { Link } from "react-router";
 
-import { ProjectsSection } from "@/components/projects/projects-section";
 import { DefaultModelPicker } from "@/components/sessions/default-model-picker";
+import { Button } from "@/components/ui/button";
 import { APP_TITLE } from "@/lib/app-config";
 
 export function meta() {
@@ -86,7 +87,20 @@ export default function SettingsRoute() {
             />
           </SettingsGroup>
 
-          <ProjectsSection />
+          <SettingsGroup>
+            <SettingsRow
+              id="projects"
+              label={t("projects.heading")}
+              description={t("projects.movedDescription")}
+              control={
+                <Button asChild variant="outline" size="sm">
+                  <Link to="/projects" data-testid="settings-projects-link">
+                    {t("projects.heading")}
+                  </Link>
+                </Button>
+              }
+            />
+          </SettingsGroup>
         </div>
       }
       team={

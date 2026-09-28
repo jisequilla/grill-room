@@ -14,7 +14,7 @@ import type {
 } from "@shared/session-constants";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { toast } from "sonner";
 
 import { SessionStateBadge } from "@/components/sessions/session-state-badge";
@@ -126,14 +126,34 @@ export default function SessionWorkspaceRoute() {
   // One line whatever the width: the actions take what they need and the title
   // truncates in the rest, with the whole of it kept in `title`.
   const pageTitle = session?.title ?? t("pages.sessionWorkspaceTitle");
+  const sessionProjectId = session?.projectId ?? null;
+  const { data: sessionProject } = useActionQuery(
+    "get-project",
+    { id: sessionProjectId ?? "" },
+    { enabled: sessionProjectId !== null },
+  );
   useSetPageTitle(
-    <h1
-      className="min-w-0 truncate text-lg font-semibold tracking-tight"
-      title={pageTitle}
-      data-testid="session-title"
-    >
-      {pageTitle}
-    </h1>,
+    <div className="flex min-w-0 items-baseline gap-1">
+      {sessionProjectId !== null && sessionProject ? (
+        <>
+          <Link
+            to={`/projects/${sessionProjectId}`}
+            className="max-w-[40%] shrink-0 truncate font-mono text-lg text-muted-foreground hover:underline"
+            data-testid="session-breadcrumb-project"
+          >
+            {sessionProject.name}
+          </Link>
+          <span className="text-lg text-muted-foreground">/</span>
+        </>
+      ) : null}
+      <h1
+        className="min-w-0 truncate text-lg font-semibold tracking-tight"
+        title={pageTitle}
+        data-testid="session-title"
+      >
+        {pageTitle}
+      </h1>
+    </div>,
   );
 
   function refresh() {

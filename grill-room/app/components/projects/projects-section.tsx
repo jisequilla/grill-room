@@ -2,6 +2,7 @@ import { useActionQuery } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { IconPlus } from "@tabler/icons-react";
 import { useState } from "react";
+import { Link } from "react-router";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,7 @@ import type {
 
 import { ProjectFormDialog } from "./project-form-dialog";
 
-/** The project registry on the settings page: every registered repository, with add and edit. */
+/** The project registry on the Projects page: every registered repository, with add and edit. */
 export function ProjectsSection() {
   const t = useT();
   const { data: projects, isLoading } = useActionQuery("list-projects", {});
@@ -66,7 +67,15 @@ export function ProjectsSection() {
                 data-testid="project-row"
               >
                 <div className="min-w-0 space-y-1">
-                  <p className="truncate text-sm font-medium">{project.name}</p>
+                  <p className="truncate text-sm font-medium">
+                    <Link
+                      to={`/projects/${project.id}`}
+                      className="hover:underline focus-visible:underline"
+                      data-testid="project-open"
+                    >
+                      {project.name}
+                    </Link>
+                  </p>
                   <p className="truncate font-mono text-xs text-muted-foreground">
                     {project.rootPath}/{project.workingExportFolder}
                   </p>
