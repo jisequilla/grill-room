@@ -1,6 +1,10 @@
-import { actionErrorMessage, useActionMutation } from "@agent-native/core/client/hooks";
+import {
+  actionErrorMessage,
+  useActionMutation,
+  useActionQuery,
+} from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
 import { ProjectSelect } from "@/components/projects/project-select";
@@ -27,6 +31,14 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { actionErrorCode } from "@/lib/decisions";
 import { DOCS_FOLDER_ERROR_KEY } from "@/lib/docs-folder";
 import {
+  clearSessionDraft,
+  hasDraftText,
+  readSessionDraft,
+  withKnownProject,
+  writeSessionDraft,
+  type SessionDraft,
+} from "@/lib/session-draft";
+import {
   ANSWERING_MODE_LABEL_KEY,
   MODEL_LABEL_KEY,
 } from "@/lib/session-labels";
@@ -46,6 +58,28 @@ interface CreateSessionDialogProps {
   onCreated: (sessionId: string) => void;
 }
 
+type SessionForm = Omit<SessionDraft, "model"> & { model: SessionModel };
+
+function emptyForm(defaultModel: SessionModel | undefined): SessionForm {
+  return {
+    title: "",
+    idea: "",
+    model: defaultModel ?? "fable",
+    answeringMode: "whole-round",
+    docsFolder: "",
+    projectId: null,
+  };
+}
+
+/** `window.localStorage`, or undefined where reading it throws (some private modes). */
+function draftStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
 export function CreateSessionDialog({
   open,
   onOpenChange,
@@ -53,30 +87,88 @@ export function CreateSessionDialog({
   onCreated,
 }: CreateSessionDialogProps) {
   const t = useT();
-  const [title, setTitle] = useState("");
-  const [idea, setIdea] = useState("");
-  const [model, setModel] = useState<SessionModel>(defaultModel ?? "fable");
-  const [answeringMode, setAnsweringMode] =
-    useState<SessionAnsweringMode>("whole-round");
-  const [docsFolder, setDocsFolder] = useState("");
+  const [form, setForm] = useState<SessionForm>(() =>
+    emptyForm(defaultModel),
+  );
   const [docsFolderError, setDocsFolderError] = useState<string | null>(null);
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const { data: projects } = useActionQuery("list-projects", {});
 
-  // Reset the form to a clean slate, pre-filled with the current global
-  // default model, every time the dialog opens.
+  // The latest form, so two quick edits never write a stale draft.
+  const formRef = useRef(form);
+  // Whether the model in the form is the user's: a restored draft carried one,
+  // or they picked one. Until then a late-arriving default may replace it.
+  const modelIsUsersRef = useRef(false);
+  const defaultModelRef = useRef(defaultModel);
+  defaultModelRef.current = defaultModel;
+
+  function apply(next: SessionForm) {
+    formRef.current = next;
+    setForm(next);
+  }
+
+  function toDraft(values: SessionForm): SessionDraft {
+    return {
+      ...values,
+      model: modelIsUsersRef.current ? values.model : null,
+    };
+  }
+
+  function update(patch: Partial<SessionForm>) {
+    if (patch.model !== undefined) modelIsUsersRef.current = true;
+    const next = { ...formRef.current, ...patch };
+    apply(next);
+    writeSessionDraft(draftStorage(), toDraft(next));
+  }
+
+  function resetForm() {
+    modelIsUsersRef.current = false;
+    apply(emptyForm(defaultModelRef.current));
+    setDocsFolderError(null);
+  }
+
+  // Every open starts from the stored draft, or from a clean form when there is
+  // none. Only edits write the draft, so this never touches storage.
   useEffect(() => {
     if (!open) return;
-    setTitle("");
-    setIdea("");
-    setAnsweringMode("whole-round");
-    setDocsFolder("");
+    const draft = readSessionDraft(draftStorage());
+    if (!draft) {
+      resetForm();
+      return;
+    }
+    modelIsUsersRef.current = draft.model !== null;
+    apply({
+      ...draft,
+      model: draft.model ?? defaultModelRef.current ?? "fable",
+    });
     setDocsFolderError(null);
-    setProjectId(null);
-    setModel(defaultModel ?? "fable");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // The default model loads asynchronously; it fills the picker only while the
+  // model is not the user's, and never touches the other fields.
+  useEffect(() => {
+    if (!open || modelIsUsersRef.current || defaultModel === undefined) return;
+    apply({ ...formRef.current, model: defaultModel });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultModel]);
+
+  // A draft can name a project that no longer exists. Show none, without
+  // rewriting storage: the next edit prunes it there too.
+  useEffect(() => {
+    if (!open || !projects) return;
+    const known = withKnownProject(
+      toDraft(formRef.current),
+      projects.map((project) => project.id),
+    );
+    if (known.projectId !== formRef.current.projectId) {
+      apply({ ...formRef.current, projectId: known.projectId });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, projects, form.projectId]);
 
   const { mutate, isPending } = useActionMutation("create-session", {
     onSuccess: (session: { id: string }) => {
+      clearSessionDraft(draftStorage());
       onOpenChange(false);
       onCreated(session.id);
     },
@@ -92,12 +184,14 @@ export function CreateSessionDialog({
     },
   });
 
-  const canSubmit = title.trim().length > 0 && idea.trim().length > 0;
+  const canSubmit =
+    form.title.trim().length > 0 && form.idea.trim().length > 0;
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!canSubmit || isPending) return;
     setDocsFolderError(null);
+    const { title, idea, model, answeringMode, docsFolder, projectId } = form;
     const folder = docsFolder.trim();
     mutate({
       title: title.trim(),
@@ -111,7 +205,14 @@ export function CreateSessionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent
+        onInteractOutside={(event) => {
+          if (hasDraftText(formRef.current)) event.preventDefault();
+        }}
+        onEscapeKeyDown={(event) => {
+          if (hasDraftText(formRef.current)) event.preventDefault();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t("sessions.createTitle")}</DialogTitle>
         </DialogHeader>
@@ -120,8 +221,8 @@ export function CreateSessionDialog({
             <Label htmlFor="session-title">{t("sessions.titleLabel")}</Label>
             <Input
               id="session-title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
+              value={form.title}
+              onChange={(event) => update({ title: event.target.value })}
               placeholder={t("sessions.titlePlaceholder")}
               autoFocus
             />
@@ -130,8 +231,8 @@ export function CreateSessionDialog({
             <Label htmlFor="session-idea">{t("sessions.ideaLabel")}</Label>
             <Textarea
               id="session-idea"
-              value={idea}
-              onChange={(event) => setIdea(event.target.value)}
+              value={form.idea}
+              onChange={(event) => update({ idea: event.target.value })}
               placeholder={t("sessions.ideaPlaceholder")}
               rows={4}
             />
@@ -142,8 +243,10 @@ export function CreateSessionDialog({
                 {t("sessions.modelLabel")}
               </Label>
               <Select
-                value={model}
-                onValueChange={(value) => setModel(value as SessionModel)}
+                value={form.model}
+                onValueChange={(value) =>
+                  update({ model: value as SessionModel })
+                }
               >
                 <SelectTrigger id="session-model">
                   <SelectValue />
@@ -162,9 +265,11 @@ export function CreateSessionDialog({
               <ToggleGroup
                 type="single"
                 variant="outline"
-                value={answeringMode}
+                value={form.answeringMode}
                 onValueChange={(value) => {
-                  if (value) setAnsweringMode(value as SessionAnsweringMode);
+                  if (value) {
+                    update({ answeringMode: value as SessionAnsweringMode });
+                  }
                 }}
                 className="w-full"
               >
@@ -186,9 +291,9 @@ export function CreateSessionDialog({
             </Label>
             <Input
               id="session-docs-folder"
-              value={docsFolder}
+              value={form.docsFolder}
               onChange={(event) => {
-                setDocsFolder(event.target.value);
+                update({ docsFolder: event.target.value });
                 setDocsFolderError(null);
               }}
               placeholder={t("sessions.docsFolderPlaceholder")}
@@ -213,8 +318,8 @@ export function CreateSessionDialog({
             </Label>
             <ProjectSelect
               id="session-project"
-              value={projectId}
-              onChange={setProjectId}
+              value={form.projectId}
+              onChange={(projectId) => update({ projectId })}
               aria-describedby="session-project-hint"
             />
             <p id="session-project-hint" className="text-xs text-muted-foreground">
@@ -222,6 +327,19 @@ export function CreateSessionDialog({
             </p>
           </div>
           <DialogFooter>
+            {hasDraftText(form) && (
+              <Button
+                type="button"
+                variant="ghost"
+                data-testid="discard-session-draft"
+                onClick={() => {
+                  clearSessionDraft(draftStorage());
+                  resetForm();
+                }}
+              >
+                {t("sessions.discardDraft")}
+              </Button>
+            )}
             <Button
               type="button"
               variant="ghost"
