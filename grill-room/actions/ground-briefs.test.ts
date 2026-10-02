@@ -373,6 +373,29 @@ describe("ground-briefs", () => {
     );
   });
 
+  it("clamps a buildsOnFiles entry and a buildsOn citation that run past the file's end", async () => {
+    const { session } = await aSessionWithHandoff();
+    const raw = withTicket(2, (ticket) => {
+      ticket.buildsOnFiles = ["src/ingest/metrics.ts:25-99"];
+      ticket.buildsOn[0] = {
+        ...ticket.buildsOn[0]!,
+        citation: "src/ingest/queue.ts:4-50",
+        createdPath: null,
+      };
+    });
+    const interviewer = scriptInterviewer([{ kind: "handoff-scout", result: raw }]);
+
+    const grounded = await groundBriefs.run({ sessionId: session.id });
+
+    expect(scoutRequests(interviewer.requests)).toHaveLength(1);
+    const stored = grounded.grounding!.result.tickets.find((ticket) => ticket.number === 2)!;
+    expect(stored.buildsOnFiles).toEqual(["src/ingest/metrics.ts:25-30"]);
+    expect(stored.buildsOn[0]!.citation).toBe("src/ingest/queue.ts:4-10");
+    const rawTicket = raw.tickets.find((ticket) => ticket.number === 2)!;
+    expect(rawTicket.buildsOnFiles).toEqual(["src/ingest/metrics.ts:25-99"]);
+    expect(rawTicket.buildsOn[0]!.citation).toBe("src/ingest/queue.ts:4-50");
+  });
+
   describe("the rejection check refuses and the retry is accepted", () => {
     it("a citation to a missing file", async () => {
       const { session } = await aSessionWithHandoff();
