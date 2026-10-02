@@ -1,4 +1,10 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 
 import { answerOwnText, chooseScenario, createSession } from "./support";
 
@@ -220,11 +226,120 @@ test.describe("at 390×844", () => {
         detail.evaluate((element) => element.contains(document.activeElement)),
       )
       .toBe(true);
+
+    // The row left the document with the tree sheet, so focus goes to the
+    // button that opened the sheet.
+    await page.keyboard.press("Escape");
+    await expect(detail).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+
+  async function reachLooseEnd(page: Page, request: APIRequestContext) {
+    const sessionId = await createSession(page, {
+      title: "Narrow focus",
+      idea: "A tool that turns a loose idea into settled decisions.",
+    });
+    await chooseScenario(request, sessionId, "supersession");
+    await page.getByRole("button", { name: "Start the interview" }).click();
+    const cards = page.getByTestId("round-card");
+    await expect(cards).toHaveCount(2);
+    await answerOwnText(cards.first(), "A workspace, on disk.", "save");
+    await cards
+      .last()
+      .getByRole("button", { name: "I don't know", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Submit round" }).click();
+    await expect(page.getByTestId("done-proposed-panel")).toBeVisible();
+    return page
+      .getByTestId("loose-end")
+      .getByRole("button", { name: "Where does the data live?" });
+  }
+
+  test("closing a loose end's detail returns focus to it", async ({
+    page,
+    request,
+  }) => {
+    const opener = await reachLooseEnd(page, request);
+    const detail = page.getByRole("dialog", {
+      name: "Where does the data live?",
+    });
+
+    await opener.click();
+    await expect(detail).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(detail).toBeHidden();
+    await expect(opener).toBeFocused();
+
+    await opener.click();
+    await expect(detail).toBeVisible();
+    await detail.getByRole("button", { name: "Close" }).click();
+    await expect(detail).toBeHidden();
+    await expect(opener).toBeFocused();
+  });
+
+  test("a reopened detail returns focus to its latest opener", async ({
+    page,
+    request,
+  }) => {
+    const opener = await reachLooseEnd(page, request);
+    const detail = page.getByRole("dialog", {
+      name: "Where does the data live?",
+    });
+
+    await opener.click();
+    await expect(detail).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(detail).toBeHidden();
+
+    const trigger = page.getByTestId("tree-sheet-trigger");
+    await trigger.click();
+    await page
+      .getByTestId("tree-sheet")
+      .getByTestId("tree-row")
+      .filter({ hasText: "Where does the data live?" })
+      .click();
+    await expect(detail).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(detail).toBeHidden();
+    await expect(trigger).toBeFocused();
   });
 });
 
 test.describe("at 1280×720", () => {
   test.use({ viewport: LAPTOP });
+
+  test("closing a decision's detail returns focus to its tree row", async ({
+    page,
+    request,
+  }) => {
+    const sessionId = await createSession(page, {
+      title: "Wide focus",
+      idea: "A tool that turns a loose idea into settled decisions.",
+    });
+    await chooseScenario(request, sessionId, "supersession");
+    await page.getByRole("button", { name: "Start the interview" }).click();
+    const cards = page.getByTestId("round-card");
+    await expect(cards).toHaveCount(2);
+    await answerOwnText(cards.first(), "A workspace, on disk.", "save");
+    await cards
+      .last()
+      .getByRole("button", { name: "I don't know", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Submit round" }).click();
+    await expect(page.getByTestId("done-proposed-panel")).toBeVisible();
+
+    const row = page
+      .getByTestId("tree-row")
+      .filter({ hasText: "Where does the data live?" });
+    await row.click();
+    const detail = page.getByRole("dialog", {
+      name: "Where does the data live?",
+    });
+    await expect(detail).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(detail).toBeHidden();
+    await expect(row).toBeFocused();
+  });
 
   test("two actions stay visible, … holds the batch, and the tree keeps its column", async ({
     page,
