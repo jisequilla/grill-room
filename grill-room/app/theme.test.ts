@@ -119,9 +119,14 @@ describe("theme tokens", () => {
     expect(triplet("dark", row.name)).toBe(row.dark);
   });
 
-  it("makes --unplaced the muted foreground in both themes", () => {
-    expect(DECLARED.light.get("unplaced")).toBe("var(--muted-foreground)");
-    expect(DECLARED.dark.get("unplaced")).toBe("var(--muted-foreground)");
+  it("gives --unplaced its own Ash in both themes and leaves --muted-foreground alone", () => {
+    expect(DECLARED.light.get("muted-foreground")).toBe("28 8% 39%");
+    expect(DECLARED.dark.get("muted-foreground")).toBe("30 9% 60.4%");
+    for (const theme of ["light", "dark"] as const) {
+      const own = DECLARED[theme].get("unplaced");
+      expect(own).toMatch(/^\d+ \d+% [\d.]+%$/);
+      expect(own).not.toBe(DECLARED[theme].get("muted-foreground"));
+    }
   });
 
   it.each(STATE_VARIABLES)("registers --%s as a Tailwind colour", (name) => {
@@ -131,8 +136,8 @@ describe("theme tokens", () => {
   });
 });
 
-/** WCAG 2.x relative luminance of an `H S% L%` triplet. */
-function luminance(hsl: string): number {
+/** An `H S% L%` triplet as sRGB channels in 0–1. */
+function hslToRgb(hsl: string): [number, number, number] {
   const [h, s, l] = hsl.split(/\s+/).map((part) => Number.parseFloat(part));
   const sat = s / 100;
   const light = l / 100;
@@ -146,17 +151,37 @@ function luminance(hsl: string): number {
     : h < 240 ? [0, x, chroma]
     : h < 300 ? [x, 0, chroma]
     : [chroma, 0, x];
-  const channel = (value: number) => {
-    const c = value + m;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+  return [r + m, g + m, b + m];
+}
+
+/** WCAG 2.x relative luminance of sRGB channels in 0–1. */
+function luminanceOfRgb(rgb: [number, number, number]): number {
+  const [r, g, b] = rgb.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** WCAG 2.x relative luminance of an `H S% L%` triplet. */
+function luminance(hsl: string): number {
+  return luminanceOfRgb(hslToRgb(hsl));
+}
+
+function ratio(a: number, b: number): number {
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
 function contrast(theme: Theme, fg: string, bg: string): number {
-  const a = luminance(triplet(theme, fg));
-  const b = luminance(triplet(theme, bg));
-  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  return ratio(luminance(triplet(theme, fg)), luminance(triplet(theme, bg)));
+}
+
+/**
+ * A state colour as text over its own tint: the state at `alpha` composited
+ * per sRGB channel over a base surface.
+ */
+function tintedContrast(theme: Theme, state: string, alpha: number, base: string): number {
+  const fg = hslToRgb(triplet(theme, state));
+  const under = hslToRgb(triplet(theme, base));
+  const tint = fg.map((c, i) => alpha * c + (1 - alpha) * under[i]) as [number, number, number];
+  return ratio(luminanceOfRgb(fg), luminanceOfRgb(tint));
 }
 
 const TEXT_PAIRS: [string, string][] = [
@@ -198,6 +223,63 @@ function hits(pattern: RegExp): string[] {
       ),
   );
 }
+
+const TINT_BASES = ["card", "background", "muted"] as const;
+
+type Tint = { state: (typeof STATE_VARIABLES)[number]; digits: string; alpha: number };
+
+/** Every `bg-<state>/<n>` class in the components, deduplicated by state and digit string. */
+function stateTints(): Tint[] {
+  const found = new Map<string, Tint>();
+  const marker = new RegExp(`bg-(${STATE_VARIABLES.join("|")})/`, "g");
+  for (const file of tsxFiles(APP_DIR)) {
+    const source = readFileSync(file, "utf8");
+    for (const match of source.matchAll(marker)) {
+      const tail = source.slice(match.index + match[0].length);
+      const digits = tail.match(/^(\d+)(?![0-9A-Za-z./_-])/)?.[1];
+      if (digits === undefined) {
+        throw new Error(
+          `${path.relative(APP_DIR, file)}: ${match[0]}${tail.slice(0, 12)} is not a plain-digit alpha ending at a class boundary`,
+        );
+      }
+      found.set(`${match[1]}/${digits}`, {
+        state: match[1] as Tint["state"],
+        digits,
+        alpha: Number(digits) / 100,
+      });
+    }
+  }
+  return [...found.values()];
+}
+
+const TINTS = stateTints();
+
+describe("state tints", () => {
+  it("finds every state tint the components use", () => {
+    const keys = TINTS.map((tint) => `${tint.state}/${tint.digits}`);
+    for (const expected of [
+      "settled/10",
+      "settled/7",
+      "owed/15",
+      "owed/10",
+      "owed/8",
+      "repo/10",
+      "frontier/10",
+      "unplaced/15",
+      "unplaced/10",
+    ]) {
+      expect(keys).toContain(expected);
+    }
+  });
+
+  for (const theme of ["light", "dark"] as const) {
+    it.each(
+      TINTS.flatMap((tint) => TINT_BASES.map((base) => [tint.state, tint.state, tint.digits, base, tint.alpha] as const)),
+    )(`${theme}: --%s on bg-%s/%s over --%s is at least 4.5`, (state, _again, _digits, base, alpha) => {
+      expect(tintedContrast(theme, state, alpha, base)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
 
 const HUE_CLASS =
   /(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3}/;

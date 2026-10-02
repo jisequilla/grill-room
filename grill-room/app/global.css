@@ -48,11 +48,11 @@
   --border: 33 16% 86.5%;
   --input: 30 8% 54.5%;
   --ring: 14 83% 41.6%;
-  --settled: 149 48% 32.4%;
-  --owed: 40 100% 28%;
+  --settled: 149 48% 29.4%;
+  --owed: 40 100% 25%;
   --repo: 206 38% 36.1%;
-  --frontier: 14 84% 38%;
-  --unplaced: var(--muted-foreground);
+  --frontier: 14 84% 37.9%;
+  --unplaced: 28 8% 36.6%;
   --radius: 0.5rem;
   --sidebar-background: 34 18% 92.4%;
   --sidebar-foreground: 30 8% 34.1%;
@@ -259,7 +259,7 @@
   --owed: 40 73% 55.5%;
   --repo: 207 42% 66.7%;
   --frontier: 17 88% 66.5%;
-  --unplaced: var(--muted-foreground);
+  --unplaced: 30 9% 60.8%;
   --radius: 0.5rem;
   --sidebar-background: 30 14% 5.5%;
   --sidebar-foreground: 30 9% 60.4%;

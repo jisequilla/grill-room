@@ -237,13 +237,20 @@ replace every hard-coded `emerald-*`, `orange-*`, `amber-*`, `sky-*` and
 `violet-*` class in `decision-state-badge.tsx`, `round-card.tsx`,
 `export-visibility-report.tsx` and their siblings.
 
-| Variable | Name | Light | Dark | Role | Contrast (on card) |
+| Variable | Name | Light | Dark | Role | Contrast (card / own tint) |
 | --- | --- | --- | --- | --- | --- |
-| `--settled` | Tempered | #2B7A51 `149 48% 32.4%` | #5FBF8A `147 43% 56.1%` | settled, accepted, tracked | 5.1 / 7.7 |
-| `--owed` | Ochre | #8F5F00 `40 100% 28%` | #E0A93B `40 73% 55.5%` | loose end, stale, untracked, deferred | 5.4 / 8.2 |
-| `--repo` | Steel | #39617F `206 38% 36.1%` | #86ADCE `207 42% 66.7%` | repo provenance, citations, commits | 6.4 / 7.3 |
-| `--frontier` | Ember text | #B23610 `14 84% 38%` | #F58A5E `17 88% 66.5%` | frontier labels and ring as text | 6.0 / 7.2 |
-| `--unplaced` | Ash | = `--muted-foreground` | = `--muted-foreground` | unplaced, withdrawn, blocked | 5.4 / 6.3 |
+| `--settled` | Tempered | #276F4A `149 48% 29.4%` | #5FBF8A `147 43% 56.1%` | settled, accepted, tracked | light 5.9 / 4.5 · dark 7.7 / 5.9 |
+| `--owed` | Ochre | #805500 `40 100% 25%` | #E0A93B `40 73% 55.5%` | loose end, stale, untracked, deferred | light 6.4 / 4.5 · dark 8.2 / 5.6 |
+| `--repo` | Steel | #39617F `206 38% 36.1%` | #86ADCE `207 42% 66.7%` | repo provenance, citations, commits | light 6.4 / 4.9 · dark 7.4 / 5.6 |
+| `--frontier` | Ember text | #B2350F `14 84% 37.9%` | #F58A5E `17 88% 66.5%` | frontier labels and ring as text | light 6.0 / 4.5 · dark 7.1 / 5.5 |
+| `--unplaced` | Ash | #655D56 `28 8% 36.6%` | #A49B92 `30 9% 60.8%` | unplaced, withdrawn, blocked | light 6.3 / 4.5 · dark 6.3 / 4.5 |
+
+"Own tint" is the state colour as text on the same colour at the alpha a
+component uses (`bg-settled/10`), over the card, the page background and the
+muted surface; the cell gives the worst of those. A stamp on a hovered or
+selected row (`bg-accent`, darker than all three) is out of scope, because
+hover and selection are transient and the AA rule here is for the resting
+surface.
 
 Loose end and stale share Ochre because both are what the session still owes.
 Shape tells them apart: a hollow ring for a loose end, a dashed border for
