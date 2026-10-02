@@ -116,6 +116,7 @@ export default function SessionWorkspaceRoute() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [treeSheetOpen, setTreeSheetOpen] = useState(false);
   const treeTriggerRef = useRef<HTMLButtonElement>(null);
+  const detailReturnFocusRef = useRef<HTMLElement | null>(null);
 
   const { data: session, isLoading: sessionLoading } = useActionQuery(
     "get-session",
@@ -397,11 +398,20 @@ export default function SessionWorkspaceRoute() {
       ) ?? null;
 
   function selectDecision(decision: TreeDecision) {
+    const fromTreeSheet = treeSheetOpen;
     setTreeSheetOpen(false);
-    openDecision(decision.id);
+    openDecision(decision.id, fromTreeSheet ? treeTriggerRef.current : null);
   }
 
-  function openDecision(decisionId: string) {
+  function openDecision(
+    decisionId: string,
+    returnFocusTarget: HTMLElement | null = null,
+  ) {
+    detailReturnFocusRef.current =
+      returnFocusTarget ??
+      (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
     setSelectedId(decisionId);
     setDetailOpen(true);
   }
@@ -599,6 +609,7 @@ export default function SessionWorkspaceRoute() {
           decisions={decisions}
           open={detailOpen && selected !== null}
           onOpenChange={setDetailOpen}
+          returnFocusTo={detailReturnFocusRef}
         />
       </div>
     </TooltipProvider>

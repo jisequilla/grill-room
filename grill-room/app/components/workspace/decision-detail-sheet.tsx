@@ -1,5 +1,6 @@
 import { useT } from "@agent-native/core/client/i18n";
 import { IconArrowBackUp } from "@tabler/icons-react";
+import type { RefObject } from "react";
 
 import { AnswerNow } from "@/components/workspace/answer-now";
 import {
@@ -45,17 +46,23 @@ function Section({
 /**
  * One decision, read in full: its question, the answer it holds now, what it
  * hangs off, and the story of what it used to say.
+ *
+ * The sheet has no Radix trigger, so on close it hands focus back to
+ * `returnFocusTo`, the element that opened it. When that element has left the
+ * document, Radix's default runs.
  */
 export function DecisionDetailSheet({
   decision,
   decisions,
   open,
   onOpenChange,
+  returnFocusTo,
 }: {
   decision: TreeDecision | null;
   decisions: readonly TreeDecision[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  returnFocusTo: RefObject<HTMLElement | null>;
 }) {
   const t = useT();
 
@@ -74,6 +81,12 @@ export function DecisionDetailSheet({
       <SheetContent
         side="right"
         className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-lg"
+        onCloseAutoFocus={(event) => {
+          const target = returnFocusTo.current;
+          if (!target?.isConnected) return;
+          event.preventDefault();
+          target.focus();
+        }}
       >
         <SheetHeader className="space-y-3 text-left">
           <div className="flex flex-wrap items-center gap-1.5">
