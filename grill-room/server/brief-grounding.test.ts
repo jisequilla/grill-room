@@ -967,6 +967,47 @@ describe("reasonsToRefuseHandoffGrounding on a reach", () => {
     expect(reasons).toEqual([noTrackedFile("onlyIgnored"), noTrackedFile("onlyUntracked")]);
   });
 
+  it("checks each ticket's reach on its own and numbers its reasons by ticket", async () => {
+    const root = repos.create({ files: EXPORT_FOLDER_FILES });
+    const first = aResultReaching([{ symbol: "exportFolder" }]).tickets[0]!;
+    const result = {
+      tickets: [
+        first,
+        { ...first, number: 2, reach: [{ symbol: "exportFolder" }, { symbol: "a b" }] },
+      ],
+    };
+
+    const reasons = await reasonsToRefuseHandoffGrounding(result, {
+      projectRoot: root,
+      tickets: [
+        { number: 1, blockedBy: [] },
+        { number: 2, blockedBy: [] },
+      ],
+    });
+
+    expect(reasons).toEqual([
+      "Ticket 2's reach `a b` is not one identifier; give a single name such as `exportFolder`.",
+    ]);
+  });
+
+  it("lets two tickets both reach one symbol without a twice reason", async () => {
+    const root = repos.create({ files: EXPORT_FOLDER_FILES });
+    const first = aResultReaching([{ symbol: "exportFolder" }]).tickets[0]!;
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { tickets: [first, { ...first, number: 2 }] },
+      {
+        projectRoot: root,
+        tickets: [
+          { number: 1, blockedBy: [] },
+          { number: 2, blockedBy: [] },
+        ],
+      },
+    );
+
+    expect(reasons).toEqual([]);
+  });
+
   it("does not search for an invalid entry", async () => {
     const folder = repos.plainFolder();
 
