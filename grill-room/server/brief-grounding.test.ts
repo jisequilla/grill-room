@@ -990,6 +990,53 @@ describe("reasonsToRefuseHandoffGrounding on a reach", () => {
     ]);
   });
 
+  describe("on the second of two tickets", () => {
+    const BOTH_TICKETS = [
+      { number: 1, blockedBy: [] },
+      { number: 2, blockedBy: [] },
+    ];
+
+    function refuseSecondTicketReaching(projectRoot: string, reach: string[]): Promise<string[]> {
+      const first = aResultReaching([{ symbol: "exportFolder" }]).tickets[0]!;
+      return reasonsToRefuseHandoffGrounding(
+        { tickets: [first, { ...first, number: 2, reach: reach.map((symbol) => ({ symbol })) }] },
+        { projectRoot, tickets: BOTH_TICKETS },
+      );
+    }
+
+    it("numbers the twice reason by ticket 2", async () => {
+      const root = repos.create({ files: EXPORT_FOLDER_FILES });
+
+      const reasons = await refuseSecondTicketReaching(root, ["exportFolder", "exportFolder"]);
+
+      expect(reasons).toEqual(["Ticket 2 declares the reach `exportFolder` twice."]);
+    });
+
+    it("numbers the no-tracked-file reason by ticket 2", async () => {
+      const root = repos.create({ files: EXPORT_FOLDER_FILES });
+
+      const reasons = await refuseSecondTicketReaching(root, ["exportFoldr"]);
+
+      expect(reasons).toEqual([
+        "Ticket 2 declares a reach for `exportFoldr`, which no tracked file contains; a reach is for a symbol that exists in the repository today. Spell it as the code does, or drop the reach.",
+      ]);
+    });
+
+    it("numbers the could-not-check reason by ticket 2", async () => {
+      const folder = repos.plainFolder({ "a.ts": "exportFolder\n" });
+      const first = aResultReaching([]).tickets[0]!;
+
+      const reasons = await reasonsToRefuseHandoffGrounding(
+        { tickets: [first, { ...first, number: 2, reach: [{ symbol: "exportFolder" }] }] },
+        { projectRoot: folder, tickets: BOTH_TICKETS },
+      );
+
+      expect(reasons).toEqual([
+        "Ticket 2's reach `exportFolder` could not be checked: git grep exited 128.",
+      ]);
+    });
+  });
+
   it("lets two tickets both reach one symbol without a twice reason", async () => {
     const root = repos.create({ files: EXPORT_FOLDER_FILES });
     const first = aResultReaching([{ symbol: "exportFolder" }]).tickets[0]!;
