@@ -23,6 +23,19 @@ A ticket's precision comes from examples, not from length:
 - Each acceptance line names the test that proves it, and that test must fail with the change reverted.
 - When a ticket changes both a model prompt and the server check that enforces it, it carries a seam test: every answer shape the prompt describes passes the check.
 
+## Which loop
+
+The workflow is the default for a ticket that is ready. The benchmark's weak point decides the exceptions: a judgment call in the middle of a workflow has nowhere to go (`docs/benchmarks/hand-loop-vs-workflow.md`).
+
+| Bead | Route |
+|------|-------|
+| A ticket with its behaviour table, cleared by pre-flight | The workflow, with two lenses when it touches a server check, a schema or a model prompt |
+| An open owner decision, or a design not yet settled | A grill (in the app or with `/grill-me`) first, then a ticket, then the workflow |
+| Debugging with an unknown cause, or a spike | The hand loop, on `opus`, so judgment can enter mid-task |
+| Work only the owner can do | No delegation |
+
+Pre-flight, verification on the branch merged with `main`, and the merge stay in the main session in every route. A launch needs the user's typed message naming the tickets: a workflow agent takes the last typed message as its authority and refuses work approved only through the question tool.
+
 ## Before launching
 
 - Local `main` holds nothing unpushed. Push it first if it does, so the worktree's base includes it.
