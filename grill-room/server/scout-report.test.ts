@@ -5,7 +5,12 @@ import { describe, expect, it } from "vitest";
 
 import { useTempGitRepos } from "../test/git-repos.js";
 import { aScoutProjectResult } from "./interviewer/test-fixtures.js";
-import { checkCitation, reasonsToRefuseScoutReport } from "./scout-report.js";
+import {
+  checkCitation,
+  clampCitation,
+  clampScoutReportCitations,
+  reasonsToRefuseScoutReport,
+} from "./scout-report.js";
 
 const repos = useTempGitRepos();
 
@@ -225,5 +230,74 @@ describe("reasonsToRefuseScoutReport", () => {
         reasonsToRefuseScoutReport(result, { projectRoot: root, previousDecisionKeys: [] }),
       ).toEqual([]);
     });
+  });
+});
+
+describe("clampCitation", () => {
+  it.each([
+    ["src/three-lines.ts:2-60", "src/three-lines.ts:2-3"],
+    ["src/three-lines.ts:3-60", "src/three-lines.ts:3"],
+    ["src/three-lines.ts:1-3", "src/three-lines.ts:1-3"],
+    ["src/three-lines.ts:2-2", "src/three-lines.ts:2-2"],
+    ["src/three-lines.ts:2", "src/three-lines.ts:2"],
+    ["src/three-lines.ts:60", "src/three-lines.ts:60"],
+    ["src/three-lines.ts:4-60", "src/three-lines.ts:4-60"],
+    ["src/missing.ts:1-5", "src/missing.ts:1-5"],
+    ["src/three-lines.ts:3-1", "src/three-lines.ts:3-1"],
+    ["src/three-lines.ts:0", "src/three-lines.ts:0"],
+    ["src/three-lines.ts:1-", "src/three-lines.ts:1-"],
+    ["src/three-lines.ts", "src/three-lines.ts"],
+    ["../outside.ts:1-5", "../outside.ts:1-5"],
+    ["src:1-5", "src:1-5"],
+    ["src/empty.ts:1-4", "src/empty.ts:1-4"],
+  ])("%s becomes %s", (citation, expected) => {
+    expect(clampCitation(aRepo(), citation)).toBe(expected);
+  });
+
+  it("never throws, even when the project root is missing", () => {
+    expect(clampCitation("/does/not/exist", "src/a.ts:1-9")).toBe("src/a.ts:1-9");
+  });
+
+  it("leaves every refusal of checkCitation exactly as it was", () => {
+    const root = aRepo();
+    expect(checkCitation(root, clampCitation(root, "src/three-lines.ts:60"))).toMatch(
+      /cites line 60, but src\/three-lines.ts has 3 lines\./,
+    );
+    expect(checkCitation(root, clampCitation(root, "src/three-lines.ts:4-60"))).toMatch(
+      /cites line 60/,
+    );
+    expect(checkCitation(root, clampCitation(root, "src/empty.ts:1-4"))).toMatch(/has 0 lines/);
+    expect(checkCitation(root, clampCitation(root, "src/missing.ts:1-5"))).toMatch(
+      /does not exist/,
+    );
+  });
+
+  it("seam: clampCitation then checkCitation accepts every range the citation rule says is cut", () => {
+    const root = aRepo();
+    for (const citation of [
+      "src/three-lines.ts:2-60",
+      "src/three-lines.ts:3-60",
+      "src/three-lines.ts:1-4",
+      "src/no-trailing-newline.ts:1-9",
+      "docs/adr/0003-queue.md:5-10",
+    ]) {
+      expect(checkCitation(root, clampCitation(root, citation)), citation).toBeNull();
+    }
+  });
+});
+
+describe("clampScoutReportCitations", () => {
+  it("clamps every citation without mutating the report", () => {
+    const root = aRepo();
+    const report = aScoutProjectResult();
+    report.currentState[0]!.citations = ["src/three-lines.ts:2-9"];
+    report.proposedDecisions[0]!.citation = "docs/adr/0003-queue.md:5-10";
+
+    const clamped = clampScoutReportCitations(report, root);
+
+    expect(clamped.currentState[0]?.citations).toEqual(["src/three-lines.ts:2-3"]);
+    expect(clamped.proposedDecisions[0]?.citation).toBe("docs/adr/0003-queue.md:5-9");
+    expect(report.currentState[0]?.citations).toEqual(["src/three-lines.ts:2-9"]);
+    expect(report.proposedDecisions[0]?.citation).toBe("docs/adr/0003-queue.md:5-10");
   });
 });

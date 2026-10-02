@@ -764,9 +764,11 @@ const CITATION_RULES = [
   "Every citation is a path relative to the project root, a colon, and a",
   "line number or an inclusive line range: `src/server.ts:42` or",
   "`docs/adr/0003-queue.md:5-12`. Cite only files you actually opened and",
-  "lines you actually read. Never invent a path, and never cite a line past",
-  "the end of its file: the app checks every citation against the repository",
-  "and rejects the whole report if any one is wrong.",
+  "lines you actually read, and never invent a path. Read numbers every",
+  "line, and the last numbered line is the file's length. The app checks",
+  "every citation against the repository: a range that runs past the end",
+  "is cut to the last line, and a citation that starts past the end, or a",
+  "path that does not exist, rejects the whole report.",
 ];
 
 function renderFacts(facts: ProjectServerFacts): string {

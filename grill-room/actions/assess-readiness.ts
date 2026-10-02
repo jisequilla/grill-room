@@ -6,6 +6,7 @@ import { getDb, schema } from "../server/db/index.js";
 import { getInterviewer } from "../server/interviewer/index.js";
 import type { AssessReadinessResult } from "../server/interviewer/index.js";
 import {
+  clampReadinessCitations,
   currentReadiness,
   failIfPastFirstRound,
   reasonsToRefuseReadiness,
@@ -100,8 +101,11 @@ export default defineAction({
               },
               observer,
             );
-            previousResult = turn.result;
-            return turn;
+            const clamped = project
+              ? clampReadinessCitations(turn.result, project.rootPath)
+              : turn.result;
+            previousResult = clamped;
+            return { ...turn, result: clamped };
           },
           reasonsToRefuse: (result) =>
             reasonsToRefuseReadiness(

@@ -213,10 +213,26 @@ describe("scout-project", () => {
     expect(report!.result).toEqual(aScoutProjectResult());
   });
 
-  it("refuses a citation to a line past the file's end and asks again", async () => {
+  it("clamps a citation range past the file's end and stores it at once", async () => {
+    const { session } = await aSessionWithProject();
+    const raw = aScoutProjectResult();
+    raw.proposedDecisions[0]!.citation = "docs/adr/0003-queue.md:5-10";
+    raw.currentState[0]!.citations = ["src/ingest/metrics.ts:12-40"];
+    const interviewer = scriptInterviewer([{ kind: "scout-project", result: raw }]);
+
+    await scoutProject.run({ sessionId: session.id });
+
+    expect(scoutRequests(interviewer.requests)).toHaveLength(1);
+    const { report } = await getScoutReport.run({ sessionId: session.id });
+    expect(report!.result.proposedDecisions[0]!.citation).toBe("docs/adr/0003-queue.md:5-9");
+    expect(report!.result.currentState[0]!.citations).toEqual(["src/ingest/metrics.ts:12-30"]);
+    expect(raw.proposedDecisions[0]!.citation).toBe("docs/adr/0003-queue.md:5-10");
+  });
+
+  it("refuses a citation that starts past the file's end and asks again", async () => {
     const { session } = await aSessionWithProject();
     const outOfRange = aScoutProjectResult();
-    outOfRange.proposedDecisions[0]!.citation = "docs/adr/0003-queue.md:5-10";
+    outOfRange.proposedDecisions[0]!.citation = "docs/adr/0003-queue.md:10-12";
     const interviewer = scriptInterviewer([
       { kind: "scout-project", result: outOfRange },
       { kind: "scout-project", result: aScoutProjectResult() },
@@ -226,7 +242,7 @@ describe("scout-project", () => {
 
     const requests = scoutRequests(interviewer.requests);
     expect(requests).toHaveLength(2);
-    expect(requests[1]!.rejectionReason).toMatch(/cites line 10, but docs\/adr\/0003-queue\.md has 9 lines/);
+    expect(requests[1]!.rejectionReason).toMatch(/cites line 12, but docs\/adr\/0003-queue\.md has 9 lines/);
     expect((await getScoutReport.run({ sessionId: session.id })).report).not.toBeNull();
   });
 

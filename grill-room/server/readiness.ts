@@ -20,7 +20,11 @@ import {
   MAX_READY_UNKNOWNS,
   type AssessReadinessResult,
 } from "./interviewer/index.js";
-import { checkCitation, currentScoutReport } from "./scout-report.js";
+import {
+  checkCitation,
+  clampCitation,
+  currentScoutReport,
+} from "./scout-report.js";
 
 /**
  * A readiness result's evidence as it may be stored: the current shape, or,
@@ -143,6 +147,24 @@ function normalizeForComparison(text: string): string {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .replace(/[.!?]+$/, "");
+}
+
+/**
+ * The judgment with each repo-sourced item's citation clamped by
+ * `clampCitation`. A new object, the argument is never changed.
+ */
+export function clampReadinessCitations(
+  result: AssessReadinessResult,
+  projectRoot: string,
+): AssessReadinessResult {
+  return {
+    ...result,
+    evidence: result.evidence.map((item) =>
+      item.source === "repo" && item.citation !== null
+        ? { ...item, citation: clampCitation(projectRoot, item.citation) }
+        : item,
+    ),
+  };
 }
 
 /**

@@ -999,7 +999,7 @@ describe("what the adapter sends for a project scout", () => {
     expect(prompt).toContain("Branch: main");
     expect(prompt).toContain("Record the broker decision");
     expect(prompt).toContain("docs/adr");
-    expect(prompt).toContain("Never invent a path");
+    expect(prompt).toContain("never invent a path");
     expect(prompt).toContain("`recorded`");
     expect(prompt).toContain("`inferred`");
     expect(prompt).toContain("return an empty list");
@@ -1284,7 +1284,7 @@ describe("what the adapter sends for a handoff scout", () => {
     const { prompt } = await handoffInvocation();
 
     expect(prompt).toContain("Cite only files you actually opened");
-    expect(prompt).toContain("Never invent a path");
+    expect(prompt).toContain("never invent a path");
     expect(prompt).toContain("one cited line cannot show an absence");
     expect(prompt).toContain("hidden from you on purpose");
   });
@@ -2952,6 +2952,46 @@ describe("what each attempt costs and does", () => {
       expect(ended[0]!.metrics?.toolCalls).toEqual({ Glob: 1, Read: 1 });
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the citation rule the scouts are told", () => {
+  const CUT_RULE = [
+    "Every citation is a path relative to the project root, a colon, and a",
+    "line number or an inclusive line range: `src/server.ts:42` or",
+    "`docs/adr/0003-queue.md:5-12`. Cite only files you actually opened and",
+    "lines you actually read, and never invent a path. Read numbers every",
+    "line, and the last numbered line is the file's length. The app checks",
+    "every citation against the repository: a range that runs past the end",
+    "is cut to the last line, and a citation that starts past the end, or a",
+    "path that does not exist, rejects the whole report.",
+  ].join("\n");
+
+  async function promptOfFirstInvocation(
+    structuredOutput: unknown,
+    run: (interviewer: ReturnType<typeof createClaudeCliInterviewer>) => Promise<unknown>,
+  ): Promise<string> {
+    const runner = recordingRunner([ok(anEnvelope({ structured_output: structuredOutput }))]);
+    await run(createClaudeCliInterviewer({ runCli: runner.runCli }));
+    return valueOf(runner.invocations[0].args, "-p") as string;
+  }
+
+  it("tells the scouts a range past the end is cut and a start past the end is refused", async () => {
+    const projectScout = await promptOfFirstInvocation(aScoutProjectResult(), (interviewer) =>
+      interviewer.scoutProject(aScoutProjectRequest({ projectRoot: "/Users/someone/p" })),
+    );
+    const handoffScout = await promptOfFirstInvocation(aHandoffScoutResult(), (interviewer) =>
+      interviewer.scoutHandoff(aHandoffScoutRequest({ projectRoot: "/Users/someone/p" })),
+    );
+    const readiness = await promptOfFirstInvocation(anAssessReadinessResult(), (interviewer) =>
+      interviewer.assessReadiness(anAssessReadinessRequest()),
+    );
+
+    expect(projectScout).toContain(CUT_RULE);
+    expect(handoffScout).toContain(CUT_RULE);
+    for (const prompt of [projectScout, handoffScout, readiness]) {
+      expect(prompt).not.toContain("if any one is wrong");
     }
   });
 });

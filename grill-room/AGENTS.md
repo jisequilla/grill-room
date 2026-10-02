@@ -256,8 +256,9 @@ reports:
   one-line reason.
 
 Every citation is checked against the project's files before the report is
-accepted; a report citing a missing file or an out-of-range line is refused
-and the scout is asked again. The report is stored on the session with the
+accepted; a range that only ends past its file's end is cut to the last line
+and stored, while a report citing a missing file or a range that starts past
+its file's end is refused and the scout is asked again. The report is stored on the session with the
 commit and idea it read, so `get-scout-report` can say when it has gone
 **stale** — the idea changed, or the project's `HEAD` moved — without a fresh
 scout run happening on its own.
@@ -767,7 +768,10 @@ Every result is checked before it is accepted, and one that fails is sent back
 with the reasons:
 
 - every citation (`buildsOnFiles`, `facts`, a citation-form `buildsOn`) points
-  at real lines of the project, by the same check the project scout uses;
+  at real lines of the project, by the same check the project scout uses; a
+  range that only ends past its file's end is cut to the last line first
+  (`clampCitation`, run in the action before the check), and one that starts
+  past the end is refused;
 - every ticket of the handoff appears exactly once, and no other;
 - every blocker of a ticket has exactly one `buildsOn` entry, and every
   `buildsOn` names a real blocker;

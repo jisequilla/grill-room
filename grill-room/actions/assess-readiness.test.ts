@@ -5,10 +5,23 @@ import {
   scriptInterviewer,
   type AssessReadinessRequest,
 } from "../server/interviewer/index.js";
-import { anAssessReadinessResult } from "../server/interviewer/test-fixtures.js";
+import {
+  anAssessReadinessResult,
+  aScoutProjectResult,
+  ideaEvidence,
+  repoEvidence,
+} from "../server/interviewer/test-fixtures.js";
 import { useTestDatabase } from "../test/db.js";
+import { useTempGitRepos } from "../test/git-repos.js";
 import assessReadiness from "./assess-readiness.js";
 import createSession from "./create-session.js";
+import registerProject from "./register-project.js";
+
+const repos = useTempGitRepos();
+
+function lines(count: number): string {
+  return Array.from({ length: count }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
+}
 
 function readinessRequests(
   requests: readonly { kind: string }[],
@@ -47,5 +60,42 @@ describe("assess-readiness", () => {
     expect(requests[1]!.previousResult).toEqual(refused);
 
     expect(judged.readiness!.result).toEqual(accepted);
+  });
+
+  it("stores a repo item's citation clamped to its file's end", async () => {
+    const root = repos.create({
+      files: {
+        "src/ingest/metrics.ts": lines(30),
+        "docs/adr/0003-queue.md": lines(9),
+      },
+    });
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+    });
+    const session = await createSession.run({
+      title: "Ingest lag alerts",
+      idea: "Alert the on-call engineer when ingest falls behind.",
+      model: "opus",
+      projectId: project.id,
+    });
+    const raw = anAssessReadinessResult({
+      evidence: [
+        ideaEvidence("Alert the on-call engineer"),
+        repoEvidence("The queue is Postgres-backed", "docs/adr/0003-queue.md:5-10"),
+      ],
+    });
+    // With a project and no report the action runs the scout first.
+    const interviewer = scriptInterviewer([
+      { kind: "scout-project", result: aScoutProjectResult() },
+      { kind: "assess-readiness", result: raw },
+    ]);
+
+    const judged = await assessReadiness.run({ sessionId: session.id });
+
+    expect(readinessRequests(interviewer.requests)).toHaveLength(1);
+    expect(judged.readiness!.result.evidence[1]!.citation).toBe("docs/adr/0003-queue.md:5-9");
+    expect(raw.evidence[1]!.citation).toBe("docs/adr/0003-queue.md:5-10");
   });
 });

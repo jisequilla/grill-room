@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { blockersThroughGates } from "../shared/ticket-gates.js";
 import {
+  clampHandoffGroundingCitations,
   currentBriefGrounding,
   measureReach,
   reasonsToRefuseHandoffGrounding,
@@ -174,13 +175,17 @@ export default defineAction({
               },
               observer,
             );
-            previousResult = turn.result;
-            const reasons = await reasonsToRefuseHandoffGrounding(turn.result, {
+            const clamped = clampHandoffGroundingCitations(
+              turn.result,
+              project.rootPath,
+            );
+            previousResult = clamped;
+            const reasons = await reasonsToRefuseHandoffGrounding(clamped, {
               projectRoot: project.rootPath,
               tickets: requestTickets,
             });
             return {
-              result: { result: turn.result, reasons },
+              result: { result: clamped, reasons },
               conversationId: turn.conversationId,
             };
           },

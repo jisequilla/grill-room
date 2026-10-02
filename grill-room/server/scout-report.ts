@@ -395,6 +395,85 @@ function lineCount(text: string): number {
   return text.endsWith("\n") ? pieces - 1 : pieces;
 }
 
+type ResolvedCitation =
+  | { problem: string }
+  | { problem: null; citedPath: string; start: number; end: number; lines: number };
+
+function resolveCitation(
+  projectRoot: string,
+  citation: string,
+): ResolvedCitation {
+  const separator = citation.lastIndexOf(":");
+  const citedPath = separator > 0 ? citation.slice(0, separator) : "";
+  const range = separator > 0 ? citation.slice(separator + 1) : "";
+  const match = /^([1-9][0-9]*)(?:-([1-9][0-9]*))?$/.exec(range);
+  if (!citedPath || !match) {
+    return {
+      problem: `Citation "${citation}" is not \`path:line\` or \`path:start-end\`.`,
+    };
+  }
+  const start = Number(match[1]);
+  const end = match[2] === undefined ? start : Number(match[2]);
+  if (end < start) {
+    return {
+      problem: `Citation "${citation}" has a line range that ends before it starts.`,
+    };
+  }
+
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(projectRoot);
+  } catch {
+    return {
+      problem: `Citation "${citation}" cannot be checked: the project root ${projectRoot} does not exist.`,
+    };
+  }
+
+  const resolved = path.resolve(realRoot, citedPath);
+  if (path.isAbsolute(citedPath) || !isInside(realRoot, resolved)) {
+    return {
+      problem: `Citation "${citation}" points outside the project; cite a path relative to the project root.`,
+    };
+  }
+
+  let realPath: string;
+  try {
+    realPath = realpathSync(resolved);
+  } catch {
+    return {
+      problem: `Citation "${citation}" cites ${citedPath}, which does not exist in the project.`,
+    };
+  }
+  if (!isInside(realRoot, realPath)) {
+    return {
+      problem: `Citation "${citation}" cites ${citedPath}, which leads outside the project.`,
+    };
+  }
+  let isFile: boolean;
+  try {
+    isFile = statSync(realPath).isFile();
+  } catch {
+    return {
+      problem: `Citation "${citation}" cites ${citedPath}, which does not exist in the project.`,
+    };
+  }
+  if (!isFile) {
+    return {
+      problem: `Citation "${citation}" cites ${citedPath}, which is not a file; cite a file and a line.`,
+    };
+  }
+
+  let lines: number;
+  try {
+    lines = lineCount(readFileSync(realPath, "utf8"));
+  } catch {
+    return {
+      problem: `Citation "${citation}" cites ${citedPath}, which cannot be read.`,
+    };
+  }
+  return { problem: null, citedPath, start, end, lines };
+}
+
 /**
  * Why a citation (`path:line` or `path:start-end`, relative to the project
  * root) does not point at real lines of the project's working tree, written
@@ -410,60 +489,32 @@ export function checkCitation(
   projectRoot: string,
   citation: string,
 ): string | null {
-  const separator = citation.lastIndexOf(":");
-  const citedPath = separator > 0 ? citation.slice(0, separator) : "";
-  const range = separator > 0 ? citation.slice(separator + 1) : "";
-  const match = /^([1-9][0-9]*)(?:-([1-9][0-9]*))?$/.exec(range);
-  if (!citedPath || !match) {
-    return `Citation "${citation}" is not \`path:line\` or \`path:start-end\`.`;
-  }
-  const start = Number(match[1]);
-  const end = match[2] === undefined ? start : Number(match[2]);
-  if (end < start) {
-    return `Citation "${citation}" has a line range that ends before it starts.`;
-  }
-
-  let realRoot: string;
-  try {
-    realRoot = realpathSync(projectRoot);
-  } catch {
-    return `Citation "${citation}" cannot be checked: the project root ${projectRoot} does not exist.`;
-  }
-
-  const resolved = path.resolve(realRoot, citedPath);
-  if (path.isAbsolute(citedPath) || !isInside(realRoot, resolved)) {
-    return `Citation "${citation}" points outside the project; cite a path relative to the project root.`;
-  }
-
-  let realPath: string;
-  try {
-    realPath = realpathSync(resolved);
-  } catch {
-    return `Citation "${citation}" cites ${citedPath}, which does not exist in the project.`;
-  }
-  if (!isInside(realRoot, realPath)) {
-    return `Citation "${citation}" cites ${citedPath}, which leads outside the project.`;
-  }
-  let isFile: boolean;
-  try {
-    isFile = statSync(realPath).isFile();
-  } catch {
-    return `Citation "${citation}" cites ${citedPath}, which does not exist in the project.`;
-  }
-  if (!isFile) {
-    return `Citation "${citation}" cites ${citedPath}, which is not a file; cite a file and a line.`;
-  }
-
-  let lines: number;
-  try {
-    lines = lineCount(readFileSync(realPath, "utf8"));
-  } catch {
-    return `Citation "${citation}" cites ${citedPath}, which cannot be read.`;
-  }
-  if (end > lines) {
+  const resolved = resolveCitation(projectRoot, citation);
+  if (resolved.problem !== null) return resolved.problem;
+  if (resolved.end > resolved.lines) {
+    const { lines, citedPath, end } = resolved;
     return `Citation "${citation}" cites line ${end}, but ${citedPath} has ${lines} line${lines === 1 ? "" : "s"}.`;
   }
   return null;
+}
+
+/**
+ * The citation to store: a range that starts inside its file but ends past
+ * the last line is cut to the last line (a cut range of one line is written
+ * as one line). Anything else, including every citation `checkCitation`
+ * refuses, comes back unchanged so the check treats it as it always has.
+ * Never throws.
+ */
+export function clampCitation(projectRoot: string, citation: string): string {
+  try {
+    const resolved = resolveCitation(projectRoot, citation);
+    if (resolved.problem !== null) return citation;
+    const { citedPath, start, end, lines } = resolved;
+    if (end <= lines || start > lines) return citation;
+    return start === lines ? `${citedPath}:${lines}` : `${citedPath}:${start}-${lines}`;
+  } catch {
+    return citation;
+  }
 }
 
 /**
@@ -545,6 +596,29 @@ function reasonsForStaleSupersededProposals(
     }
   }
   return reasons;
+}
+
+/**
+ * The report with every citation clamped by {@link clampCitation}; a new
+ * object, the argument is never changed.
+ */
+export function clampScoutReportCitations(
+  report: ScoutProjectResult,
+  projectRoot: string,
+): ScoutProjectResult {
+  return {
+    ...report,
+    currentState: report.currentState.map((item) => ({
+      ...item,
+      citations: item.citations.map((citation) =>
+        clampCitation(projectRoot, citation),
+      ),
+    })),
+    proposedDecisions: report.proposedDecisions.map((decision) => ({
+      ...decision,
+      citation: clampCitation(projectRoot, decision.citation),
+    })),
+  };
 }
 
 /**
