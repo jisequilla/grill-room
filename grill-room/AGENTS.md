@@ -109,7 +109,7 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `generate-handoff` | Generate or regenerate a session's handoff from deterministic templates (no model call): `HANDOFF.md` plus one brief per ticket, except a gate, which gets none. Regenerating rewrites every unedited text and keeps each hand-edited brief whose build ticket still exists, word for word. Refuses with `no-project`, `project-not-found`, `spec-missing`, `no-tickets` or `ticket-cycle`, and with `handoff-edited` when keeping an edit is impossible (HANDOFF.md was edited, an edited brief's ticket is gone, or a legacy handoff carries edits) unless `overwriteEdits` is true, which rewrites everything. See "Handoff" below. |
 | `get-handoff` | A session's handoff (HANDOFF.md, briefs by ticket number, timestamps) or null, with `stale` (its inputs changed since generation), `exportStale` (edited or regenerated after the last export that included it), `handoffEdited`, `editedBriefs`, `outdatedBriefs` (see "Handoff" below), `canGenerate`, and `cannotGenerateReason`. |
 | `update-handoff` | Edit a generated handoff: replace HANDOFF.md's `markdown` and/or `briefs` by `ticketNumber`. Marks it edited. Saving an edited brief while the handoff is current marks it reviewed, dropping it from `outdatedBriefs`. Refuses with `handoff-missing` or `brief-not-found`. |
-| `ground-briefs` | Ground a session's handoff briefs in its project's code: one handoff scout turn (turn kind `handoff-scout`, always on sonnet, read-only over the project root, a conversation of its own) covering every build ticket at once (a gate is never grounded, and a build ticket blocked through a gate is sent that gate's own blockers instead), reporting per ticket the files to create or edit, the existing files it builds on, cited codebase facts, what it needs from each blocker with the check that proves it, and the test and command that prove it. The result is checked against the handoff and the working tree before it is stored, replacing any earlier grounding. Refused with `no-project`, `not-a-repo`, `handoff-missing`, `handoff-stale`, `turn-working`, `too-many-tickets` or `too-many-blockers` (the last two before any turn is spent, counting build tickets and their blockers through gates); a grounding refused three times fails the turn with `invalid-brief-grounding`. See "Grounding the briefs" below. |
+| `ground-briefs` | Ground a session's handoff briefs in its project's code: one handoff scout turn (turn kind `handoff-scout`, always on sonnet, read-only over the project root, a conversation of its own) covering every build ticket at once (a gate is never grounded, and a build ticket blocked through a gate is sent that gate's own blockers instead), reporting per ticket the files to create or edit, the symbols it reshapes whose every `git grep` hit it may edit (its reach), the existing files it builds on, cited codebase facts, what it needs from each blocker with the check that proves it, and the test and command that prove it. The result is checked against the handoff and the working tree before it is stored, replacing any earlier grounding. Refused with `no-project`, `not-a-repo`, `handoff-missing`, `handoff-stale`, `turn-working`, `too-many-tickets` or `too-many-blockers` (the last two before any turn is spent, counting build tickets and their blockers through gates); a grounding refused three times fails the turn with `invalid-brief-grounding`. See "Grounding the briefs" below. |
 | `get-brief-grounding` | A session's brief grounding or null: the scout's result per ticket, the commit and handoff fingerprint it was made for, the model, when it ran, its turn record, `current`, and `staleReason` (`handoff-changed` or `head-moved`, null while current). |
 | `set-build-record` | Create or edit a ticket's build record — model, whether the first attempt passed, whether it was escalated, what the prompt was missing, and free notes — identifying the ticket by `ticketId` or by `sessionId` + `ticketNumber`. Optionally updates the ticket's `status` in the same call. A gate is refused with `gate_ticket` (409): nothing is built for it. See "Logging a build from an agent" below. |
 | `get-build-record` | One ticket's build record, or null when none has been logged yet. |
@@ -812,6 +812,22 @@ with the reasons:
   `<dir>/<dir>` (Django's `mysite/mysite/`). `<dir>` is compared without a
   leading `./` or trailing slash; a word that holds `<dir>/` only further in
   is not a match, and words after a second `cd` are not looked at.
+- every `reach` entry (a symbol the ticket renames, removes or reshapes, at
+  most three per ticket) is one identifier (`^[A-Za-z_][A-Za-z0-9_]*$`, so no
+  `$`, dot, space or leading `-`); an entry that is not one is refused and not
+  searched;
+- no `reach` symbol is declared twice in one ticket (one reason per repeated
+  symbol, on its second occurrence);
+- every `reach` symbol is contained in some tracked file
+  (`git grep -l -w -F -e <symbol>` from the project root finds one), since a
+  reach is for a symbol that exists in the repository today: a symbol only an
+  untracked or ignored file holds, or only a blocker's `create` file will
+  define, is refused. A repository git cannot search is refused like a
+  `check-ignore` failure.
+
+The model never sets a reach's file count: the contract carries `{ symbol }`
+only, and `ground-briefs` stores each accepted entry as
+`{ symbol, files }` with the count `measureReach` returns.
 
 A ticket may list no files to change, as a spike does; its proving test may
 then live anywhere. A handoff with more tickets than one turn can ground, or a
@@ -863,6 +879,13 @@ fresh:
   settings, since a setting alone (the delivery recipe, the review switch,
   the verify command) also changes the fingerprint (`handoff-changed`) — or
   that the repository has moved since (`head-moved`).
+- **A reach**, when the covered ticket declares one, is its own group in
+  File boundaries between "Files to edit:" and "Existing files it builds
+  on:": per symbol, `` `symbol`: every file `git grep -lw symbol` lists from
+  the project root (N when grounded) ``, printing the command and the count
+  measured at grounding instead of the paths. A stored entry with no count
+  prints no count; a ticket with no reach prints no group. `renderBrief`
+  stays synchronous and pure: the count comes only from the stored field.
 - **No grounding**, or a ticket the grounding does not cover (a ticket added
   since it ran, or the session has never been grounded): today's two empty
   slots, unchanged.

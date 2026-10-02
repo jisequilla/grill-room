@@ -350,6 +350,9 @@ export const scoutProjectResultSchema = z.strictObject({
 /** A grounded ticket creates or edits at most this many files. */
 export const MAX_HANDOFF_SCOUT_FILES_TO_CHANGE = 20;
 
+/** A grounded ticket declares a reach for at most this many symbols. */
+export const MAX_HANDOFF_SCOUT_REACH = 3;
+
 /** A grounded ticket builds on at most this many existing files. */
 export const MAX_HANDOFF_SCOUT_BUILDS_ON_FILES = 20;
 
@@ -426,10 +429,11 @@ const handoffBuildsOnForms = z.union([
 ]);
 
 /** One ticket's grounding, as a handoff scout reports it. */
-function groundedTicket<Citation extends z.ZodType, BuildsOn extends z.ZodType>(
-  citation: Citation,
-  buildsOn: BuildsOn,
-) {
+function groundedTicket<
+  Citation extends z.ZodType,
+  BuildsOn extends z.ZodType,
+  Reach extends z.ZodType,
+>(citation: Citation, buildsOn: BuildsOn, reach: Reach) {
   return z.strictObject({
     /** The ticket's number, as the request listed it. */
     number: z.number().int().positive(),
@@ -446,6 +450,12 @@ function groundedTicket<Citation extends z.ZodType, BuildsOn extends z.ZodType>(
         }),
       )
       .max(MAX_HANDOFF_SCOUT_FILES_TO_CHANGE),
+    /**
+     * Symbols the ticket renames, removes or reshapes: every tracked file
+     * `git grep` finds for one is the ticket's to edit. The app fills in
+     * `files`, the count it measured; the model never sets it.
+     */
+    reach,
     /** The existing code the ticket builds on, cited. */
     buildsOnFiles: z.array(citation).max(MAX_HANDOFF_SCOUT_BUILDS_ON_FILES),
     /** Verified facts about the code the ticket touches, each cited. */
@@ -468,6 +478,20 @@ function groundedTicket<Citation extends z.ZodType, BuildsOn extends z.ZodType>(
   });
 }
 
+const handoffReachContract = z
+  .array(z.strictObject({ symbol: handoffText }))
+  .max(MAX_HANDOFF_SCOUT_REACH);
+
+const handoffReachResult = z
+  .array(
+    z.strictObject({
+      symbol: handoffText,
+      files: z.number().int().nonnegative().optional(),
+    }),
+  )
+  .max(MAX_HANDOFF_SCOUT_REACH)
+  .default([]);
+
 /**
  * What a handoff scout found reading a project for every ticket of one
  * handoff, one entry per ticket by number: the validator. It bounds the lists
@@ -478,7 +502,7 @@ function groundedTicket<Citation extends z.ZodType, BuildsOn extends z.ZodType>(
  */
 export const handoffScoutResultSchema = z.strictObject({
   tickets: z
-    .array(groundedTicket(handoffText, handoffBuildsOn))
+    .array(groundedTicket(handoffText, handoffBuildsOn, handoffReachResult))
     .max(MAX_HANDOFF_SCOUT_TICKETS),
 });
 
@@ -486,7 +510,11 @@ export const handoffScoutResultSchema = z.strictObject({
 export const handoffScoutContractSchema = z.strictObject({
   tickets: z
     .array(
-      groundedTicket(z.string().regex(CITATION_PATTERN), handoffBuildsOnForms),
+      groundedTicket(
+        z.string().regex(CITATION_PATTERN),
+        handoffBuildsOnForms,
+        handoffReachContract,
+      ),
     )
     .max(MAX_HANDOFF_SCOUT_TICKETS),
 });

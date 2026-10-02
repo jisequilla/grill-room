@@ -22,7 +22,7 @@ import { eq } from "@agent-native/core/db/schema";
 
 import { checkIgnored } from "./check-ignore.js";
 import { getDb, schema } from "./db/index.js";
-import { runGit } from "./git.js";
+import { IDENTIFIER_PATTERN, runGit } from "./git.js";
 import {
   blockerThatCreates,
   getHandoffRow,
@@ -538,6 +538,30 @@ function buildsOnCitationSyntaxReason(
   return null;
 }
 
+/** `git grep` could not say which files hold a symbol. */
+export class ReachUnmeasurable extends Error {
+  constructor(
+    readonly exitCode: number,
+    readonly stderr: string,
+  ) {
+    super(`git grep exited ${exitCode}.`);
+    this.name = "ReachUnmeasurable";
+  }
+}
+
+/**
+ * How many tracked files contain `symbol` as a whole word, as
+ * `git grep -lw <symbol>` lists them from the project root: 0 when none.
+ */
+export async function measureReach(projectRoot: string, symbol: string): Promise<number> {
+  const result = await runGit(projectRoot, ["grep", "-l", "-w", "-F", "-e", symbol]);
+  if (result.exitCode === 0) {
+    return result.stdout.split("\n").filter((line) => line.length > 0).length;
+  }
+  if (result.exitCode === 1) return 0;
+  throw new ReachUnmeasurable(result.exitCode, result.stderr);
+}
+
 /** A path as a case-insensitive, normalising file system such as APFS compares it. */
 export function collisionKey(filePath: string): string {
   return path.posix
@@ -578,6 +602,10 @@ export function collisionKey(filePath: string): string {
  * - a proving test the ticket marks `edit` is a test by its name
  *   ({@link isTestFileByName}), not the file the ticket changes; one it
  *   creates is always accepted;
+ * - every `reach` entry is one identifier (letters, digits, underscore);
+ * - no `reach` symbol is declared twice in one ticket;
+ * - every `reach` symbol is contained in some tracked file, since a reach is
+ *   for a symbol that exists in the repository today;
  * - a `buildsOn` check or a `provedBy` command that starts `cd <dir> &&` (or
  *   `cd <dir>;`) names no later path beginning with `<dir>/` while the
  *   project has no `<dir>/<dir>`, since after the `cd` paths are relative to
@@ -875,6 +903,39 @@ export async function reasonsToRefuseHandoffGrounding(
             `Ticket ${entry.ticket} marks ${entry.path} as create, but git ignores that path, so the repository would never track it; plan a path git tracks.`,
           );
         }
+      }
+    }
+  }
+
+  for (const ticket of result.tickets) {
+    const seen = new Set<string>();
+    const reportedTwice = new Set<string>();
+    for (const { symbol } of ticket.reach) {
+      if (!IDENTIFIER_PATTERN.test(symbol)) {
+        reasons.push(
+          `Ticket ${ticket.number}'s reach \`${symbol}\` is not one identifier; give a single name such as \`exportFolder\`.`,
+        );
+        continue;
+      }
+      if (seen.has(symbol)) {
+        if (!reportedTwice.has(symbol)) {
+          reportedTwice.add(symbol);
+          reasons.push(`Ticket ${ticket.number} declares the reach \`${symbol}\` twice.`);
+        }
+        continue;
+      }
+      seen.add(symbol);
+      try {
+        if ((await measureReach(realRoot, symbol)) === 0) {
+          reasons.push(
+            `Ticket ${ticket.number} declares a reach for \`${symbol}\`, which no tracked file contains; a reach is for a symbol that exists in the repository today. Spell it as the code does, or drop the reach.`,
+          );
+        }
+      } catch (error) {
+        if (!(error instanceof ReachUnmeasurable)) throw error;
+        reasons.push(
+          `Ticket ${ticket.number}'s reach \`${symbol}\` could not be checked: git grep exited ${error.exitCode}.`,
+        );
       }
     }
   }

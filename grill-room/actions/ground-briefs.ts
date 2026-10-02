@@ -5,6 +5,7 @@ import { z } from "zod";
 import { blockersThroughGates } from "../shared/ticket-gates.js";
 import {
   currentBriefGrounding,
+  measureReach,
   reasonsToRefuseHandoffGrounding,
   storeBriefGrounding,
 } from "../server/brief-grounding.js";
@@ -191,9 +192,24 @@ export default defineAction({
             ),
         });
 
+        const acceptedResult = accepted.result.result;
+        const measured: HandoffScoutResult = {
+          tickets: await Promise.all(
+            acceptedResult.tickets.map(async (ticket) => ({
+              ...ticket,
+              reach: await Promise.all(
+                ticket.reach.map(async ({ symbol }) => ({
+                  symbol,
+                  files: await measureReach(project.rootPath, symbol),
+                })),
+              ),
+            })),
+          ),
+        };
+
         await storeBriefGrounding({
           sessionId,
-          result: accepted.result.result,
+          result: measured,
           commitRead: facts.headCommit,
           handoffFingerprint: handoff.fingerprint,
           model: SCOUT_MODEL,

@@ -637,6 +637,7 @@ describe("grounded briefs", () => {
       { path: "server/projects.ts", change: "create" as const },
       { path: "server/db/schema.ts", change: "edit" as const },
     ],
+    reach: [],
     buildsOnFiles: ["server/git.ts:10-20"],
     facts: [
       {
@@ -655,6 +656,7 @@ describe("grounded briefs", () => {
   const TICKET_2_GROUNDING = {
     number: 2,
     filesToChange: [{ path: "server/export-bundle.ts", change: "edit" as const }],
+    reach: [],
     buildsOnFiles: [],
     facts: [],
     buildsOn: [
@@ -736,6 +738,54 @@ describe("grounded briefs", () => {
     );
   });
 
+  it("prints a reach as its grep command and the count measured when grounded", () => {
+    const withReach = (reach: { symbol: string; files?: number }[], filesToChange = TICKET_2_GROUNDING.filesToChange) =>
+      renderBrief(aSource(), ticketByNumber(2), {
+        grounding: {
+          ...CURRENT_GROUNDING,
+          tickets: [TICKET_1_GROUNDING, { ...TICKET_2_GROUNDING, filesToChange, reach }],
+        },
+      });
+    const groupHeading =
+      "Files that reference a symbol it reshapes (edit any of them as the change requires):";
+
+    expect(section(withReach([{ symbol: "exportFolder", files: 37 }]), "## File boundaries")).toBe(
+      [
+        "## File boundaries",
+        "",
+        "Files to edit:",
+        "",
+        "- `server/export-bundle.ts`",
+        "",
+        groupHeading,
+        "",
+        "- `exportFolder`: every file `git grep -lw exportFolder` lists from the project root (37 when grounded)",
+      ].join("\n"),
+    );
+    expect(section(withReach([{ symbol: "exportFolder" }]), "## File boundaries")).toBe(
+      [
+        "## File boundaries",
+        "",
+        "Files to edit:",
+        "",
+        "- `server/export-bundle.ts`",
+        "",
+        groupHeading,
+        "",
+        "- `exportFolder`: every file `git grep -lw exportFolder` lists from the project root",
+      ].join("\n"),
+    );
+    expect(section(withReach([{ symbol: "exportFolder", files: 0 }], []), "## File boundaries")).toBe(
+      [
+        "## File boundaries",
+        "",
+        groupHeading,
+        "",
+        "- `exportFolder`: every file `git grep -lw exportFolder` lists from the project root (0 when grounded)",
+      ].join("\n"),
+    );
+  });
+
   it("names what a blocker adds to a file it edits, and the check, in Builds on", () => {
     const grounding: HandoffGrounding = {
       ...CURRENT_GROUNDING,
@@ -744,6 +794,7 @@ describe("grounded briefs", () => {
         {
           number: 3,
           filesToChange: [{ path: "server/export.test.ts", change: "edit" }],
+          reach: [],
           buildsOnFiles: [],
           facts: [],
           buildsOn: [
