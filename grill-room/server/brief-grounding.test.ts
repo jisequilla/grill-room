@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -6,6 +8,8 @@ import { useTempGitRepos } from "../test/git-repos.js";
 import { aHandoffScoutResult } from "./interviewer/test-fixtures.js";
 import {
   isTestFileByName,
+  measureReach,
+  ReachUnmeasurable,
   reasonsToRefuseHandoffGrounding,
   type GroundedHandoffTicket,
 } from "./brief-grounding.js";
@@ -34,6 +38,7 @@ function aBareResult(): ReturnType<typeof aHandoffScoutResult> {
       {
         number: 1,
         filesToChange: [],
+        reach: [],
         buildsOnFiles: [],
         facts: [],
         buildsOn: [],
@@ -202,6 +207,7 @@ function aTicket(
   return {
     number,
     filesToChange: Object.entries(files).map(([path, change]) => ({ path, change })),
+    reach: [],
     buildsOnFiles: [],
     facts: [],
     buildsOn: buildsOn.map(({ blocker, createdPath, check }) => ({
@@ -522,6 +528,7 @@ function aCitationBuildsOnTicket(citation: string): ScoutTicket {
   return {
     number: 2,
     filesToChange: [],
+    reach: [],
     buildsOnFiles: [],
     facts: [],
     buildsOn: [
@@ -840,5 +847,191 @@ describe("isTestFileByName", () => {
     "tests/fixtures/export.json",
   ])("does not count %s as a test", (candidate) => {
     expect(isTestFileByName(candidate)).toBe(false);
+  });
+});
+
+/** The bare one-ticket result with `reach` declared on its ticket. */
+function aResultReaching(
+  reach: { symbol: string }[],
+  filesToChange: { path: string; change: "create" | "edit" }[] = [],
+): ReturnType<typeof aHandoffScoutResult> {
+  const result = aBareResult();
+  return {
+    tickets: [
+      {
+        ...result.tickets[0]!,
+        filesToChange,
+        reach,
+        provedBy: { testPath: null, command: "npm test" },
+      },
+    ],
+  };
+}
+
+const EXPORT_FOLDER_FILES: Record<string, string> = {
+  "src/a.ts": "export const exportFolder = 1;\n",
+  "src/b.ts": "import { exportFolder } from './a';\n",
+  "src/c.ts": "console.log(exportFolder);\n",
+};
+
+describe("measureReach", () => {
+  it("measureReach counts tracked files only", async () => {
+    const root = repos.create({ files: { ...EXPORT_FOLDER_FILES, "src/d.ts": "exportFolderTwo\n" } });
+
+    expect(await measureReach(root, "exportFolder")).toBe(3);
+    expect(await measureReach(root, "noSuchSymbol")).toBe(0);
+  });
+
+  it("does not count a file the repository does not track", async () => {
+    const root = repos.create({
+      files: { "src/a.ts": "const exportFolder = 1;\n" },
+      gitignore: "ignored.ts\n",
+    });
+    writeFileSync(path.join(root, "ignored.ts"), "exportFolder\n");
+    writeFileSync(path.join(root, "untracked.ts"), "exportFolder\n");
+
+    expect(await measureReach(root, "exportFolder")).toBe(1);
+  });
+
+  it("throws ReachUnmeasurable where it cannot search", async () => {
+    const folder = repos.plainFolder({ "a.ts": "exportFolder\n" });
+
+    const failure = await measureReach(folder, "exportFolder").catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ReachUnmeasurable);
+    expect((failure as ReachUnmeasurable).exitCode).not.toBe(0);
+    expect((failure as ReachUnmeasurable).stderr).not.toBe("");
+  });
+
+  it("turns an unmeasurable reach into a refusal reason in the check", async () => {
+    const folder = repos.plainFolder({ "a.ts": "exportFolder\n" });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(aResultReaching([{ symbol: "exportFolder" }]), {
+      projectRoot: folder,
+      tickets: aSingleTicket(),
+    });
+
+    expect(reasons).toEqual([
+      expect.stringMatching(/^Ticket 1's reach `exportFolder` could not be checked: git grep exited \d+\.$/),
+    ]);
+  });
+});
+
+describe("reasonsToRefuseHandoffGrounding on a reach", () => {
+  const notOneIdentifier = (symbol: string) =>
+    `Ticket 1's reach \`${symbol}\` is not one identifier; give a single name such as \`exportFolder\`.`;
+  const noTrackedFile = (symbol: string) =>
+    `Ticket 1 declares a reach for \`${symbol}\`, which no tracked file contains; a reach is for a symbol that exists in the repository today. Spell it as the code does, or drop the reach.`;
+  const twice = (symbol: string) => `Ticket 1 declares the reach \`${symbol}\` twice.`;
+
+  it.each([
+    { name: "an empty reach", reach: [], expected: [] },
+    { name: "a symbol in many committed files", reach: ["exportFolder"], expected: [] },
+    { name: "a symbol with a space", reach: ["export Folder"], expected: [notOneIdentifier("export Folder")] },
+    { name: "a dotted symbol", reach: ["a.b"], expected: [notOneIdentifier("a.b")] },
+    { name: "a dollar symbol", reach: ["$foo"], expected: [notOneIdentifier("$foo")] },
+    { name: "an option-looking symbol", reach: ["-O"], expected: [notOneIdentifier("-O")] },
+    { name: "a symbol no file holds", reach: ["exportFoldr"], expected: [noTrackedFile("exportFoldr")] },
+    { name: "a repeated symbol", reach: ["exportFolder", "exportFolder"], expected: [twice("exportFolder")] },
+    {
+      name: "an invalid symbol twice",
+      reach: ["a b", "a b"],
+      expected: [notOneIdentifier("a b"), notOneIdentifier("a b")],
+    },
+    {
+      name: "invalid twice, then a symbol no file holds three times",
+      reach: ["a b", "a b", "exportFoldr", "exportFoldr", "exportFoldr"],
+      expected: [notOneIdentifier("a b"), notOneIdentifier("a b"), noTrackedFile("exportFoldr"), twice("exportFoldr")],
+    },
+  ])("gives $name exactly the reasons of the table", async ({ reach, expected }) => {
+    const root = repos.create({ files: EXPORT_FOLDER_FILES });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      aResultReaching(reach.map((symbol) => ({ symbol }))),
+      { projectRoot: root, tickets: aSingleTicket() },
+    );
+
+    expect(reasons).toEqual(expected);
+  });
+
+  it("refuses a symbol only an untracked or ignored file holds", async () => {
+    const root = repos.create({ files: { "src/a.ts": "x\n" }, gitignore: "ignored.ts\n" });
+    writeFileSync(path.join(root, "ignored.ts"), "onlyIgnored\n");
+    writeFileSync(path.join(root, "untracked.ts"), "onlyUntracked\n");
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      aResultReaching([{ symbol: "onlyIgnored" }, { symbol: "onlyUntracked" }]),
+      { projectRoot: root, tickets: aSingleTicket() },
+    );
+
+    expect(reasons).toEqual([noTrackedFile("onlyIgnored"), noTrackedFile("onlyUntracked")]);
+  });
+
+  it("checks each ticket's reach on its own and numbers its reasons by ticket", async () => {
+    const root = repos.create({ files: EXPORT_FOLDER_FILES });
+    const first = aResultReaching([{ symbol: "exportFolder" }]).tickets[0]!;
+    const result = {
+      tickets: [
+        first,
+        { ...first, number: 2, reach: [{ symbol: "exportFolder" }, { symbol: "a b" }] },
+      ],
+    };
+
+    const reasons = await reasonsToRefuseHandoffGrounding(result, {
+      projectRoot: root,
+      tickets: [
+        { number: 1, blockedBy: [] },
+        { number: 2, blockedBy: [] },
+      ],
+    });
+
+    expect(reasons).toEqual([
+      "Ticket 2's reach `a b` is not one identifier; give a single name such as `exportFolder`.",
+    ]);
+  });
+
+  it("lets two tickets both reach one symbol without a twice reason", async () => {
+    const root = repos.create({ files: EXPORT_FOLDER_FILES });
+    const first = aResultReaching([{ symbol: "exportFolder" }]).tickets[0]!;
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { tickets: [first, { ...first, number: 2 }] },
+      {
+        projectRoot: root,
+        tickets: [
+          { number: 1, blockedBy: [] },
+          { number: 2, blockedBy: [] },
+        ],
+      },
+    );
+
+    expect(reasons).toEqual([]);
+  });
+
+  it("does not search for an invalid entry", async () => {
+    const folder = repos.plainFolder();
+
+    const reasons = await reasonsToRefuseHandoffGrounding(aResultReaching([{ symbol: "a b" }]), {
+      projectRoot: folder,
+      tickets: aSingleTicket(),
+    });
+
+    expect(reasons).toEqual([notOneIdentifier("a b")]);
+  });
+});
+
+describe("the reach seam", () => {
+  it("accepts the reach the scout prompt describes for a rename", async () => {
+    // As buildHandoffScoutPrompt tells the scout: a ticket that renames
+    // something existing declares its symbol, lists one file it edits, and
+    // does not list the other uses.
+    const root = repos.create({ files: EXPORT_FOLDER_FILES });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      aResultReaching([{ symbol: "exportFolder" }], [{ path: "src/a.ts", change: "edit" }]),
+      { projectRoot: root, tickets: aSingleTicket() },
+    );
+
+    expect(reasons).toEqual([]);
   });
 });

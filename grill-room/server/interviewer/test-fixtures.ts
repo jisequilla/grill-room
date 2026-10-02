@@ -330,6 +330,7 @@ export function aHandoffScoutResult(
           { path: "src/ingest/lag-alert.test.ts", change: "create" },
           { path: "src/ingest/metrics.ts", change: "edit" },
         ],
+        reach: [],
         buildsOnFiles: ["src/ingest/metrics.ts:12-30"],
         facts: [
           {
@@ -349,6 +350,7 @@ export function aHandoffScoutResult(
           { path: "src/ingest/queue.ts", change: "edit" },
           { path: "src/ingest/queue.test.ts", change: "create" },
         ],
+        reach: [],
         buildsOnFiles: ["docs/adr/0003-queue.md:5-9"],
         facts: [],
         buildsOn: [

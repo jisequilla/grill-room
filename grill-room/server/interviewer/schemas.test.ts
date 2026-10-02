@@ -10,6 +10,7 @@ import {
   MAX_HANDOFF_SCOUT_BUILDS_ON_FILES,
   MAX_HANDOFF_SCOUT_FACTS,
   MAX_HANDOFF_SCOUT_FILES_TO_CHANGE,
+  MAX_HANDOFF_SCOUT_REACH,
   MAX_HANDOFF_SCOUT_TICKETS,
   MAX_SCOUT_CURRENT_STATE,
   MAX_SCOUT_PROPOSED_DECISIONS,
@@ -231,6 +232,30 @@ describe("the handoff scout schema", () => {
     const parsed = handoffScoutResultSchema.parse(withDependency(stored));
 
     expect(parsed.tickets[1]!.buildsOn[0]).toMatchObject({ editedPath: null, symbol: null });
+  });
+
+  it("reads a grounding stored before reach as an empty reach", () => {
+    const { reach: _reach, ...stored } = aGroundedTicket!;
+    const parsed = handoffScoutResultSchema.parse({ tickets: [stored] });
+
+    expect(parsed.tickets[0]!.reach).toEqual([]);
+  });
+
+  it("requires reach in the contract and leaves its count to the app", () => {
+    const { reach: _reach, ...withoutReach } = aGroundedTicket!;
+    const reaching = (reach: unknown) => ({ tickets: [{ ...aGroundedTicket, reach }] });
+
+    expect(contractAccepts({ tickets: [withoutReach] })).toBe(false);
+    expect(contractAccepts(reaching([{ symbol: "exportFolder" }]))).toBe(true);
+    expect(contractAccepts(reaching([{ symbol: "exportFolder", files: 37 }]))).toBe(false);
+    expect(contractAccepts(reaching([{ symbol: "" }]))).toBe(false);
+    expect(contractAccepts(reaching(Array.from({ length: MAX_HANDOFF_SCOUT_REACH + 1 }, () => ({ symbol: "a" }))))).toBe(
+      false,
+    );
+    expect(accepts(reaching([{ symbol: "exportFolder", files: 37 }]))).toBe(true);
+    expect(accepts(reaching([{ symbol: "exportFolder" }]))).toBe(true);
+    expect(accepts(reaching([{ symbol: "" }]))).toBe(false);
+    expect(accepts(reaching([{ symbol: "a", files: -1 }]))).toBe(false);
   });
 
   it("accepts an empty grounding, facts and dependencies", () => {

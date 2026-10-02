@@ -1206,8 +1206,8 @@ function groundingStaleLine(grounding: HandoffGrounding): string {
 }
 
 /**
- * The files to create, the files to edit, and the existing files it builds
- * on. A file to edit that one of the ticket's blockers creates is marked
+ * The files to create, the files to edit, the symbols whose every `git grep`
+ * hit it may edit, and the existing files it builds on. A file to edit that one of the ticket's blockers creates is marked
  * "(created by ticket NN)", so the builder knows it waits on that file rather
  * than finding it today.
  */
@@ -1231,6 +1231,18 @@ function fileBoundariesContent(
   }
   if (edits.length > 0) {
     groups.push(["Files to edit:", "", ...edits.map((file) => editLine(file.path))].join("\n"));
+  }
+  if (entry.reach.length > 0) {
+    groups.push(
+      [
+        "Files that reference a symbol it reshapes (edit any of them as the change requires):",
+        "",
+        ...entry.reach.map(
+          ({ symbol, files }) =>
+            `- \`${symbol}\`: every file \`git grep -lw ${symbol}\` lists from the project root${files === undefined ? "" : ` (${files} when grounded)`}`,
+        ),
+      ].join("\n"),
+    );
   }
   if (entry.buildsOnFiles.length > 0) {
     groups.push(

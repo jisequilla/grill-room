@@ -1348,6 +1348,21 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).not.toContain("The `command` runs it,");
   });
 
+  it("tells the scout to declare a reach for a rename of existing code instead of listing its uses", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("- `reach`: at most 3 symbols");
+    expect(prompt).toContain("renames, removes or reshapes something that already exists in the");
+    expect(prompt).toContain("so do not list those uses in `filesToChange`");
+    expect(prompt).toContain("One identifier");
+    expect(prompt).toContain("(letters, digits, underscore), and none twice");
+    expect(prompt).toContain("Give no reach");
+    expect(prompt).toContain("the app refuses a symbol no");
+    expect(prompt).toContain("Empty when the ticket reshapes nothing.");
+    expect(prompt.indexOf("- `reach`")).toBeGreaterThan(prompt.indexOf("- `filesToChange`"));
+    expect(prompt.indexOf("- `reach`")).toBeLessThan(prompt.indexOf("- `buildsOnFiles`"));
+  });
+
   it("says the proving test is one of the ticket's own files, unless it changes none", async () => {
     const { prompt } = await handoffInvocation();
 

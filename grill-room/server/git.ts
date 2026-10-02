@@ -18,7 +18,11 @@ const READ_ONLY_SUBCOMMANDS = new Set([
   "status",
   "log",
   "remote",
+  "grep",
 ]);
+
+/** One name: letters, digits and underscore, not starting with a digit. */
+export const IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
  * `remote` is read-only only as `git remote -v`; every other form
@@ -28,6 +32,23 @@ const READ_ONLY_SUBCOMMANDS = new Set([
  */
 function isAllowedRemoteInvocation(args: string[]): boolean {
   return args.length === 2 && args[1] === "-v";
+}
+
+/**
+ * `grep` is read-only only as `git grep -l -w -F -e <identifier>`: the other
+ * forms can open files in a pager (`-O`, `--open-files-in-pager`), search
+ * outside the index (`--no-index`), or take an option for a pattern, so one
+ * exact shape is allowed and nothing else.
+ */
+function isAllowedGrepInvocation(args: string[]): boolean {
+  return (
+    args.length === 6 &&
+    args[1] === "-l" &&
+    args[2] === "-w" &&
+    args[3] === "-F" &&
+    args[4] === "-e" &&
+    IDENTIFIER_PATTERN.test(args[5]!)
+  );
 }
 
 /**
@@ -89,6 +110,13 @@ export function runGit(repo: string, args: string[]): Promise<GitResult> {
   if (subcommand === "remote" && !isAllowedRemoteInvocation(args)) {
     return Promise.reject(
       new Error(`Refusing to run git remote ${args.slice(1).join(" ")}: only "remote -v" is allowed.`),
+    );
+  }
+  if (subcommand === "grep" && !isAllowedGrepInvocation(args)) {
+    return Promise.reject(
+      new Error(
+        `Refusing to run git grep ${args.slice(1).join(" ")}: only "grep -l -w -F -e <identifier>" is allowed.`,
+      ),
     );
   }
   if (subcommand === "log" && isDisallowedLogInvocation(args)) {

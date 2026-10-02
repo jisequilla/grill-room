@@ -815,6 +815,7 @@ describe("ground-briefs", () => {
     const ticket3 = (change: "create" | "edit"): HandoffScoutResult["tickets"][number] => ({
       number: 3,
       filesToChange: [{ path: testFile, change }],
+      reach: [],
       buildsOnFiles: [],
       facts: [],
       buildsOn: [
@@ -863,6 +864,43 @@ describe("ground-briefs", () => {
     expect(grounded.grounding).toMatchObject({ result: accepted, current: true });
     const read = await getBriefGrounding.run({ sessionId: session.id });
     expect(read.grounding!.result).toEqual(accepted);
+  });
+
+  it("a reach no tracked file contains", async () => {
+    const root = repos.create({
+      files: {
+        "src/ingest/metrics.ts": `${lines(30)}export const lagThreshold = 1;\n`,
+        "src/ingest/queue.ts": `${lines(10)}lagThreshold\n`,
+        "docs/adr/0003-queue.md": lines(9),
+        "CLAUDE.md": "# Agent instructions\n",
+      },
+      gitignore: "dist/\n",
+    });
+    const { session } = await aSessionWithHandoff({ root });
+    const refused = withTicket(1, (ticket) => {
+      ticket.reach = [{ symbol: "lagThreshld" }];
+    });
+    const accepted = withTicket(1, (ticket) => {
+      ticket.reach = [{ symbol: "lagThreshold" }];
+    });
+    const interviewer = scriptInterviewer([
+      { kind: "handoff-scout", result: refused },
+      { kind: "handoff-scout", result: accepted },
+    ]);
+
+    const grounded = await groundBriefs.run({ sessionId: session.id });
+
+    const requests = scoutRequests(interviewer.requests);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.rejectionReason).toBe(
+      "Ticket 1 declares a reach for `lagThreshld`, which no tracked file contains; a reach is for a symbol that exists in the repository today. Spell it as the code does, or drop the reach.",
+    );
+    expect(requests[1]!.previousResult!.tickets[0]!.reach).toEqual([{ symbol: "lagThreshld" }]);
+    expect(grounded.grounding!.result.tickets[0]!.reach).toEqual([
+      { symbol: "lagThreshold", files: 2 },
+    ]);
+    const read = await getBriefGrounding.run({ sessionId: session.id });
+    expect(read.grounding!.result.tickets[0]!.reach).toEqual([{ symbol: "lagThreshold", files: 2 }]);
   });
 
   it("accepts a dependency on what a blocker adds to a file it edits", async () => {

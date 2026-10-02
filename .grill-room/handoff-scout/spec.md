@@ -65,6 +65,7 @@ Export never waits for grounding. It says whether the briefs are grounded and cu
 - **The request carries:** the project's server facts, the spec, and every ticket with its number, title, body and blockers.
 - **The result, per ticket number:**
   - `filesToChange`: paths, each marked create or edit;
+  - `reach`: up to three symbols the ticket renames, removes or reshapes, each one identifier; every tracked file `git grep` finds for one is the ticket's to edit. The app stores the count of files it measured beside each symbol; the model never sets it;
   - `buildsOnFiles`: citations;
   - `facts`: a statement and a citation;
   - `buildsOn`: one per blocker, with the blocker's number, what it provides, a citation or a path to be created by that blocker, and a check command or test;
@@ -75,11 +76,14 @@ Export never waits for grounding. It says whether the briefs are grounded and cu
   - A file marked edit exists.
   - A file marked create resolves inside the root, does not exist, and is not git-ignored.
   - A dependency on a path to be created must be listed as a create by that blocker.
+  - Every `reach` entry is one identifier (letters, digits, underscore).
+  - No `reach` symbol is declared twice in one ticket.
+  - Every `reach` symbol is contained in some tracked file, since a reach is for a symbol that exists today.
 - **Storage.** A grounding record per session:
   - the accepted result, the commit read, the handoff fingerprint it was made for, the model, the run time and the turn link;
   - replaced on re-run.
   - It is current only while the handoff's fingerprint and the project's HEAD match what it read.
-- **Rendering.** The brief renderer fills File boundaries and Codebase facts, and adds "Builds on" and "Proved by" sections, from a current grounding.
+- **Rendering.** The brief renderer fills File boundaries (with a reach printed as its `git grep` command and the count measured at grounding) and Codebase facts, and adds "Builds on" and "Proved by" sections, from a current grounding.
   - With stale grounding, the brief still renders it, under a line saying it was grounded at an earlier commit or for earlier tickets.
   - With none, today's slots stay.
   - A brief the user edited keeps its edited text; grounding never rewrites it.
