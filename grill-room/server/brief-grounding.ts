@@ -37,7 +37,7 @@ import {
   type HandoffScoutResult,
   type InterviewerModel,
 } from "./interviewer/index.js";
-import { checkCitation } from "./scout-report.js";
+import { checkCitation, clampCitation } from "./scout-report.js";
 import { computeWaves } from "./tickets.js";
 
 /** A stored brief grounding, as every reader sees it. */
@@ -568,6 +568,35 @@ export function collisionKey(filePath: string): string {
     .normalize(filePath.normalize("NFC"))
     .toLowerCase()
     .replace(/\/+$/, "");
+}
+
+/**
+ * The result with every citation clamped by `clampCitation`: each
+ * `buildsOnFiles` entry, fact citation and non-null `buildsOn` citation. A new
+ * object, the argument is never changed.
+ */
+export function clampHandoffGroundingCitations(
+  result: HandoffScoutResult,
+  projectRoot: string,
+): HandoffScoutResult {
+  return {
+    ...result,
+    tickets: result.tickets.map((ticket) => ({
+      ...ticket,
+      buildsOnFiles: ticket.buildsOnFiles.map((citation) =>
+        clampCitation(projectRoot, citation),
+      ),
+      facts: ticket.facts.map((fact) => ({
+        ...fact,
+        citation: clampCitation(projectRoot, fact.citation),
+      })),
+      buildsOn: ticket.buildsOn.map((entry) =>
+        entry.citation === null
+          ? entry
+          : { ...entry, citation: clampCitation(projectRoot, entry.citation) },
+      ),
+    })),
+  };
 }
 
 /**

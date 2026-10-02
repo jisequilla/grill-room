@@ -15,6 +15,7 @@ import { getProject, type Project } from "../server/projects.js";
 import {
   currentScoutReport,
   latestScoutReport,
+  clampScoutReportCitations,
   previousRepoDecisions,
   reasonsToRefuseScoutReport,
   repoDecisionsInTree,
@@ -186,8 +187,12 @@ export async function scoutProjectCore(input: {
             },
             observer,
           );
-          previousResult = turn.result;
-          return turn;
+          const clamped = clampScoutReportCitations(
+            turn.result,
+            project.rootPath,
+          );
+          previousResult = clamped;
+          return { ...turn, result: clamped };
         },
         reasonsToRefuse: (result) =>
           reasonsToRefuseScoutReport(result, {

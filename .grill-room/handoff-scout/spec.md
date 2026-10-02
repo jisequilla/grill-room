@@ -100,7 +100,8 @@ Export never waits for grounding. It says whether the briefs are grounded and cu
 - **Adapter contract test** (the existing scout pattern): the request kind runs on sonnet, with read-only tools, deny rules and the project root. Its prompt carries the tickets, their blockers and the facts.
 - **Action tests** (temp git repo, scripted fake):
   - a valid grounding is stored and read back current;
-  - each check refuses and retries: a missing citation, an out-of-range line, an edit of a missing file, a create inside an ignored path, a create outside the root, a create of an existing file, a buildsOn naming a non-blocker, a missing ticket, and a dependency on an uncreated path;
+  - each check refuses and retries: a missing citation, a citation whose line range starts past its file's end, an edit of a missing file, a create inside an ignored path, a create outside the root, a create of an existing file, a buildsOn naming a non-blocker, a missing ticket, and a dependency on an uncreated path;
+  - a range that only ends past the file's end is cut to the last line and accepted;
   - the grounding goes stale after a new commit and after a ticket edit;
   - each refusal of the action itself.
 - **Brief renderer** (the existing pure tests): exact text with current grounding, with stale grounding, with none, and with an edited brief.

@@ -67,7 +67,7 @@ Sessions without a project keep today's readiness exactly as it is. Readiness st
 19. As a user, I want each proposed decision to carry a one-line reason why it matters for this idea, so that I can judge relevance quickly.
 20. As a user, I want the scout to propose only decisions that bear on this idea, so that my design tree is not flooded with every decision the project ever made.
 21. As a user, I want the report bounded in size, so that a large repo produces a readable report.
-22. As a user, I want the app to refuse a report that cites a file or line that does not exist, and to ask the scout again, so that invented citations never reach me.
+22. As a user, I want the app to refuse a report that cites a file that does not exist, or a line range that starts past its file's end, and to ask the scout again, and to cut a range that only ends past the file's end to the last line, so that invented citations never reach me.
 23. As a user, I want the readiness judge to read the scout report, so that it can tell me when my idea is already built or contradicts the project.
 24. As a user, I want each evidence item to say whether it came from my idea or from the repo, so that I can tell what I claimed from what the code shows.
 25. As a user, I want repo evidence to carry its citation, so that the judge's reasoning is checkable.
@@ -139,7 +139,7 @@ Sessions without a project keep today's readiness exactly as it is. Readiness st
   - On a re-run, `previousDecisions`: items of `{ key, change: unchanged | changed | removed, statement? }`, one for every decision in the previous report.
 - A citation is a repo-relative path with a line number or line range.
 - The app refuses the result and asks again (the existing rejection loop) when:
-  - a cited path does not exist at the commit read, or a cited line lies beyond the file's end
+  - a cited path does not exist at the commit read, or a cited line range starts past the file's end (a range that only ends past the file's end is cut to the last line and accepted)
   - a proposed decision reuses a key
   - on a re-run, a previous decision is missing from `previousDecisions`
 
@@ -209,7 +209,7 @@ Sessions without a project keep today's readiness exactly as it is. Readiness st
 - **Action boundary (main seam).** Action tests run against the in-memory embedded database with the scripted fake interviewer, as across the project's existing action tests. They also use a real temporary git repository built in the test, as the existing project-registration and visibility tests already do. Cases:
   - Server facts: commit, branch, remotes, dirty state, recent commits and the presence of instructions, decisions and rules are reported as they are in the fixture repo.
   - A project that is not a git repository is refused before any turn.
-  - A report citing a missing file or an out-of-range line is refused and asked again; a valid one is stored.
+  - A report citing a missing file or a line range that starts past its file's end is refused and asked again; a range that only ends past the file's end is cut to the last line and stored; a valid one is stored.
   - Readiness with a project runs scout then judge. Without a project it behaves exactly as before, confirmed by the existing readiness tests passing unchanged.
   - Evidence items carry their source, and repo evidence with an invalid citation is refused.
   - Keeping a proposal adds a settled repo decision that the frontier never offers again. Dropping adds nothing and the proposal still reaches the interviewer as context.

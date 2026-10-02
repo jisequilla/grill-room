@@ -337,6 +337,42 @@ describe("ground-briefs", () => {
     expect((await getSession.run({ id: session.id })).model).toBe("fable");
   });
 
+  it("clamps a citation range past the file's end and accepts it at once", async () => {
+    const { session } = await aSessionWithHandoff();
+    const raw = withTicket(1, (ticket) => {
+      ticket.facts = [{ statement: "Queue ADR.", citation: "docs/adr/0003-queue.md:5-10" }];
+    });
+    const interviewer = scriptInterviewer([{ kind: "handoff-scout", result: raw }]);
+
+    const grounded = await groundBriefs.run({ sessionId: session.id });
+
+    expect(scoutRequests(interviewer.requests)).toHaveLength(1);
+    const stored = grounded.grounding!.result.tickets.find((ticket) => ticket.number === 1)!;
+    expect(stored.facts[0]!.citation).toBe("docs/adr/0003-queue.md:5-9");
+  });
+
+  it("a retry shows the clamped citation, not the raw one", async () => {
+    const { session } = await aSessionWithHandoff();
+    const refused = withTicket(1, (ticket) => {
+      ticket.buildsOnFiles = ["src/alerts.ts:1"];
+      ticket.facts = [{ statement: "Queue ADR.", citation: "docs/adr/0003-queue.md:5-10" }];
+    });
+    const interviewer = scriptInterviewer([
+      { kind: "handoff-scout", result: refused },
+      { kind: "handoff-scout", result: aHandoffScoutResult() },
+    ]);
+
+    await groundBriefs.run({ sessionId: session.id });
+
+    const requests = scoutRequests(interviewer.requests);
+    expect(requests).toHaveLength(2);
+    const shown = requests[1]!.previousResult!.tickets.find((ticket) => ticket.number === 1)!;
+    expect(shown.facts[0]!.citation).toBe("docs/adr/0003-queue.md:5-9");
+    expect(refused.tickets.find((ticket) => ticket.number === 1)!.facts[0]!.citation).toBe(
+      "docs/adr/0003-queue.md:5-10",
+    );
+  });
+
   describe("the rejection check refuses and the retry is accepted", () => {
     it("a citation to a missing file", async () => {
       const { session } = await aSessionWithHandoff();
@@ -349,15 +385,15 @@ describe("ground-briefs", () => {
       expect(reason).toMatch(/cites src\/alerts\.ts, which does not exist/);
     });
 
-    it("a citation to a line past the file's end", async () => {
+    it("refuses a citation that starts past the file's end", async () => {
       const { session } = await aSessionWithHandoff();
       const reason = await refusedThenAccepted(
         session.id,
         withTicket(1, (ticket) => {
-          ticket.facts = [{ statement: "Queue ADR.", citation: "docs/adr/0003-queue.md:5-10" }];
+          ticket.facts = [{ statement: "Queue ADR.", citation: "docs/adr/0003-queue.md:10-12" }];
         }),
       );
-      expect(reason).toMatch(/cites line 10, but docs\/adr\/0003-queue\.md has 9 lines/);
+      expect(reason).toMatch(/cites line 12, but docs\/adr\/0003-queue\.md has 9 lines/);
     });
 
     it("a citation-form dependency to a missing file", async () => {
