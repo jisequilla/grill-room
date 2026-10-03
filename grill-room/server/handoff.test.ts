@@ -2411,12 +2411,15 @@ describe("the pre-flight step before launching a ticket", () => {
   it("renders the pre-flight step before launch in both recipes, and none when it is switched off", () => {
     for (const [label, overrides, rendered] of cases) {
       const section = beforeLaunching(renderHandoff(aSource(overrides)).markdown);
+      const step = `${BULLET}\n\n${PROMPT}`;
       if (!rendered) {
         expect(section, label).not.toContain("Pre-flight the ticket");
         expect(section, label).not.toContain("PREFLIGHT:");
+        const withStep = renderHandoff(aSource({ ...overrides, preflightStep: true })).markdown;
+        expect(withStep, label).toContain(`\n${step}`);
+        expect(renderHandoff(aSource(overrides)).markdown, label).toBe(withStep.replace(`\n${step}`, ""));
         continue;
       }
-      const step = `${BULLET}\n\n${PROMPT}`;
       expect(section, label).toContain(step);
       const fillSlots = Math.max(
         section.indexOf("- The briefs are grounded and current"),
@@ -2424,7 +2427,9 @@ describe("the pre-flight step before launching a ticket", () => {
       );
       expect(fillSlots, label).toBeGreaterThan(-1);
       expect(section.indexOf(BULLET), label).toBeGreaterThan(fillSlots);
-      expect(step, label).not.toMatch(/sonnet|opus|haiku|claude-/i);
+      const renderedStep = section.slice(section.indexOf(BULLET), section.indexOf(PROMPT) + PROMPT.length);
+      expect(renderedStep, label).toContain("PREFLIGHT: clear");
+      expect(renderedStep, label).not.toMatch(/sonnet|opus|haiku|claude-/i);
     }
   });
 
