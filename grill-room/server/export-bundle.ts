@@ -687,6 +687,8 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
         commitRead: grounding.commitRead,
         current: grounding.current,
         staleReason: grounding.staleReason,
+        rulesRead: grounding.result.rulesRead,
+        delegationProposals: grounding.result.delegationProposals,
       }
     : null;
   const groundingCurrent = groundingForRender?.current === true;
@@ -813,7 +815,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       briefSource !== null && (!wasEdited || handoff.markdown === renderHandoffMarkdown(briefSource));
     const headerMarkdown =
       headerEligible && briefSource !== null
-        ? renderHandoffMarkdown(briefSource, useGroundedWording, handoffExportFacts)
+        ? renderHandoffMarkdown(briefSource, useGroundedWording, handoffExportFacts, groundingForRender)
         : handoff.markdown;
     handoffFiles.push({
       relativePath: HANDOFF_FILE,

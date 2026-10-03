@@ -608,6 +608,8 @@ export const handoffScoutResultSchema = z.strictObject({
     )
     .max(MAX_HANDOFF_SCOUT_TICKETS),
   delegationProposals: delegationProposalsResult,
+  /** Set by the server on every stored grounding; the model never sends it. */
+  rulesRead: z.boolean().optional(),
 });
 
 /** The handoff scout's result as the model is constrained to it: the contract. */

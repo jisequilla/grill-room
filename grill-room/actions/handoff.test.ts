@@ -4,6 +4,7 @@ import path from "node:path";
 import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { serializeDelegationProposals, serializeDelegationValues } from "../server/delegation-values.js";
 import { EXPORT_MANIFEST_FILE, hashExportContent, parseExportManifest } from "../server/export.js";
 import {
   BUNDLE_TOKEN,
@@ -369,6 +370,35 @@ describe("handoff generation", () => {
     expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(true);
     const { markdown } = await generateHandoff.run({ sessionId: session.id });
     expect(markdown).not.toContain("PREFLIGHT: clear");
+  });
+
+  it("goes stale when the project's delegation values or proposals change", async () => {
+    const { session, project } = await aReadySession();
+    const before = await loadHandoffSource(session.id);
+    if (!("source" in before)) throw new Error("expected a handoff source");
+    expect(before.source.project.delegationValuesJson ?? null).toBeNull();
+    expect(before.source.project.delegationProposalsJson ?? null).toBeNull();
+    await generateHandoff.run({ sessionId: session.id });
+
+    const values = serializeDelegationValues({ pruneCommand: { command: "just prune", citation: "CLAUDE.md:4" } });
+    await getDb().update(schema.projects).set({ delegationValuesJson: values }).where(eq(schema.projects.id, project.id));
+    const withValues = await loadHandoffSource(session.id);
+    if (!("source" in withValues)) throw new Error("expected a handoff source");
+    expect(withValues.source.project.delegationValuesJson).toBe(values);
+    expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(true);
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+    expect(markdown).toContain("with the repository's command: `just prune`");
+    expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(false);
+
+    const proposals = serializeDelegationProposals({ preflight: { citation: "AGENTS.md:9" } });
+    await getDb()
+      .update(schema.projects)
+      .set({ delegationProposalsJson: proposals })
+      .where(eq(schema.projects.id, project.id));
+    const withProposals = await loadHandoffSource(session.id);
+    if (!("source" in withProposals)) throw new Error("expected a handoff source");
+    expect(withProposals.source.project.delegationProposalsJson).toBe(proposals);
+    expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(true);
   });
 
   it("renders the project's tickets in flight in the cap line and the checked Waves intro", async () => {

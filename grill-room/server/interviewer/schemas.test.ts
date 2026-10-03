@@ -239,6 +239,16 @@ describe("the handoff scout schema", () => {
     expect(parsed.tickets[1]!.buildsOn[0]).toMatchObject({ editedPath: null, symbol: null });
   });
 
+  it("a stored grounding without rulesRead parses, the validator accepts rulesRead, and the contract has no rulesRead key", () => {
+    const stored = { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [aGroundedTicket] };
+    expect(handoffScoutResultSchema.parse(stored).rulesRead).toBeUndefined();
+    expect(handoffScoutResultSchema.parse({ ...stored, rulesRead: true }).rulesRead).toBe(true);
+    expect(handoffScoutResultSchema.parse({ ...stored, rulesRead: false }).rulesRead).toBe(false);
+    expect(accepts({ ...stored, rulesRead: "yes" })).toBe(false);
+    expect(Object.keys(handoffScoutContractSchema.shape)).not.toContain("rulesRead");
+    expect(contractAccepts({ ...stored, rulesRead: true })).toBe(false);
+  });
+
   it("reads a grounding stored before reach as an empty reach", () => {
     const { reach: _reach, ...stored } = aGroundedTicket!;
     const parsed = handoffScoutResultSchema.parse({ tickets: [stored] });
