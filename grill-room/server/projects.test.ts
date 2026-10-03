@@ -579,6 +579,46 @@ describe("updateProject", () => {
     expect(untouched).toMatchObject({ deliveryRecipe: "pull-request", adversarialReview: false });
   });
 
+  it("registers preflightStep as true by default, and keeps or changes it on update", async () => {
+    const project = await aProject();
+    expect(project.preflightStep).toBe(true);
+
+    const off = registered(
+      await registerProject({
+        root: repos.create({ gitignore: ".scratch/\n" }),
+        verifyCommand: "pnpm test",
+        workingExportFolder: ".scratch",
+        preflightStep: false,
+      }),
+    );
+    expect(off.preflightStep).toBe(false);
+
+    const switchedOff = registered(await updateProject(project.id, { preflightStep: false }));
+    expect(switchedOff.preflightStep).toBe(false);
+
+    const kept = registered(await updateProject(project.id, { name: "x" }));
+    expect(kept.preflightStep).toBe(false);
+  });
+
+  it("keeps a project's delegation values and proposals through an update", async () => {
+    const project = await aProject();
+    expect(project.delegationValuesJson).toBeNull();
+    expect(project.delegationProposalsJson).toBeNull();
+
+    const values = '{"reviewRule":{"citation":"a.md:1"}}';
+    const proposals = '{"maxTicketsInFlight":{"value":3,"citation":"a.md:2"}}';
+    await getDb()
+      .update(schema.projects)
+      .set({ delegationValuesJson: values, delegationProposalsJson: proposals })
+      .where(eq(schema.projects.id, project.id));
+
+    const renamed = registered(await updateProject(project.id, { name: "x" }));
+    expect(renamed).toMatchObject({ delegationValuesJson: values, delegationProposalsJson: proposals });
+
+    const switched = registered(await updateProject(project.id, { preflightStep: false }));
+    expect(switched).toMatchObject({ delegationValuesJson: values, delegationProposalsJson: proposals });
+  });
+
   it("changes tickets in flight and keeps it when omitted", async () => {
     const project = await aProject();
     expect(project.maxTicketsInFlight).toBe(3);

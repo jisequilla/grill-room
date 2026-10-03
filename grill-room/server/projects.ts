@@ -117,6 +117,8 @@ export interface ProjectInput {
   deliveryRecipe?: string | null;
   /** Defaults to true. */
   adversarialReview?: boolean | null;
+  /** Defaults to true. */
+  preflightStep?: boolean | null;
   /** Defaults to 3. */
   maxTicketsInFlight?: number | null;
 }
@@ -595,6 +597,8 @@ async function validate(
       : tracker.kind === "valid"
         ? JSON.stringify(tracker.tracker.commands)
         : null;
+  const delegationValuesJson = existing?.delegationValuesJson ?? null;
+  const delegationProposalsJson = existing?.delegationProposalsJson ?? null;
   const trackerDiagnostic =
     tracker === null
       ? (existing?.trackerDiagnostic ?? null)
@@ -703,7 +707,10 @@ async function validate(
       visibility,
       deliveryRecipe,
       adversarialReview: input.adversarialReview ?? true,
+      preflightStep: input.preflightStep ?? true,
       maxTicketsInFlight,
+      delegationValuesJson,
+      delegationProposalsJson,
       trackerCommandsJson,
       trackerDiagnostic,
     },
@@ -759,6 +766,7 @@ export async function updateProject(
     visibility: patch.visibility ?? existing.visibility,
     deliveryRecipe: sanitizedDeliveryRecipePatch(patch.deliveryRecipe, existing.deliveryRecipe),
     adversarialReview: patch.adversarialReview ?? existing.adversarialReview,
+    preflightStep: patch.preflightStep ?? existing.preflightStep,
     maxTicketsInFlight: patch.maxTicketsInFlight ?? existing.maxTicketsInFlight,
   };
 

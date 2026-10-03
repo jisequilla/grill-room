@@ -31,6 +31,16 @@ describe("update-project", () => {
     expect((await getProject.run({ id: project.id })).maxTicketsInFlight).toBe(5);
   });
 
+  it("passes preflightStep through to the project", async () => {
+    const project = await aProject();
+    expect(project.preflightStep).toBe(true);
+
+    const updated = await updateProject.run({ id: project.id, preflightStep: false });
+
+    expect(updated.preflightStep).toBe(false);
+    expect(await getProject.run({ id: project.id })).toMatchObject({ preflightStep: false });
+  });
+
   it("update-project refuses tickets in flight of 11 with status 400 and its code", async () => {
     const project = await aProject();
 
