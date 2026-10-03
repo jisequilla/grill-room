@@ -105,6 +105,37 @@ describe("parseDelegationProposals", () => {
     expect(() => parseDelegationProposals('{"maxTicketsInFlight":{"citation":"a.md:1"}}')).toThrow();
   });
 
+  it("throws on an unknown slot", () => {
+    expect(() => parseDelegationProposals('{"colour":{}}')).toThrow();
+  });
+
+  it("throws on an unknown key inside a slot, for the cap and the prune command", () => {
+    expect(() =>
+      parseDelegationProposals('{"maxTicketsInFlight":{"value":3,"citation":"a.md:1","x":1}}'),
+    ).toThrow();
+    expect(() =>
+      parseDelegationProposals('{"pruneCommand":{"command":"a","citation":"a.md:1","x":1}}'),
+    ).toThrow();
+  });
+
+  it("throws on a cap that is not a whole number from 1 to 10", () => {
+    for (const value of [0, 2.5]) {
+      expect(() =>
+        parseDelegationProposals(
+          JSON.stringify({ maxTicketsInFlight: { value, citation: "a.md:1" } }),
+        ),
+      ).toThrow();
+    }
+  });
+
+  it("throws on a blank command, and on a citation with no line, in a proposal", () => {
+    expect(() => parseDelegationProposals(prune("  ", "a.md:1"))).toThrow();
+    expect(() => parseDelegationProposals(review("a.md"))).toThrow();
+    expect(() =>
+      parseDelegationProposals('{"maxTicketsInFlight":{"value":3,"citation":"a.md"}}'),
+    ).toThrow();
+  });
+
   it("mirrors the values helpers on null and empty", () => {
     expect(parseDelegationProposals(null)).toEqual({});
     expect(serializeDelegationProposals({})).toBeNull();
