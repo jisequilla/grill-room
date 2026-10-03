@@ -189,6 +189,7 @@ export default defineAction({
             const reasons = await reasonsToRefuseHandoffGrounding(clamped, {
               projectRoot: project.rootPath,
               tickets: requestTickets,
+              ruleSources: factPack.ruleSources,
             });
             return {
               result: { result: clamped, reasons },
