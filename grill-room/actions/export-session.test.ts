@@ -1288,6 +1288,24 @@ describe("export writes grounded briefs", () => {
     expect(handoff).toContain("No repository delegation rules were found:");
   });
 
+  it("HANDOFF carries no none-found line when the grounding read the rule sources and proposed a value", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    const base = aHandoffScoutResult();
+    await groundNow(session.id, root, {
+      ...base,
+      rulesRead: true,
+      delegationProposals: {
+        ...base.delegationProposals,
+        pruneCommand: { command: "just prune-worktrees", citation: "CLAUDE.md:40" },
+      },
+    });
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    const handoff = await fs.readFile(path.join(root, ".scratch", "grill-room", "HANDOFF.md"), "utf8");
+    expect(handoff).not.toContain("No repository delegation rules were found");
+  });
+
   it("HANDOFF carries no none-found line for a grounding that never recorded reading the rule sources", async () => {
     const { root, session } = await aReadySession();
     await generateHandoff.run({ sessionId: session.id });
