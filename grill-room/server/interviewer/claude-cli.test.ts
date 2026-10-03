@@ -1282,7 +1282,7 @@ describe("what the adapter sends for a handoff scout", () => {
           trackedFiles: ["src/a.ts", "src/b.ts"],
           trackedFilesOmitted: 200,
           namedDocs: [
-            { paths: ["AGENTS.md", "CLAUDE.md"], lines: ["# CLAUDE.md", "second"], truncated: false },
+            { paths: ["AGENTS.md", "CLAUDE.md"], lines: ["# CLAUDE.md", "second"], cutLines: [], truncated: false },
           ],
           verifyCommand: { command: "pnpm test", source: "registered" },
         }),
@@ -1308,8 +1308,8 @@ describe("what the adapter sends for a handoff scout", () => {
         projectRoot: PROJECT_ROOT,
         factPack: someHandoffFactPack({
           namedDocs: [
-            { paths: ["package.json", "CLAUDE.md", "AGENTS.md"], lines: ["{}"], truncated: false },
-            { paths: ["docs/agent.md", "CLAUDE.md"], lines: ["x"], truncated: false },
+            { paths: ["package.json", "CLAUDE.md", "AGENTS.md"], lines: ["{}"], cutLines: [], truncated: false },
+            { paths: ["docs/agent.md", "CLAUDE.md"], lines: ["x"], cutLines: [], truncated: false },
           ],
         }),
       }),
@@ -1339,6 +1339,7 @@ describe("what the adapter sends for a handoff scout", () => {
             {
               paths: ["package.json"],
               lines: Array.from({ length: 400 }, (_, index) => `l${index + 1}`),
+              cutLines: [],
               truncated: true,
             },
           ],
@@ -1353,12 +1354,48 @@ describe("what the adapter sends for a handoff scout", () => {
     );
   });
 
+  it("marks a root document line cut at 500 characters and says which lines were cut", async () => {
+    const cases: { cutLines: number[]; note: string }[] = [
+      {
+        cutLines: [3],
+        note: "(line 3 was cut at 500 characters; open the file to read it whole)",
+      },
+      {
+        cutLines: [3, 17],
+        note: "(lines 3, 17 were cut at 500 characters; open the file to read them whole)",
+      },
+      {
+        cutLines: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        note: "(lines 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 and 1 more were cut at 500 characters; open the file to read them whole)",
+      },
+      {
+        cutLines: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        note: "(lines 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 and 2 more were cut at 500 characters; open the file to read them whole)",
+      },
+    ];
+    for (const { cutLines, note } of cases) {
+      const lastCut = cutLines[cutLines.length - 1]!;
+      const docLines = Array.from({ length: lastCut }, (_, index) =>
+        cutLines.includes(index + 1) ? `${"x".repeat(500)} …` : "short",
+      );
+      const { prompt } = await handoffInvocation(
+        aHandoffScoutRequest({
+          projectRoot: PROJECT_ROOT,
+          factPack: someHandoffFactPack({
+            namedDocs: [{ paths: ["package.json"], lines: docLines, cutLines, truncated: true }],
+          }),
+        }),
+      );
+      expect(prompt).toContain(`${String(lastCut).padStart(6)}\t${"x".repeat(500)} …\n${note}\n(truncated after line`);
+    }
+  });
+
   it("does not note a truncation for a document shown whole", async () => {
     const { prompt } = await handoffInvocation(
       aHandoffScoutRequest({
         projectRoot: PROJECT_ROOT,
         factPack: someHandoffFactPack({
-          namedDocs: [{ paths: ["package.json"], lines: ["{}"], truncated: false }],
+          namedDocs: [{ paths: ["package.json"], lines: ["{}"], cutLines: [], truncated: false }],
         }),
       }),
     );

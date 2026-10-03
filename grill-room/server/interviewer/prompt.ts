@@ -906,7 +906,17 @@ function renderHandoffTicket(ticket: HandoffScoutTicket): string {
   ].join("\n");
 }
 
-function renderHandoffFactPack(pack: HandoffFactPack): string[] {
+function renderCutLinesNote(cutLines: number[]): string {
+  const shown = cutLines.slice(0, 10).join(", ");
+  const rest = cutLines.length - 10;
+  if (cutLines.length === 1) {
+    return `(line ${shown} was cut at 500 characters; open the file to read it whole)`;
+  }
+  const which = rest > 0 ? `${shown} and ${rest} more` : shown;
+  return `(lines ${which} were cut at 500 characters; open the file to read them whole)`;
+}
+
+export function renderHandoffFactPack(pack: HandoffFactPack): string[] {
   const files =
     pack.trackedFiles.length > 0
       ? [
@@ -926,6 +936,7 @@ function renderHandoffFactPack(pack: HandoffFactPack): string[] {
             heading,
             "",
             ...doc.lines.map((line, index) => `${String(index + 1).padStart(6)}\t${line}`),
+            ...(doc.cutLines.length > 0 ? [renderCutLinesNote(doc.cutLines)] : []),
             ...(doc.truncated
               ? [
                   `(truncated after line ${doc.lines.length}: line ${doc.lines.length} is not this file's last line; open it for the rest)`,
