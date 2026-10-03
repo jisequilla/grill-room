@@ -37,6 +37,7 @@ import {
   type HandoffScoutResult,
   type InterviewerModel,
 } from "./interviewer/index.js";
+import { collectRuleSources, rulesForFiles, type RuleSource } from "./repo-rules.js";
 import { checkCitation, clampCitation } from "./scout-report.js";
 import { computeWaves } from "./tickets.js";
 
@@ -570,19 +571,150 @@ export function collisionKey(filePath: string): string {
     .replace(/\/+$/, "");
 }
 
+function citationPath(citation: string): string {
+  const separator = citation.lastIndexOf(":");
+  return separator === -1 ? citation : citation.slice(0, separator);
+}
+
+function backticked(values: readonly string[]): string {
+  return values.map((value) => `\`${value}\``).join(", ");
+}
+
+function isExistingFileInside(realRoot: string, file: string): boolean {
+  if (!staysInsideRepo(file) || path.isAbsolute(file)) return false;
+  const resolved = path.resolve(realRoot, file);
+  if (!isInside(realRoot, resolved) || !resolvesInside(realRoot, resolved)) return false;
+  try {
+    return statSync(realpathSync(resolved)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The refusals for the rule claims: `rules`, `twoLensReview` and
+ * `delegationProposals`, checked against the repository's rule sources. Each
+ * claim is checked and reported on its own.
+ */
+function ruleClaimReasons(
+  result: HandoffScoutResult,
+  context: { projectRoot: string; realRoot: string; ruleSources: RuleSource[] },
+): string[] {
+  const { projectRoot, realRoot, ruleSources } = context;
+  const reasons: string[] = [];
+  const sourceOf = (citation: string): RuleSource | undefined => {
+    const cited = citationPath(citation);
+    return ruleSources.find((source) => samePath(source.path, cited));
+  };
+  const notASource = (subject: string, remedy: string): string => {
+    const head = `${subject} is not in one of the repository's rule sources`;
+    return ruleSources.length === 0
+      ? `${head}; the repository has no rule sources, so leave rules empty, twoLensReview null and every delegationProposals slot null.`
+      : `${head}; cite a line of ${backticked(ruleSources.map((source) => source.path))}${remedy}.`;
+  };
+  const checkClaimCitation = (citation: string, subject: string, remedy: string): RuleSource | null => {
+    const source = sourceOf(citation);
+    if (!source) {
+      reasons.push(notASource(subject, remedy));
+      return null;
+    }
+    const problem = checkCitation(projectRoot, citation);
+    if (problem) reasons.push(problem);
+    return source;
+  };
+
+  const proposals = result.delegationProposals;
+  for (const slot of ["maxTicketsInFlight", "pruneCommand", "reviewRule", "preflight"] as const) {
+    const proposal = proposals[slot];
+    if (proposal === null) continue;
+    checkClaimCitation(
+      proposal.citation,
+      `The delegationProposals.${slot} citation "${proposal.citation}"`,
+      `, or set ${slot} to null`,
+    );
+  }
+
+  for (const ticket of result.tickets) {
+    const { globMatched } = rulesForFiles(
+      ruleSources,
+      ticket.filesToChange.map((file) => file.path),
+    );
+    const matched = new Map(globMatched.map((entry) => [entry.path, entry.files]));
+
+    for (const rule of ticket.rules) {
+      const source = checkClaimCitation(
+        rule.citation,
+        `Ticket ${ticket.number}'s rule citation "${rule.citation}"`,
+        "",
+      );
+      if (source && source.globs !== null && !matched.has(source.path)) {
+        reasons.push(
+          `Ticket ${ticket.number} cites ${source.path}, whose paths: globs (${backticked(source.globs)}) match none of its filesToChange; drop that entry, or cite a rule that applies to this ticket.`,
+        );
+      }
+      for (const file of rule.requiredFiles) {
+        if (!isExistingFileInside(realRoot, file)) {
+          reasons.push(
+            `Ticket ${ticket.number}'s rule ${rule.citation} requires ${file}, which is not a file in the repository; list existing files, relative to the root. A rule that requires creating a new file cannot be claimed yet.`,
+          );
+        }
+      }
+    }
+
+    if (ticket.twoLensReview !== null) {
+      checkClaimCitation(
+        ticket.twoLensReview.citation,
+        `Ticket ${ticket.number}'s twoLensReview citation "${ticket.twoLensReview.citation}"`,
+        ", or set twoLensReview to null",
+      );
+    }
+
+    for (const [sourcePath, files] of matched) {
+      const answered = ticket.rules.some((rule) => samePath(citationPath(rule.citation), sourcePath));
+      if (!answered) {
+        reasons.push(
+          `Ticket ${ticket.number} changes ${backticked(files)}, which ${sourcePath}'s paths: globs match, but its rules has no entry citing ${sourcePath}; read it and give one entry, with requiredFiles: [] if it requires no files of this ticket.`,
+        );
+      }
+    }
+  }
+  return reasons;
+}
+
+function clampSlot<Slot extends { citation: string } | null>(slot: Slot, projectRoot: string): Slot {
+  return slot === null ? slot : { ...slot, citation: clampCitation(projectRoot, slot.citation) };
+}
+
 /**
  * The result with every citation clamped by `clampCitation`: each
- * `buildsOnFiles` entry, fact citation and non-null `buildsOn` citation. A new
- * object, the argument is never changed.
+ * `buildsOnFiles` entry, fact citation, non-null `buildsOn` citation, rule
+ * citation, non-null `twoLensReview` citation and the citation of every
+ * non-null `delegationProposals` slot. A new object, the argument is never
+ * changed.
  */
 export function clampHandoffGroundingCitations(
   result: HandoffScoutResult,
   projectRoot: string,
 ): HandoffScoutResult {
+  const proposals = result.delegationProposals;
   return {
     ...result,
+    delegationProposals: {
+      maxTicketsInFlight: clampSlot(proposals.maxTicketsInFlight, projectRoot),
+      pruneCommand: clampSlot(proposals.pruneCommand, projectRoot),
+      reviewRule: clampSlot(proposals.reviewRule, projectRoot),
+      preflight: clampSlot(proposals.preflight, projectRoot),
+    },
     tickets: result.tickets.map((ticket) => ({
       ...ticket,
+      rules: ticket.rules.map((rule) => ({
+        ...rule,
+        citation: clampCitation(projectRoot, rule.citation),
+      })),
+      twoLensReview:
+        ticket.twoLensReview === null
+          ? null
+          : { ...ticket.twoLensReview, citation: clampCitation(projectRoot, ticket.twoLensReview.citation) },
       buildsOnFiles: ticket.buildsOnFiles.map((citation) =>
         clampCitation(projectRoot, citation),
       ),
@@ -631,6 +763,15 @@ export function clampHandoffGroundingCitations(
  * - a proving test the ticket marks `edit` is a test by its name
  *   ({@link isTestFileByName}), not the file the ticket changes; one it
  *   creates is always accepted;
+ * - every rule citation, non-null `twoLensReview` citation and non-null
+ *   `delegationProposals` citation names one of the repository's rule sources
+ *   and points at a real line of it;
+ * - every rule's citation names a rule source whose `paths:` globs match one
+ *   of the ticket's `filesToChange`, or a source with no globs;
+ * - every rule's `requiredFiles` entry is an existing file inside the root;
+ * - every rule source whose `paths:` globs match a ticket's `filesToChange`
+ *   has at least one rule entry citing it (silence is refused, a wrong line
+ *   is not silence);
  * - every `reach` entry is one identifier (letters, digits, underscore);
  * - no `reach` symbol is declared twice in one ticket;
  * - every `reach` symbol is contained in some tracked file, since a reach is
@@ -648,7 +789,11 @@ export function clampHandoffGroundingCitations(
  */
 export async function reasonsToRefuseHandoffGrounding(
   result: HandoffScoutResult,
-  input: { projectRoot: string; tickets: readonly GroundedHandoffTicket[] },
+  input: {
+    projectRoot: string;
+    tickets: readonly GroundedHandoffTicket[];
+    ruleSources?: RuleSource[];
+  },
 ): Promise<string[]> {
   const reasons: string[] = [];
 
@@ -843,6 +988,14 @@ export async function reasonsToRefuseHandoffGrounding(
     );
     return reasons;
   }
+
+  reasons.push(
+    ...ruleClaimReasons(result, {
+      projectRoot: input.projectRoot,
+      realRoot,
+      ruleSources: input.ruleSources ?? collectRuleSources(input.projectRoot),
+    }),
+  );
 
   const toCheckIgnored: { ticket: number; path: string }[] = [];
   for (const ticket of result.tickets) {

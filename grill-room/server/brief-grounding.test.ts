@@ -5,6 +5,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { useTempGitRepos } from "../test/git-repos.js";
+import type { RuleSource } from "./repo-rules.js";
+import { checkCitation } from "./scout-report.js";
 import { aHandoffScoutResult, NO_DELEGATION_PROPOSALS } from "./interviewer/test-fixtures.js";
 import {
   clampHandoffGroundingCitations,
@@ -979,6 +981,297 @@ describe("measureReach", () => {
   });
 });
 
+const RULE_FIXTURE_FILES: Record<string, string> = {
+  "CLAUDE.md": "# Rules\nAlways test.\nNever skip.\n",
+  ".claude/rules/versioning.md": [
+    "---",
+    'paths: ["web/**/*"]',
+    "---",
+    "Bump the version.",
+    "Update the env example.",
+    "Keep the changelog.",
+    "Tag the release.",
+    "Done.",
+    "",
+  ].join("\n"),
+  "web/package.json": "{}\n",
+  "web/.env.example": "A=1\n",
+  "src/a.ts": "export {};\n",
+  "docs/rules.md": "# Docs\n",
+};
+
+type RuleTicket = ReturnType<typeof aHandoffScoutResult>["tickets"][number];
+
+/** A one-ticket result changing `files`, with `tweak` applied to the ticket and the proposals. */
+function aRuleClaim(
+  files: string[],
+  tweak: (
+    ticket: RuleTicket,
+    result: ReturnType<typeof aHandoffScoutResult>,
+  ) => void = () => {},
+): ReturnType<typeof aHandoffScoutResult> {
+  const result = aBareResult();
+  const ticket = result.tickets[0]!;
+  ticket.filesToChange = files.map((file) => ({ path: file, change: "edit" as const }));
+  ticket.provedBy = { testPath: null, command: "npm test" };
+  tweak(ticket, result);
+  return result;
+}
+
+const VERSIONING = ".claude/rules/versioning.md";
+const BOTH_SOURCES = "`CLAUDE.md`, `.claude/rules/versioning.md`";
+const notInSource = (citation: string) =>
+  `Ticket 1's rule citation "${citation}" is not in one of the repository's rule sources; cite a line of ${BOTH_SOURCES}.`;
+const noEntryFor = (files: string) =>
+  `Ticket 1 changes ${files}, which ${VERSIONING}'s paths: globs match, but its rules has no entry citing ${VERSIONING}; read it and give one entry, with requiredFiles: [] if it requires no files of this ticket.`;
+const rule = (citation: string, requiredFiles: string[] = []) => ({
+  citation,
+  statement: "A rule.",
+  requiredFiles,
+});
+
+describe("reasonsToRefuseHandoffGrounding on rule claims", () => {
+  async function refusals(
+    result: ReturnType<typeof aHandoffScoutResult>,
+    options: { ruleSources?: RuleSource[] } = {},
+  ): Promise<string[]> {
+    const root = repos.create({ files: RULE_FIXTURE_FILES });
+    return reasonsToRefuseHandoffGrounding(result, {
+      projectRoot: root,
+      tickets: aSingleTicket(),
+      ...options,
+    });
+  }
+
+  it("accepts silence on a ticket no glob matches", async () => {
+    expect(await refusals(aRuleClaim(["src/a.ts"]))).toEqual([]);
+  });
+
+  it("refuses silence on a glob-matched source (R5)", async () => {
+    expect(await refusals(aRuleClaim(["web/package.json"]))).toEqual([noEntryFor("`web/package.json`")]);
+  });
+
+  it("refuses silence on a dot-file the glob matches (R5)", async () => {
+    expect(await refusals(aRuleClaim(["web/.env.example"]))).toEqual([noEntryFor("`web/.env.example`")]);
+  });
+
+  it("accepts an entry with required files", async () => {
+    const claim = aRuleClaim(["web/package.json"], (ticket) => {
+      ticket.rules = [rule(`${VERSIONING}:3-5`, ["web/package.json"])];
+    });
+    expect(await refusals(claim)).toEqual([]);
+  });
+
+  it("accepts an entry with no required files", async () => {
+    const claim = aRuleClaim(["web/package.json"], (ticket) => {
+      ticket.rules = [rule(`${VERSIONING}:3`)];
+    });
+    expect(await refusals(claim)).toEqual([]);
+  });
+
+  it("accepts an entry for an unconditional source beside the glob-matched one", async () => {
+    const claim = aRuleClaim(["web/package.json"], (ticket) => {
+      ticket.rules = [rule(`${VERSIONING}:3`), rule("CLAUDE.md:2")];
+    });
+    expect(await refusals(claim)).toEqual([]);
+  });
+
+  it("matches only filesToChange, never reach or buildsOnFiles", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (ticket) => {
+      ticket.buildsOnFiles = ["web/package.json:1"];
+    });
+    expect(await refusals(claim)).toEqual([]);
+  });
+
+  it("refuses a glob-matched source cited by a ticket it does not match (R3)", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (ticket) => {
+      ticket.rules = [rule(`${VERSIONING}:3`)];
+    });
+    expect(await refusals(claim)).toEqual([
+      `Ticket 1 cites ${VERSIONING}, whose paths: globs (\`web/**/*\`) match none of its filesToChange; drop that entry, or cite a rule that applies to this ticket.`,
+    ]);
+  });
+
+  it("refuses a citation in a file that is not a rule source (R1)", async () => {
+    const claim = aRuleClaim(["web/package.json"], (ticket) => {
+      ticket.rules = [rule(`${VERSIONING}:3`), rule("docs/rules.md:1")];
+    });
+    expect(await refusals(claim)).toEqual([notInSource("docs/rules.md:1")]);
+  });
+
+  it("refuses a line past the file's end (R2) and does not count it as silence", async () => {
+    const claim = aRuleClaim(["web/package.json"], (ticket) => {
+      ticket.rules = [rule(`${VERSIONING}:40`)];
+    });
+    expect(await refusals(claim)).toEqual([
+      `Citation "${VERSIONING}:40" cites line 40, but ${VERSIONING} has 8 lines.`,
+    ]);
+  });
+
+  it("refuses a rule source cited without a line (R2), in checkCitation's words", async () => {
+    const root = repos.create({ files: RULE_FIXTURE_FILES });
+    const problem = checkCitation(root, "CLAUDE.md");
+    expect(problem).not.toBeNull();
+    const claim = aRuleClaim(["src/a.ts"], (ticket) => {
+      ticket.rules = [rule("CLAUDE.md")];
+    });
+    expect(await refusals(claim)).toEqual([problem]);
+  });
+
+  it("refuses a non-source cited without a line (R1)", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (ticket) => {
+      ticket.rules = [rule("docs/rules.md")];
+    });
+    expect(await refusals(claim)).toEqual([notInSource("docs/rules.md")]);
+  });
+
+  const notAFile = (citation: string, file: string) =>
+    `Ticket 1's rule ${citation} requires ${file}, which is not a file in the repository; list existing files, relative to the root. A rule that requires creating a new file cannot be claimed yet.`;
+
+  it("refuses a required file that does not exist (R4)", async () => {
+    const claim = aRuleClaim(["web/package.json"], (ticket) => {
+      ticket.rules = [rule(`${VERSIONING}:3`, ["web/missing.json"])];
+    });
+    expect(await refusals(claim)).toEqual([notAFile(`${VERSIONING}:3`, "web/missing.json")]);
+  });
+
+  it("refuses a required file outside the root (R4)", async () => {
+    const claim = aRuleClaim(["web/package.json"], (ticket) => {
+      ticket.rules = [rule(`${VERSIONING}:3`, ["../outside.json"])];
+    });
+    expect(await refusals(claim)).toEqual([notAFile(`${VERSIONING}:3`, "../outside.json")]);
+  });
+
+  it("refuses a required file that is a folder (R4)", async () => {
+    const claim = aRuleClaim(["web/package.json"], (ticket) => {
+      ticket.rules = [rule(`${VERSIONING}:3`, ["web"])];
+    });
+    expect(await refusals(claim)).toEqual([notAFile(`${VERSIONING}:3`, "web")]);
+  });
+
+  it("checks required files even for an unconditional source (R4)", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (ticket) => {
+      ticket.rules = [rule("CLAUDE.md:2", ["nope.ts"])];
+    });
+    expect(await refusals(claim)).toEqual([notAFile("CLAUDE.md:2", "nope.ts")]);
+  });
+
+  it("refuses a twoLensReview citation outside the rule sources (R1)", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (ticket) => {
+      ticket.twoLensReview = { citation: "README.md:1" };
+    });
+    expect(await refusals(claim)).toEqual([
+      `Ticket 1's twoLensReview citation "README.md:1" is not in one of the repository's rule sources; cite a line of ${BOTH_SOURCES}, or set twoLensReview to null.`,
+    ]);
+  });
+
+  it("accepts a twoLensReview citation into a rule source", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (ticket) => {
+      ticket.twoLensReview = { citation: "CLAUDE.md:2" };
+    });
+    expect(await refusals(claim)).toEqual([]);
+  });
+
+  it("refuses a proposal citing a line past the file's end (R2)", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (_ticket, result) => {
+      result.delegationProposals = {
+        ...NO_DELEGATION_PROPOSALS,
+        pruneCommand: { command: "just prune", citation: "CLAUDE.md:9" },
+      };
+    });
+    expect(await refusals(claim)).toEqual([`Citation "CLAUDE.md:9" cites line 9, but CLAUDE.md has 3 lines.`]);
+  });
+
+  it("refuses a proposal citing a non-source (R1), naming the slot", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (_ticket, result) => {
+      result.delegationProposals = {
+        ...NO_DELEGATION_PROPOSALS,
+        preflight: { citation: "docs/rules.md:1" },
+        reviewRule: { citation: "docs/rules.md:1" },
+      };
+    });
+    expect(await refusals(claim)).toEqual([
+      `The delegationProposals.reviewRule citation "docs/rules.md:1" is not in one of the repository's rule sources; cite a line of ${BOTH_SOURCES}, or set reviewRule to null.`,
+      `The delegationProposals.preflight citation "docs/rules.md:1" is not in one of the repository's rule sources; cite a line of ${BOTH_SOURCES}, or set preflight to null.`,
+    ]);
+  });
+
+  it("does not apply R3 to a proposal citing a glob-matched source", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (_ticket, result) => {
+      result.delegationProposals = {
+        ...NO_DELEGATION_PROPOSALS,
+        maxTicketsInFlight: { value: 2, citation: `${VERSIONING}:2` },
+      };
+    });
+    expect(await refusals(claim)).toEqual([]);
+  });
+
+  it("words R1 for a repository with no rule sources", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (ticket) => {
+      ticket.rules = [rule("CLAUDE.md:1")];
+    });
+    expect(await refusals(claim, { ruleSources: [] })).toEqual([
+      `Ticket 1's rule citation "CLAUDE.md:1" is not in one of the repository's rule sources; the repository has no rule sources, so leave rules empty, twoLensReview null and every delegationProposals slot null.`,
+    ]);
+  });
+
+  it("reports each failing claim on its own, even with the same citation", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (ticket) => {
+      ticket.rules = [rule("docs/rules.md:1"), rule("docs/rules.md:1")];
+    });
+    expect(await refusals(claim)).toEqual([notInSource("docs/rules.md:1"), notInSource("docs/rules.md:1")]);
+  });
+
+  it("checks rule claims against the rule sources it is given, not the disk", async () => {
+    const claim = () =>
+      aRuleClaim(["src/a.ts"], (ticket) => {
+        ticket.rules = [rule(`${VERSIONING}:3`)];
+      });
+    const given: RuleSource[] = [{ path: "CLAUDE.md", globs: null, lineCount: 3 }];
+
+    const refused = await refusals(claim(), { ruleSources: given });
+    const collected = await refusals(claim());
+
+    expect(refused).toEqual([
+      `Ticket 1's rule citation "${VERSIONING}:3" is not in one of the repository's rule sources; cite a line of \`CLAUDE.md\`.`,
+    ]);
+    expect(collected).toEqual([
+      `Ticket 1 cites ${VERSIONING}, whose paths: globs (\`web/**/*\`) match none of its filesToChange; drop that entry, or cite a rule that applies to this ticket.`,
+    ]);
+  });
+
+  it("seam: every rules, two-lens and proposal shape the handoff prompt describes passes the rule checks", async () => {
+    const shapes: [string, string[], (ticket: RuleTicket, result: ReturnType<typeof aHandoffScoutResult>) => void][] = [
+      ["a rule with required files", ["web/package.json"], (t) => {
+        t.rules = [rule(`${VERSIONING}:3-5`, ["web/package.json"])];
+      }],
+      ["a rule with requiredFiles empty", ["web/package.json"], (t) => {
+        t.rules = [rule(`${VERSIONING}:3`)];
+      }],
+      ["twoLensReview null", ["src/a.ts"], (t) => {
+        t.twoLensReview = null;
+      }],
+      ["twoLensReview set", ["src/a.ts"], (t) => {
+        t.twoLensReview = { citation: "CLAUDE.md:2" };
+      }],
+      ["proposals all null", ["src/a.ts"], (_t, r) => {
+        r.delegationProposals = NO_DELEGATION_PROPOSALS;
+      }],
+      ["proposals all set", ["src/a.ts"], (_t, r) => {
+        r.delegationProposals = {
+          maxTicketsInFlight: { value: 3, citation: "CLAUDE.md:1" },
+          pruneCommand: { command: "just prune", citation: "CLAUDE.md:2" },
+          reviewRule: { citation: "CLAUDE.md:2-3" },
+          preflight: { citation: `${VERSIONING}:4` },
+        };
+      }],
+    ];
+    for (const [name, files, tweak] of shapes) {
+      expect(await refusals(aRuleClaim(files, tweak)), name).toEqual([]);
+    }
+  });
+});
+
 describe("reasonsToRefuseHandoffGrounding on a reach", () => {
   const notOneIdentifier = (symbol: string) =>
     `Ticket 1's reach \`${symbol}\` is not one identifier; give a single name such as \`exportFolder\`.`;
@@ -1198,5 +1491,38 @@ describe("clampHandoffGroundingCitations", () => {
     expect(stored.facts[0]!.citation).toBe("src/ingest/metrics.ts:12-30");
     expect(stored.buildsOn[0]!.citation).toBe("docs/adr/0003-queue.md:5-9");
     expect(result.tickets[1]!.buildsOnFiles).toEqual(["src/ingest/metrics.ts:25-99"]);
+  });
+
+  it("clamps rule, two-lens and proposal citations", () => {
+    const root = repos.create({ files: RULE_FIXTURE_FILES });
+    const result = aBareResult();
+    result.tickets[0]!.rules = [
+      { citation: ".claude/rules/versioning.md:6-20", statement: "Bump.", requiredFiles: [] },
+    ];
+    result.tickets[0]!.twoLensReview = null;
+    result.delegationProposals = {
+      ...NO_DELEGATION_PROPOSALS,
+      reviewRule: { citation: "CLAUDE.md:2-9" },
+    };
+    deepFreeze(result);
+
+    const clamped = clampHandoffGroundingCitations(result, root);
+
+    expect(clamped.tickets[0]!.rules[0]!.citation).toBe(".claude/rules/versioning.md:6-8");
+    expect(clamped.tickets[0]!.twoLensReview).toBeNull();
+    expect(clamped.delegationProposals.reviewRule).toEqual({ citation: "CLAUDE.md:2-3" });
+    expect(clamped.delegationProposals.pruneCommand).toBeNull();
+    expect(result.tickets[0]!.rules[0]!.citation).toBe(".claude/rules/versioning.md:6-20");
+    expect(result.delegationProposals.reviewRule).toEqual({ citation: "CLAUDE.md:2-9" });
+  });
+
+  it("clamps a two-lens citation past the file's end", () => {
+    const root = repos.create({ files: RULE_FIXTURE_FILES });
+    const result = aBareResult();
+    result.tickets[0]!.twoLensReview = { citation: "CLAUDE.md:3-9" };
+
+    const clamped = clampHandoffGroundingCitations(result, root);
+
+    expect(clamped.tickets[0]!.twoLensReview).toEqual({ citation: "CLAUDE.md:3" });
   });
 });

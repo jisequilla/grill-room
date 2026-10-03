@@ -792,11 +792,17 @@ opens a rule file with Read. For each ticket the scout now also reports
 `delegationProposals` (`maxTicketsInFlight`, `pruneCommand`, `reviewRule` and
 `preflight`, each a value with a citation or null). They are required in the
 contract and defaulted in the validator, and are stored and returned with the
-grounding; nothing checks them, and HANDOFF's none-found line reads them: it
-renders only for a grounding whose four proposals are all null. The server
-also stamps `rulesRead: true` on every grounding it stores (the validator
-accepts the field, the contract never carries it): it means the scout was
-handed the rule-source list, and a grounding stored before it reads as not read.
+grounding. The rejection check refuses a rule, two-lens or proposal citation
+outside the rule sources or past a file's last line, a rule citing a `paths:`
+source none of the ticket's `filesToChange` match, a `requiredFiles` entry that
+is not an existing file inside the root, and a ticket silent on a rule source
+its `filesToChange` match; HANDOFF's none-found line reads the proposals: it
+renders only for a grounding marked `rulesRead: true` whose four proposals are
+all null, while the project stores no delegation values or proposals. The
+server also stamps `rulesRead: true` on every grounding it stores (the
+validator accepts the field, the contract never carries it): it means the scout
+was handed the rule-source list, and a grounding stored before it reads as not
+read.
 
 `server/repo-rules.ts` collects the repository's rule sources (the root `CLAUDE.md` and `AGENTS.md` and every `.md` under `.claude/rules/`, each with the `paths:` globs of its frontmatter) and matches them to files; the fact pack lists them for the handoff scout.
 
