@@ -1687,6 +1687,12 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("that blocker's `buildsOn`\n  entry uses `createdPath` (or `editedPath` with `symbol`) naming it.");
     expect(prompt).toContain("`provides` says the test is collected by the runner that ticket\n  sets up.");
     expect(prompt).toContain("Give `facts: []` for collection");
+    expect(prompt).toContain(
+      "When the runner comes from a ticket further up the chain, the\n  `buildsOn` entry for its direct blocker stays as usual, and its\n  `provides` says the test is collected by the runner that ticket\n  sets up.",
+    );
+    expect(prompt).toContain(
+      "the test command its body names, which fails before the ticket\n  (nothing to run) and passes after it.",
+    );
     expect(prompt).toContain("a build or a grep over\n  its own files that fails today, with no fact about tests");
     expect(prompt).toContain("or when no runner exists\n  yet, as below.");
     expect(prompt).toContain("State no fact about\n  collection and none that the spec excludes tests.");
