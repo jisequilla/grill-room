@@ -106,7 +106,7 @@ async function collectTrackedFiles(
   };
 }
 
-function isInside(realRoot: string, candidate: string): boolean {
+export function isInside(realRoot: string, candidate: string): boolean {
   const relative = path.relative(realRoot, candidate);
   return (
     relative !== "" &&
@@ -116,7 +116,7 @@ function isInside(realRoot: string, candidate: string): boolean {
   );
 }
 
-function readableDoc(realRoot: string, name: string): { relative: string; text: string } | null {
+export function readableDoc(realRoot: string, name: string): { relative: string; text: string } | null {
   try {
     const real = realpathSync(path.join(realRoot, name));
     if (!isInside(realRoot, real)) return null;
