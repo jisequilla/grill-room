@@ -1082,3 +1082,24 @@ describe("the reach seam", () => {
     expect(reasons).toEqual([]);
   });
 });
+
+describe("reasonsToRefuseHandoffGrounding on a root document the fact pack showed", () => {
+  it("accepts an edit of, and a fact citing, a root document the fact pack showed", async () => {
+    const root = repos.create({ files: { "CLAUDE.md": "# Agent instructions\nBe brief.\n" } });
+    const result = aBareResult();
+    result.tickets[0]!.filesToChange = [
+      { path: "CLAUDE.md", change: "edit" },
+      { path: "test/fixture.test.ts", change: "create" },
+    ];
+    result.tickets[0]!.facts = [
+      { statement: "The agent instructions ask for brevity.", citation: "CLAUDE.md:2" },
+    ];
+
+    const reasons = await reasonsToRefuseHandoffGrounding(result, {
+      projectRoot: root,
+      tickets: aSingleTicket(),
+    });
+
+    expect(reasons).toEqual([]);
+  });
+});
