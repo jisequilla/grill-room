@@ -1,4 +1,5 @@
 import type { HandoffFactPack } from "../handoff-fact-pack.js";
+import { MAX_TICKETS_IN_FLIGHT, MIN_TICKETS_IN_FLIGHT } from "../../shared/session-constants.js";
 import { numberRanges } from "../tickets.js";
 import { interviewerInstructions, loadSpecTemplate } from "./instructions.js";
 import {
@@ -1245,7 +1246,7 @@ function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
     "- `delegationProposals`, once per report, not per ticket: the values the",
     "  rule sources state, each with the `citation` of its line, or null when",
     "  none states it. `maxTicketsInFlight` is `{ value, citation }` with a",
-    "  whole number from 1 to 10; `pruneCommand` is `{ command, citation }`;",
+    `  whole number from ${MIN_TICKETS_IN_FLIGHT} to ${MAX_TICKETS_IN_FLIGHT}; \`pruneCommand\` is \`{ command, citation }\`;`,
     "  `reviewRule` is `{ citation }`; `preflight` is `{ citation }`, the",
     "  repository's own pre-flight procedure.",
     "",

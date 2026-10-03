@@ -828,8 +828,8 @@ describe("grounded briefs", () => {
             },
           ],
           rules: [],
-    twoLensReview: null,
-    provedBy: {
+          twoLensReview: null,
+          provedBy: {
             testPath: "server/export.test.ts",
             command: "pnpm exec vitest run server/export.test.ts",
           },
@@ -1002,8 +1002,8 @@ describe("grounded briefs", () => {
         {
           ...TICKET_1_GROUNDING,
           rules: [],
-    twoLensReview: null,
-    provedBy: { testPath: null, command: "cd backend && go build ./..." },
+          twoLensReview: null,
+          provedBy: { testPath: null, command: "cd backend && go build ./..." },
         },
       ],
     };

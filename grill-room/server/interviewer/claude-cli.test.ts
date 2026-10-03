@@ -1860,27 +1860,24 @@ describe("what the adapter sends for a handoff scout", () => {
 
   it("asks the handoff scout for the rules that apply to each ticket, a two-lens flag, and the repository's delegation values", async () => {
     const { prompt } = await handoffInvocation();
-
-    expect(prompt).toContain("- `rules`: one entry for every rule file the fact pack lists with globs");
-    expect(prompt).toContain("none skipped");
-    expect(prompt).toContain("matches `web/.env.example`");
-    expect(prompt).toContain("applies to every ticket`,\n  give an entry only when it requires something of this ticket");
-    expect(prompt).toContain("`citation` of the rule's lines as `path:line` or\n  `path:start-end`");
-    expect(prompt).toContain("`statement` of what the rule requires of this");
-    expect(prompt).toContain("`requiredFiles`: every file the rule requires this ticket\n  to create or edit, relative to the root");
-    expect(prompt).toContain("`requiredFiles: []` says the");
-    expect(prompt).toContain("List a required file even when\n  it is outside `filesToChange`");
-    expect(prompt).toContain("- `twoLensReview`: `{ citation }` of the rule line that gives this ticket");
-    expect(prompt).toContain("two reviewers (or two review lenses)");
-    expect(prompt).toContain("- `delegationProposals`, once per report");
-    expect(prompt).toContain("`maxTicketsInFlight` is `{ value, citation }`");
-    expect(prompt).toContain("`pruneCommand` is `{ command, citation }`");
-    expect(prompt).toContain("when a rule source says so and\n  this ticket qualifies; otherwise null.");
-    expect(prompt).toContain("or null when\n  none states it");
-    expect(prompt).toContain("each with the `citation` of its line");
-    expect(prompt).toContain("whole number from 1 to 10");
-    expect(prompt).toContain("`reviewRule` is `{ citation }`");
-    expect(prompt).toContain("`preflight` is `{ citation }`");
+    const flat = prompt.replace(/\s+/g, " ");
+    const clauses = [
+      "- `rules`: one entry for every rule file the fact pack lists with globs that match a file in this ticket's `filesToChange`, none skipped.",
+      "A glob's `**` also matches dot-files and dot-folders, so `web/**/*` matches `web/.env.example`.",
+      "For a file listed as `applies to every ticket`, give an entry only when it requires something of this ticket.",
+      "Each entry gives the `citation` of the rule's lines as `path:line` or `path:start-end`,",
+      "the `statement` of what the rule requires of this ticket,",
+      "and `requiredFiles`: every file the rule requires this ticket to create or edit, relative to the root.",
+      "`requiredFiles: []` says the rule requires no files of this ticket.",
+      "List a required file even when it is outside `filesToChange`: the app compares the two.",
+      "- `twoLensReview`: `{ citation }` of the rule line that gives this ticket two reviewers (or two review lenses), when a rule source says so and this ticket qualifies; otherwise null.",
+      "- `delegationProposals`, once per report, not per ticket: the values the rule sources state, each with the `citation` of its line, or null when none states it.",
+      "`maxTicketsInFlight` is `{ value, citation }` with a whole number from 1 to 10;",
+      "`pruneCommand` is `{ command, citation }`;",
+      "`reviewRule` is `{ citation }`;",
+      "`preflight` is `{ citation }`, the repository's own pre-flight procedure.",
+    ];
+    for (const clause of clauses) expect(flat).toContain(clause);
     expect(prompt.indexOf("- `rules`:")).toBeGreaterThan(prompt.indexOf("- `provedBy`:"));
   });
 

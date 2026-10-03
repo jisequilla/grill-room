@@ -747,7 +747,8 @@ describe("ground-briefs", () => {
     it("a missing ticket", async () => {
       const { session } = await aSessionWithHandoff();
       const reason = await refusedThenAccepted(session.id, {
-        delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [aHandoffScoutResult().tickets[0]!],
+        delegationProposals: NO_DELEGATION_PROPOSALS,
+        tickets: [aHandoffScoutResult().tickets[0]!],
       });
       expect(reason).toMatch(/Ticket 2 is missing; report every ticket of the handoff \(1, 2\) exactly once/);
     });
@@ -756,7 +757,8 @@ describe("ground-briefs", () => {
       const { session } = await aSessionWithHandoff();
       const [first, second] = aHandoffScoutResult().tickets;
       const reason = await refusedThenAccepted(session.id, {
-        delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [first!, second!, first!, { ...first!, number: 7 }],
+        delegationProposals: NO_DELEGATION_PROPOSALS,
+        tickets: [first!, second!, first!, { ...first!, number: 7 }],
       });
       expect(reason).toMatch(/Ticket 1 appears 2 times/);
       expect(reason).toMatch(/Ticket 7 is not a ticket of this handoff/);
@@ -823,7 +825,8 @@ describe("ground-briefs", () => {
     it("a dependency on an edited file with no symbol, or a symbol with no edited file", async () => {
       const { session } = await aSessionWithHandoff();
       const reason = await refusedThenAccepted(session.id, {
-        delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [
+        delegationProposals: NO_DELEGATION_PROPOSALS,
+        tickets: [
           aHandoffScoutResult().tickets[0]!,
           {
             ...aHandoffScoutResult().tickets[1]!,
@@ -973,10 +976,12 @@ describe("ground-briefs", () => {
       provedBy: { testPath: testFile, command: "npm test -- lag-alert" },
     });
     const refused: HandoffScoutResult = {
-      delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [...aHandoffScoutResult().tickets, ticket3("create")],
+      delegationProposals: NO_DELEGATION_PROPOSALS,
+      tickets: [...aHandoffScoutResult().tickets, ticket3("create")],
     };
     const accepted: HandoffScoutResult = {
-      delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [...aHandoffScoutResult().tickets, ticket3("edit")],
+      delegationProposals: NO_DELEGATION_PROPOSALS,
+      tickets: [...aHandoffScoutResult().tickets, ticket3("edit")],
     };
     const interviewer = scriptInterviewer([
       { kind: "handoff-scout", result: refused },
