@@ -1400,6 +1400,7 @@ export function renderBrief(
       "## Rules",
       "",
       "- Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.",
+      "- Build test fixtures in the encoding production uses for the same data: when a Codebase fact states how a value is stored or sent, match it, and never encode a value twice (such as JSON.stringify into a JSON column).",
       "- Run git only inside your worktree. Never run git against another checkout, never commit directly on `main`, and never merge anything.",
       "- Commit on your worktree branch as you go.",
     ].join("\n"),

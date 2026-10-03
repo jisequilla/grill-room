@@ -398,6 +398,9 @@ describe("delivery recipe and the review gate", () => {
   });
 });
 
+const FIXTURES_RULE =
+  "- Build test fixtures in the encoding production uses for the same data: when a Codebase fact states how a value is stored or sent, match it, and never encode a value twice (such as JSON.stringify into a JSON column).";
+
 describe("briefs", () => {
   it("renders one brief per ticket at briefs/NN-slug.md", () => {
     const { briefs } = renderHandoff(aSource());
@@ -417,6 +420,7 @@ describe("briefs", () => {
     expect(brief).toContain("Blocked by: 01");
     expect(brief).toContain("```bash\njust verify\n```");
     expect(brief).toContain("Create and edit files only within the file boundaries above");
+    expect(brief).toContain(FIXTURES_RULE);
     expect(brief).toContain("never commit directly on `main`, and never merge anything");
     expect(brief).toContain("`git push -u origin HEAD`, then `gh pr create --draft` against `main`");
     expect(brief).toContain("push pending: gh account");
@@ -736,6 +740,17 @@ describe("grounded briefs", () => {
         "```",
       ].join("\n"),
     );
+  });
+
+  it("carries the fixtures rule between the file-boundaries bullet and the git bullet when grounded", () => {
+    const brief = renderBrief(aSource(), ticketByNumber(2), { grounding: CURRENT_GROUNDING });
+    const rules = section(brief, "## Rules").split("\n").filter((line) => line.startsWith("- "));
+
+    const boundaries = rules.findIndex((line) => line.startsWith("- Create and edit files only within the file boundaries"));
+    const git = rules.findIndex((line) => line.startsWith("- Run git only inside your worktree"));
+    expect(boundaries).toBeGreaterThan(-1);
+    expect(rules[boundaries + 1]).toBe(FIXTURES_RULE);
+    expect(git).toBe(boundaries + 2);
   });
 
   it("prints a reach as its grep command and the count measured when grounded", () => {

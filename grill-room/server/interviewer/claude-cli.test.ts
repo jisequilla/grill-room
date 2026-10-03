@@ -1795,12 +1795,54 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("declare a 404.");
   });
 
+  it("asks for a fact stating the real shape of data a ticket depends on, cited where it is produced or stored", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  When the ticket reads or writes data and its behaviour depends on that",
+        "  data's shape (a payload's fields, which of them can be null, a column's",
+        "  meaning, or how a value is encoded or stored, such as a JSON column",
+        "  holding an object or a string, a timestamp as a Date or a string, or a",
+        "  big integer as a number or a string), state that shape in a fact, and",
+        "  cite where you read it being produced or stored: the code that emits or",
+        "  inserts it, or the schema or migration that defines it. For a column or",
+        "  field whose meaning the ticket relies on, cite what writes it, not only",
+        "  its declaration: a name such as `created_at` is never evidence of what",
+        "  it holds. Cite an existing fixture or sample only when you could read no",
+        "  producer and no schema or migration for the data, and then say in the",
+        "  fact that the shape was not confirmed against production. When you",
+        "  cannot read the shape where it is produced or stored, cite the closest",
+        "  producer or schema you did read, state what those lines hold, and name",
+        "  which part of the shape the ticket must confirm. When the ticket's",
+        "  behaviour does not depend on data shape, no such fact is required.",
+      ].join("\n"),
+    );
+    expect(prompt).not.toContain("cannot find the shape in the repository");
+    expect(prompt).not.toContain("say so in a fact that cites the");
+  });
+
+  it("lets a fact cite a fixture only when no producer or schema is readable, and says the shape was not confirmed against production", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  it holds. Cite an existing fixture or sample only when you could read no",
+        "  producer and no schema or migration for the data, and then say in the",
+        "  fact that the shape was not confirmed against production. When you",
+      ].join("\n"),
+    );
+    expect(prompt).not.toContain("or an existing\n  fixture or sample in the repository");
+  });
+
   it("does not let the facts rule contradict the exclusivity rule that follows it", async () => {
     const { prompt } = await handoffInvocation();
 
     expect(prompt).not.toContain("a field the spec assumes that does not exist");
     expect(prompt).not.toContain("a response it must return that the code cannot yet");
     expect(prompt).toContain("A fact states only what its cited lines show");
+    expect(prompt).not.toContain("closest producer or schema you did read, and name what is unknown");
+    expect(prompt).not.toContain("the repository does not define");
   });
 
   it("asks buildsOn.provides to say when this ticket needs something its blocker does not promise", async () => {
