@@ -620,10 +620,11 @@ session, and is readable and editable in the output page's Handoff block.
   ticket text, its blockers, the verify command, the file-boundary and
   git/worktree rules, a fixtures rule (build test fixtures in the encoding
   production uses for the same data, never encoding a value twice), the
-  report format, and "report, then stop", plus two labelled slots for the orchestrator: **File boundaries** and **Codebase
-  facts**. Its delivery section varies by delivery recipe the same way
-  HANDOFF.md's lifecycle does, and its report section names a separate
-  reviewer only when the review switch is on. `get-handoff` always shows the
+  report format, and "report, then stop", plus two labelled slots for the
+  orchestrator: **File boundaries** and **Codebase facts**. Its delivery
+  section varies by delivery recipe the same way HANDOFF.md's lifecycle does,
+  and its report section names a separate reviewer only when the review
+  switch is on. `get-handoff` always shows the
   two slots empty, as `generate-handoff` wrote them; the exported bundle's
   copy carries the session's grounding, when it has one that actually covers
   the ticket, applied at export time — see "Grounding the briefs" below for
