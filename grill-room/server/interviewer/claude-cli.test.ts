@@ -1337,7 +1337,8 @@ describe("what the adapter sends for a handoff scout", () => {
       [
         "- `provedBy`: the `testPath` of the test file to add or extend,",
         "  relative to the project root, or null when the spec rules out",
-        "  tests for this ticket's kind of change (see below). `command`",
+        "  tests for this ticket's kind of change or when no runner exists",
+        "  yet, as below. `command`",
         "  is the shell command that proves the ticket, in the form the",
         "  project already runs its tests.",
       ].join("\n"),
@@ -1430,7 +1431,8 @@ describe("what the adapter sends for a handoff scout", () => {
         "  When `testPath` is set, it must sit where the project's own test",
         "  command collects it: a runner config's include globs, the test",
         "  recipe in a justfile, Makefile or package.json, or the runner's",
-        "  default discovery. You confirm this and state it in a fact,",
+        "  default discovery. When a runner already exists (a config, a",
+        "  recipe, or a test file), you confirm this and state it in a fact,",
         "  citing the config or recipe line that collects it. With no",
         "  explicit include globs, cite the line that invokes the runner",
         '  (e.g. `package.json`\'s `"test": "vitest run"`) and name the',
@@ -1442,7 +1444,12 @@ describe("what the adapter sends for a handoff scout", () => {
         "  invokes the runner, configures what it collects, nor is such",
         "  a test file. This fact may cite a config, recipe, or existing",
         "  test file the ticket does not change, an exception to facts",
-        "  being about the code the ticket touches. A path the runner",
+        "  being about the code the ticket touches.",
+      ].join("\n"),
+    );
+    expect(prompt).toContain(
+      [
+        "  When a runner already exists, a path the runner",
         "  does not collect — a file under `scripts/` when the runner",
         "  only globs `src/**/*.test.ts` — is not a proof: pick a path",
         "  the runner collects.",
@@ -1486,7 +1493,8 @@ describe("what the adapter sends for a handoff scout", () => {
       [
         "  a test file. This fact may cite a config, recipe, or existing",
         "  test file the ticket does not change, an exception to facts",
-        "  being about the code the ticket touches. A path the runner",
+        "  being about the code the ticket touches.",
+        "  When no runner exists yet, the facts say",
       ].join("\n"),
     );
     expect(prompt).not.toContain("This fact may cite a config or recipe file the ticket");
@@ -1532,6 +1540,29 @@ describe("what the adapter sends for a handoff scout", () => {
       ].join("\n"),
     );
     expect(prompt).not.toContain("do not\n  add one");
+  });
+
+  it("tells the scout how to ground a ticket that sets up the test runner, and one whose blocker sets it up", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("When no runner exists yet, the facts say");
+    expect(prompt).toContain("or no runner config, recipe or test file exists");
+    expect(prompt).toContain("creates the runner\n  config or recipe itself and whose body names a test command it");
+    expect(prompt).toContain("`testPath` null and `command`\n  the test command its body names");
+    expect(prompt).toContain("or a grep for the\n  runner config it creates, is also accepted");
+    expect(prompt).toContain("feature ticket that creates no runner config or recipe is not.");
+    expect(prompt).toContain("that blocker's `buildsOn`\n  entry uses `createdPath` (or `editedPath` with `symbol`) naming it.");
+    expect(prompt).toContain("`provides` says the test is collected by the runner that ticket\n  sets up.");
+    expect(prompt).toContain("Give `facts: []` for collection");
+    expect(prompt).toContain("a build or a grep over\n  its own files that fails today, with no fact about tests");
+    expect(prompt).toContain("or when no runner exists\n  yet, as below.");
+
+    const start = prompt.indexOf("A ticket that sets up the test runner itself");
+    const runnerSetupSentence = prompt.slice(start, prompt.indexOf("as `pnpm test`;", start));
+    expect(start).toBeGreaterThan(-1);
+    expect(runnerSetupSentence).toContain("`testPath` to\n  null");
+    expect(runnerSetupSentence).not.toMatch(/exclud|rules? out/);
+    expect(prompt).toContain("no fact about tests is required.");
   });
 
   it("says a ticket proved by a build builds the whole module, adding any file outside its own the build needs", async () => {

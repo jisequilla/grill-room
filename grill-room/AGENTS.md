@@ -803,7 +803,10 @@ with the reasons:
   among them, as a `create` or an `edit`. `testPath` may be null instead,
   for a ticket whose kind of change the spec keeps untested: its
   `provedBy.command` alone (a build, or a grep over its own files) proves
-  it, and neither test-path rule applies;
+  it, and neither test-path rule applies. `testPath` is also null for the
+  ticket that sets up the test runner itself in a project with none: the
+  test command its body names proves it, and no fact about tests is
+  required;
 - a proving test the ticket marks `edit` is a test by its name
   (`isTestFileByName`: a source-code extension, and `_test.*`, `_spec.*`,
   `.test.*`, `.spec.*`, `test_*`, or a `__tests__/`, `test/`, `tests/`,

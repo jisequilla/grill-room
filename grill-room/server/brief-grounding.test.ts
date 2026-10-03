@@ -368,6 +368,45 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
     expect(reasons).toEqual([]);
   });
 
+  it("seam: a set with no test runner yet, grounded as the prompt describes, is accepted", async () => {
+    // As buildHandoffScoutPrompt tells the scout: ticket 1 sets up the runner
+    // and is proved by its test command; a later ticket is collected through
+    // its blocker, with no collection fact.
+    const root = repos.create({ files: { "README.md": "# Greenfield\n" }, commit: false });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      {
+        tickets: [
+          aTicket(1, { "package.json": "create", "vitest.config.ts": "create" }, null, [], "pnpm test"),
+          aTicket(
+            2,
+            { "src/a.test.ts": "create", "src/b.ts": "create" },
+            "src/a.test.ts",
+            [{ blocker: 1, createdPath: "vitest.config.ts" }],
+            "pnpm test src/a.test.ts",
+          ),
+          aTicket(
+            3,
+            { "src/c.test.ts": "create" },
+            "src/c.test.ts",
+            [{ blocker: 2, createdPath: "src/b.ts" }],
+            "pnpm test src/c.test.ts",
+          ),
+        ],
+      },
+      {
+        projectRoot: root,
+        tickets: [
+          { number: 1, blockedBy: [] },
+          { number: 2, blockedBy: [1] },
+          { number: 3, blockedBy: [2] },
+        ],
+      },
+    );
+
+    expect(reasons).toEqual([]);
+  });
+
   it("collides two creates that differ only in case, Unicode form or a trailing slash", async () => {
     const root = repos.create({ files: { "README.md": "# Marathon\n" } });
     const upper = "backend/export/Export_test.go";

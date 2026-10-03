@@ -627,7 +627,7 @@ export function clampHandoffGroundingCitations(
  *   an `edit`;
  * - a ticket that changes files lists its proving test among them, unless
  *   its `testPath` is null (the spec rules out tests for its kind of change,
- *   and the command alone proves it);
+ *   or it sets up the test runner itself, and the command alone proves it);
  * - a proving test the ticket marks `edit` is a test by its name
  *   ({@link isTestFileByName}), not the file the ticket changes; one it
  *   creates is always accepted;
