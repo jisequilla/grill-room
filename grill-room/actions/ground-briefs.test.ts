@@ -303,9 +303,39 @@ describe("ground-briefs", () => {
       ]),
     );
     expect(request!.factPack.namedDocs).toEqual([
-      { paths: ["CLAUDE.md"], lines: ["# Agent instructions"], truncated: false },
+      { paths: ["CLAUDE.md"], lines: ["# Agent instructions"], cutLines: [], truncated: false },
     ]);
     expect(request!.factPack.verifyCommand).not.toBeNull();
+  });
+
+  it("leaves the session's last export folder out of the fact pack", async () => {
+    const root = repos.create({
+      files: {
+        "src/ingest/metrics.ts": lines(30),
+        "src/ingest/queue.ts": lines(10),
+        "docs/adr/0003-queue.md": lines(9),
+        "CLAUDE.md": "# Agent instructions\n",
+        ".scratch/out/spec.md": "spec\n",
+        ".scratch/out/HANDOFF.md": "handoff\n",
+      },
+      gitignore: "dist/\n",
+    });
+    const { session } = await aSessionWithHandoff({ root });
+    await getDb()
+      .update(schema.sessions)
+      .set({ lastExportFolder: ".scratch/out" })
+      .where(eq(schema.sessions.id, session.id));
+    const interviewer = scriptInterviewer([
+      { kind: "handoff-scout", result: aHandoffScoutResult() },
+    ]);
+
+    await groundBriefs.run({ sessionId: session.id });
+
+    const [request] = scoutRequests(interviewer.requests);
+    expect(request!.factPack.trackedFiles).toContain("src/ingest/queue.ts");
+    expect(request!.factPack.trackedFiles.some((file) => file.startsWith(".scratch/out/"))).toBe(
+      false,
+    );
   });
 
   it("replaces the earlier grounding on a re-run", async () => {

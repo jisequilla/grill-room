@@ -770,7 +770,7 @@ turn, never stored, and for the handoff scout only): the files git tracks
 (sorted, at most 3,000, with the count of the rest; leaving out the export
 folder, every file a secret pattern names, and files gone from the working
 tree), the root `CLAUDE.md`, `AGENTS.md` and `package.json` numbered like
-`cat -n` (at most 400 lines each; names resolving to one real file become
+`cat -n` (at most 400 lines each, each line cut at 500 characters with a note naming the cut lines, and at most 40,000 bytes of lines per document; the file list is also capped at 100,000 bytes, and the count of the rest includes paths the byte budget dropped; names resolving to one real file become
 one entry; a symlink leading outside the root, to a secret file or into
 `.git` is left out), and the verify command. The documents count as opened:
 the scout may cite their shown lines and mark them `edit` without opening
