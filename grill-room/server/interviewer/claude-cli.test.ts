@@ -1302,6 +1302,22 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt.indexOf("## Files the repository tracks")).toBeLessThan(prompt.indexOf("## The spec"));
   });
 
+  it("heads a root document with its first path and joins every alias with a comma", async () => {
+    const { prompt } = await handoffInvocation(
+      aHandoffScoutRequest({
+        projectRoot: PROJECT_ROOT,
+        factPack: someHandoffFactPack({
+          namedDocs: [
+            { paths: ["package.json", "CLAUDE.md", "AGENTS.md"], lines: ["{}"], truncated: false },
+            { paths: ["docs/agent.md", "CLAUDE.md"], lines: ["x"], truncated: false },
+          ],
+        }),
+      }),
+    );
+    expect(prompt).toContain("### package.json (also CLAUDE.md, AGENTS.md)\n");
+    expect(prompt).toContain("### docs/agent.md (also CLAUDE.md)\n");
+  });
+
   it("omits the omitted-count line when every tracked file is listed", async () => {
     const { prompt } = await handoffInvocation(
       aHandoffScoutRequest({

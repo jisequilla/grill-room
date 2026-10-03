@@ -117,6 +117,13 @@ describe("collectHandoffFactPack: root documents", () => {
     expect(namedDocs[0]!.lines).toEqual(["hello"]);
   });
 
+  it("leaves out a CLAUDE.md that is a symlink into the repository's own metadata folder", async () => {
+    const root = repos.create({ files: { "src/a.ts": "a\n" } });
+    fs.symlinkSync(".git/config", path.join(root, "CLAUDE.md"));
+    const { namedDocs } = await collectHandoffFactPack(root, {});
+    expect(namedDocs).toEqual([]);
+  });
+
   it("leaves out a CLAUDE.md that links outside the root or to .env", async () => {
     const outside = repos.plainFolder({ "outside.md": "secret\n" });
     const root = repos.create({ files: { ".env": "S=1\n" } });
