@@ -522,6 +522,19 @@ function renderTask(
         ...(request.greenfield && request.verifyCommand !== null
           ? ["", greenfieldTicketsSection(request.verifyCommand)]
           : []),
+        ...(request.trackedFiles
+          ? [
+              "",
+              ...renderTrackedFiles(request.trackedFiles.files, request.trackedFiles.omitted),
+              "",
+              "When a ticket creates, edits or reshapes something whose path or symbol you",
+              "know from this list or from the project section above, name it in the",
+              "ticket's body as inline code, such as `src/ingest/metrics.ts` or",
+              "`exportFolder`. Name a path as existing only when this list or the",
+              "project section shows it; a file the ticket creates may be named as a new",
+              "path.",
+            ]
+          : []),
         ...(request.userStories.length > 0
           ? ["", userStoriesTicketsSection(request.userStories)]
           : []),
@@ -916,16 +929,20 @@ function renderCutLinesNote(cutLines: number[]): string {
   return `(lines ${which} were cut at 500 characters; open the file to read them whole)`;
 }
 
+export function renderTrackedFiles(files: string[], omitted: number): string[] {
+  return [
+    "## Files the repository tracks",
+    "",
+    "Tracked files only, with secret files left out: a path missing from this",
+    "list is never evidence that a file does not exist.",
+    "",
+    ...(files.length > 0
+      ? [...files, ...(omitted > 0 ? [`(and ${omitted} more not listed)`] : [])]
+      : ["No tracked files yet."]),
+  ];
+}
+
 export function renderHandoffFactPack(pack: HandoffFactPack): string[] {
-  const files =
-    pack.trackedFiles.length > 0
-      ? [
-          ...pack.trackedFiles,
-          ...(pack.trackedFilesOmitted > 0
-            ? [`(and ${pack.trackedFilesOmitted} more not listed)`]
-            : []),
-        ]
-      : ["No tracked files yet."];
   const docs =
     pack.namedDocs.length > 0
       ? pack.namedDocs.flatMap((doc) => {
@@ -954,12 +971,7 @@ export function renderHandoffFactPack(pack: HandoffFactPack): string[] {
       })`
     : "None registered or found in a justfile, package.json or Makefile.";
   return [
-    "## Files the repository tracks",
-    "",
-    "Tracked files only, with secret files left out: a path missing from this",
-    "list is never evidence that a file does not exist.",
-    "",
-    ...files,
+    ...renderTrackedFiles(pack.trackedFiles, pack.trackedFilesOmitted),
     "",
     "## Root documents, already opened",
     "",

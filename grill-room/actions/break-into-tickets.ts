@@ -11,6 +11,7 @@ import {
 } from "../server/consistency.js";
 import { getDb, schema } from "../server/db/index.js";
 import { headCommit } from "../server/export-bundle.js";
+import { collectHandoffFactPack } from "../server/handoff-fact-pack.js";
 import { getInterviewer, MAX_HANDOFF_SCOUT_TICKETS } from "../server/interviewer/index.js";
 import type { BreakIntoTicketsResult } from "../server/interviewer/index.js";
 import { getProject } from "../server/projects.js";
@@ -145,6 +146,16 @@ export default defineAction({
         const project = session!.projectId ? await getProject(session!.projectId) : undefined;
         const verifyCommand = project?.verifyCommand ?? null;
         const greenfield = project ? (await headCommit(project.rootPath)) === null : false;
+        // The tracked files let the tickets name what they touch. The
+        // breakdown still runs without them when collecting fails.
+        const trackedFiles = project
+          ? await collectHandoffFactPack(project.rootPath, {
+              excludeFolder: session!.lastExportFolder ?? undefined,
+            }).then(
+              (pack) => ({ files: pack.trackedFiles, omitted: pack.trackedFilesOmitted }),
+              () => null,
+            )
+          : null;
         // The spec's numbered user stories, read once so every retry is
         // judged against the same list. None skips the story check.
         const stories = userStories(spec!.markdown).map((story) => story.number);
@@ -177,6 +188,7 @@ export default defineAction({
                 specMarkdown: spec!.markdown,
                 greenfield,
                 verifyCommand,
+                trackedFiles,
                 userStories: stories,
                 rejectionReason,
               },
