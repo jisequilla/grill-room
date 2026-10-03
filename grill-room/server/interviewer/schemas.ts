@@ -544,31 +544,30 @@ const handoffTwoLensResult = z
   .nullable()
   .default(null);
 
-function delegationProposals<Citation extends z.ZodType>(
-  citation: Citation,
-  slot: <T extends z.ZodType>(shape: T) => z.ZodType,
-) {
-  return z.strictObject({
-    maxTicketsInFlight: slot(
-      z.strictObject({
-        value: z
-          .number()
-          .int()
-          .min(MIN_TICKETS_IN_FLIGHT)
-          .max(MAX_TICKETS_IN_FLIGHT),
-        citation,
-      }),
-    ),
-    pruneCommand: slot(z.strictObject({ command: handoffText, citation })),
-    reviewRule: slot(z.strictObject({ citation })),
-    preflight: slot(z.strictObject({ citation })),
-  });
+function proposalShapes<Citation extends z.ZodType>(citation: Citation) {
+  return {
+    maxTicketsInFlight: z.strictObject({
+      value: z
+        .number()
+        .int()
+        .min(MIN_TICKETS_IN_FLIGHT)
+        .max(MAX_TICKETS_IN_FLIGHT),
+      citation,
+    }),
+    pruneCommand: z.strictObject({ command: handoffText, citation }),
+    reviewRule: z.strictObject({ citation }),
+    preflight: z.strictObject({ citation }),
+  };
 }
 
-const delegationProposalsContract = delegationProposals(
-  z.string().regex(CITATION_PATTERN),
-  (shape) => shape.nullable(),
-);
+const contractProposalShapes = proposalShapes(z.string().regex(CITATION_PATTERN));
+
+const delegationProposalsContract = z.strictObject({
+  maxTicketsInFlight: contractProposalShapes.maxTicketsInFlight.nullable(),
+  pruneCommand: contractProposalShapes.pruneCommand.nullable(),
+  reviewRule: contractProposalShapes.reviewRule.nullable(),
+  preflight: contractProposalShapes.preflight.nullable(),
+});
 
 const NO_PROPOSALS = {
   maxTicketsInFlight: null,
@@ -577,9 +576,16 @@ const NO_PROPOSALS = {
   preflight: null,
 };
 
-const delegationProposalsResult = delegationProposals(handoffText, (shape) =>
-  shape.nullable().default(null),
-).default(NO_PROPOSALS);
+const resultProposalShapes = proposalShapes(handoffText);
+
+const delegationProposalsResult = z
+  .strictObject({
+    maxTicketsInFlight: resultProposalShapes.maxTicketsInFlight.nullable().default(null),
+    pruneCommand: resultProposalShapes.pruneCommand.nullable().default(null),
+    reviewRule: resultProposalShapes.reviewRule.nullable().default(null),
+    preflight: resultProposalShapes.preflight.nullable().default(null),
+  })
+  .default(NO_PROPOSALS);
 
 /**
  * What a handoff scout found reading a project for every ticket of one

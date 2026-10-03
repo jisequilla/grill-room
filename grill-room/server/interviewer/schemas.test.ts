@@ -5,6 +5,7 @@ import {
   citation,
   handoffScoutContractSchema,
   handoffScoutResultSchema,
+  type HandoffScoutResult,
   jsonSchemaFor,
   MAX_HANDOFF_SCOUT_BUILDS_ON,
   MAX_HANDOFF_SCOUT_BUILDS_ON_FILES,
@@ -606,5 +607,15 @@ describe("the handoff scout schema: rules, two-lens flag and delegation proposal
       expect(contractAccepts(shape)).toBe(true);
       expect(accepts(shape)).toBe(true);
     }
+  });
+
+  it("types each delegation proposal slot, so a consumer reads it without a cast", () => {
+    const proposals = aHandoffScoutResult().delegationProposals;
+    const inFlight: number | undefined = proposals.maxTicketsInFlight?.value;
+    const prune: string | undefined = proposals.pruneCommand?.command;
+    const rule: string | undefined = proposals.reviewRule?.citation;
+    // @ts-expect-error a number is not a prune slot
+    const bad: HandoffScoutResult["delegationProposals"]["pruneCommand"] = 42;
+    expect([inFlight, prune, rule, bad]).toBeDefined();
   });
 });

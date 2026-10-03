@@ -1875,6 +1875,10 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("- `delegationProposals`, once per report");
     expect(prompt).toContain("`maxTicketsInFlight` is `{ value, citation }`");
     expect(prompt).toContain("`pruneCommand` is `{ command, citation }`");
+    expect(prompt).toContain("when a rule source says so and\n  this ticket qualifies; otherwise null.");
+    expect(prompt).toContain("or null when\n  none states it");
+    expect(prompt).toContain("each with the `citation` of its line");
+    expect(prompt).toContain("whole number from 1 to 10");
     expect(prompt).toContain("`reviewRule` is `{ citation }`");
     expect(prompt).toContain("`preflight` is `{ citation }`");
     expect(prompt.indexOf("- `rules`:")).toBeGreaterThan(prompt.indexOf("- `provedBy`:"));

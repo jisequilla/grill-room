@@ -789,7 +789,7 @@ opens a rule file with Read. For each ticket the scout now also reports
 contract and defaulted in the validator, and are stored and returned with the
 grounding; nothing checks them and nothing renders them yet.
 
-`server/repo-rules.ts` collects the repository's rule sources (the root `CLAUDE.md` and `AGENTS.md` and every `.md` under `.claude/rules/`, each with the `paths:` globs of its frontmatter) and matches them to files; nothing uses it yet.
+`server/repo-rules.ts` collects the repository's rule sources (the root `CLAUDE.md` and `AGENTS.md` and every `.md` under `.claude/rules/`, each with the `paths:` globs of its frontmatter) and matches them to files; the fact pack lists them for the handoff scout.
 
 Every result is checked before it is accepted, and one that fails is sent back
 with the reasons:
