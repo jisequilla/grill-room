@@ -315,7 +315,7 @@ describe("ground-briefs", () => {
         {
           citation: "CLAUDE.md:1",
           statement: "Every change updates the changelog.",
-          requiredFiles: ["CHANGELOG.md"],
+          requiredFiles: ["src/ingest/queue.ts"],
         },
       ];
       ticket.twoLensReview = { citation: "CLAUDE.md:1" };
@@ -332,6 +332,44 @@ describe("ground-briefs", () => {
     expect(read.grounding!.result.tickets[0]!.rules).toEqual(scripted.tickets[0]!.rules);
     expect(read.grounding!.result.tickets[0]!.twoLensReview).toEqual({ citation: "CLAUDE.md:1" });
     expect(read.grounding!.result.delegationProposals).toEqual(scripted.delegationProposals);
+  });
+
+  it("refuses a report that skips a glob-matched rule, and stores the retry that answers it", async () => {
+    const root = repos.create({
+      files: {
+        "src/ingest/metrics.ts": lines(30),
+        "src/ingest/queue.ts": lines(10),
+        "docs/adr/0003-queue.md": lines(9),
+        "CLAUDE.md": "# Agent instructions\n",
+        ".claude/rules/versioning.md": '---\npaths: ["src/ingest/queue.ts"]\n---\nBump the version.\nKeep the changelog.\n',
+      },
+      gitignore: "dist/\n",
+    });
+    const { session } = await aSessionWithHandoff({ root });
+    const answered = withTicket(2, (ticket) => {
+      ticket.rules = [
+        {
+          citation: ".claude/rules/versioning.md:4",
+          statement: "Bump the version.",
+          requiredFiles: [],
+        },
+      ];
+    });
+    const interviewer = scriptInterviewer([
+      { kind: "handoff-scout", result: aHandoffScoutResult() },
+      { kind: "handoff-scout", result: answered },
+    ]);
+
+    const grounded = await groundBriefs.run({ sessionId: session.id });
+
+    const requests = scoutRequests(interviewer.requests);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.rejectionReason).toContain(
+      "Ticket 2 changes `src/ingest/queue.ts`, which .claude/rules/versioning.md's paths: globs match, but its rules has no entry citing .claude/rules/versioning.md;",
+    );
+    const read = await getBriefGrounding.run({ sessionId: session.id });
+    expect(grounded.grounding!.result.tickets[1]!.rules).toEqual(answered.tickets[1]!.rules);
+    expect(read.grounding!.result.tickets[1]!.rules).toEqual(answered.tickets[1]!.rules);
   });
 
   it("leaves the session's last export folder out of the fact pack", async () => {

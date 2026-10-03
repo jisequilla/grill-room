@@ -792,7 +792,7 @@ opens a rule file with Read. For each ticket the scout now also reports
 `delegationProposals` (`maxTicketsInFlight`, `pruneCommand`, `reviewRule` and
 `preflight`, each a value with a citation or null). They are required in the
 contract and defaulted in the validator, and are stored and returned with the
-grounding; nothing checks them and nothing renders them yet.
+grounding. The rejection check refuses a rule, two-lens or proposal citation outside the rule sources or past a file's last line, a rule citing a `paths:` source none of the ticket's `filesToChange` match, a `requiredFiles` entry that is not an existing file inside the root, and a ticket silent on a rule source its `filesToChange` match; nothing renders them yet.
 
 `server/repo-rules.ts` collects the repository's rule sources (the root `CLAUDE.md` and `AGENTS.md` and every `.md` under `.claude/rules/`, each with the `paths:` globs of its frontmatter) and matches them to files; the fact pack lists them for the handoff scout.
 
