@@ -62,6 +62,46 @@ describe("assess-readiness", () => {
     expect(judged.readiness!.result).toEqual(accepted);
   });
 
+  it("a retry shows the clamped citation, not the raw one", async () => {
+    const root = repos.create({
+      files: {
+        "src/ingest/metrics.ts": lines(30),
+        "docs/adr/0003-queue.md": lines(9),
+      },
+    });
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+    });
+    const session = await createSession.run({
+      title: "Ingest lag alerts",
+      idea: "Alert the on-call engineer when ingest falls behind.",
+      model: "opus",
+      projectId: project.id,
+    });
+    const refused = anAssessReadinessResult({
+      evidence: [
+        repoEvidence("The queue is Postgres-backed", "docs/adr/0003-queue.md:5-10"),
+        repoEvidence("Alerting lives elsewhere", "src/missing.ts:1"),
+      ],
+    });
+    const interviewer = scriptInterviewer([
+      { kind: "scout-project", result: aScoutProjectResult() },
+      { kind: "assess-readiness", result: refused },
+      { kind: "assess-readiness", result: anAssessReadinessResult() },
+    ]);
+
+    await assessReadiness.run({ sessionId: session.id });
+
+    const requests = readinessRequests(interviewer.requests);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.rejectionReason).toMatch(/src\/missing\.ts/);
+    const shown = requests[1]!.previousResult!;
+    expect(shown.evidence[0]!.citation).toBe("docs/adr/0003-queue.md:5-9");
+    expect(shown.evidence[1]!.citation).toBe("src/missing.ts:1");
+  });
+
   it("stores a repo item's citation clamped to its file's end", async () => {
     const root = repos.create({
       files: {

@@ -1,4 +1,4 @@
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -254,6 +254,21 @@ describe("clampCitation", () => {
     expect(clampCitation(aRepo(), citation)).toBe(expected);
   });
 
+  it.skipIf(process.getuid?.() === 0)(
+    "clampCitation returns an unreadable file's citation unchanged",
+    () => {
+      const root = repos.create({ files: { "src/unreadable.ts": "one\ntwo\nthree\n" } });
+      const file = path.join(root, "src/unreadable.ts");
+      chmodSync(file, 0o000);
+      try {
+        expect(() => readFileSync(file)).toThrow();
+        expect(clampCitation(root, "src/unreadable.ts:1-5")).toBe("src/unreadable.ts:1-5");
+      } finally {
+        chmodSync(file, 0o644);
+      }
+    },
+  );
+
   it("never throws, even when the project root is missing", () => {
     expect(clampCitation("/does/not/exist", "src/a.ts:1-9")).toBe("src/a.ts:1-9");
   });
@@ -298,6 +313,34 @@ describe("clampScoutReportCitations", () => {
     expect(clamped.currentState[0]?.citations).toEqual(["src/three-lines.ts:2-3"]);
     expect(clamped.proposedDecisions[0]?.citation).toBe("docs/adr/0003-queue.md:5-9");
     expect(report.currentState[0]?.citations).toEqual(["src/three-lines.ts:2-9"]);
+    expect(report.proposedDecisions[0]?.citation).toBe("docs/adr/0003-queue.md:5-10");
+  });
+});
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}
+
+describe("clampScoutReportCitations on a frozen report", () => {
+  it("clampScoutReportCitations returns a new result and leaves a frozen input untouched", () => {
+    const root = aRepo();
+    const report = aScoutProjectResult();
+    report.currentState[0]!.citations = ["src/three-lines.ts:2-9", "src/ingest/metrics.ts:12-40"];
+    report.proposedDecisions[0]!.citation = "docs/adr/0003-queue.md:5-10";
+    deepFreeze(report);
+
+    const clamped = clampScoutReportCitations(report, root);
+
+    expect(clamped).not.toBe(report);
+    expect(clamped.currentState[0]?.citations).toEqual([
+      "src/three-lines.ts:2-3",
+      "src/ingest/metrics.ts:12-30",
+    ]);
+    expect(clamped.proposedDecisions[0]?.citation).toBe("docs/adr/0003-queue.md:5-9");
     expect(report.proposedDecisions[0]?.citation).toBe("docs/adr/0003-queue.md:5-10");
   });
 });
