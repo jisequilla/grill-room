@@ -1,3 +1,4 @@
+import type { HandoffFactPack } from "../handoff-fact-pack.js";
 import type { ProjectServerFacts } from "../project-facts.js";
 import type { InterviewerErrorCode } from "./errors.js";
 import type {
@@ -360,6 +361,8 @@ export interface HandoffScoutRequest extends RequestBase {
   /** The absolute root of the project: the only folder the scout can read. */
   projectRoot: string;
   facts: ProjectServerFacts;
+  /** Tracked files, root documents and the verify command, collected by the server for this turn. */
+  factPack: HandoffFactPack;
   /** The session's spec, which defines the work with the tickets. */
   specMarkdown: string;
   /** Every ticket of the handoff, in number order. */

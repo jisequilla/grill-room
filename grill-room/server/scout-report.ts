@@ -389,7 +389,7 @@ function isInside(root: string, candidate: string): boolean {
   );
 }
 
-function lineCount(text: string): number {
+export function lineCount(text: string): number {
   if (text.length === 0) return 0;
   const pieces = text.split("\n").length;
   return text.endsWith("\n") ? pieces - 1 : pieces;

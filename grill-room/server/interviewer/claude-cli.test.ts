@@ -39,6 +39,7 @@ import {
   aFindSupersededResult,
   aHandoffScoutRequest,
   aHandoffScoutResult,
+  someHandoffFactPack,
   aProposeRoundRequest,
   aProposeRoundResult,
   aScoutProjectRequest,
@@ -1273,6 +1274,138 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt.startsWith("-")).toBe(false);
   });
 
+  it("shows the fact pack: tracked files, root documents already opened, and the verify command", async () => {
+    const { prompt } = await handoffInvocation(
+      aHandoffScoutRequest({
+        projectRoot: PROJECT_ROOT,
+        factPack: someHandoffFactPack({
+          trackedFiles: ["src/a.ts", "src/b.ts"],
+          trackedFilesOmitted: 200,
+          namedDocs: [
+            { paths: ["AGENTS.md", "CLAUDE.md"], lines: ["# CLAUDE.md", "second"], truncated: false },
+          ],
+          verifyCommand: { command: "pnpm test", source: "registered" },
+        }),
+      }),
+    );
+
+    expect(prompt).toContain(
+      "## Files the repository tracks\n\nTracked files only, with secret files left out: a path missing from this\nlist is never evidence that a file does not exist.\n\nsrc/a.ts\nsrc/b.ts\n(and 200 more not listed)\n",
+    );
+    expect(prompt).toContain(
+      "## Root documents, already opened\n\nThese count as files you opened: cite their shown lines, and mark them\n`edit`, without opening them. For a line past a truncation, open the file.\n\n### AGENTS.md (also CLAUDE.md)\n\n     1\t# CLAUDE.md\n     2\tsecond\n",
+    );
+    expect(prompt).toContain("## Verify command\n\n`pnpm test` (registered for this project)");
+    expect(prompt.indexOf("## Files the repository tracks")).toBeGreaterThan(
+      prompt.indexOf("- Recent commit subjects, newest first:"),
+    );
+    expect(prompt.indexOf("## Files the repository tracks")).toBeLessThan(prompt.indexOf("## The spec"));
+  });
+
+  it("heads a root document with its first path and joins every alias with a comma", async () => {
+    const { prompt } = await handoffInvocation(
+      aHandoffScoutRequest({
+        projectRoot: PROJECT_ROOT,
+        factPack: someHandoffFactPack({
+          namedDocs: [
+            { paths: ["package.json", "CLAUDE.md", "AGENTS.md"], lines: ["{}"], truncated: false },
+            { paths: ["docs/agent.md", "CLAUDE.md"], lines: ["x"], truncated: false },
+          ],
+        }),
+      }),
+    );
+    expect(prompt).toContain("### package.json (also CLAUDE.md, AGENTS.md)\n");
+    expect(prompt).toContain("### docs/agent.md (also CLAUDE.md)\n");
+  });
+
+  it("omits the omitted-count line when every tracked file is listed", async () => {
+    const { prompt } = await handoffInvocation(
+      aHandoffScoutRequest({
+        projectRoot: PROJECT_ROOT,
+        factPack: someHandoffFactPack({ trackedFiles: ["src/a.ts"] }),
+      }),
+    );
+
+    expect(prompt).toContain("src/a.ts\n\n## Root documents");
+    expect(prompt).not.toContain("more not listed");
+  });
+
+  it("notes a truncated root document, naming the line it stopped at", async () => {
+    const { prompt } = await handoffInvocation(
+      aHandoffScoutRequest({
+        projectRoot: PROJECT_ROOT,
+        factPack: someHandoffFactPack({
+          namedDocs: [
+            {
+              paths: ["package.json"],
+              lines: Array.from({ length: 400 }, (_, index) => `l${index + 1}`),
+              truncated: true,
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(prompt).toContain("### package.json\n\n     1\tl1\n");
+    expect(prompt).toContain("   400\tl400\n");
+    expect(prompt).toContain(
+      "(truncated after line 400: line 400 is not this file's last line; open it for the rest)",
+    );
+  });
+
+  it("does not note a truncation for a document shown whole", async () => {
+    const { prompt } = await handoffInvocation(
+      aHandoffScoutRequest({
+        projectRoot: PROJECT_ROOT,
+        factPack: someHandoffFactPack({
+          namedDocs: [{ paths: ["package.json"], lines: ["{}"], truncated: false }],
+        }),
+      }),
+    );
+
+    expect(prompt).not.toContain("(truncated after line");
+  });
+
+  it("says a suggested verify command was suggested from the project's recipes", async () => {
+    const { prompt } = await handoffInvocation(
+      aHandoffScoutRequest({
+        projectRoot: PROJECT_ROOT,
+        factPack: someHandoffFactPack({
+          verifyCommand: { command: "just verify", source: "suggested" },
+        }),
+      }),
+    );
+
+    expect(prompt).toContain("`just verify` (suggested from the project's recipes)");
+  });
+
+  it("says so when there is no verify command, no tracked file and no root document", async () => {
+    const { prompt } = await handoffInvocation(
+      aHandoffScoutRequest({ projectRoot: PROJECT_ROOT, factPack: someHandoffFactPack() }),
+    );
+
+    expect(prompt).toContain("None registered or found in a justfile, package.json or Makefile.");
+    expect(prompt).toContain("No tracked files yet.");
+    expect(prompt).toContain("None at the root.");
+  });
+
+  it("lets the handoff scout cite and edit root documents it was shown, and the project scout not", async () => {
+    const { prompt } = await handoffInvocation();
+    const runner = recordingRunner([ok(anEnvelope({ structured_output: aScoutProjectResult() }))]);
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).scoutProject(
+      aScoutProjectRequest({ projectRoot: PROJECT_ROOT }),
+    );
+    const projectPrompt = valueOf(runner.invocations[0]!.args, "-p") as string;
+
+    expect(prompt).toContain("`edit` is a file that exists and that you opened (a root document shown");
+    expect(prompt).toContain(
+      "The root documents shown above count as opened and read for the lines shown.",
+    );
+    expect(projectPrompt).not.toContain("root document");
+    expect(projectPrompt).not.toContain("count as opened");
+    expect(projectPrompt).not.toContain("## Files the repository tracks");
+  });
+
   it("says the spec and tickets define the work, and the code defines the facts", async () => {
     const { prompt } = await handoffInvocation();
 
@@ -1712,7 +1845,8 @@ describe("what the adapter sends for a handoff scout", () => {
 
     expect(prompt).toContain(
       [
-        "  `edit` is a file that exists and that you opened, or a file one of",
+        "  `edit` is a file that exists and that you opened (a root document shown",
+        "  above counts as opened), or a file one of",
         "  this ticket's blockers marks as `create`, directly or through their",
         "  own blockers: the blocker lands first, so the file is there when this",
         "  ticket starts. `buildsOn` stays one entry per ticket in the Blocked by",

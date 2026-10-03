@@ -1,3 +1,4 @@
+import type { HandoffFactPack } from "../handoff-fact-pack.js";
 import type {
   AssessReadinessEvidenceItem,
   AssessReadinessResult,
@@ -284,6 +285,18 @@ export function anAssessReadinessResult(
   };
 }
 
+export function someHandoffFactPack(
+  overrides: Partial<HandoffFactPack> = {},
+): HandoffFactPack {
+  return {
+    trackedFiles: [],
+    trackedFilesOmitted: 0,
+    namedDocs: [],
+    verifyCommand: null,
+    ...overrides,
+  };
+}
+
 export function aHandoffScoutRequest(
   overrides: Partial<Omit<HandoffScoutRequest, "kind">> = {},
 ): HandoffScoutRequest {
@@ -295,6 +308,7 @@ export function aHandoffScoutRequest(
     }),
     projectRoot: "/Users/someone/projects/observability",
     facts: someProjectServerFacts(),
+    factPack: someHandoffFactPack(),
     specMarkdown:
       "## Problem Statement\n\nNobody is told when ingest falls behind.",
     tickets: [

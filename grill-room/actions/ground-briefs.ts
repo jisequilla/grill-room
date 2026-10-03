@@ -23,6 +23,7 @@ import {
   SCOUT_MODEL,
   type HandoffScoutResult,
 } from "../server/interviewer/index.js";
+import { collectHandoffFactPack } from "../server/handoff-fact-pack.js";
 import { collectProjectFacts } from "../server/project-facts.js";
 import { failWithProjectFactsRefusal } from "../server/project-refusal.js";
 import { getProject } from "../server/projects.js";
@@ -80,6 +81,10 @@ export default defineAction({
     );
     if ("refusal" in collected) failWithProjectFactsRefusal(collected.refusal);
     const { facts } = collected;
+    const factPack = await collectHandoffFactPack(project.rootPath, {
+      excludeFolder: session.lastExportFolder ?? undefined,
+      verifyCommand: project.verifyCommand,
+    });
 
     const handoff = await getHandoffRow(sessionId);
     if (!handoff) {
@@ -168,6 +173,7 @@ export default defineAction({
                 },
                 projectRoot: project.rootPath,
                 facts,
+                factPack,
                 specMarkdown: spec?.markdown ?? "",
                 tickets: requestTickets,
                 rejectionReason,

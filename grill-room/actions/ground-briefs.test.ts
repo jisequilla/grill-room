@@ -284,6 +284,30 @@ describe("ground-briefs", () => {
     });
   });
 
+  it("sends the scout the fact pack", async () => {
+    const { session } = await aSessionWithHandoff();
+    const interviewer = scriptInterviewer([
+      { kind: "handoff-scout", result: aHandoffScoutResult() },
+    ]);
+
+    await groundBriefs.run({ sessionId: session.id });
+
+    const [request] = scoutRequests(interviewer.requests);
+    expect(request!.factPack.trackedFiles).toEqual(
+      expect.arrayContaining([
+        "CLAUDE.md",
+        "README.md",
+        "docs/adr/0003-queue.md",
+        "src/ingest/metrics.ts",
+        "src/ingest/queue.ts",
+      ]),
+    );
+    expect(request!.factPack.namedDocs).toEqual([
+      { paths: ["CLAUDE.md"], lines: ["# Agent instructions"], truncated: false },
+    ]);
+    expect(request!.factPack.verifyCommand).not.toBeNull();
+  });
+
   it("replaces the earlier grounding on a re-run", async () => {
     const { session } = await aSessionWithHandoff();
     scriptInterviewer([{ kind: "handoff-scout", result: aHandoffScoutResult() }]);
