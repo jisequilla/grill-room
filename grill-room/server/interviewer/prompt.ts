@@ -1,3 +1,4 @@
+import type { HandoffFactPack } from "../handoff-fact-pack.js";
 import { numberRanges } from "../tickets.js";
 import { interviewerInstructions, loadSpecTemplate } from "./instructions.js";
 import {
@@ -905,6 +906,62 @@ function renderHandoffTicket(ticket: HandoffScoutTicket): string {
   ].join("\n");
 }
 
+function renderHandoffFactPack(pack: HandoffFactPack): string[] {
+  const files =
+    pack.trackedFiles.length > 0
+      ? [
+          ...pack.trackedFiles,
+          ...(pack.trackedFilesOmitted > 0
+            ? [`(and ${pack.trackedFilesOmitted} more not listed)`]
+            : []),
+        ]
+      : ["No tracked files yet."];
+  const docs =
+    pack.namedDocs.length > 0
+      ? pack.namedDocs.flatMap((doc) => {
+          const [first, ...others] = doc.paths;
+          const heading =
+            others.length > 0 ? `### ${first} (also ${others.join(", ")})` : `### ${first}`;
+          return [
+            heading,
+            "",
+            ...doc.lines.map((line, index) => `${String(index + 1).padStart(6)}\t${line}`),
+            ...(doc.truncated
+              ? [
+                  `(truncated after line ${doc.lines.length}: line ${doc.lines.length} is not this file's last line; open it for the rest)`,
+                ]
+              : []),
+            "",
+          ];
+        })
+      : ["None at the root.", ""];
+  const verify = pack.verifyCommand
+    ? `\`${pack.verifyCommand.command}\` (${
+        pack.verifyCommand.source === "registered"
+          ? "registered for this project"
+          : "suggested from the project's recipes"
+      })`
+    : "None registered or found in a justfile, package.json or Makefile.";
+  return [
+    "## Files the repository tracks",
+    "",
+    "Tracked files only, with secret files left out: a path missing from this",
+    "list is never evidence that a file does not exist.",
+    "",
+    ...files,
+    "",
+    "## Root documents, already opened",
+    "",
+    "These count as files you opened: cite their shown lines, and mark them",
+    "`edit`, without opening them. For a line past a truncation, open the file.",
+    "",
+    ...docs,
+    "## Verify command",
+    "",
+    verify,
+  ];
+}
+
 /**
  * The handoff scout reads the project for the work the spec and tickets
  * define. Like the project scout, it carries none of the grilling method: only
@@ -932,6 +989,8 @@ function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
     "",
     renderFacts(request.facts),
     "",
+    ...renderHandoffFactPack(request.factPack),
+    "",
     "## The spec",
     "",
     request.specMarkdown,
@@ -952,7 +1011,8 @@ function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
     "",
     `- \`filesToChange\`: empty for a ticket that changes no files, otherwise at most ${MAX_HANDOFF_SCOUT_FILES_TO_CHANGE} files the ticket may`,
     "  touch, each a `path` relative to the project root and a `change`.",
-    "  `edit` is a file that exists and that you opened, or a file one of",
+    "  `edit` is a file that exists and that you opened (a root document shown",
+    "  above counts as opened), or a file one of",
     "  this ticket's blockers marks as `create`, directly or through their",
     "  own blockers: the blocker lands first, so the file is there when this",
     "  ticket starts. `buildsOn` stays one entry per ticket in the Blocked by",
@@ -1116,6 +1176,7 @@ function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
     "  the runner collects.",
     "",
     ...CITATION_RULES,
+    "The root documents shown above count as opened and read for the lines shown.",
     "Paths to create are checked too: a path outside the project, one that",
     "already exists, or one the repository ignores rejects the whole report.",
     "So does a dependency that names a path its blocker does not create or",

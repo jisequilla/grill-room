@@ -126,7 +126,7 @@ function parseTrackedPaths(stdout: string): string[] {
  * project-relative folder), matching on the path segment boundary: excluding
  * `.scratch/a` must not exclude `.scratch/ab/decisions.md`.
  */
-function isUnderFolder(filePath: string, folder: string): boolean {
+export function isUnderFolder(filePath: string, folder: string): boolean {
   const normalized = folder.replace(/\/+$/, "");
   return filePath === normalized || filePath.startsWith(`${normalized}/`);
 }

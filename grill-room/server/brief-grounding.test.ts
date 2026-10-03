@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { useTempGitRepos } from "../test/git-repos.js";
 import { aHandoffScoutResult } from "./interviewer/test-fixtures.js";
 import {
+  clampHandoffGroundingCitations,
   isTestFileByName,
   measureReach,
   ReachUnmeasurable,
@@ -1119,5 +1120,60 @@ describe("the reach seam", () => {
     );
 
     expect(reasons).toEqual([]);
+  });
+});
+
+describe("reasonsToRefuseHandoffGrounding on a root document the fact pack showed", () => {
+  it("accepts an edit of, and a fact citing, a root document the fact pack showed", async () => {
+    const root = repos.create({ files: { "CLAUDE.md": "# Agent instructions\nBe brief.\n" } });
+    const result = aBareResult();
+    result.tickets[0]!.filesToChange = [
+      { path: "CLAUDE.md", change: "edit" },
+      { path: "test/fixture.test.ts", change: "create" },
+    ];
+    result.tickets[0]!.facts = [
+      { statement: "The agent instructions ask for brevity.", citation: "CLAUDE.md:2" },
+    ];
+
+    const reasons = await reasonsToRefuseHandoffGrounding(result, {
+      projectRoot: root,
+      tickets: aSingleTicket(),
+    });
+
+    expect(reasons).toEqual([]);
+  });
+});
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}
+
+describe("clampHandoffGroundingCitations", () => {
+  it("clampHandoffGroundingCitations returns a new result and leaves a frozen input untouched", () => {
+    const root = repos.create({
+      files: {
+        "src/ingest/metrics.ts": Array.from({ length: 30 }, () => "x").join("\n") + "\n",
+        "docs/adr/0003-queue.md": Array.from({ length: 9 }, () => "x").join("\n") + "\n",
+      },
+    });
+    const result = aHandoffScoutResult();
+    const ticket = result.tickets[1]!;
+    ticket.buildsOnFiles = ["src/ingest/metrics.ts:25-99"];
+    ticket.facts = [{ statement: "Ingest lag.", citation: "src/ingest/metrics.ts:12-40" }];
+    ticket.buildsOn[0] = { ...ticket.buildsOn[0]!, citation: "docs/adr/0003-queue.md:5-10" };
+    deepFreeze(result);
+
+    const clamped = clampHandoffGroundingCitations(result, root);
+
+    expect(clamped).not.toBe(result);
+    const stored = clamped.tickets[1]!;
+    expect(stored.buildsOnFiles).toEqual(["src/ingest/metrics.ts:25-30"]);
+    expect(stored.facts[0]!.citation).toBe("src/ingest/metrics.ts:12-30");
+    expect(stored.buildsOn[0]!.citation).toBe("docs/adr/0003-queue.md:5-9");
+    expect(result.tickets[1]!.buildsOnFiles).toEqual(["src/ingest/metrics.ts:25-99"]);
   });
 });
