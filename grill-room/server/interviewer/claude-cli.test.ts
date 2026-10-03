@@ -1758,6 +1758,27 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("declare a 404.");
   });
 
+  it("asks for a fact stating the real shape of data a ticket depends on, cited where it is produced or stored", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  When the ticket reads or writes data and its behaviour depends on that",
+        "  data's shape (a payload's fields, which of them can be null, a column's",
+        "  meaning, or how a value is encoded or stored, such as a JSON column",
+      ].join("\n"),
+    );
+    expect(prompt).toContain("state that shape in a fact, and");
+    expect(prompt).toContain("cite where you read it being produced or stored: the code that emits or");
+    expect(prompt).toContain("inserts it, the schema or migration that defines it, or an existing");
+    expect(prompt).toContain("cite what writes it, not only its declaration: a");
+    expect(prompt).toContain("name such as `created_at` is never evidence of what it holds.");
+    expect(prompt).toContain("cannot find the shape in the repository, say so in a fact that cites the");
+    expect(prompt).toContain("closest producer or schema you did read, and name what is unknown in");
+    expect(prompt).toContain("the positive-claim form above.");
+    expect(prompt).toContain("depend on data shape, no such fact is required.");
+  });
+
   it("does not let the facts rule contradict the exclusivity rule that follows it", async () => {
     const { prompt } = await handoffInvocation();
 
