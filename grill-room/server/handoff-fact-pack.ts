@@ -2,6 +2,7 @@ import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { runGit } from "./git.js";
+import { collectRuleSources, type RuleSource } from "./repo-rules.js";
 import { SCOUT_SECRET_FILE_PATTERNS } from "./interviewer/claude-cli.js";
 import { isUnderFolder } from "./project-facts.js";
 import { suggestVerifyCommand } from "./projects.js";
@@ -55,6 +56,7 @@ export interface HandoffFactPack {
   trackedFiles: string[];
   trackedFilesOmitted: number;
   namedDocs: HandoffFactPackDoc[];
+  ruleSources: RuleSource[];
   verifyCommand: { command: string; source: "registered" | "suggested" } | null;
 }
 
@@ -187,6 +189,7 @@ export async function collectHandoffFactPack(
   return {
     ...tracked,
     namedDocs: collectNamedDocs(root),
+    ruleSources: collectRuleSources(root),
     verifyCommand: chooseVerifyCommand(root, options.verifyCommand),
   };
 }

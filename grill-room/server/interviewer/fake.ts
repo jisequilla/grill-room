@@ -1427,6 +1427,8 @@ export function handoffScoutTurns(): ScriptedTurn[] {
               },
             ],
             buildsOn: [],
+            rules: [],
+            twoLensReview: null,
             provedBy: {
               testPath: "src/ingest/lag-alert.test.ts",
               command: "npm test -- lag-alert",
@@ -1457,12 +1459,20 @@ export function handoffScoutTurns(): ScriptedTurn[] {
                 check: "grep -n LAG_ALERT_THRESHOLD_MS src/ingest/metrics.ts",
               },
             ],
+            rules: [],
+            twoLensReview: null,
             provedBy: {
               testPath: "src/ingest/metrics.test.ts",
               command: "npm test -- metrics",
             },
           },
         ],
+        delegationProposals: {
+          maxTicketsInFlight: null,
+          pruneCommand: null,
+          reviewRule: null,
+          preflight: null,
+        },
       },
     },
   ];

@@ -650,6 +650,8 @@ describe("grounded briefs", () => {
       },
     ],
     buildsOn: [],
+    rules: [],
+    twoLensReview: null,
     provedBy: {
       testPath: "server/projects.test.ts",
       command: "pnpm exec vitest run server/projects.test.ts",
@@ -674,6 +676,8 @@ describe("grounded briefs", () => {
         check: "test -f server/projects.ts",
       },
     ],
+    rules: [],
+    twoLensReview: null,
     provedBy: {
       testPath: "server/export-bundle.test.ts",
       command: "pnpm exec vitest run server/export-bundle.test.ts",
@@ -823,7 +827,9 @@ describe("grounded briefs", () => {
               check: "grep -n rootPath server/db/schema.ts",
             },
           ],
-          provedBy: {
+          rules: [],
+    twoLensReview: null,
+    provedBy: {
             testPath: "server/export.test.ts",
             command: "pnpm exec vitest run server/export.test.ts",
           },
@@ -995,7 +1001,9 @@ describe("grounded briefs", () => {
       tickets: [
         {
           ...TICKET_1_GROUNDING,
-          provedBy: { testPath: null, command: "cd backend && go build ./..." },
+          rules: [],
+    twoLensReview: null,
+    provedBy: { testPath: null, command: "cd backend && go build ./..." },
         },
       ],
     };

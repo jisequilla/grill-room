@@ -1,3 +1,4 @@
+import type { HandoffFactPack } from "../handoff-fact-pack.js";
 import {
   appendFile,
   mkdir,
@@ -1302,6 +1303,41 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt.indexOf("## Files the repository tracks")).toBeLessThan(prompt.indexOf("## The spec"));
   });
 
+  it("lists the repository's rules after the root documents", async () => {
+    const intro =
+      "## The repository's rules\n\nThese files are the repository's own rules. Read each one that applies to a\nticket before you ground it; the root documents above are already open.\n\n";
+    const rendered = async (ruleSources: HandoffFactPack["ruleSources"]) =>
+      (
+        await handoffInvocation(
+          aHandoffScoutRequest({
+            projectRoot: PROJECT_ROOT,
+            factPack: someHandoffFactPack({ ruleSources }),
+          }),
+        )
+      ).prompt;
+
+    expect(await rendered([])).toContain(
+      `${intro}None: no root CLAUDE.md or AGENTS.md and no .claude/rules/.\n\n## Verify command`,
+    );
+    expect(await rendered([{ path: ".claude/rules/versioning.md", globs: ["VERSION", "web/**/*"], lineCount: 9 }])).toContain(
+      `${intro}- \`.claude/rules/versioning.md\`: applies to a ticket that changes a file matching \`VERSION\`, \`web/**/*\`\n\n## Verify command`,
+    );
+    expect(await rendered([{ path: "CLAUDE.md", globs: null, lineCount: 3 }])).toContain(
+      `${intro}- \`CLAUDE.md\`: applies to every ticket\n\n## Verify command`,
+    );
+    const several = await rendered([
+      { path: ".claude/rules/versioning.md", globs: ["VERSION"], lineCount: 9 },
+      { path: "CLAUDE.md", globs: null, lineCount: 3 },
+    ]);
+    expect(several).toContain(
+      "- `.claude/rules/versioning.md`: applies to a ticket that changes a file matching `VERSION`\n- `CLAUDE.md`: applies to every ticket\n\n## Verify command",
+    );
+    expect(several.indexOf("## Root documents, already opened")).toBeLessThan(
+      several.indexOf("## The repository's rules"),
+    );
+    expect(several.indexOf("## The repository's rules")).toBeLessThan(several.indexOf("## Verify command"));
+  });
+
   it("heads a root document with its first path and joins every alias with a comma", async () => {
     const { prompt } = await handoffInvocation(
       aHandoffScoutRequest({
@@ -1820,6 +1856,28 @@ describe("what the adapter sends for a handoff scout", () => {
     );
     expect(prompt).not.toContain("cannot find the shape in the repository");
     expect(prompt).not.toContain("say so in a fact that cites the");
+  });
+
+  it("asks the handoff scout for the rules that apply to each ticket, a two-lens flag, and the repository's delegation values", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain("- `rules`: one entry for every rule file the fact pack lists with globs");
+    expect(prompt).toContain("none skipped");
+    expect(prompt).toContain("matches `web/.env.example`");
+    expect(prompt).toContain("applies to every ticket`,\n  give an entry only when it requires something of this ticket");
+    expect(prompt).toContain("`citation` of the rule's lines as `path:line` or\n  `path:start-end`");
+    expect(prompt).toContain("`statement` of what the rule requires of this");
+    expect(prompt).toContain("`requiredFiles`: every file the rule requires this ticket\n  to create or edit, relative to the root");
+    expect(prompt).toContain("`requiredFiles: []` says the");
+    expect(prompt).toContain("List a required file even when\n  it is outside `filesToChange`");
+    expect(prompt).toContain("- `twoLensReview`: `{ citation }` of the rule line that gives this ticket");
+    expect(prompt).toContain("two reviewers (or two review lenses)");
+    expect(prompt).toContain("- `delegationProposals`, once per report");
+    expect(prompt).toContain("`maxTicketsInFlight` is `{ value, citation }`");
+    expect(prompt).toContain("`pruneCommand` is `{ command, citation }`");
+    expect(prompt).toContain("`reviewRule` is `{ citation }`");
+    expect(prompt).toContain("`preflight` is `{ citation }`");
+    expect(prompt.indexOf("- `rules`:")).toBeGreaterThan(prompt.indexOf("- `provedBy`:"));
   });
 
   it("lets a fact cite a fixture only when no producer or schema is readable, and says the shape was not confirmed against production", async () => {

@@ -963,6 +963,14 @@ export function renderHandoffFactPack(pack: HandoffFactPack): string[] {
           ];
         })
       : ["None at the root.", ""];
+  const rules =
+    pack.ruleSources.length > 0
+      ? pack.ruleSources.map((source) =>
+          source.globs
+            ? `- \`${source.path}\`: applies to a ticket that changes a file matching ${source.globs.map((glob) => `\`${glob}\``).join(", ")}`
+            : `- \`${source.path}\`: applies to every ticket`,
+        )
+      : ["None: no root CLAUDE.md or AGENTS.md and no .claude/rules/."];
   const verify = pack.verifyCommand
     ? `\`${pack.verifyCommand.command}\` (${
         pack.verifyCommand.source === "registered"
@@ -979,6 +987,13 @@ export function renderHandoffFactPack(pack: HandoffFactPack): string[] {
     "`edit`, without opening them. For a line past a truncation, open the file.",
     "",
     ...docs,
+    "## The repository's rules",
+    "",
+    "These files are the repository's own rules. Read each one that applies to a",
+    "ticket before you ground it; the root documents above are already open.",
+    "",
+    ...rules,
+    "",
     "## Verify command",
     "",
     verify,
@@ -1213,6 +1228,26 @@ function buildHandoffScoutPrompt(request: HandoffScoutRequest): string {
     "  does not collect — a file under `scripts/` when the runner",
     "  only globs `src/**/*.test.ts` — is not a proof: pick a path",
     "  the runner collects.",
+    "- `rules`: one entry for every rule file the fact pack lists with globs",
+    "  that match a file in this ticket's `filesToChange`, none skipped. A",
+    "  glob's `**` also matches dot-files and dot-folders, so `web/**/*`",
+    "  matches `web/.env.example`. For a file listed as `applies to every ticket`,",
+    "  give an entry only when it requires something of this ticket.",
+    "  Each entry gives the `citation` of the rule's lines as `path:line` or",
+    "  `path:start-end`, the `statement` of what the rule requires of this",
+    "  ticket, and `requiredFiles`: every file the rule requires this ticket",
+    "  to create or edit, relative to the root. `requiredFiles: []` says the",
+    "  rule requires no files of this ticket. List a required file even when",
+    "  it is outside `filesToChange`: the app compares the two.",
+    "- `twoLensReview`: `{ citation }` of the rule line that gives this ticket",
+    "  two reviewers (or two review lenses), when a rule source says so and",
+    "  this ticket qualifies; otherwise null.",
+    "- `delegationProposals`, once per report, not per ticket: the values the",
+    "  rule sources state, each with the `citation` of its line, or null when",
+    "  none states it. `maxTicketsInFlight` is `{ value, citation }` with a",
+    "  whole number from 1 to 10; `pruneCommand` is `{ command, citation }`;",
+    "  `reviewRule` is `{ citation }`; `preflight` is `{ citation }`, the",
+    "  repository's own pre-flight procedure.",
     "",
     ...CITATION_RULES,
     "The root documents shown above count as opened and read for the lines shown.",
