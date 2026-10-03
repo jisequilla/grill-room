@@ -117,6 +117,7 @@ export interface HandoffSource {
     visibility: ProjectVisibility;
     deliveryRecipe: DeliveryRecipe;
     adversarialReview: boolean;
+    preflightStep?: boolean;
     trackerCommandsJson: string | null;
     /** How many tickets may run at once; absent means {@link DEFAULT_MAX_TICKETS_IN_FLIGHT}. */
     maxTicketsInFlight?: number;
@@ -278,9 +279,9 @@ export interface RenderedHandoff {
  * A hash over every input the templates render from. The field list is fixed
  * and ordered here, so the same inputs always hash the same.
  *
- * `deliveryRecipe`, `adversarialReview` and `maxTicketsInFlight` join the
- * canonical object only when they differ from the migration default
- * (`pull-request`, `true`, 3): these fields were added to every existing project by an additive
+ * `deliveryRecipe`, `adversarialReview`, `preflightStep` and `maxTicketsInFlight`
+ * join the canonical object only when they differ from the migration default
+ * (`pull-request`, `true`, `true`, 3): these fields were added to every existing project by an additive
  * migration, so a project still on the defaults must hash exactly as it did
  * before these fields existed, or every handoff stored before this change
  * goes stale on upgrade for nothing that actually changed.
@@ -312,6 +313,7 @@ export function handoffFingerprint(source: HandoffSource): string {
         ? {}
         : { deliveryRecipe: source.project.deliveryRecipe }),
       ...(source.project.adversarialReview === false ? { adversarialReview: false } : {}),
+      ...(source.project.preflightStep === false ? { preflightStep: false } : {}),
       ...(source.project.maxTicketsInFlight === undefined ||
       source.project.maxTicketsInFlight === DEFAULT_MAX_TICKETS_IN_FLIGHT
         ? {}
@@ -507,6 +509,32 @@ function fillSlotsLine(groundingCurrent: boolean): string {
   return "- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.";
 }
 
+const PREFLIGHT_BULLET =
+  "- Pre-flight the ticket before launching it. Give a fresh, read-only agent the prompt below, with the ticket's brief pasted in, against the current `main`. Launch the ticket only when the agent ends with `PREFLIGHT: clear`. On `PREFLIGHT: needs changes`, fix the ticket or its brief, or put the owner's decisions to the owner, then pre-flight again. Where it was measured, a pre-flight cost roughly 210-230k tokens and 4-6 minutes per ticket, and it found real problems on every run.";
+
+const PREFLIGHT_PROMPT = [
+  "```text",
+  "You are checking a ticket before anyone builds it, in this repository, on `main`. You change nothing. Read the brief below, then read the code it names.",
+  "",
+  "<paste the ticket's brief here>",
+  "",
+  "Report only these five lists. Each item cites the brief's line and the file:line in the code that it concerns.",
+  "",
+  "1. **Wrong premises.** The brief states something about the code that the code does not show: a line number, a symbol, a behaviour, or a claim that something is impossible.",
+  "2. **Ambiguities.** A rule that two careful builders could implement differently. Give both readings, and propose the example that settles it.",
+  "3. **Contradictions.** The brief conflicts with itself, with an existing rule in the code, or with a check that enforces it. Run each acceptance check against the brief's examples: a check that cannot tell an allowed case from a forbidden one is a contradiction.",
+  "4. **Boundary gaps.** The acceptance criteria need a file outside the brief's file boundaries.",
+  "5. **Decisions.** Anything only the owner can settle: scope, a schema change, or a spec change.",
+  "",
+  "End with `PREFLIGHT: clear` when all five lists are empty, or `PREFLIGHT: needs changes` otherwise.",
+  "```",
+].join("\n");
+
+/** The pre-flight bullet and its prompt, last in "Before launching a ticket"; absent means on. */
+function preflightLines(source: HandoffSource): string[] {
+  return source.project.preflightStep === false ? [] : [PREFLIGHT_BULLET, "", PREFLIGHT_PROMPT];
+}
+
 /** Paths as inline code: `` `a` and `b` ``, or `` `a`, `b` and `c` ``. */
 function pathList(paths: readonly string[]): string {
   const codes = paths.map(inlineCode);
@@ -693,6 +721,7 @@ function pullRequestLifecycle(source: HandoffSource, groundingCurrent: boolean):
     "",
     "- Local `main` holds nothing unpushed (`git status`, `git log origin/main..main`). Push it first if it does, so the worktree's base includes it.",
     fillSlotsLine(groundingCurrent),
+    ...preflightLines(source),
     "",
     "### The subagent",
     "",
@@ -755,6 +784,7 @@ function localMergeLifecycle(source: HandoffSource, groundingCurrent: boolean): 
     "",
     "- Local `main` holds every change you want the next worktree to start from — commit it before delegating.",
     fillSlotsLine(groundingCurrent),
+    ...preflightLines(source),
     "",
     "### The subagent",
     "",
@@ -1579,6 +1609,7 @@ export async function loadHandoffSource(
         visibility: project.visibility,
         deliveryRecipe: project.deliveryRecipe,
         adversarialReview: project.adversarialReview,
+        preflightStep: project.preflightStep,
         trackerCommandsJson: project.trackerCommandsJson,
         maxTicketsInFlight: project.maxTicketsInFlight,
       },

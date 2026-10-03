@@ -56,7 +56,7 @@ test.describe("project settings", () => {
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  test("changes the delivery recipe and the adversarial review switch, and both persist across a reload", async ({
+  test("changes the delivery recipe, the adversarial review switch and the pre-flight switch, and all persist across a reload", async ({
     page,
     request,
   }) => {
@@ -95,6 +95,11 @@ test.describe("project settings", () => {
     await reviewSwitch.click();
     await expect(reviewSwitch).toHaveAttribute("aria-checked", "false");
 
+    const preflightSwitch = page.getByTestId("project-preflight-step");
+    await expect(preflightSwitch).toHaveAttribute("aria-checked", "true");
+    await preflightSwitch.click();
+    await expect(preflightSwitch).toHaveAttribute("aria-checked", "false");
+
     const inFlight = page.getByTestId("project-max-tickets-in-flight");
     await expect(inFlight).toHaveValue("3");
     await inFlight.fill("2");
@@ -120,6 +125,7 @@ test.describe("project settings", () => {
     const saved = await savedResponse.json();
     expect(saved.deliveryRecipe).toBe("pull-request");
     expect(saved.adversarialReview).toBe(false);
+    expect(saved.preflightStep).toBe(false);
     expect(saved.maxTicketsInFlight).toBe(2);
 
     await page.reload();
@@ -137,6 +143,10 @@ test.describe("project settings", () => {
     await expect(
       page.getByTestId("project-adversarial-review"),
     ).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByTestId("project-preflight-step")).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
     await expect(page.getByTestId("project-max-tickets-in-flight")).toHaveValue("2");
 
     // The stored values are unchanged by the reload and reopen alone.
@@ -147,6 +157,7 @@ test.describe("project settings", () => {
     const reloaded = await reloadedResponse.json();
     expect(reloaded.deliveryRecipe).toBe("pull-request");
     expect(reloaded.adversarialReview).toBe(false);
+    expect(reloaded.preflightStep).toBe(false);
     expect(reloaded.maxTicketsInFlight).toBe(2);
   });
 

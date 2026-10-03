@@ -77,6 +77,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
   const [visibility, setVisibility] = useState<ProjectVisibility>("tracked");
   const [deliveryRecipe, setDeliveryRecipe] = useState<DeliveryRecipe>("pull-request");
   const [adversarialReview, setAdversarialReview] = useState(true);
+  const [preflightStep, setPreflightStep] = useState(true);
   const [maxTicketsInFlight, setMaxTicketsInFlight] = useState("");
   const [visibilitySeeded, setVisibilitySeeded] = useState(false);
   const [workingExportFolderSuggested, setWorkingExportFolderSuggested] = useState(false);
@@ -112,6 +113,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
     const seeded = seedDeliverySettings(project);
     setDeliveryRecipe(seeded.deliveryRecipe);
     setAdversarialReview(seeded.adversarialReview);
+    setPreflightStep(seeded.preflightStep);
     setMaxTicketsInFlight(String(seeded.maxTicketsInFlight));
     setTrackerDiagnostic(project?.trackerDiagnostic ?? null);
     setErrors({});
@@ -238,6 +240,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
         ...withDeliverySettings(fields, {
           deliveryRecipe,
           adversarialReview,
+          preflightStep,
           // A blank field is left out, so the stored value is kept.
           maxTicketsInFlight:
             maxTicketsInFlight.trim().length > 0 ? Number(maxTicketsInFlight) : undefined,
@@ -486,6 +489,8 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
               onDeliveryRecipeChange={setDeliveryRecipe}
               adversarialReview={adversarialReview}
               onAdversarialReviewChange={setAdversarialReview}
+              preflightStep={preflightStep}
+              onPreflightStepChange={setPreflightStep}
               maxTicketsInFlight={maxTicketsInFlight}
               onMaxTicketsInFlightChange={(value) => {
                 setMaxTicketsInFlight(value);

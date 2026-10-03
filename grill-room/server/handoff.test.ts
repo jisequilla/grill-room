@@ -597,6 +597,14 @@ describe("handoffFingerprint", () => {
     }
   });
 
+  it("leaves the fingerprint unchanged while pre-flight is on, and changes it when it is off", () => {
+    const base = handoffFingerprint(aSource());
+
+    expect(handoffFingerprint(aSource({ preflightStep: undefined }))).toBe(base);
+    expect(handoffFingerprint(aSource({ preflightStep: true }))).toBe(base);
+    expect(handoffFingerprint(aSource({ preflightStep: false }))).not.toBe(base);
+  });
+
   it("hashes a project on the default in-flight cap exactly as before, and a changed cap differently", () => {
     const pinned = "7cb3834b6357f33c1d8fd7a276ceb2266946f3cf08139ebab86bf924b1125261";
 
@@ -2359,5 +2367,70 @@ describe("open questions on a brief", () => {
     expect(rendered.markdown).toContain(
       '- Which API keys does the payment account need? (ticket 02: "API keys are issued")',
     );
+  });
+});
+
+describe("the pre-flight step before launching a ticket", () => {
+  const BULLET =
+    "- Pre-flight the ticket before launching it. Give a fresh, read-only agent the prompt below, with the ticket's brief pasted in, against the current `main`. Launch the ticket only when the agent ends with `PREFLIGHT: clear`. On `PREFLIGHT: needs changes`, fix the ticket or its brief, or put the owner's decisions to the owner, then pre-flight again. Where it was measured, a pre-flight cost roughly 210-230k tokens and 4-6 minutes per ticket, and it found real problems on every run.";
+  const PROMPT = [
+    "```text",
+    "You are checking a ticket before anyone builds it, in this repository, on `main`. You change nothing. Read the brief below, then read the code it names.",
+    "",
+    "<paste the ticket's brief here>",
+    "",
+    "Report only these five lists. Each item cites the brief's line and the file:line in the code that it concerns.",
+    "",
+    "1. **Wrong premises.** The brief states something about the code that the code does not show: a line number, a symbol, a behaviour, or a claim that something is impossible.",
+    "2. **Ambiguities.** A rule that two careful builders could implement differently. Give both readings, and propose the example that settles it.",
+    "3. **Contradictions.** The brief conflicts with itself, with an existing rule in the code, or with a check that enforces it. Run each acceptance check against the brief's examples: a check that cannot tell an allowed case from a forbidden one is a contradiction.",
+    "4. **Boundary gaps.** The acceptance criteria need a file outside the brief's file boundaries.",
+    "5. **Decisions.** Anything only the owner can settle: scope, a schema change, or a spec change.",
+    "",
+    "End with `PREFLIGHT: clear` when all five lists are empty, or `PREFLIGHT: needs changes` otherwise.",
+    "```",
+  ].join("\n");
+
+  function beforeLaunching(markdown: string): string {
+    const start = markdown.indexOf("### Before launching a ticket");
+    const end = markdown.indexOf("### The subagent");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    return markdown.slice(start, end);
+  }
+
+  const cases: Array<[string, Partial<HandoffSource["project"]>, boolean]> = [
+    ["pull-request, preflightStep absent", { deliveryRecipe: "pull-request" }, true],
+    ["local-merge, preflightStep true", { deliveryRecipe: "local-merge", preflightStep: true }, true],
+    ["pull-request, preflightStep false", { deliveryRecipe: "pull-request", preflightStep: false }, false],
+    ["local-merge, preflightStep false", { deliveryRecipe: "local-merge", preflightStep: false }, false],
+    ["pull-request, review off", { deliveryRecipe: "pull-request", adversarialReview: false }, true],
+    ["local-merge, review off", { deliveryRecipe: "local-merge", adversarialReview: false }, true],
+  ];
+
+  it("renders the pre-flight step before launch in both recipes, and none when it is switched off", () => {
+    for (const [label, overrides, rendered] of cases) {
+      const section = beforeLaunching(renderHandoff(aSource(overrides)).markdown);
+      if (!rendered) {
+        expect(section, label).not.toContain("Pre-flight the ticket");
+        expect(section, label).not.toContain("PREFLIGHT:");
+        continue;
+      }
+      const step = `${BULLET}\n\n${PROMPT}`;
+      expect(section, label).toContain(step);
+      const fillSlots = Math.max(
+        section.indexOf("- The briefs are grounded and current"),
+        section.indexOf("- Fill the brief's **File boundaries**"),
+      );
+      expect(fillSlots, label).toBeGreaterThan(-1);
+      expect(section.indexOf(BULLET), label).toBeGreaterThan(fillSlots);
+      expect(step, label).not.toMatch(/sonnet|opus|haiku|claude-/i);
+    }
+  });
+
+  it("a source with no preflightStep renders the step", () => {
+    const source = aSource();
+    expect(source.project.preflightStep).toBeUndefined();
+    expect(renderHandoff(source).markdown).toContain(BULLET);
   });
 });
