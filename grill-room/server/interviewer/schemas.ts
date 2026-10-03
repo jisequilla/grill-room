@@ -469,7 +469,9 @@ function groundedTicket<
      * test is one of the ticket's own files to change, unless it has none.
      * `testPath` is null when the spec rules out tests for the ticket's kind
      * of change: `command` alone proves it, a build or a grep over the
-     * ticket's own files. A grounding stored before this always has a string.
+     * ticket's own files. It is also null for the ticket that sets up the
+     * test runner in a project with none: its test command proves it. A
+     * grounding stored before this always has a string.
      */
     provedBy: z.strictObject({
       testPath: handoffText.nullable(),
