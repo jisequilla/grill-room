@@ -65,6 +65,10 @@ export default defineAction({
       .describe(
         "Whether a second, fresh-context reviewer checks each ticket against its spec before it merges; defaults to true",
       ),
+    preflightStep: z
+      .boolean()
+      .optional()
+      .describe("Whether the handoff carries a pre-flight step before each ticket launches; defaults to true"),
     maxTicketsInFlight: z
       .number()
       .optional()

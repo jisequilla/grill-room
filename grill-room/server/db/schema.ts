@@ -128,6 +128,12 @@ export const projects = table("gr_projects", {
   maxTicketsInFlight: integer("max_tickets_in_flight")
     .notNull()
     .default(DEFAULT_MAX_TICKETS_IN_FLIGHT),
+  /** Whether the handoff carries a pre-flight step before each ticket launches. */
+  preflightStep: boolean("preflight_step").notNull().default(true),
+  /** The owner-confirmed repository delegation values, as JSON text; see `server/delegation-values.ts`. */
+  delegationValuesJson: text("delegation_values_json"),
+  /** The delegation values proposed from the repository and not yet confirmed, as JSON text. */
+  delegationProposalsJson: text("delegation_proposals_json"),
   /**
    * The declared tracker's `commands` map, as JSON text, or null when no
    * tracker was found. Set at registration and by `refresh-project-tracker`
@@ -554,6 +560,30 @@ export const consistencyFindings = table(
     sessionIdx: index("gr_idx_consistency_findings_session").on(
       consistencyFindingsTable.sessionId,
     ),
+  }),
+);
+
+/**
+ * An owner's waiver of a rule conflict on one ticket, with the reason. Dropped
+ * with its ticket, so a re-broken ticket loses it.
+ */
+export const ruleWaivers = table(
+  "gr_rule_waivers",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    ticketId: text("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    rulePath: text("rule_path").notNull(),
+    missingFilesJson: text("missing_files_json").notNull(),
+    reason: text("reason").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (ruleWaiversTable) => ({
+    sessionIdx: index("gr_idx_rule_waivers_session").on(ruleWaiversTable.sessionId),
   }),
 );
 

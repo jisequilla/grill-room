@@ -599,4 +599,21 @@ ALTER TABLE gr_specs ADD COLUMN IF NOT EXISTS consistency_spec_sha256 TEXT;
 UPDATE gr_specs SET consistency_attempted_for = consistency_checked_for WHERE consistency_attempted_for IS NULL;
 UPDATE gr_specs SET consistency_spec_sha256 = encode(sha256(convert_to(replace(markdown, E'\\r\\n', E'\\n'), 'UTF8')), 'hex') WHERE consistency_checked_for IS NOT NULL AND consistency_spec_sha256 IS NULL`,
   },
+  {
+    version: 77,
+    name: "handoff-repo-rules-storage",
+    sql: `ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS preflight_step BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS delegation_values_json TEXT;
+ALTER TABLE gr_projects ADD COLUMN IF NOT EXISTS delegation_proposals_json TEXT;
+CREATE TABLE IF NOT EXISTS gr_rule_waivers (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES gr_sessions(id) ON DELETE CASCADE,
+  ticket_id TEXT NOT NULL REFERENCES gr_tickets(id) ON DELETE CASCADE,
+  rule_path TEXT NOT NULL,
+  missing_files_json TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS gr_idx_rule_waivers_session ON gr_rule_waivers(session_id)`,
+  },
 ];

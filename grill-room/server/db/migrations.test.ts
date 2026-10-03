@@ -581,3 +581,75 @@ describe("consistency-findings-decision-column migration", () => {
     ]);
   });
 });
+
+describe("handoff-repo-rules-storage migration", () => {
+  beforeEach(dropSchema);
+
+  it("reads an existing project's preflight_step as true and its delegation columns as null, and round-trips each, on a database at the previous version", async () => {
+    const migration = appMigrations.find((entry) => entry.name === "handoff-repo-rules-storage")!;
+    const before = appMigrations.filter((entry) => entry.version < migration.version);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_projects (id, name, root_path, verify_command, working_export_folder, visibility, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, "Grill Room", "/repos/grill-room", "pnpm test", ".scratch", "tracked", now, now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const select = `SELECT preflight_step, delegation_values_json, delegation_proposals_json FROM gr_projects WHERE id = ?`;
+    const existing = await getDbExec().execute({ sql: select, args: [id] });
+    expect(existing.rows).toEqual([
+      { preflight_step: true, delegation_values_json: null, delegation_proposals_json: null },
+    ]);
+
+    await getDbExec().execute({
+      sql: `UPDATE gr_projects SET preflight_step = ?, delegation_values_json = ?, delegation_proposals_json = ? WHERE id = ?`,
+      args: [false, '{"a":1}', '{"b":2}', id],
+    });
+    const updated = await getDbExec().execute({ sql: select, args: [id] });
+    expect(updated.rows).toEqual([
+      { preflight_step: false, delegation_values_json: '{"a":1}', delegation_proposals_json: '{"b":2}' },
+    ]);
+  });
+
+  it("stores a rule waiver and drops it when its ticket is deleted", async () => {
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    const ticketId = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [sessionId, "Grill Room", "An idea.", now, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_tickets (id, session_id, number, slug, title, body, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [ticketId, sessionId, 1, "one", "One", "Body.", now, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_rule_waivers (id, session_id, ticket_id, rule_path, missing_files_json, reason, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [randomUUID(), sessionId, ticketId, ".claude/rules/x.md", '["a.ts"]', "Not needed.", now],
+    });
+
+    const stored = await getDbExec().execute({
+      sql: `SELECT rule_path, missing_files_json, reason FROM gr_rule_waivers WHERE session_id = ?`,
+      args: [sessionId],
+    });
+    expect(stored.rows).toEqual([
+      { rule_path: ".claude/rules/x.md", missing_files_json: '["a.ts"]', reason: "Not needed." },
+    ]);
+
+    await getDbExec().execute({ sql: `DELETE FROM gr_tickets WHERE id = ?`, args: [ticketId] });
+    const dropped = await getDbExec().execute({
+      sql: `SELECT id FROM gr_rule_waivers WHERE session_id = ?`,
+      args: [sessionId],
+    });
+    expect(dropped.rows).toEqual([]);
+  });
+});

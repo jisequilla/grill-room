@@ -125,6 +125,18 @@ describe("project actions", () => {
     });
   });
 
+  it("passes preflightStep through to the new project", async () => {
+    const project = await registerProject.run({
+      root: repos.create(),
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+      preflightStep: false,
+    });
+
+    expect(project.preflightStep).toBe(false);
+    expect(await getProject.run({ id: project.id })).toMatchObject({ preflightStep: false });
+  });
+
   it("register-project, update-project, get-project and list-projects round-trip the durable folder", async () => {
     const root = repos.create();
 
