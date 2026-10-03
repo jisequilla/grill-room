@@ -1556,11 +1556,14 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("Give `facts: []` for collection");
     expect(prompt).toContain("a build or a grep over\n  its own files that fails today, with no fact about tests");
     expect(prompt).toContain("or when no runner exists\n  yet, as below.");
+    expect(prompt).toContain("State no fact about\n  collection and none that the spec excludes tests.");
+    expect(prompt).toContain("`testPath` to null and gives");
 
     const start = prompt.indexOf("A ticket that sets up the test runner itself");
-    const runnerSetupSentence = prompt.slice(start, prompt.indexOf("as `pnpm test`;", start));
+    const runnerSetupSentence = prompt.slice(start, prompt.indexOf("is required.", start) + "is required.".length);
     expect(start).toBeGreaterThan(-1);
     expect(runnerSetupSentence).toContain("`testPath` to\n  null");
+    expect(runnerSetupSentence).toContain("in a project with\n  none yet, sets");
     expect(runnerSetupSentence).not.toMatch(/exclud|rules? out/);
     expect(prompt).toContain("no fact about tests is required.");
   });
