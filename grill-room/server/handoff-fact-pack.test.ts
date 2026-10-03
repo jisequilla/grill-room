@@ -216,6 +216,12 @@ describe("collectHandoffFactPack: byte budget", () => {
     const root = repos.create({ files: { "package.json": `${"x".repeat(1200)}\n` } });
     const doc = await docOf(root);
     expect(bytes(doc.lines[0]!) + 1).toBe(505);
+    const many = repos.create({
+      files: { "package.json": `${Array.from({ length: 79 }, () => "x".repeat(1200)).join("\n")}\n` },
+    });
+    const long = await docOf(many);
+    expect(long.lines).toHaveLength(79);
+    expect(long.cutLines).toHaveLength(79);
   });
 
   it("shows a line of 499 ASCII characters plus one emoji whole", async () => {
@@ -289,6 +295,7 @@ describe("collectHandoffFactPack: byte budget", () => {
     const body = [
       ...Array.from({ length: 198 }, () => "a".repeat(200)),
       "b".repeat(300),
+      "",
       "",
     ].join("\n");
     const root = repos.create({ files: { "package.json": body } });
