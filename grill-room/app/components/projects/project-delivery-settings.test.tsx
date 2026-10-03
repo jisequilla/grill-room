@@ -101,8 +101,10 @@ describe("ProjectDeliverySettings", () => {
     expect(on).toContain('data-testid="project-preflight-step"');
     expect(on).toContain('id="project-preflight-step"');
     expect(on).toContain('for="project-preflight-step"');
-    expect(on).toContain('data-state="checked"');
-    expect(off).toContain('data-state="unchecked"');
+    const switchTag = (html: string) =>
+      html.match(/<button[^>]*id="project-preflight-step"[^>]*>/)?.[0] ?? "";
+    expect(switchTag(on)).toContain('aria-checked="true"');
+    expect(switchTag(off)).toContain('aria-checked="false"');
   });
 
   it("renders the tickets in flight field, labelled and described by its hint", () => {

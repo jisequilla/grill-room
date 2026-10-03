@@ -598,11 +598,11 @@ describe("handoffFingerprint", () => {
   });
 
   it("leaves the fingerprint unchanged while pre-flight is on, and changes it when it is off", () => {
-    const base = handoffFingerprint(aSource());
+    const pinned = "7cb3834b6357f33c1d8fd7a276ceb2266946f3cf08139ebab86bf924b1125261";
 
-    expect(handoffFingerprint(aSource({ preflightStep: undefined }))).toBe(base);
-    expect(handoffFingerprint(aSource({ preflightStep: true }))).toBe(base);
-    expect(handoffFingerprint(aSource({ preflightStep: false }))).not.toBe(base);
+    expect(handoffFingerprint(aSource({ preflightStep: undefined }))).toBe(pinned);
+    expect(handoffFingerprint(aSource({ preflightStep: true }))).toBe(pinned);
+    expect(handoffFingerprint(aSource({ preflightStep: false }))).not.toBe(pinned);
   });
 
   it("hashes a project on the default in-flight cap exactly as before, and a changed cap differently", () => {

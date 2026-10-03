@@ -354,6 +354,23 @@ describe("handoff generation", () => {
     expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(true);
   });
 
+  it("passes the pre-flight switch into the handoff source, and goes stale when it changes", async () => {
+    const { session, project } = await aReadySession();
+    const before = await loadHandoffSource(session.id);
+    if (!("source" in before)) throw new Error("expected a handoff source");
+    expect(before.source.project.preflightStep).toBe(true);
+    await generateHandoff.run({ sessionId: session.id });
+
+    await updateProject.run({ id: project.id, preflightStep: false });
+
+    const after = await loadHandoffSource(session.id);
+    if (!("source" in after)) throw new Error("expected a handoff source");
+    expect(after.source.project.preflightStep).toBe(false);
+    expect((await getHandoff.run({ sessionId: session.id })).handoff?.stale).toBe(true);
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+    expect(markdown).not.toContain("PREFLIGHT: clear");
+  });
+
   it("renders the project's tickets in flight in the cap line and the checked Waves intro", async () => {
     const { session, project } = await aReadySession();
     await updateProject.run({ id: project.id, maxTicketsInFlight: 2 });
