@@ -1768,15 +1768,31 @@ describe("what the adapter sends for a handoff scout", () => {
         "  meaning, or how a value is encoded or stored, such as a JSON column",
       ].join("\n"),
     );
+    expect(prompt).toContain(
+      [
+        "  big integer as a number or a string), state that shape in a fact, and",
+        "  cite where you read it being produced or stored: the code that emits or",
+        "  inserts it, the schema or migration that defines it, or an existing",
+        "  fixture or sample in the repository. For a column or field whose meaning",
+        "  the ticket relies on, cite what writes it, not only its declaration: a",
+        "  name such as `created_at` is never evidence of what it holds.",
+      ].join("\n"),
+    );
     expect(prompt).toContain("state that shape in a fact, and");
     expect(prompt).toContain("cite where you read it being produced or stored: the code that emits or");
     expect(prompt).toContain("inserts it, the schema or migration that defines it, or an existing");
     expect(prompt).toContain("cite what writes it, not only its declaration: a");
     expect(prompt).toContain("name such as `created_at` is never evidence of what it holds.");
-    expect(prompt).toContain("cannot find the shape in the repository, say so in a fact that cites the");
-    expect(prompt).toContain("closest producer or schema you did read, and name what is unknown in");
-    expect(prompt).toContain("the positive-claim form above.");
-    expect(prompt).toContain("depend on data shape, no such fact is required.");
+    expect(prompt).toContain(
+      [
+        "  cannot read the shape where it is produced or stored, cite the closest",
+        "  producer or schema you did read, state what those lines hold, and name",
+        "  which part of the shape the ticket must confirm. When the ticket's",
+        "  behaviour does not depend on data shape, no such fact is required.",
+      ].join("\n"),
+    );
+    expect(prompt).not.toContain("cannot find the shape in the repository");
+    expect(prompt).not.toContain("say so in a fact that cites the");
   });
 
   it("does not let the facts rule contradict the exclusivity rule that follows it", async () => {
@@ -1785,6 +1801,8 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).not.toContain("a field the spec assumes that does not exist");
     expect(prompt).not.toContain("a response it must return that the code cannot yet");
     expect(prompt).toContain("A fact states only what its cited lines show");
+    expect(prompt).not.toContain("closest producer or schema you did read, and name what is unknown");
+    expect(prompt).not.toContain("the repository does not define");
   });
 
   it("asks buildsOn.provides to say when this ticket needs something its blocker does not promise", async () => {
