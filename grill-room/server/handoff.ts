@@ -46,6 +46,12 @@ import type {
 } from "../shared/session-constants.js";
 import { DEFAULT_MAX_TICKETS_IN_FLIGHT } from "../shared/session-constants.js";
 import { cardsCurrent } from "./consistency.js";
+import {
+  parseDelegationProposals,
+  parseDelegationValues,
+  type DelegationProposals,
+  type DelegationValues,
+} from "./delegation-values.js";
 import { getDb, schema } from "./db/index.js";
 import { hashExportContent, openingSections, padTicketNumber, sanitizeTicketSlug } from "./export.js";
 // Type-only: erased at compile time, so this never becomes a runtime import.
@@ -121,6 +127,8 @@ export interface HandoffSource {
     trackerCommandsJson: string | null;
     /** How many tickets may run at once; absent means {@link DEFAULT_MAX_TICKETS_IN_FLIGHT}. */
     maxTicketsInFlight?: number;
+    delegationValuesJson?: string | null;
+    delegationProposalsJson?: string | null;
   };
   /**
    * The spec's user stories no ticket lists in its `implements`, ascending.
@@ -212,6 +220,10 @@ export interface HandoffGrounding {
   current: boolean;
   /** Null while current. */
   staleReason: HandoffGroundingStaleReason | null;
+  /** Set by the server on every grounding stored since the rule sources were handed to the scout; absent on older ones. */
+  rulesRead?: boolean;
+  /** The scout's proposed delegation values; absent counts as all four slots null. */
+  delegationProposals?: HandoffScoutResult["delegationProposals"];
 }
 
 /** A ticket as the blocker graph needs it. */
@@ -279,6 +291,7 @@ export interface RenderedHandoff {
  * A hash over every input the templates render from. The field list is fixed
  * and ordered here, so the same inputs always hash the same.
  *
+ * `delegationValuesJson` and `delegationProposalsJson` join only when non-null.
  * `deliveryRecipe`, `adversarialReview`, `preflightStep` and `maxTicketsInFlight`
  * join the canonical object only when they differ from the migration default
  * (`pull-request`, `true`, `true`, 3): these fields were added to every existing project by an additive
@@ -319,6 +332,12 @@ export function handoffFingerprint(source: HandoffSource): string {
         ? {}
         : { maxTicketsInFlight: source.project.maxTicketsInFlight }),
       trackerCommandsJson: source.project.trackerCommandsJson,
+      ...(source.project.delegationValuesJson
+        ? { delegationValuesJson: source.project.delegationValuesJson }
+        : {}),
+      ...(source.project.delegationProposalsJson
+        ? { delegationProposalsJson: source.project.delegationProposalsJson }
+        : {}),
     },
     // Each only when not the default, as above: a session with no open
     // current card and no not-current check hashes exactly as before.
@@ -530,9 +549,93 @@ const PREFLIGHT_PROMPT = [
   "```",
 ].join("\n");
 
+interface DelegationRules {
+  values: DelegationValues;
+  proposals: DelegationProposals;
+}
+
+function delegationRules(source: HandoffSource): DelegationRules {
+  return {
+    values: parseDelegationValues(source.project.delegationValuesJson ?? null),
+    proposals: parseDelegationProposals(source.project.delegationProposalsJson ?? null),
+  };
+}
+
+type DelegationSlot = keyof DelegationValues;
+
+/** A proposal for a slot the owner has not confirmed; a confirmed slot's proposal renders nothing. */
+function pendingProposal<S extends DelegationSlot>(
+  rules: DelegationRules,
+  slot: S,
+): DelegationProposals[S] | undefined {
+  return rules.values[slot] === undefined ? rules.proposals[slot] : undefined;
+}
+
+const DEFAULT_PRUNE_STEP = "Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).";
+
+function pruneStepText(rules: DelegationRules): string {
+  const confirmed = rules.values.pruneCommand;
+  return confirmed
+    ? `Prune merged worktrees with the repository's command: ${inlineCode(confirmed.command)} (${inlineCode(confirmed.citation)}).`
+    : DEFAULT_PRUNE_STEP;
+}
+
+/** After the numbered steps: a blank line and the pending prune proposal, or nothing. */
+function pendingPruneLines(rules: DelegationRules): string[] {
+  const pending = pendingProposal(rules, "pruneCommand");
+  return pending
+    ? [
+        "",
+        `The repository proposes its own prune command, ${inlineCode(pending.command)} (${inlineCode(pending.citation)}); it is not confirmed, so the last step uses the default.`,
+      ]
+    : [];
+}
+
 /** The pre-flight bullet and its prompt, last in "Before launching a ticket"; absent means on. */
 function preflightLines(source: HandoffSource): string[] {
-  return source.project.preflightStep === false ? [] : [PREFLIGHT_BULLET, "", PREFLIGHT_PROMPT];
+  if (source.project.preflightStep === false) return [];
+  const rules = delegationRules(source);
+  const confirmed = rules.values.preflight;
+  if (confirmed) {
+    return [
+      `- Pre-flight the ticket before launching it, following the repository's own procedure at ${inlineCode(confirmed.citation)}. Launch the ticket only when that procedure clears it.`,
+    ];
+  }
+  const pending = pendingProposal(rules, "preflight");
+  return pending
+    ? [
+        PREFLIGHT_BULLET,
+        "",
+        PREFLIGHT_PROMPT,
+        "",
+        `- The repository may have its own pre-flight procedure at ${inlineCode(pending.citation)}; it is not confirmed, so use the prompt above.`,
+      ]
+    : [PREFLIGHT_BULLET, "", PREFLIGHT_PROMPT];
+}
+
+function citationPath(citation: string): string {
+  return citation.slice(0, citation.lastIndexOf(":"));
+}
+
+/**
+ * The paragraph after the lifecycle's opening: the precedence line when any
+ * value or proposal is stored, the none-found line when a grounding read the
+ * rule sources and proposed nothing, otherwise nothing.
+ */
+function delegationRulesNote(source: HandoffSource, grounding: HandoffGrounding | null): string | null {
+  const { values, proposals } = delegationRules(source);
+  const citations = [...Object.values(values), ...Object.values(proposals)].map((entry) => entry.citation);
+  if (citations.length > 0) {
+    const files = [...new Set(citations.map(citationPath))].sort().map(inlineCode).join(", ");
+    return `Where this lifecycle differs from the repository's own rules, the repository's rule wins: ${files}.`;
+  }
+  const proposedNothing =
+    grounding?.delegationProposals === undefined ||
+    Object.values(grounding.delegationProposals).every((slot) => slot === null);
+  if (grounding?.rulesRead === true && proposedNothing) {
+    return "No repository delegation rules were found: the rule sources state no in-flight cap, prune command, review rule or pre-flight procedure, so this lifecycle stands as written.";
+  }
+  return null;
 }
 
 /** Paths as inline code: `` `a` and `b` ``, or `` `a`, `b` and `c` ``. */
@@ -662,10 +765,19 @@ function executionPlanSection(source: HandoffSource, exportFacts?: ExportFacts):
   const cap = maxTicketsInFlight(source);
   const why =
     "Every ticket in flight draws on the same subscription's rate limit, and a rate-limited failure reads like a failed ticket; each one's reports also need your attention before it can merge.";
+  const rules = delegationRules(source);
+  const confirmedCap = rules.values.maxTicketsInFlight;
+  const repositorySets = confirmedCap ? ` The repository sets this cap: ${inlineCode(confirmedCap.citation)}.` : "";
   const capLine =
     cap === 1
-      ? `- Run one ticket at a time. ${why}`
-      : `- Run at most ${cap} tickets at a time, even when a wave is wider. ${why}${checked ? "" : " Until the briefs are grounded, run one at a time, as Waves says."}`;
+      ? `- Run one ticket at a time.${repositorySets} ${why}`
+      : `- Run at most ${cap} tickets at a time, even when a wave is wider.${repositorySets} ${why}${checked ? "" : " Until the briefs are grounded, run one at a time, as Waves says."}`;
+  const pendingCap = pendingProposal(rules, "maxTicketsInFlight");
+  const pendingCapLine = pendingCap
+    ? [
+        `- The repository proposes ${pendingCap.value === 1 ? "one ticket" : `at most ${pendingCap.value} tickets`} at a time (${inlineCode(pendingCap.citation)}); it is not confirmed, so the cap above stands.`,
+      ]
+    : [];
 
   return [
     "## Execution plan",
@@ -673,6 +785,7 @@ function executionPlanSection(source: HandoffSource, exportFacts?: ExportFacts):
     `- Longest chain: ${chainText}`,
     `- Wave widths, in build tickets: ${widths} (wave 1 first).`,
     capLine,
+    ...pendingCapLine,
   ].join("\n");
 }
 
@@ -683,8 +796,15 @@ function executionPlanSection(source: HandoffSource, exportFacts?: ExportFacts):
  * gate is on: with the gate on, the reviewer marks it ready on approval;
  * with it off, the main session marks it ready itself once satisfied.
  */
-function pullRequestLifecycle(source: HandoffSource, groundingCurrent: boolean): string {
+function pullRequestLifecycle(
+  source: HandoffSource,
+  groundingCurrent: boolean,
+  grounding: HandoffGrounding | null,
+): string {
   const verify = `\`${source.project.verifyCommand}\``;
+  const rules = delegationRules(source);
+  const pruneStep = pruneStepText(rules);
+  const note = delegationRulesNote(source, grounding);
   const review = source.project.adversarialReview;
   const closeStep =
     source.project.trackerKind === "beads"
@@ -700,7 +820,7 @@ function pullRequestLifecycle(source: HandoffSource, groundingCurrent: boolean):
         "5. Merge only a ready, approved pull request whose re-verification in step 3 has passed: `gh pr merge <n> --merge --delete-branch`. Never merge a draft.",
         `6. \`git pull\` on local \`main\` and re-run ${verify} on the merged result.`,
         `7. ${closeStep}`,
-        "8. Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).",
+        `8. ${pruneStep}`,
       ]
     : [
         "1. Read the PR diff (`gh pr diff <n>`) against the brief's file boundaries.",
@@ -709,7 +829,7 @@ function pullRequestLifecycle(source: HandoffSource, groundingCurrent: boolean):
         "4. Mark the pull request ready (`gh pr ready <n>`) once you are satisfied, then merge: `gh pr merge <n> --merge --delete-branch`. Never merge a draft.",
         `5. \`git pull\` on local \`main\` and re-run ${verify} on the merged result.`,
         `6. ${closeStep}`,
-        "7. Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).",
+        `7. ${pruneStep}`,
       ];
 
   return [
@@ -717,6 +837,7 @@ function pullRequestLifecycle(source: HandoffSource, groundingCurrent: boolean):
     "",
     "Every ticket runs in its own worktree (Agent tool, `isolation: \"worktree\"`) and reaches `main` only through a pull request you have reviewed and verified. Worktrees are created from `origin/main`, not from local `main`, so work merged only locally is invisible to the next worktree.",
     "",
+    ...(note === null ? [] : [note, ""]),
     "### Before launching a ticket",
     "",
     "- Local `main` holds nothing unpushed (`git status`, `git log origin/main..main`). Push it first if it does, so the worktree's base includes it.",
@@ -734,6 +855,7 @@ function pullRequestLifecycle(source: HandoffSource, groundingCurrent: boolean):
     "### You, the main session",
     "",
     mainSessionSteps.join("\n"),
+    ...pendingPruneLines(rules),
   ].join("\n");
 }
 
@@ -746,8 +868,15 @@ function pullRequestLifecycle(source: HandoffSource, groundingCurrent: boolean):
  * in "Before delegating the first ticket") is what makes a new worktree
  * branch from the main session's current `main`.
  */
-function localMergeLifecycle(source: HandoffSource, groundingCurrent: boolean): string {
+function localMergeLifecycle(
+  source: HandoffSource,
+  groundingCurrent: boolean,
+  grounding: HandoffGrounding | null,
+): string {
   const verify = `\`${source.project.verifyCommand}\``;
+  const rules = delegationRules(source);
+  const pruneStep = pruneStepText(rules);
+  const note = delegationRulesNote(source, grounding);
   const review = source.project.adversarialReview;
   const closeStep =
     source.project.trackerKind === "beads"
@@ -763,7 +892,7 @@ function localMergeLifecycle(source: HandoffSource, groundingCurrent: boolean): 
         "5. Merge only approved, verified work, locally: `git merge --no-ff <branch>`.",
         `6. Re-run ${verify} on \`main\` after merging.`,
         `7. ${closeStep}`,
-        "8. Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).",
+        `8. ${pruneStep}`,
       ]
     : [
         "1. Read the branch diff (`git diff main..<branch>`) against the brief's file boundaries.",
@@ -772,7 +901,7 @@ function localMergeLifecycle(source: HandoffSource, groundingCurrent: boolean): 
         "4. Merge only verified work, locally: `git merge --no-ff <branch>`.",
         `5. Re-run ${verify} on \`main\` after merging.`,
         `6. ${closeStep}`,
-        "7. Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).",
+        `7. ${pruneStep}`,
       ];
 
   return [
@@ -780,6 +909,7 @@ function localMergeLifecycle(source: HandoffSource, groundingCurrent: boolean): 
     "",
     "Every ticket runs in its own worktree (Agent tool, `isolation: \"worktree\"`), on its own branch, and reaches `main` only once you merge it in locally. With `worktree.baseRef` set to `head` (see \"Before delegating the first ticket\"), each new worktree branches from your current local `main`, so work merged there is immediately visible to the next one.",
     "",
+    ...(note === null ? [] : [note, ""]),
     "### Before launching a ticket",
     "",
     "- Local `main` holds every change you want the next worktree to start from — commit it before delegating.",
@@ -795,13 +925,18 @@ function localMergeLifecycle(source: HandoffSource, groundingCurrent: boolean): 
     "### You, the main session",
     "",
     mainSessionSteps.join("\n"),
+    ...pendingPruneLines(rules),
   ].join("\n");
 }
 
-function lifecycleSection(source: HandoffSource, groundingCurrent: boolean): string {
+function lifecycleSection(
+  source: HandoffSource,
+  groundingCurrent: boolean,
+  grounding: HandoffGrounding | null,
+): string {
   return source.project.deliveryRecipe === "pull-request"
-    ? pullRequestLifecycle(source, groundingCurrent)
-    : localMergeLifecycle(source, groundingCurrent);
+    ? pullRequestLifecycle(source, groundingCurrent, grounding)
+    : localMergeLifecycle(source, groundingCurrent, grounding);
 }
 
 /**
@@ -826,11 +961,26 @@ function reviewingSection(source: HandoffSource): string {
         ? 'It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it through the project\'s tracker, the same way you record the merge: as a comment on the ticket\'s bead.'
         : 'It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it yourself: append a `## Review` section to the ticket file with the verdict and any findings — the one-line `Status:` line has no room for them — then set `Status:` once the ticket actually closes.';
   }
+  const rules = delegationRules(source);
+  const confirmedRule = rules.values.reviewRule;
+  const pendingRule = pendingProposal(rules, "reviewRule");
+  const ruleParagraph = confirmedRule
+    ? [
+        `**The repository's review rule.** ${inlineCode(confirmedRule.citation)} sets how this repository reviews tickets; where it differs from this section, it wins.`,
+        "",
+      ]
+    : pendingRule
+      ? [
+          `**A proposed review rule.** The repository may set its own review rule at ${inlineCode(pendingRule.citation)}; it is not confirmed, so this section stands as written.`,
+          "",
+        ]
+      : [];
   return [
     "## Reviewing a ticket",
     "",
     "Every ticket is reviewed by a second, fresh-context agent before it can be merged.",
     "",
+    ...ruleParagraph,
     "**Inputs.** The reviewer gets the spec, the ticket, its delegation brief and the diff — never the builder's report.",
     "",
     "**What to try to break.** Unmet acceptance criteria, changes outside the file boundaries, untested edge cases, seams with the tickets this one builds on, and claims the diff does not support.",
@@ -1025,6 +1175,7 @@ export function renderHandoffMarkdown(
   source: HandoffSource,
   groundingCurrent = false,
   exportFacts?: ExportFacts,
+  grounding: HandoffGrounding | null = null,
 ): string {
   const facts = factsFor(source, exportFacts);
   const briefsPerTicket = hasGates(source) ? "one per ticket except gates" : "one per ticket";
@@ -1060,7 +1211,7 @@ export function renderHandoffMarkdown(
       ? [uncoveredStoriesSection(source.uncoveredStories)]
       : []),
     ...[openQuestionsSection(source)].filter((section): section is string => section !== null),
-    lifecycleSection(source, groundingCurrent),
+    lifecycleSection(source, groundingCurrent, grounding),
   ];
   if (source.project.adversarialReview) sections.push(reviewingSection(source));
   sections.push(recordingSection(), trackingSection(source));
@@ -1469,7 +1620,7 @@ export function renderHandoff(source: HandoffSource, options: RenderHandoffOptio
   const total = source.tickets.length;
   const groundingCurrent = (options.grounding ?? null)?.current === true;
   return {
-    markdown: renderHandoffMarkdown(source, groundingCurrent),
+    markdown: renderHandoffMarkdown(source, groundingCurrent, undefined, options.grounding ?? null),
     // A gate has no builder, so it gets no brief. Padding still counts every
     // ticket, so a brief's name matches its issue file.
     briefs: source.tickets.filter((ticket) => !isGate(ticket)).map((ticket) => ({
@@ -1610,6 +1761,8 @@ export async function loadHandoffSource(
         deliveryRecipe: project.deliveryRecipe,
         adversarialReview: project.adversarialReview,
         preflightStep: project.preflightStep,
+        delegationValuesJson: project.delegationValuesJson,
+        delegationProposalsJson: project.delegationProposalsJson,
         trackerCommandsJson: project.trackerCommandsJson,
         maxTicketsInFlight: project.maxTicketsInFlight,
       },

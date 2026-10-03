@@ -18,6 +18,7 @@ import {
   loadHandoffSource,
   renderBrief,
 } from "../server/handoff.js";
+import type { HandoffScoutResult } from "../server/interviewer/index.js";
 import { aHandoffScoutResult } from "../server/interviewer/test-fixtures.js";
 import { getProject } from "../server/projects.js";
 import type { ProjectVisibility } from "../shared/session-constants.js";
@@ -1214,13 +1215,17 @@ describe("export writes grounded briefs", () => {
   useTestDatabase();
 
   /** Grounds the session right now: a valid result, today's fingerprint, HEAD as read. */
-  async function groundNow(sessionId: string, root: string): Promise<void> {
+  async function groundNow(
+    sessionId: string,
+    root: string,
+    result: HandoffScoutResult = aHandoffScoutResult(),
+  ): Promise<void> {
     const loaded = await loadHandoffSource(sessionId);
     if (!("source" in loaded)) throw new Error("expected a handoff source");
     const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
     await storeBriefGrounding({
       sessionId,
-      result: aHandoffScoutResult(),
+      result,
       commitRead: head,
       handoffFingerprint: handoffFingerprint(loaded.source),
       model: "sonnet",
@@ -1272,6 +1277,26 @@ describe("export writes grounded briefs", () => {
       .limit(1);
     return row!.editedAt;
   }
+
+  it("HANDOFF says no delegation rules were found once a grounding read the rule sources and found none", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    await groundNow(session.id, root, { ...aHandoffScoutResult(), rulesRead: true });
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    const handoff = await fs.readFile(path.join(root, ".scratch", "grill-room", "HANDOFF.md"), "utf8");
+    expect(handoff).toContain("No repository delegation rules were found:");
+  });
+
+  it("HANDOFF carries no none-found line for a grounding that never recorded reading the rule sources", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    await groundNow(session.id, root);
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    const handoff = await fs.readFile(path.join(root, ".scratch", "grill-room", "HANDOFF.md"), "utf8");
+    expect(handoff).not.toContain("No repository delegation rules were found");
+  });
 
   it("exports an unedited brief with the grounded sections", async () => {
     const { root, session } = await aReadySession();

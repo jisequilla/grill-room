@@ -376,8 +376,17 @@ describe("ground-briefs", () => {
     const rerun = await groundBriefs.run({ sessionId: session.id });
 
     expect(rerun.grounding!.id).not.toBe(first.grounding!.id);
-    expect((await getBriefGrounding.run({ sessionId: session.id })).grounding!.result).toEqual(second);
+    expect((await getBriefGrounding.run({ sessionId: session.id })).grounding!.result).toEqual({ ...second, rulesRead: true });
     expect(await getDb().select().from(schema.briefGroundings)).toHaveLength(1);
+  });
+
+  it("marks a stored grounding as having read the rule sources", async () => {
+    const { session } = await aSessionWithHandoff();
+    scriptInterviewer([{ kind: "handoff-scout", result: aHandoffScoutResult() }]);
+    const grounded = await groundBriefs.run({ sessionId: session.id });
+
+    expect(grounded.grounding!.result.rulesRead).toBe(true);
+    expect((await getBriefGrounding.run({ sessionId: session.id })).grounding!.result.rulesRead).toBe(true);
   });
 
   it("accepts a ticket that changes no files, and so lists no proving test", async () => {
@@ -1009,7 +1018,7 @@ describe("ground-briefs", () => {
 
     expect(grounded.grounding).toMatchObject({ result: accepted, current: true });
     const read = await getBriefGrounding.run({ sessionId: session.id });
-    expect(read.grounding!.result).toEqual(accepted);
+    expect(read.grounding!.result).toEqual({ ...accepted, rulesRead: true });
   });
 
   it("a reach no tracked file contains", async () => {

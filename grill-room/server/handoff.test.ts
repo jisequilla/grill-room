@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  type DelegationProposals,
+  type DelegationValues,
+  serializeDelegationProposals,
+  serializeDelegationValues,
+} from "./delegation-values.js";
+import {
   BUNDLE_TOKEN,
   bundlePathFor,
   CODEBASE_FACTS_SLOT,
@@ -2445,5 +2451,319 @@ describe("the pre-flight step before launching a ticket", () => {
     const source = aSource();
     expect(source.project.preflightStep).toBeUndefined();
     expect(renderHandoff(source).markdown).toContain(BULLET);
+  });
+});
+
+describe("the repository's delegation values in HANDOFF", () => {
+  const RECIPES = ["pull-request", "local-merge"] as const;
+  const BASE_FINGERPRINT = "7cb3834b6357f33c1d8fd7a276ceb2266946f3cf08139ebab86bf924b1125261";
+  const DEFAULT_PRUNE = "Prune merged worktrees (`git worktree remove <path>`, then `git worktree prune`).";
+
+  function stored(
+    values: DelegationValues = {},
+    proposals: DelegationProposals = {},
+  ): Partial<HandoffSource["project"]> {
+    return {
+      delegationValuesJson: serializeDelegationValues(values),
+      delegationProposalsJson: serializeDelegationProposals(proposals),
+    };
+  }
+
+  function aGrounding(extra: Partial<HandoffGrounding> = {}): HandoffGrounding {
+    return { tickets: [], commitRead: null, current: true, staleReason: null, ...extra };
+  }
+
+  function render(overrides: Partial<HandoffSource["project"]>, grounding: HandoffGrounding | null = null): string {
+    return renderHandoffMarkdown(aSource(overrides), false, undefined, grounding);
+  }
+
+  /** Replaces the one occurrence of `from`, failing when there is not exactly one. */
+  function swap(text: string, from: string, to: string): string {
+    expect(text.split(from).length - 1, from).toBe(1);
+    return text.replace(from, () => to);
+  }
+
+  function withNote(text: string, note: string): string {
+    return swap(text, "### Before launching a ticket", `${note}\n\n### Before launching a ticket`);
+  }
+
+  function precedence(...files: string[]): string {
+    return `Where this lifecycle differs from the repository's own rules, the repository's rule wins: ${files.map((file) => `\`${file}\``).join(", ")}.`;
+  }
+
+  function pruneLine(review: boolean): string {
+    return `${review ? 8 : 7}. ${DEFAULT_PRUNE}`;
+  }
+
+  function preflightSpan(markdown: string): string {
+    const start = markdown.indexOf("- Pre-flight the ticket before launching it.");
+    const end = markdown.indexOf("\n\n### The subagent");
+    expect(start).toBeGreaterThan(-1);
+    return markdown.slice(start, end);
+  }
+
+  it("renders each delegation slot as default, confirmed or pending", () => {
+    for (const deliveryRecipe of RECIPES) {
+      const common = { deliveryRecipe, maxTicketsInFlight: 3 };
+      const base = render(common);
+
+      const capConfirmed = render({ ...common, ...stored({ maxTicketsInFlight: { citation: "CLAUDE.md:12" } }) });
+      expect(capConfirmed, deliveryRecipe).toContain(
+        "- Run at most 3 tickets at a time, even when a wave is wider. The repository sets this cap: `CLAUDE.md:12`. Every ticket in flight",
+      );
+      expect(capConfirmed, deliveryRecipe).toBe(
+        withNote(
+          swap(
+            base,
+            "even when a wave is wider. Every",
+            "even when a wave is wider. The repository sets this cap: `CLAUDE.md:12`. Every",
+          ),
+          precedence("CLAUDE.md"),
+        ),
+      );
+
+      for (const [value, words] of [
+        [1, "one ticket"],
+        [4, "at most 4 tickets"],
+      ] as const) {
+        const capPending = render({
+          ...common,
+          ...stored({}, { maxTicketsInFlight: { value, citation: "CLAUDE.md:12" } }),
+        });
+        const bullet = `- The repository proposes ${words} at a time (\`CLAUDE.md:12\`); it is not confirmed, so the cap above stands.`;
+        expect(capPending, deliveryRecipe).toContain(`\n${bullet}\n`);
+        expect(capPending, deliveryRecipe).toBe(
+          withNote(swap(base, "\n\n## Waves", `\n${bullet}\n\n## Waves`), precedence("CLAUDE.md")),
+        );
+      }
+
+      const pruneConfirmed = render({
+        ...common,
+        ...stored({ pruneCommand: { command: "just prune-worktrees", citation: ".claude/rules/worktrees.md:120" } }),
+      });
+      const confirmedStep =
+        "8. Prune merged worktrees with the repository's command: `just prune-worktrees` (`.claude/rules/worktrees.md:120`).";
+      expect(pruneConfirmed, deliveryRecipe).toContain(confirmedStep);
+      expect(pruneConfirmed, deliveryRecipe).toBe(
+        withNote(swap(base, pruneLine(true), confirmedStep), precedence(".claude/rules/worktrees.md")),
+      );
+
+      const prunePending = render({
+        ...common,
+        ...stored({}, { pruneCommand: { command: "just prune-worktrees", citation: "CLAUDE.md:40" } }),
+      });
+      const pendingPrune =
+        "The repository proposes its own prune command, `just prune-worktrees` (`CLAUDE.md:40`); it is not confirmed, so the last step uses the default.";
+      expect(prunePending, deliveryRecipe).toContain(`${pruneLine(true)}\n\n${pendingPrune}`);
+      expect(prunePending, deliveryRecipe).toBe(
+        withNote(swap(base, pruneLine(true), `${pruneLine(true)}\n\n${pendingPrune}`), precedence("CLAUDE.md")),
+      );
+
+      const reviewConfirmed = render({
+        ...common,
+        ...stored({ reviewRule: { citation: ".claude/rules/worktrees.md:90-96" } }),
+      });
+      const confirmedRule =
+        "**The repository's review rule.** `.claude/rules/worktrees.md:90-96` sets how this repository reviews tickets; where it differs from this section, it wins.";
+      expect(reviewConfirmed, deliveryRecipe).toContain(
+        `fresh-context agent before it can be merged.\n\n${confirmedRule}\n\n**Inputs.**`,
+      );
+      expect(reviewConfirmed, deliveryRecipe).toBe(
+        withNote(swap(base, "\n\n**Inputs.**", `\n\n${confirmedRule}\n\n**Inputs.**`), precedence(".claude/rules/worktrees.md")),
+      );
+
+      const reviewPending = render({ ...common, ...stored({}, { reviewRule: { citation: "AGENTS.md:7" } }) });
+      const pendingRule =
+        "**A proposed review rule.** The repository may set its own review rule at `AGENTS.md:7`; it is not confirmed, so this section stands as written.";
+      expect(reviewPending, deliveryRecipe).toContain(
+        `fresh-context agent before it can be merged.\n\n${pendingRule}\n\n**Inputs.**`,
+      );
+      expect(reviewPending, deliveryRecipe).toBe(
+        withNote(swap(base, "\n\n**Inputs.**", `\n\n${pendingRule}\n\n**Inputs.**`), precedence("AGENTS.md")),
+      );
+
+      const span = preflightSpan(base);
+      const preflightConfirmed = render({
+        ...common,
+        ...stored({ preflight: { citation: ".claude/templates/delegation/preflight.md:1" } }),
+      });
+      const pointer =
+        "- Pre-flight the ticket before launching it, following the repository's own procedure at `.claude/templates/delegation/preflight.md:1`. Launch the ticket only when that procedure clears it.";
+      expect(preflightConfirmed, deliveryRecipe).toContain(pointer);
+      expect(preflightConfirmed, deliveryRecipe).toBe(
+        withNote(swap(base, span, pointer), precedence(".claude/templates/delegation/preflight.md")),
+      );
+
+      const preflightPending = render({ ...common, ...stored({}, { preflight: { citation: "AGENTS.md:30" } }) });
+      const pendingPreflight =
+        "- The repository may have its own pre-flight procedure at `AGENTS.md:30`; it is not confirmed, so use the prompt above.";
+      expect(preflightPending, deliveryRecipe).toContain(`\`PREFLIGHT: needs changes\` otherwise.\n\`\`\`\n\n${pendingPreflight}`);
+      expect(preflightPending, deliveryRecipe).toBe(
+        withNote(swap(base, span, `${span}\n\n${pendingPreflight}`), precedence("AGENTS.md")),
+      );
+    }
+  });
+
+  it("a confirmed prune command replaces every default prune step", () => {
+    const values = stored({ pruneCommand: { command: "just prune-worktrees", citation: ".claude/rules/worktrees.md:120" } });
+    for (const deliveryRecipe of RECIPES) {
+      for (const adversarialReview of [true, false]) {
+        const markdown = render({ deliveryRecipe, adversarialReview, ...values });
+        const label = `${deliveryRecipe}, review ${adversarialReview}`;
+        expect(markdown, label).not.toContain("git worktree prune");
+        expect(markdown, label).not.toContain("git worktree remove");
+        expect(markdown, label).toContain(
+          `${adversarialReview ? 8 : 7}. Prune merged worktrees with the repository's command: \`just prune-worktrees\``,
+        );
+      }
+    }
+  });
+
+  it("a confirmed pre-flight replaces the embedded prompt, and nothing renders when pre-flight is off", () => {
+    const values = stored({ preflight: { citation: ".claude/templates/delegation/preflight.md:1" } });
+    for (const deliveryRecipe of RECIPES) {
+      const on = render({ deliveryRecipe, ...values });
+      expect(on, deliveryRecipe).not.toContain("PREFLIGHT: clear");
+      expect(on.split("Pre-flight the ticket before launching it").length - 1, deliveryRecipe).toBe(1);
+
+      const off = render({ deliveryRecipe, preflightStep: false, ...values });
+      expect(off, deliveryRecipe).not.toMatch(/pre-flight/i);
+      expect(off, deliveryRecipe).not.toContain("PREFLIGHT");
+      expect(off, deliveryRecipe).toBe(
+        withNote(render({ deliveryRecipe, preflightStep: false }), precedence(".claude/templates/delegation/preflight.md")),
+      );
+    }
+  });
+
+  it("a review rule renders nothing while review is off, and still counts toward the precedence line", () => {
+    const values = stored({ reviewRule: { citation: ".claude/rules/worktrees.md:90-96" } });
+    for (const deliveryRecipe of RECIPES) {
+      const off = render({ deliveryRecipe, adversarialReview: false, ...values });
+      expect(off, deliveryRecipe).not.toContain("## Reviewing a ticket");
+      expect(off, deliveryRecipe).not.toContain("review rule");
+      expect(off, deliveryRecipe).toBe(
+        withNote(render({ deliveryRecipe, adversarialReview: false }), precedence(".claude/rules/worktrees.md")),
+      );
+    }
+  });
+
+  it("a proposal for a confirmed slot renders the confirmed text only", () => {
+    const confirmed = stored({ pruneCommand: { command: "just prune-worktrees", citation: "CLAUDE.md:40" } });
+    const both = stored(
+      { pruneCommand: { command: "just prune-worktrees", citation: "CLAUDE.md:40" } },
+      { pruneCommand: { command: "make prune", citation: "CLAUDE.md:41" } },
+    );
+    for (const deliveryRecipe of RECIPES) {
+      const markdown = render({ deliveryRecipe, ...both });
+      expect(markdown, deliveryRecipe).not.toContain("proposes its own prune command");
+      expect(markdown, deliveryRecipe).not.toContain("make prune");
+      expect(markdown, deliveryRecipe).toBe(render({ deliveryRecipe, ...confirmed }));
+    }
+  });
+
+  it("renders the precedence line citing exactly the files the values came from, and the none-found line only after a grounding read the rules", () => {
+    const noneFound =
+      "No repository delegation rules were found: the rule sources state no in-flight cap, prune command, review rule or pre-flight procedure, so this lifecycle stands as written.";
+    const noProposals = { maxTicketsInFlight: null, pruneCommand: null, reviewRule: null, preflight: null };
+    for (const deliveryRecipe of RECIPES) {
+      const base = render({ deliveryRecipe });
+      expect(base, deliveryRecipe).toBe(renderHandoff(aSource({ deliveryRecipe })).markdown);
+      expect(base, deliveryRecipe).not.toContain("the repository's rule wins");
+      expect(base, deliveryRecipe).not.toContain("No repository delegation rules");
+
+      const twice = render({
+        deliveryRecipe,
+        ...stored(
+          {
+            pruneCommand: { command: "just prune", citation: ".claude/rules/worktrees.md:120" },
+            reviewRule: { citation: ".claude/rules/worktrees.md:90-96" },
+          },
+          { maxTicketsInFlight: { value: 2, citation: "CLAUDE.md:12" } },
+        ),
+      });
+      expect(twice, deliveryRecipe).toContain(
+        `${precedence(".claude/rules/worktrees.md", "CLAUDE.md")}\n\n### Before launching a ticket`,
+      );
+
+      const codePointOrder = render({
+        deliveryRecipe,
+        ...stored(
+          {},
+          {
+            maxTicketsInFlight: { value: 2, citation: "docs/x.md:1" },
+            pruneCommand: { command: "just prune", citation: "CLAUDE.md:2" },
+            reviewRule: { citation: "AGENTS.md:3" },
+          },
+        ),
+      });
+      expect(codePointOrder, deliveryRecipe).toContain(precedence("AGENTS.md", "CLAUDE.md", "docs/x.md"));
+
+      // The paragraph follows the lifecycle's opening paragraph and sits before the first subsection.
+      const lifecycle = twice.slice(twice.indexOf("## Delegation lifecycle"));
+      expect(lifecycle.split("\n\n")[2], deliveryRecipe).toBe(precedence(".claude/rules/worktrees.md", "CLAUDE.md"));
+      expect(lifecycle.split("\n\n")[3], deliveryRecipe).toBe("### Before launching a ticket");
+
+      const read = aGrounding({ rulesRead: true });
+      expect(render({ deliveryRecipe }, read), deliveryRecipe).toBe(withNote(base, noneFound));
+      expect(
+        render({ deliveryRecipe }, aGrounding({ rulesRead: true, delegationProposals: noProposals })),
+        deliveryRecipe,
+      ).toBe(withNote(base, noneFound));
+      expect(
+        render({ deliveryRecipe }, aGrounding({ rulesRead: true, current: false, staleReason: "head-moved" })),
+        deliveryRecipe,
+      ).toBe(withNote(base, noneFound));
+      expect(render({ deliveryRecipe }, aGrounding()), deliveryRecipe).toBe(base);
+      expect(render({ deliveryRecipe }, aGrounding({ rulesRead: false })), deliveryRecipe).toBe(base);
+      expect(render({ deliveryRecipe }, aGrounding({ delegationProposals: noProposals })), deliveryRecipe).toBe(base);
+      expect(
+        render(
+          { deliveryRecipe },
+          aGrounding({
+            rulesRead: true,
+            delegationProposals: { ...noProposals, pruneCommand: { command: "just prune", citation: "CLAUDE.md:1" } },
+          }),
+        ),
+        deliveryRecipe,
+      ).toBe(base);
+
+      // Stored values win over the none-found line.
+      const values = stored({ preflight: { citation: "AGENTS.md:9" } });
+      expect(render({ deliveryRecipe, ...values }, read), deliveryRecipe).toBe(render({ deliveryRecipe, ...values }));
+    }
+  });
+
+  it("joins the delegation columns to the fingerprint only when stored", () => {
+    const values = serializeDelegationValues({ pruneCommand: { command: "just prune", citation: "CLAUDE.md:4" } })!;
+    const other = serializeDelegationValues({ reviewRule: { citation: "AGENTS.md:2" } })!;
+    const fingerprint = (overrides: Partial<HandoffSource["project"]>) => handoffFingerprint(aSource(overrides));
+
+    expect(fingerprint({})).toBe(BASE_FINGERPRINT);
+    expect(fingerprint({ delegationValuesJson: null, delegationProposalsJson: null })).toBe(BASE_FINGERPRINT);
+
+    const valuesOnly = fingerprint({ delegationValuesJson: values });
+    expect(valuesOnly).not.toBe(BASE_FINGERPRINT);
+    const proposalsOnly = fingerprint({ delegationProposalsJson: values });
+    expect(proposalsOnly).not.toBe(BASE_FINGERPRINT);
+    expect(proposalsOnly).not.toBe(valuesOnly);
+
+    const both = fingerprint({ delegationValuesJson: values, delegationProposalsJson: other });
+    expect(both).not.toBe(valuesOnly);
+    expect(both).not.toBe(fingerprint({ delegationProposalsJson: other }));
+    expect(both).not.toBe(fingerprint({ delegationValuesJson: other, delegationProposalsJson: values }));
+  });
+
+  it("renders the same text from the same stored inputs twice", () => {
+    const overrides = stored(
+      { pruneCommand: { command: "just prune", citation: "CLAUDE.md:4" } },
+      { preflight: { citation: "AGENTS.md:9" } },
+    );
+    for (const deliveryRecipe of RECIPES) {
+      const grounding = aGrounding({ rulesRead: true });
+      expect(render({ deliveryRecipe, ...overrides }, grounding)).toBe(render({ deliveryRecipe, ...overrides }, grounding));
+      expect(renderHandoff(aSource({ deliveryRecipe, ...overrides })).markdown).toBe(
+        renderHandoff(aSource({ deliveryRecipe, ...overrides })).markdown,
+      );
+    }
   });
 });
