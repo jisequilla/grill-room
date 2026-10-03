@@ -205,6 +205,7 @@ export default defineAction({
 
         const acceptedResult = accepted.result.result;
         const measured: HandoffScoutResult = {
+          ...acceptedResult,
           tickets: await Promise.all(
             acceptedResult.tickets.map(async (ticket) => ({
               ...ticket,

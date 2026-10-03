@@ -1,3 +1,4 @@
+import type { HandoffFactPack } from "../handoff-fact-pack.js";
 import {
   appendFile,
   mkdir,
@@ -1302,6 +1303,41 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt.indexOf("## Files the repository tracks")).toBeLessThan(prompt.indexOf("## The spec"));
   });
 
+  it("lists the repository's rules after the root documents", async () => {
+    const intro =
+      "## The repository's rules\n\nThese files are the repository's own rules. Read each one that applies to a\nticket before you ground it; the root documents above are already open.\n\n";
+    const rendered = async (ruleSources: HandoffFactPack["ruleSources"]) =>
+      (
+        await handoffInvocation(
+          aHandoffScoutRequest({
+            projectRoot: PROJECT_ROOT,
+            factPack: someHandoffFactPack({ ruleSources }),
+          }),
+        )
+      ).prompt;
+
+    expect(await rendered([])).toContain(
+      `${intro}None: no root CLAUDE.md or AGENTS.md and no .claude/rules/.\n\n## Verify command`,
+    );
+    expect(await rendered([{ path: ".claude/rules/versioning.md", globs: ["VERSION", "web/**/*"], lineCount: 9 }])).toContain(
+      `${intro}- \`.claude/rules/versioning.md\`: applies to a ticket that changes a file matching \`VERSION\`, \`web/**/*\`\n\n## Verify command`,
+    );
+    expect(await rendered([{ path: "CLAUDE.md", globs: null, lineCount: 3 }])).toContain(
+      `${intro}- \`CLAUDE.md\`: applies to every ticket\n\n## Verify command`,
+    );
+    const several = await rendered([
+      { path: ".claude/rules/versioning.md", globs: ["VERSION"], lineCount: 9 },
+      { path: "CLAUDE.md", globs: null, lineCount: 3 },
+    ]);
+    expect(several).toContain(
+      "- `.claude/rules/versioning.md`: applies to a ticket that changes a file matching `VERSION`\n- `CLAUDE.md`: applies to every ticket\n\n## Verify command",
+    );
+    expect(several.indexOf("## Root documents, already opened")).toBeLessThan(
+      several.indexOf("## The repository's rules"),
+    );
+    expect(several.indexOf("## The repository's rules")).toBeLessThan(several.indexOf("## Verify command"));
+  });
+
   it("heads a root document with its first path and joins every alias with a comma", async () => {
     const { prompt } = await handoffInvocation(
       aHandoffScoutRequest({
@@ -1820,6 +1856,29 @@ describe("what the adapter sends for a handoff scout", () => {
     );
     expect(prompt).not.toContain("cannot find the shape in the repository");
     expect(prompt).not.toContain("say so in a fact that cites the");
+  });
+
+  it("asks the handoff scout for the rules that apply to each ticket, a two-lens flag, and the repository's delegation values", async () => {
+    const { prompt } = await handoffInvocation();
+    const flat = prompt.replace(/\s+/g, " ");
+    const clauses = [
+      "- `rules`: one entry for every rule file the fact pack lists with globs that match a file in this ticket's `filesToChange`, none skipped.",
+      "A glob's `**` also matches dot-files and dot-folders, so `web/**/*` matches `web/.env.example`.",
+      "For a file listed as `applies to every ticket`, give an entry only when it requires something of this ticket.",
+      "Each entry gives the `citation` of the rule's lines as `path:line` or `path:start-end`,",
+      "the `statement` of what the rule requires of this ticket,",
+      "and `requiredFiles`: every file the rule requires this ticket to create or edit, relative to the root.",
+      "`requiredFiles: []` says the rule requires no files of this ticket.",
+      "List a required file even when it is outside `filesToChange`: the app compares the two.",
+      "- `twoLensReview`: `{ citation }` of the rule line that gives this ticket two reviewers (or two review lenses), when a rule source says so and this ticket qualifies; otherwise null.",
+      "- `delegationProposals`, once per report, not per ticket: the values the rule sources state, each with the `citation` of its line, or null when none states it.",
+      "`maxTicketsInFlight` is `{ value, citation }` with a whole number from 1 to 10;",
+      "`pruneCommand` is `{ command, citation }`;",
+      "`reviewRule` is `{ citation }`;",
+      "`preflight` is `{ citation }`, the repository's own pre-flight procedure.",
+    ];
+    for (const clause of clauses) expect(flat).toContain(clause);
+    expect(prompt.indexOf("- `rules`:")).toBeGreaterThan(prompt.indexOf("- `provedBy`:"));
   });
 
   it("lets a fact cite a fixture only when no producer or schema is readable, and says the shape was not confirmed against production", async () => {

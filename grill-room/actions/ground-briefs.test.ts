@@ -23,7 +23,7 @@ import {
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
 import { buildPrompt } from "../server/interviewer/prompt.js";
-import { aHandoffScoutResult } from "../server/interviewer/test-fixtures.js";
+import { aHandoffScoutResult, NO_DELEGATION_PROPOSALS } from "../server/interviewer/test-fixtures.js";
 import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
@@ -306,6 +306,32 @@ describe("ground-briefs", () => {
       { paths: ["CLAUDE.md"], lines: ["# Agent instructions"], cutLines: [], truncated: false },
     ]);
     expect(request!.factPack.verifyCommand).not.toBeNull();
+  });
+
+  it("stores and returns the scout's rules, two-lens flags and delegation proposals", async () => {
+    const { session } = await aSessionWithHandoff();
+    const scripted = withTicket(1, (ticket) => {
+      ticket.rules = [
+        {
+          citation: "CLAUDE.md:1",
+          statement: "Every change updates the changelog.",
+          requiredFiles: ["CHANGELOG.md"],
+        },
+      ];
+      ticket.twoLensReview = { citation: "CLAUDE.md:1" };
+    });
+    scripted.delegationProposals = {
+      ...NO_DELEGATION_PROPOSALS,
+      maxTicketsInFlight: { value: 2, citation: "CLAUDE.md:1" },
+    };
+    scriptInterviewer([{ kind: "handoff-scout", result: scripted }]);
+
+    await groundBriefs.run({ sessionId: session.id });
+
+    const read = await getBriefGrounding.run({ sessionId: session.id });
+    expect(read.grounding!.result.tickets[0]!.rules).toEqual(scripted.tickets[0]!.rules);
+    expect(read.grounding!.result.tickets[0]!.twoLensReview).toEqual({ citation: "CLAUDE.md:1" });
+    expect(read.grounding!.result.delegationProposals).toEqual(scripted.delegationProposals);
   });
 
   it("leaves the session's last export folder out of the fact pack", async () => {
@@ -721,6 +747,7 @@ describe("ground-briefs", () => {
     it("a missing ticket", async () => {
       const { session } = await aSessionWithHandoff();
       const reason = await refusedThenAccepted(session.id, {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [aHandoffScoutResult().tickets[0]!],
       });
       expect(reason).toMatch(/Ticket 2 is missing; report every ticket of the handoff \(1, 2\) exactly once/);
@@ -730,6 +757,7 @@ describe("ground-briefs", () => {
       const { session } = await aSessionWithHandoff();
       const [first, second] = aHandoffScoutResult().tickets;
       const reason = await refusedThenAccepted(session.id, {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [first!, second!, first!, { ...first!, number: 7 }],
       });
       expect(reason).toMatch(/Ticket 1 appears 2 times/);
@@ -797,6 +825,7 @@ describe("ground-briefs", () => {
     it("a dependency on an edited file with no symbol, or a symbol with no edited file", async () => {
       const { session } = await aSessionWithHandoff();
       const reason = await refusedThenAccepted(session.id, {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aHandoffScoutResult().tickets[0]!,
           {
@@ -942,12 +971,16 @@ describe("ground-briefs", () => {
           check: "test -f src/ingest/lag-alert.ts",
         },
       ],
+      rules: [],
+      twoLensReview: null,
       provedBy: { testPath: testFile, command: "npm test -- lag-alert" },
     });
     const refused: HandoffScoutResult = {
+      delegationProposals: NO_DELEGATION_PROPOSALS,
       tickets: [...aHandoffScoutResult().tickets, ticket3("create")],
     };
     const accepted: HandoffScoutResult = {
+      delegationProposals: NO_DELEGATION_PROPOSALS,
       tickets: [...aHandoffScoutResult().tickets, ticket3("edit")],
     };
     const interviewer = scriptInterviewer([

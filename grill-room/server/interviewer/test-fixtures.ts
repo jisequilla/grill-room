@@ -285,6 +285,13 @@ export function anAssessReadinessResult(
   };
 }
 
+export const NO_DELEGATION_PROPOSALS: HandoffScoutResult["delegationProposals"] = {
+  maxTicketsInFlight: null,
+  pruneCommand: null,
+  reviewRule: null,
+  preflight: null,
+};
+
 export function someHandoffFactPack(
   overrides: Partial<HandoffFactPack> = {},
 ): HandoffFactPack {
@@ -292,6 +299,7 @@ export function someHandoffFactPack(
     trackedFiles: [],
     trackedFilesOmitted: 0,
     namedDocs: [],
+    ruleSources: [],
     verifyCommand: null,
     ...overrides,
   };
@@ -353,6 +361,8 @@ export function aHandoffScoutResult(
           },
         ],
         buildsOn: [],
+        rules: [],
+        twoLensReview: null,
         provedBy: {
           testPath: "src/ingest/lag-alert.test.ts",
           command: "npm test -- lag-alert",
@@ -378,12 +388,15 @@ export function aHandoffScoutResult(
             check: "test -f src/ingest/lag-alert.ts",
           },
         ],
+        rules: [],
+        twoLensReview: null,
         provedBy: {
           testPath: "src/ingest/queue.test.ts",
           command: "npm test -- queue",
         },
       },
     ],
+    delegationProposals: NO_DELEGATION_PROPOSALS,
     ...overrides,
   };
 }

@@ -21,6 +21,23 @@ function lines(count: number): string {
   return Array.from({ length: count }, (_, index) => `line ${index + 1}`).join("\n") + "\n";
 }
 
+describe("collectHandoffFactPack: rule sources", () => {
+  it("carries the repository's rule sources and their globs", async () => {
+    const root = repos.create({
+      files: {
+        "CLAUDE.md": "# Rules\n",
+        ".claude/rules/v.md": "---\npaths:\n  - VERSION\n  - web/**/*\n---\nBump it.\n",
+      },
+    });
+    const pack = await collectHandoffFactPack(root, {});
+
+    expect(pack.ruleSources).toEqual([
+      { path: "CLAUDE.md", globs: null, lineCount: 1 },
+      { path: ".claude/rules/v.md", globs: ["VERSION", "web/**/*"], lineCount: 6 },
+    ]);
+  });
+});
+
 describe("collectHandoffFactPack: tracked files", () => {
   it("lists only src/a.ts when .env and config/prod.pem are tracked beside it", async () => {
     const root = repos.create({
@@ -278,6 +295,7 @@ describe("collectHandoffFactPack: byte budget", () => {
       trackedFiles: [],
       trackedFilesOmitted: 0,
       namedDocs: [doc],
+      ruleSources: [],
       verifyCommand: null,
     }).join("\n");
     expect(rendered).toContain("(truncated after line 199:");

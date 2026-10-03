@@ -5,19 +5,21 @@ import {
   citation,
   handoffScoutContractSchema,
   handoffScoutResultSchema,
+  type HandoffScoutResult,
   jsonSchemaFor,
   MAX_HANDOFF_SCOUT_BUILDS_ON,
   MAX_HANDOFF_SCOUT_BUILDS_ON_FILES,
   MAX_HANDOFF_SCOUT_FACTS,
   MAX_HANDOFF_SCOUT_FILES_TO_CHANGE,
   MAX_HANDOFF_SCOUT_REACH,
+  MAX_HANDOFF_SCOUT_RULES,
   MAX_HANDOFF_SCOUT_TICKETS,
   MAX_SCOUT_CURRENT_STATE,
   MAX_SCOUT_PROPOSED_DECISIONS,
   scoutProjectResultSchema,
   staysInsideRepo,
 } from "./schemas.js";
-import { aHandoffScoutResult, aScoutProjectResult } from "./test-fixtures.js";
+import { aHandoffScoutResult, aScoutProjectResult, NO_DELEGATION_PROPOSALS } from "./test-fixtures.js";
 
 const aStateItem = aScoutProjectResult().currentState[0];
 const aProposal = aScoutProjectResult().proposedDecisions[0];
@@ -170,12 +172,15 @@ const aDependency = aBlockedTicket!.buildsOn[0]!;
 
 /** The result with its first ticket replaced by `ticket`. */
 function withTicket(ticket: Record<string, unknown>) {
-  return { tickets: [ticket, aBlockedTicket] };
+  return { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [ticket, aBlockedTicket] };
 }
 
 /** The result with its blocked ticket's one dependency replaced by `dependency`. */
 function withDependency(dependency: Record<string, unknown>) {
-  return { tickets: [aGroundedTicket, { ...aBlockedTicket, buildsOn: [dependency] }] };
+  return {
+    delegationProposals: NO_DELEGATION_PROPOSALS,
+    tickets: [aGroundedTicket, { ...aBlockedTicket, buildsOn: [dependency] }],
+  };
 }
 
 function accepts(result: unknown): boolean {
@@ -243,7 +248,10 @@ describe("the handoff scout schema", () => {
 
   it("requires reach in the contract and leaves its count to the app", () => {
     const { reach: _reach, ...withoutReach } = aGroundedTicket!;
-    const reaching = (reach: unknown) => ({ tickets: [{ ...aGroundedTicket, reach }] });
+    const reaching = (reach: unknown) => ({
+      delegationProposals: NO_DELEGATION_PROPOSALS,
+      tickets: [{ ...aGroundedTicket, reach }],
+    });
 
     expect(contractAccepts({ tickets: [withoutReach] })).toBe(false);
     expect(contractAccepts(reaching([{ symbol: "exportFolder" }]))).toBe(true);
@@ -493,5 +501,121 @@ describe("break-into-tickets: kind and waitsFor default, and the CLI schema requ
 
     expect(ticket.required).toEqual(expect.arrayContaining(["kind", "waitsFor"]));
     expect(ticket.properties.kind).toMatchObject({ enum: ["build", "gate"] });
+  });
+});
+
+const aRule = {
+  citation: ".claude/rules/versioning.md:3-8",
+  statement: "A change under web/ bumps VERSION.",
+  requiredFiles: ["web/package.json"],
+};
+
+const allProposals = {
+  maxTicketsInFlight: { value: 3, citation: "CLAUDE.md:12" },
+  pruneCommand: { command: "just prune-worktrees", citation: "CLAUDE.md:30" },
+  reviewRule: { citation: ".claude/rules/worktrees.md:5-9" },
+  preflight: { citation: ".claude/rules/worktrees.md:20" },
+};
+
+function withRules(rules: unknown[], twoLensReview: unknown = null, delegationProposals: unknown = NO_DELEGATION_PROPOSALS) {
+  return {
+    delegationProposals,
+    tickets: [{ ...aGroundedTicket, rules, twoLensReview }, aBlockedTicket],
+  };
+}
+
+describe("the handoff scout schema: rules, two-lens flag and delegation proposals", () => {
+  it("reads a stored grounding with none of the new fields, with empty rules and null flags and proposals", () => {
+    const { rules: _rules, twoLensReview: _flag, ...oldTicket } = aGroundedTicket!;
+    const { rules: _r2, twoLensReview: _f2, ...oldBlocked } = aBlockedTicket!;
+    const parsed = handoffScoutResultSchema.parse({ tickets: [oldTicket, oldBlocked] });
+
+    for (const ticket of parsed.tickets) {
+      expect(ticket.rules).toEqual([]);
+      expect(ticket.twoLensReview).toBeNull();
+    }
+    expect(parsed.delegationProposals).toEqual({
+      maxTicketsInFlight: null,
+      pruneCommand: null,
+      reviewRule: null,
+      preflight: null,
+    });
+  });
+
+  it("accepts a rule with required files", () => {
+    expect(accepts(withRules([aRule]))).toBe(true);
+  });
+
+  it("accepts a rule with requiredFiles: []", () => {
+    expect(accepts(withRules([{ ...aRule, requiredFiles: [] }]))).toBe(true);
+  });
+
+  it("refuses maxTicketsInFlight out of range", () => {
+    expect(
+      accepts(withRules([], null, { ...allProposals, maxTicketsInFlight: { value: 11, citation: "a.md:1" } })),
+    ).toBe(false);
+    expect(
+      accepts(withRules([], null, { ...allProposals, maxTicketsInFlight: { value: 0, citation: "a.md:1" } })),
+    ).toBe(false);
+  });
+
+  it("refuses a rule entry with an extra key", () => {
+    expect(accepts(withRules([{ ...aRule, extra: 1 }]))).toBe(false);
+  });
+
+  it("fills the missing proposal slots with null when only one is given", () => {
+    const parsed = handoffScoutResultSchema.parse(
+      withRules([], null, { maxTicketsInFlight: null }),
+    );
+
+    expect(parsed.delegationProposals).toEqual({
+      maxTicketsInFlight: null,
+      pruneCommand: null,
+      reviewRule: null,
+      preflight: null,
+    });
+  });
+
+  it("requires every new field in the contract", () => {
+    const { rules: _rules, ...withoutRules } = aGroundedTicket!;
+    const { twoLensReview: _flag, ...withoutFlag } = aGroundedTicket!;
+    const { delegationProposals: _dp, ...withoutProposals } = withRules([]);
+
+    expect(contractAccepts({ delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [withoutRules, aBlockedTicket] })).toBe(false);
+    expect(contractAccepts({ delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [withoutFlag, aBlockedTicket] })).toBe(false);
+    expect(contractAccepts(withoutProposals)).toBe(false);
+    expect(contractAccepts(withRules([aRule]))).toBe(true);
+  });
+
+  it("holds the contract's rule list to its cap and its citations to the citation pattern", () => {
+    expect(contractAccepts(withRules(Array.from({ length: MAX_HANDOFF_SCOUT_RULES }, () => aRule)))).toBe(true);
+    expect(contractAccepts(withRules(Array.from({ length: MAX_HANDOFF_SCOUT_RULES + 1 }, () => aRule)))).toBe(false);
+    expect(contractAccepts(withRules([{ ...aRule, citation: "the versioning rule" }]))).toBe(false);
+  });
+
+  it("seam: every rules, two-lens and proposal shape the handoff prompt describes passes the contract and the validator", () => {
+    const shapes = [
+      withRules([aRule]),
+      withRules([{ ...aRule, requiredFiles: [] }]),
+      withRules([], null),
+      withRules([], { citation: ".claude/rules/worktrees.md:40" }),
+      withRules([], null, NO_DELEGATION_PROPOSALS),
+      withRules([], null, allProposals),
+    ];
+
+    for (const shape of shapes) {
+      expect(contractAccepts(shape)).toBe(true);
+      expect(accepts(shape)).toBe(true);
+    }
+  });
+
+  it("types each delegation proposal slot, so a consumer reads it without a cast", () => {
+    const proposals = aHandoffScoutResult().delegationProposals;
+    const inFlight: number | undefined = proposals.maxTicketsInFlight?.value;
+    const prune: string | undefined = proposals.pruneCommand?.command;
+    const rule: string | undefined = proposals.reviewRule?.citation;
+    // @ts-expect-error a number is not a prune slot
+    const bad: HandoffScoutResult["delegationProposals"]["pruneCommand"] = 42;
+    expect([inFlight, prune, rule, bad]).toBeDefined();
   });
 });

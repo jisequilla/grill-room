@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { useTempGitRepos } from "../test/git-repos.js";
-import { aHandoffScoutResult } from "./interviewer/test-fixtures.js";
+import { aHandoffScoutResult, NO_DELEGATION_PROPOSALS } from "./interviewer/test-fixtures.js";
 import {
   clampHandoffGroundingCitations,
   isTestFileByName,
@@ -35,6 +35,7 @@ function aSingleTicket(): GroundedHandoffTicket[] {
 /** A minimal, otherwise-valid handoff scout result for one ticket that plans no files. */
 function aBareResult(): ReturnType<typeof aHandoffScoutResult> {
   return {
+    delegationProposals: NO_DELEGATION_PROPOSALS,
     tickets: [
       {
         number: 1,
@@ -43,6 +44,8 @@ function aBareResult(): ReturnType<typeof aHandoffScoutResult> {
         buildsOnFiles: [],
         facts: [],
         buildsOn: [],
+        rules: [],
+        twoLensReview: null,
         provedBy: { testPath: "test/fixture.test.ts", command: "npm test" },
       },
     ],
@@ -220,6 +223,8 @@ function aTicket(
       symbol: null,
       check: check ?? `test -f ${createdPath}`,
     })),
+    rules: [],
+    twoLensReview: null,
     provedBy: { testPath, command },
   };
 }
@@ -233,6 +238,7 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(1, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
           aTicket(3, { [EXPORT_TEST]: "edit" }, EXPORT_TEST, [{ blocker: 1, createdPath: EXPORT }]),
@@ -257,6 +263,7 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(1, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
           aTicket(4, { [server]: "create", [serverTest]: "create" }, serverTest, [
@@ -288,6 +295,7 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(1, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
           // Direct blocker whose single entry already names another file it creates.
@@ -338,6 +346,7 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(3, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
           {
@@ -377,6 +386,7 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(1, { "package.json": "create", "vitest.config.ts": "create" }, null, [], "pnpm test"),
           aTicket(
@@ -414,6 +424,7 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(1, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
           aTicket(3, { [upper]: "create" }, upper, [{ blocker: 1, createdPath: EXPORT }]),
@@ -449,6 +460,7 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(1, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
           aTicket(9, { [EXPORT_TEST]: "create" }, EXPORT_TEST),
@@ -467,6 +479,7 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(1, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
           aTicket(2, { [EXPORT_TEST]: "edit" }, EXPORT_TEST),
@@ -510,6 +523,7 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(1, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
           aTicket(3, { [EXPORT_TEST]: "create" }, EXPORT_TEST, [{ blocker: 1, createdPath: EXPORT }]),
@@ -537,6 +551,7 @@ describe("reasonsToRefuseHandoffGrounding on a file a blocker creates", () => {
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(1, { [one]: "create" }, one),
           aTicket(2, { [shared]: "create" }, shared, [{ blocker: 1, createdPath: one }]),
@@ -582,6 +597,8 @@ function aCitationBuildsOnTicket(citation: string): ScoutTicket {
         check: "true",
       },
     ],
+    rules: [],
+    twoLensReview: null,
     provedBy: { testPath: null, command: "true" },
   };
 }
@@ -604,7 +621,7 @@ describe("reasonsToRefuseHandoffGrounding's buildsOn citation syntax check", () 
     const root = repos.create({ files: { "src/a.ts": "export const a = 1;\n" } });
 
     const reasons = await reasonsToRefuseHandoffGrounding(
-      { tickets: [blockerTicket(), aCitationBuildsOnTicket("src/x/../a.ts:1")] },
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [blockerTicket(), aCitationBuildsOnTicket("src/x/../a.ts:1")] },
       { projectRoot: root, tickets: TICKETS },
     );
 
@@ -617,7 +634,7 @@ describe("reasonsToRefuseHandoffGrounding's buildsOn citation syntax check", () 
     const root = repos.create({ files: { "README.md": "# Marathon\n" } });
 
     const reasons = await reasonsToRefuseHandoffGrounding(
-      { tickets: [blockerTicket(), aCitationBuildsOnTicket("/abs/a.ts:1")] },
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [blockerTicket(), aCitationBuildsOnTicket("/abs/a.ts:1")] },
       { projectRoot: root, tickets: TICKETS },
     );
 
@@ -632,7 +649,7 @@ describe("reasonsToRefuseHandoffGrounding's buildsOn citation syntax check", () 
     const root = repos.create({ files: { "README.md": "# Marathon\nSecond line\n" } });
 
     const reasons = await reasonsToRefuseHandoffGrounding(
-      { tickets: [blockerTicket(), aCitationBuildsOnTicket("README.md:2-1")] },
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [blockerTicket(), aCitationBuildsOnTicket("README.md:2-1")] },
       { projectRoot: root, tickets: TICKETS },
     );
 
@@ -647,7 +664,7 @@ describe("reasonsToRefuseHandoffGrounding's buildsOn citation syntax check", () 
     const root = repos.create({ files: { "README.md": "# Marathon\n" } });
 
     const reasons = await reasonsToRefuseHandoffGrounding(
-      { tickets: [blockerTicket(), aCitationBuildsOnTicket("README.md:1")] },
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [blockerTicket(), aCitationBuildsOnTicket("README.md:1")] },
       { projectRoot: root, tickets: TICKETS },
     );
 
@@ -664,6 +681,7 @@ describe("reasonsToRefuseHandoffGrounding on a check or command whose path ignor
     const root = repos.create({ files: { "README.md": "# Marathon\n" } });
     return reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(3, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
           aTicket(
@@ -729,7 +747,7 @@ describe("reasonsToRefuseHandoffGrounding on a check or command whose path ignor
     const root = repos.create({ files: { [nested]: "x = 1\n" } });
 
     const reasons = await reasonsToRefuseHandoffGrounding(
-      { tickets: [aTicket(1, { [`${dir}/new_test.py`]: "create" }, `${dir}/new_test.py`, [], command)] },
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [aTicket(1, { [`${dir}/new_test.py`]: "create" }, `${dir}/new_test.py`, [], command)] },
       { projectRoot: root, tickets: aSingleTicket() },
     );
 
@@ -741,6 +759,7 @@ describe("reasonsToRefuseHandoffGrounding on a check or command whose path ignor
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(3, { [EXPORT]: "create", [EXPORT_TEST]: "create" }, EXPORT_TEST),
           aTicket(4, { [EXPORT_TEST]: "edit" }, EXPORT_TEST, [
@@ -792,6 +811,7 @@ describe("reasonsToRefuseHandoffGrounding on what counts as a proof", () => {
 
     const reasons = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(
             1,
@@ -813,11 +833,12 @@ describe("reasonsToRefuseHandoffGrounding on what counts as a proof", () => {
   it("accepts a null testPath on a ticket that changes files, and still applies the cd rule to its command", async () => {
     const root = repos.create({ files: { "backend/server/server.go": "package server\n" } });
     const accepted = await reasonsToRefuseHandoffGrounding(
-      { tickets: [aTicket(1, { "backend/server/server.go": "edit" }, null, [], "cd backend && go build ./...")] },
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [aTicket(1, { "backend/server/server.go": "edit" }, null, [], "cd backend && go build ./...")] },
       { projectRoot: root, tickets: aSingleTicket() },
     );
     const refused = await reasonsToRefuseHandoffGrounding(
       {
+        delegationProposals: NO_DELEGATION_PROPOSALS,
         tickets: [
           aTicket(1, { "backend/server/server.go": "edit" }, null, [], "cd backend && grep -n Export backend/server/server.go"),
         ],
@@ -847,7 +868,7 @@ describe("reasonsToRefuseHandoffGrounding on what counts as a proof", () => {
     });
 
     const reasons = await reasonsToRefuseHandoffGrounding(
-      { tickets: [aTicket(1, { ...files }, testPath)] },
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [aTicket(1, { ...files }, testPath)] },
       { projectRoot: root, tickets: aSingleTicket() },
     );
 
@@ -897,6 +918,7 @@ function aResultReaching(
 ): ReturnType<typeof aHandoffScoutResult> {
   const result = aBareResult();
   return {
+    delegationProposals: NO_DELEGATION_PROPOSALS,
     tickets: [
       {
         ...result.tickets[0]!,
@@ -1011,6 +1033,7 @@ describe("reasonsToRefuseHandoffGrounding on a reach", () => {
     const root = repos.create({ files: EXPORT_FOLDER_FILES });
     const first = aResultReaching([{ symbol: "exportFolder" }]).tickets[0]!;
     const result = {
+      delegationProposals: NO_DELEGATION_PROPOSALS,
       tickets: [
         first,
         { ...first, number: 2, reach: [{ symbol: "exportFolder" }, { symbol: "a b" }] },
@@ -1039,7 +1062,7 @@ describe("reasonsToRefuseHandoffGrounding on a reach", () => {
     function refuseSecondTicketReaching(projectRoot: string, reach: string[]): Promise<string[]> {
       const first = aResultReaching([{ symbol: "exportFolder" }]).tickets[0]!;
       return reasonsToRefuseHandoffGrounding(
-        { tickets: [first, { ...first, number: 2, reach: reach.map((symbol) => ({ symbol })) }] },
+        { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [first, { ...first, number: 2, reach: reach.map((symbol) => ({ symbol })) }] },
         { projectRoot, tickets: BOTH_TICKETS },
       );
     }
@@ -1067,7 +1090,7 @@ describe("reasonsToRefuseHandoffGrounding on a reach", () => {
       const first = aResultReaching([]).tickets[0]!;
 
       const reasons = await reasonsToRefuseHandoffGrounding(
-        { tickets: [first, { ...first, number: 2, reach: [{ symbol: "exportFolder" }] }] },
+        { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [first, { ...first, number: 2, reach: [{ symbol: "exportFolder" }] }] },
         { projectRoot: folder, tickets: BOTH_TICKETS },
       );
 
@@ -1082,7 +1105,7 @@ describe("reasonsToRefuseHandoffGrounding on a reach", () => {
     const first = aResultReaching([{ symbol: "exportFolder" }]).tickets[0]!;
 
     const reasons = await reasonsToRefuseHandoffGrounding(
-      { tickets: [first, { ...first, number: 2 }] },
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [first, { ...first, number: 2 }] },
       {
         projectRoot: root,
         tickets: [

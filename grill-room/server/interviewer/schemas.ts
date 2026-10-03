@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   MAX_HANDOFF_SCOUT_BUILDS_ON,
   MAX_HANDOFF_SCOUT_TICKETS,
+  MAX_TICKETS_IN_FLIGHT,
+  MIN_TICKETS_IN_FLIGHT,
   TICKET_KINDS,
 } from "../../shared/session-constants.js";
 
@@ -353,6 +355,12 @@ export const MAX_HANDOFF_SCOUT_FILES_TO_CHANGE = 20;
 /** A grounded ticket declares a reach for at most this many symbols. */
 export const MAX_HANDOFF_SCOUT_REACH = 3;
 
+/** A grounded ticket reports at most this many applicable rules. */
+export const MAX_HANDOFF_SCOUT_RULES = 20;
+
+/** One rule reports at most this many required files. */
+export const MAX_HANDOFF_SCOUT_RULE_FILES = 20;
+
 /** A grounded ticket builds on at most this many existing files. */
 export const MAX_HANDOFF_SCOUT_BUILDS_ON_FILES = 20;
 
@@ -433,7 +441,15 @@ function groundedTicket<
   Citation extends z.ZodType,
   BuildsOn extends z.ZodType,
   Reach extends z.ZodType,
->(citation: Citation, buildsOn: BuildsOn, reach: Reach) {
+  Rules extends z.ZodType,
+  TwoLens extends z.ZodType,
+>(
+  citation: Citation,
+  buildsOn: BuildsOn,
+  reach: Reach,
+  rules: Rules,
+  twoLensReview: TwoLens,
+) {
   return z.strictObject({
     /** The ticket's number, as the request listed it. */
     number: z.number().int().positive(),
@@ -456,6 +472,10 @@ function groundedTicket<
      * `files`, the count it measured; the model never sets it.
      */
     reach,
+    /** The repository rules that apply to this ticket, each with the files it requires. */
+    rules,
+    /** The rule line that gives this ticket two review lenses, or null. */
+    twoLensReview,
     /** The existing code the ticket builds on, cited. */
     buildsOnFiles: z.array(citation).max(MAX_HANDOFF_SCOUT_BUILDS_ON_FILES),
     /** Verified facts about the code the ticket touches, each cited. */
@@ -494,6 +514,79 @@ const handoffReachResult = z
   .max(MAX_HANDOFF_SCOUT_REACH)
   .default([]);
 
+const handoffRuleContract = z
+  .array(
+    z.strictObject({
+      citation: z.string().regex(CITATION_PATTERN),
+      statement: handoffText,
+      requiredFiles: z.array(handoffText).max(MAX_HANDOFF_SCOUT_RULE_FILES),
+    }),
+  )
+  .max(MAX_HANDOFF_SCOUT_RULES);
+
+const handoffRuleResult = z
+  .array(
+    z.strictObject({
+      citation: handoffText,
+      statement: handoffText,
+      requiredFiles: z.array(handoffText).max(MAX_HANDOFF_SCOUT_RULE_FILES),
+    }),
+  )
+  .max(MAX_HANDOFF_SCOUT_RULES)
+  .default([]);
+
+const handoffTwoLensContract = z
+  .strictObject({ citation: z.string().regex(CITATION_PATTERN) })
+  .nullable();
+
+const handoffTwoLensResult = z
+  .strictObject({ citation: handoffText })
+  .nullable()
+  .default(null);
+
+function proposalShapes<Citation extends z.ZodType>(citation: Citation) {
+  return {
+    maxTicketsInFlight: z.strictObject({
+      value: z
+        .number()
+        .int()
+        .min(MIN_TICKETS_IN_FLIGHT)
+        .max(MAX_TICKETS_IN_FLIGHT),
+      citation,
+    }),
+    pruneCommand: z.strictObject({ command: handoffText, citation }),
+    reviewRule: z.strictObject({ citation }),
+    preflight: z.strictObject({ citation }),
+  };
+}
+
+const contractProposalShapes = proposalShapes(z.string().regex(CITATION_PATTERN));
+
+const delegationProposalsContract = z.strictObject({
+  maxTicketsInFlight: contractProposalShapes.maxTicketsInFlight.nullable(),
+  pruneCommand: contractProposalShapes.pruneCommand.nullable(),
+  reviewRule: contractProposalShapes.reviewRule.nullable(),
+  preflight: contractProposalShapes.preflight.nullable(),
+});
+
+const NO_PROPOSALS = {
+  maxTicketsInFlight: null,
+  pruneCommand: null,
+  reviewRule: null,
+  preflight: null,
+};
+
+const resultProposalShapes = proposalShapes(handoffText);
+
+const delegationProposalsResult = z
+  .strictObject({
+    maxTicketsInFlight: resultProposalShapes.maxTicketsInFlight.nullable().default(null),
+    pruneCommand: resultProposalShapes.pruneCommand.nullable().default(null),
+    reviewRule: resultProposalShapes.reviewRule.nullable().default(null),
+    preflight: resultProposalShapes.preflight.nullable().default(null),
+  })
+  .default(NO_PROPOSALS);
+
 /**
  * What a handoff scout found reading a project for every ticket of one
  * handoff, one entry per ticket by number: the validator. It bounds the lists
@@ -504,8 +597,17 @@ const handoffReachResult = z
  */
 export const handoffScoutResultSchema = z.strictObject({
   tickets: z
-    .array(groundedTicket(handoffText, handoffBuildsOn, handoffReachResult))
+    .array(
+      groundedTicket(
+        handoffText,
+        handoffBuildsOn,
+        handoffReachResult,
+        handoffRuleResult,
+        handoffTwoLensResult,
+      ),
+    )
     .max(MAX_HANDOFF_SCOUT_TICKETS),
+  delegationProposals: delegationProposalsResult,
 });
 
 /** The handoff scout's result as the model is constrained to it: the contract. */
@@ -516,9 +618,12 @@ export const handoffScoutContractSchema = z.strictObject({
         z.string().regex(CITATION_PATTERN),
         handoffBuildsOnForms,
         handoffReachContract,
+        handoffRuleContract,
+        handoffTwoLensContract,
       ),
     )
     .max(MAX_HANDOFF_SCOUT_TICKETS),
+  delegationProposals: delegationProposalsContract,
 });
 
 /**
