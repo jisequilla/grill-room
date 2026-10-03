@@ -1691,6 +1691,12 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).toContain("or when no runner exists\n  yet, as below.");
     expect(prompt).toContain("State no fact about\n  collection and none that the spec excludes tests.");
     expect(prompt).toContain("`testPath` to null and gives");
+    expect(prompt).toContain(
+      "A ticket that waits, directly or through its blockers, on a ticket\n  that creates the runner config or recipe sets `testPath` to a file\n  it creates under the pattern that runner will collect.",
+    );
+    expect(prompt).toContain(
+      "A ticket\n  that neither sets up a runner nor waits on one that does sets\n  `testPath` to null",
+    );
 
     const start = prompt.indexOf("A ticket that sets up the test runner itself");
     const runnerSetupSentence = prompt.slice(start, prompt.indexOf("is required.", start) + "is required.".length);
