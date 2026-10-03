@@ -250,6 +250,11 @@ export interface BreakIntoTicketsRequest extends RequestBase {
   /** The project's verify command, or null for a session with no project. */
   verifyCommand: string | null;
   /**
+   * The project's tracked files, for the tickets turn to name what each ticket
+   * touches. Null for a session with no project, or when collecting them failed.
+   */
+  trackedFiles?: { files: string[]; omitted: number } | null;
+  /**
    * The numbers of the spec's user stories, as `userStories` reads them from
    * `specMarkdown`. Empty when the spec numbers none: the prompt then asks
    * for no citations and the story check is skipped.

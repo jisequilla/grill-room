@@ -1,3 +1,5 @@
+import { rmSync } from "node:fs";
+
 import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -465,8 +467,10 @@ describe("break-into-tickets in a repository with no commits yet", () => {
   async function aSessionInProject(options: {
     commit: boolean;
     verifyCommand?: string;
+    files?: Record<string, string>;
+    removeRoot?: boolean;
   }): Promise<string> {
-    const root = repos.create({ commit: options.commit });
+    const root = repos.create({ commit: options.commit, files: options.files });
     const project = await registerProject.run({
       root,
       verifyCommand: options.verifyCommand ?? "pnpm test",
@@ -480,6 +484,7 @@ describe("break-into-tickets in a repository with no commits yet", () => {
     await confirm(session.id);
     scriptInterviewer([{ kind: "synthesize-spec", result: { markdown: GOOD_SPEC_MARKDOWN } }]);
     await synthesizeSpec.run({ sessionId: session.id });
+    if (options.removeRoot) rmSync(root, { recursive: true, force: true });
     return session.id;
   }
 
@@ -529,6 +534,46 @@ describe("break-into-tickets in a repository with no commits yet", () => {
         greenfield: false,
         verifyCommand: "just verify",
       });
+    });
+
+    it("sends the tickets turn the project's tracked files", async () => {
+      const sessionId = await aSessionInProject({
+        commit: true,
+        files: { "src/ingest/metrics.ts": "export const a = 1;\n" },
+      });
+      const interviewer = scriptInterviewer([oneGoodTicket]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      const request = interviewer.requests[0] as BreakIntoTicketsRequest;
+      expect(request.trackedFiles?.files).toContain("src/ingest/metrics.ts");
+      expect(request.trackedFiles?.omitted).toBe(0);
+    });
+
+    it("sends no tracked files for a session without a project", async () => {
+      const sessionId = await aConfirmedSessionWithSpec();
+      const interviewer = scriptInterviewer([oneGoodTicket]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      expect((interviewer.requests[0] as BreakIntoTicketsRequest).trackedFiles).toBeNull();
+    });
+
+    it("sends no tracked files when collecting them fails", async () => {
+      const sessionId = await aSessionInProject({
+        commit: true,
+        verifyCommand: "just verify",
+        removeRoot: true,
+      });
+      const interviewer = scriptInterviewer([aGreenfieldSet("just verify")]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      const request = interviewer.requests[0] as BreakIntoTicketsRequest;
+      expect(request.trackedFiles).toBeNull();
+      expect(request.greenfield).toBe(true);
+      const stored = await listTickets.run({ sessionId });
+      expect(stored.tickets).toHaveLength(2);
     });
 
     it("carries greenfield false and no verify command for a session with no project", async () => {

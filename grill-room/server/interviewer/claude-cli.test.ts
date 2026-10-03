@@ -2331,6 +2331,79 @@ describe("what the adapter sends to break a spec into tickets", () => {
       );
     }
   });
+
+  describe("the tracked files", () => {
+    const CHAIN_END = "rather than chaining them one after another through that file.";
+    const GREENFIELD_END =
+      "directly or through another ticket's `blockedBy`; a gate need not.";
+    const NAMING_RULE = [
+      "When a ticket creates, edits or reshapes something whose path or symbol you",
+      "know from this list or from the project section above, name it in the",
+      "ticket's body as inline code, such as `src/ingest/metrics.ts` or",
+      "`exportFolder`. Name a path as existing only when this list or the",
+      "project section shows it; a file the ticket creates may be named as a new",
+      "path.",
+    ].join("\n");
+    const HEADING = [
+      "## Files the repository tracks",
+      "",
+      "Tracked files only, with secret files left out: a path missing from this",
+      "list is never evidence that a file does not exist.",
+      "",
+    ].join("\n");
+
+    async function promptFor(options: {
+      trackedFiles?: { files: string[]; omitted: number } | null;
+      greenfield?: boolean;
+      userStories?: number[];
+    }): Promise<string> {
+      const runner = recordingRunner([ok(anEnvelope({ structured_output: { tickets: [] } }))]);
+      await createClaudeCliInterviewer({ runCli: runner.runCli }).breakIntoTickets({
+        kind: "break-into-tickets",
+        context: aContext(),
+        specMarkdown: "## Problem Statement\n\nExport the training log.",
+        greenfield: options.greenfield ?? false,
+        verifyCommand: "pnpm test",
+        userStories: options.userStories ?? [],
+        rejectionReason: null,
+        ...("trackedFiles" in options ? { trackedFiles: options.trackedFiles } : {}),
+      });
+      return valueOf(runner.invocations[0]!.args, "-p") as string;
+    }
+
+    it("renders null exactly as an absent field", async () => {
+      expect(await promptFor({ trackedFiles: null })).toBe(await promptFor({}));
+    });
+
+    it("shows the tickets turn the tracked files and asks it to name what each ticket touches in backticks", async () => {
+      const plain = await promptFor({});
+      const listed = await promptFor({ trackedFiles: { files: ["src/a.ts"], omitted: 0 } });
+      expect(listed).toBe(`${plain}\n\n${HEADING}\nsrc/a.ts\n\n${NAMING_RULE}`);
+      expect(listed.endsWith(`${CHAIN_END}\n\n${HEADING}\nsrc/a.ts\n\n${NAMING_RULE}`)).toBe(true);
+
+      const empty = await promptFor({ trackedFiles: { files: [], omitted: 0 } });
+      expect(empty).toBe(`${plain}\n\n${HEADING}\nNo tracked files yet.\n\n${NAMING_RULE}`);
+
+      const cut = await promptFor({ trackedFiles: { files: ["src/a.ts"], omitted: 5 } });
+      expect(cut).toBe(
+        `${plain}\n\n${HEADING}\nsrc/a.ts\n(and 5 more not listed)\n\n${NAMING_RULE}`,
+      );
+
+      const everything = await promptFor({
+        greenfield: true,
+        userStories: [1, 2],
+        trackedFiles: { files: ["src/a.ts"], omitted: 0 },
+      });
+      const greenfieldIndex = everything.indexOf("## This repository has no commits yet");
+      const filesIndex = everything.indexOf("## Files the repository tracks");
+      const storiesIndex = everything.indexOf("## User stories");
+      expect(everything).toContain(`${GREENFIELD_END}\n\n## Files the repository tracks`);
+      expect(greenfieldIndex).toBeLessThan(filesIndex);
+      expect(filesIndex).toBeLessThan(storiesIndex);
+      expect(everything).toContain(`${NAMING_RULE}\n\n## User stories`);
+      expect(everything.lastIndexOf("## ")).toBe(storiesIndex);
+    });
+  });
 });
 
 describe("what the adapter makes of what came back", () => {
