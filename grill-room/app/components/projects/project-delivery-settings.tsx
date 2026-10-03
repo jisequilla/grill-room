@@ -25,6 +25,8 @@ interface ProjectDeliverySettingsProps {
   onDeliveryRecipeChange: (value: DeliveryRecipe) => void;
   adversarialReview: boolean;
   onAdversarialReviewChange: (value: boolean) => void;
+  preflightStep: boolean;
+  onPreflightStepChange: (value: boolean) => void;
   /** The raw input text, so an empty or partial entry can be typed. */
   maxTicketsInFlight: string;
   onMaxTicketsInFlightChange: (value: string) => void;
@@ -35,6 +37,7 @@ interface ProjectDeliverySettingsProps {
 export interface DeliverySettings {
   deliveryRecipe: DeliveryRecipe;
   adversarialReview: boolean;
+  preflightStep: boolean;
   maxTicketsInFlight?: number;
 }
 
@@ -42,6 +45,7 @@ export interface DeliverySettings {
 interface DeliverySettingsSource {
   deliveryRecipe?: string | null;
   adversarialReview?: boolean | null;
+  preflightStep?: boolean | null;
   maxTicketsInFlight?: number | null;
 }
 
@@ -56,6 +60,7 @@ export function seedDeliverySettings(project: DeliverySettingsSource | null): De
   return {
     deliveryRecipe: (project?.deliveryRecipe as DeliveryRecipe | undefined) ?? "pull-request",
     adversarialReview: project?.adversarialReview ?? true,
+    preflightStep: project?.preflightStep ?? true,
     maxTicketsInFlight: project?.maxTicketsInFlight ?? DEFAULT_MAX_TICKETS_IN_FLIGHT,
   };
 }
@@ -73,6 +78,7 @@ export function withDeliverySettings<T extends object>(
     ...fields,
     deliveryRecipe: settings.deliveryRecipe,
     adversarialReview: settings.adversarialReview,
+    preflightStep: settings.preflightStep,
     ...(settings.maxTicketsInFlight === undefined
       ? {}
       : { maxTicketsInFlight: settings.maxTicketsInFlight }),
@@ -90,6 +96,8 @@ export function ProjectDeliverySettings({
   onDeliveryRecipeChange,
   adversarialReview,
   onAdversarialReviewChange,
+  preflightStep,
+  onPreflightStepChange,
   maxTicketsInFlight,
   onMaxTicketsInFlightChange,
   maxTicketsInFlightError,
@@ -138,6 +146,19 @@ export function ProjectDeliverySettings({
           data-testid="project-adversarial-review"
           checked={adversarialReview}
           onCheckedChange={onAdversarialReviewChange}
+        />
+      </div>
+
+      <div className="flex items-start justify-between gap-4 rounded-lg border px-3.5 py-3">
+        <div className="space-y-0.5">
+          <Label htmlFor="project-preflight-step">{t("projects.preflightStepLabel")}</Label>
+          <p className="text-xs text-muted-foreground">{t("projects.preflightStepHint")}</p>
+        </div>
+        <Switch
+          id="project-preflight-step"
+          data-testid="project-preflight-step"
+          checked={preflightStep}
+          onCheckedChange={onPreflightStepChange}
         />
       </div>
 

@@ -74,6 +74,23 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`) an
 
 - Local \`main\` holds nothing unpushed (\`git status\`, \`git log origin/main..main\`). Push it first if it does, so the worktree's base includes it.
 - Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+- Pre-flight the ticket before launching it. Give a fresh, read-only agent the prompt below, with the ticket's brief pasted in, against the current \`main\`. Launch the ticket only when the agent ends with \`PREFLIGHT: clear\`. On \`PREFLIGHT: needs changes\`, fix the ticket or its brief, or put the owner's decisions to the owner, then pre-flight again. Where it was measured, a pre-flight cost roughly 210-230k tokens and 4-6 minutes per ticket, and it found real problems on every run.
+
+\`\`\`text
+You are checking a ticket before anyone builds it, in this repository, on \`main\`. You change nothing. Read the brief below, then read the code it names.
+
+<paste the ticket's brief here>
+
+Report only these five lists. Each item cites the brief's line and the file:line in the code that it concerns.
+
+1. **Wrong premises.** The brief states something about the code that the code does not show: a line number, a symbol, a behaviour, or a claim that something is impossible.
+2. **Ambiguities.** A rule that two careful builders could implement differently. Give both readings, and propose the example that settles it.
+3. **Contradictions.** The brief conflicts with itself, with an existing rule in the code, or with a check that enforces it. Run each acceptance check against the brief's examples: a check that cannot tell an allowed case from a forbidden one is a contradiction.
+4. **Boundary gaps.** The acceptance criteria need a file outside the brief's file boundaries.
+5. **Decisions.** Anything only the owner can settle: scope, a schema change, or a spec change.
+
+End with \`PREFLIGHT: clear\` when all five lists are empty, or \`PREFLIGHT: needs changes\` otherwise.
+\`\`\`
 
 ### The subagent
 
@@ -207,6 +224,23 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`) an
 
 - Local \`main\` holds nothing unpushed (\`git status\`, \`git log origin/main..main\`). Push it first if it does, so the worktree's base includes it.
 - Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+- Pre-flight the ticket before launching it. Give a fresh, read-only agent the prompt below, with the ticket's brief pasted in, against the current \`main\`. Launch the ticket only when the agent ends with \`PREFLIGHT: clear\`. On \`PREFLIGHT: needs changes\`, fix the ticket or its brief, or put the owner's decisions to the owner, then pre-flight again. Where it was measured, a pre-flight cost roughly 210-230k tokens and 4-6 minutes per ticket, and it found real problems on every run.
+
+\`\`\`text
+You are checking a ticket before anyone builds it, in this repository, on \`main\`. You change nothing. Read the brief below, then read the code it names.
+
+<paste the ticket's brief here>
+
+Report only these five lists. Each item cites the brief's line and the file:line in the code that it concerns.
+
+1. **Wrong premises.** The brief states something about the code that the code does not show: a line number, a symbol, a behaviour, or a claim that something is impossible.
+2. **Ambiguities.** A rule that two careful builders could implement differently. Give both readings, and propose the example that settles it.
+3. **Contradictions.** The brief conflicts with itself, with an existing rule in the code, or with a check that enforces it. Run each acceptance check against the brief's examples: a check that cannot tell an allowed case from a forbidden one is a contradiction.
+4. **Boundary gaps.** The acceptance criteria need a file outside the brief's file boundaries.
+5. **Decisions.** Anything only the owner can settle: scope, a schema change, or a spec change.
+
+End with \`PREFLIGHT: clear\` when all five lists are empty, or \`PREFLIGHT: needs changes\` otherwise.
+\`\`\`
 
 ### The subagent
 
@@ -668,6 +702,23 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`), o
 
 - Local \`main\` holds every change you want the next worktree to start from — commit it before delegating.
 - Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+- Pre-flight the ticket before launching it. Give a fresh, read-only agent the prompt below, with the ticket's brief pasted in, against the current \`main\`. Launch the ticket only when the agent ends with \`PREFLIGHT: clear\`. On \`PREFLIGHT: needs changes\`, fix the ticket or its brief, or put the owner's decisions to the owner, then pre-flight again. Where it was measured, a pre-flight cost roughly 210-230k tokens and 4-6 minutes per ticket, and it found real problems on every run.
+
+\`\`\`text
+You are checking a ticket before anyone builds it, in this repository, on \`main\`. You change nothing. Read the brief below, then read the code it names.
+
+<paste the ticket's brief here>
+
+Report only these five lists. Each item cites the brief's line and the file:line in the code that it concerns.
+
+1. **Wrong premises.** The brief states something about the code that the code does not show: a line number, a symbol, a behaviour, or a claim that something is impossible.
+2. **Ambiguities.** A rule that two careful builders could implement differently. Give both readings, and propose the example that settles it.
+3. **Contradictions.** The brief conflicts with itself, with an existing rule in the code, or with a check that enforces it. Run each acceptance check against the brief's examples: a check that cannot tell an allowed case from a forbidden one is a contradiction.
+4. **Boundary gaps.** The acceptance criteria need a file outside the brief's file boundaries.
+5. **Decisions.** Anything only the owner can settle: scope, a schema change, or a spec change.
+
+End with \`PREFLIGHT: clear\` when all five lists are empty, or \`PREFLIGHT: needs changes\` otherwise.
+\`\`\`
 
 ### The subagent
 
@@ -804,6 +855,23 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`), o
 
 - Local \`main\` holds every change you want the next worktree to start from — commit it before delegating.
 - Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+- Pre-flight the ticket before launching it. Give a fresh, read-only agent the prompt below, with the ticket's brief pasted in, against the current \`main\`. Launch the ticket only when the agent ends with \`PREFLIGHT: clear\`. On \`PREFLIGHT: needs changes\`, fix the ticket or its brief, or put the owner's decisions to the owner, then pre-flight again. Where it was measured, a pre-flight cost roughly 210-230k tokens and 4-6 minutes per ticket, and it found real problems on every run.
+
+\`\`\`text
+You are checking a ticket before anyone builds it, in this repository, on \`main\`. You change nothing. Read the brief below, then read the code it names.
+
+<paste the ticket's brief here>
+
+Report only these five lists. Each item cites the brief's line and the file:line in the code that it concerns.
+
+1. **Wrong premises.** The brief states something about the code that the code does not show: a line number, a symbol, a behaviour, or a claim that something is impossible.
+2. **Ambiguities.** A rule that two careful builders could implement differently. Give both readings, and propose the example that settles it.
+3. **Contradictions.** The brief conflicts with itself, with an existing rule in the code, or with a check that enforces it. Run each acceptance check against the brief's examples: a check that cannot tell an allowed case from a forbidden one is a contradiction.
+4. **Boundary gaps.** The acceptance criteria need a file outside the brief's file boundaries.
+5. **Decisions.** Anything only the owner can settle: scope, a schema change, or a spec change.
+
+End with \`PREFLIGHT: clear\` when all five lists are empty, or \`PREFLIGHT: needs changes\` otherwise.
+\`\`\`
 
 ### The subagent
 
@@ -921,6 +989,23 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`), o
 
 - Local \`main\` holds every change you want the next worktree to start from — commit it before delegating.
 - Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+- Pre-flight the ticket before launching it. Give a fresh, read-only agent the prompt below, with the ticket's brief pasted in, against the current \`main\`. Launch the ticket only when the agent ends with \`PREFLIGHT: clear\`. On \`PREFLIGHT: needs changes\`, fix the ticket or its brief, or put the owner's decisions to the owner, then pre-flight again. Where it was measured, a pre-flight cost roughly 210-230k tokens and 4-6 minutes per ticket, and it found real problems on every run.
+
+\`\`\`text
+You are checking a ticket before anyone builds it, in this repository, on \`main\`. You change nothing. Read the brief below, then read the code it names.
+
+<paste the ticket's brief here>
+
+Report only these five lists. Each item cites the brief's line and the file:line in the code that it concerns.
+
+1. **Wrong premises.** The brief states something about the code that the code does not show: a line number, a symbol, a behaviour, or a claim that something is impossible.
+2. **Ambiguities.** A rule that two careful builders could implement differently. Give both readings, and propose the example that settles it.
+3. **Contradictions.** The brief conflicts with itself, with an existing rule in the code, or with a check that enforces it. Run each acceptance check against the brief's examples: a check that cannot tell an allowed case from a forbidden one is a contradiction.
+4. **Boundary gaps.** The acceptance criteria need a file outside the brief's file boundaries.
+5. **Decisions.** Anything only the owner can settle: scope, a schema change, or a spec change.
+
+End with \`PREFLIGHT: clear\` when all five lists are empty, or \`PREFLIGHT: needs changes\` otherwise.
+\`\`\`
 
 ### The subagent
 
@@ -1052,6 +1137,23 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`) an
 
 - Local \`main\` holds nothing unpushed (\`git status\`, \`git log origin/main..main\`). Push it first if it does, so the worktree's base includes it.
 - Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+- Pre-flight the ticket before launching it. Give a fresh, read-only agent the prompt below, with the ticket's brief pasted in, against the current \`main\`. Launch the ticket only when the agent ends with \`PREFLIGHT: clear\`. On \`PREFLIGHT: needs changes\`, fix the ticket or its brief, or put the owner's decisions to the owner, then pre-flight again. Where it was measured, a pre-flight cost roughly 210-230k tokens and 4-6 minutes per ticket, and it found real problems on every run.
+
+\`\`\`text
+You are checking a ticket before anyone builds it, in this repository, on \`main\`. You change nothing. Read the brief below, then read the code it names.
+
+<paste the ticket's brief here>
+
+Report only these five lists. Each item cites the brief's line and the file:line in the code that it concerns.
+
+1. **Wrong premises.** The brief states something about the code that the code does not show: a line number, a symbol, a behaviour, or a claim that something is impossible.
+2. **Ambiguities.** A rule that two careful builders could implement differently. Give both readings, and propose the example that settles it.
+3. **Contradictions.** The brief conflicts with itself, with an existing rule in the code, or with a check that enforces it. Run each acceptance check against the brief's examples: a check that cannot tell an allowed case from a forbidden one is a contradiction.
+4. **Boundary gaps.** The acceptance criteria need a file outside the brief's file boundaries.
+5. **Decisions.** Anything only the owner can settle: scope, a schema change, or a spec change.
+
+End with \`PREFLIGHT: clear\` when all five lists are empty, or \`PREFLIGHT: needs changes\` otherwise.
+\`\`\`
 
 ### The subagent
 
@@ -1170,6 +1272,23 @@ Every ticket runs in its own worktree (Agent tool, \`isolation: "worktree"\`) an
 
 - Local \`main\` holds nothing unpushed (\`git status\`, \`git log origin/main..main\`). Push it first if it does, so the worktree's base includes it.
 - Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
+- Pre-flight the ticket before launching it. Give a fresh, read-only agent the prompt below, with the ticket's brief pasted in, against the current \`main\`. Launch the ticket only when the agent ends with \`PREFLIGHT: clear\`. On \`PREFLIGHT: needs changes\`, fix the ticket or its brief, or put the owner's decisions to the owner, then pre-flight again. Where it was measured, a pre-flight cost roughly 210-230k tokens and 4-6 minutes per ticket, and it found real problems on every run.
+
+\`\`\`text
+You are checking a ticket before anyone builds it, in this repository, on \`main\`. You change nothing. Read the brief below, then read the code it names.
+
+<paste the ticket's brief here>
+
+Report only these five lists. Each item cites the brief's line and the file:line in the code that it concerns.
+
+1. **Wrong premises.** The brief states something about the code that the code does not show: a line number, a symbol, a behaviour, or a claim that something is impossible.
+2. **Ambiguities.** A rule that two careful builders could implement differently. Give both readings, and propose the example that settles it.
+3. **Contradictions.** The brief conflicts with itself, with an existing rule in the code, or with a check that enforces it. Run each acceptance check against the brief's examples: a check that cannot tell an allowed case from a forbidden one is a contradiction.
+4. **Boundary gaps.** The acceptance criteria need a file outside the brief's file boundaries.
+5. **Decisions.** Anything only the owner can settle: scope, a schema change, or a spec change.
+
+End with \`PREFLIGHT: clear\` when all five lists are empty, or \`PREFLIGHT: needs changes\` otherwise.
+\`\`\`
 
 ### The subagent
 
