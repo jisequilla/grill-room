@@ -213,6 +213,26 @@ describe("scout-project", () => {
     expect(report!.result).toEqual(aScoutProjectResult());
   });
 
+  it("a retry shows the clamped citation, not the raw one", async () => {
+    const { session } = await aSessionWithProject();
+    const refused = aScoutProjectResult();
+    refused.currentState[0]!.citations = ["src/ingest/metrics.ts:12-40"];
+    refused.proposedDecisions[0]!.citation = "src/missing.ts:1";
+    const interviewer = scriptInterviewer([
+      { kind: "scout-project", result: refused },
+      { kind: "scout-project", result: aScoutProjectResult() },
+    ]);
+
+    await scoutProject.run({ sessionId: session.id });
+
+    const requests = scoutRequests(interviewer.requests);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.rejectionReason).toMatch(/src\/missing\.ts, which does not exist/);
+    const shown = requests[1]!.previousResult!;
+    expect(shown.currentState[0]!.citations).toEqual(["src/ingest/metrics.ts:12-30"]);
+    expect(shown.proposedDecisions[0]!.citation).toBe("src/missing.ts:1");
+  });
+
   it("clamps a citation range past the file's end and stores it at once", async () => {
     const { session } = await aSessionWithProject();
     const raw = aScoutProjectResult();

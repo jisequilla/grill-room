@@ -9,7 +9,7 @@ import {
   ideaEvidence,
   repoEvidence,
 } from "./interviewer/test-fixtures.js";
-import { reasonsToRefuseReadiness } from "./readiness.js";
+import { clampReadinessCitations, reasonsToRefuseReadiness } from "./readiness.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 
 const IDEA = "A tiny web app to track books I want to read.";
@@ -222,5 +222,35 @@ describe("reasonsToRefuseReadiness", () => {
         reasons.some((reason) => reason.includes("restates the idea's goal")),
       ).toBe(false);
     });
+  });
+});
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}
+
+describe("clampReadinessCitations", () => {
+  const repos = useTempGitRepos();
+
+  it("clampReadinessCitations returns a new result and leaves a frozen input untouched", () => {
+    const root = repos.create({ files: { "docs/adr/0003-queue.md": "a\nb\nc\n" } });
+    const result = anAssessReadinessResult({
+      evidence: [
+        ideaEvidence("Alert the on-call engineer"),
+        repoEvidence("The queue is Postgres-backed", "docs/adr/0003-queue.md:2-10"),
+      ],
+    });
+    deepFreeze(result);
+
+    const clamped = clampReadinessCitations(result, root);
+
+    expect(clamped).not.toBe(result);
+    expect(clamped.evidence[0]).toEqual(ideaEvidence("Alert the on-call engineer"));
+    expect(clamped.evidence[1]!.citation).toBe("docs/adr/0003-queue.md:2-3");
+    expect(result.evidence[1]!.citation).toBe("docs/adr/0003-queue.md:2-10");
   });
 });
