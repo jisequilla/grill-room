@@ -16,8 +16,10 @@ import {
   handoffFingerprint,
   type HandoffCard,
   type HandoffGrounding,
+  type HandoffRuleWaiver,
   type HandoffSource,
   parseBriefs,
+  partitionRuleConflicts,
   renderBrief,
   renderHandoff,
   renderHandoffMarkdown,
@@ -3304,5 +3306,319 @@ describe("rule conflicts", () => {
         }
       }
     }
+  });
+
+  describe("rule waivers", () => {
+    const REASON = "Bumped in a follow-up.";
+    const waiver = (
+      id: string,
+      ticket: number,
+      rulePath: string,
+      missingFiles: string[],
+      reason = REASON,
+    ): HandoffRuleWaiver => ({ id, ticket, rulePath, missingFiles, reason });
+    const withWaivers = (source: HandoffSource, ...ruleWaivers: HandoffRuleWaiver[]): HandoffSource => ({
+      ...source,
+      ruleWaivers,
+    });
+    const conflictOn = (ticket: number, citation: string, missingFiles: string[]) => ({
+      ticket,
+      citation,
+      statement: STATEMENT,
+      missingFiles,
+    });
+    const groundingFor = (ticket: number, claims: Claim[], files = ["x.ts"]) =>
+      groundingOf([entry(ticket, files, claims)]);
+
+    describe("partitionRuleConflicts", () => {
+      it("applies to the same ticket, rule file and missing files", () => {
+        const found = conflictOn(2, "AGENTS.md:10", ["a.ts"]);
+        const grounding = groundingFor(2, [claim(["a.ts"], "AGENTS.md:10")]);
+        const w = waiver("w1", 2, "AGENTS.md", ["a.ts"]);
+        expect(partitionRuleConflicts(withWaivers(aSource(), w), grounding)).toEqual({
+          open: [],
+          accepted: [{ ...found, waiverId: "w1", reason: REASON }],
+        });
+      });
+
+      it("applies to other cited lines of the same rule file", () => {
+        const found = conflictOn(2, "AGENTS.md:40-44", ["a.ts"]);
+        const grounding = groundingFor(2, [claim(["a.ts"], "AGENTS.md:40-44")]);
+        const w = waiver("w1", 2, "AGENTS.md", ["a.ts"]);
+        expect(partitionRuleConflicts(withWaivers(aSource(), w), grounding)).toEqual({
+          open: [],
+          accepted: [{ ...found, waiverId: "w1", reason: REASON }],
+        });
+      });
+
+      it("applies whatever the order and spelling of the missing files", () => {
+        const found = conflictOn(2, "AGENTS.md:10", ["b.ts", "./a.ts"]);
+        const grounding = groundingFor(2, [claim(["b.ts", "./a.ts"], "AGENTS.md:10")]);
+        const w = waiver("w1", 2, "./AGENTS.md", ["a.ts", "b.ts"]);
+        expect(partitionRuleConflicts(withWaivers(aSource(), w), grounding)).toEqual({
+          open: [],
+          accepted: [{ ...found, waiverId: "w1", reason: REASON }],
+        });
+      });
+
+      it("does not apply when the missing-file set changed", () => {
+        const found = conflictOn(2, "AGENTS.md:10", ["a.ts", "b.ts"]);
+        const grounding = groundingFor(2, [claim(["a.ts", "b.ts"], "AGENTS.md:10")]);
+        const w = waiver("w1", 2, "AGENTS.md", ["a.ts"]);
+        expect(partitionRuleConflicts(withWaivers(aSource(), w), grounding)).toEqual({
+          open: [found],
+          accepted: [],
+        });
+      });
+
+      it("does not apply to another rule file", () => {
+        const found = conflictOn(2, "CLAUDE.md:10", ["a.ts"]);
+        const grounding = groundingFor(2, [claim(["a.ts"], "CLAUDE.md:10")]);
+        const w = waiver("w1", 2, "AGENTS.md", ["a.ts"]);
+        expect(partitionRuleConflicts(withWaivers(aSource(), w), grounding)).toEqual({
+          open: [found],
+          accepted: [],
+        });
+      });
+
+      it("does not apply to another ticket", () => {
+        const found = conflictOn(3, "AGENTS.md:10", ["a.ts"]);
+        const grounding = groundingFor(3, [claim(["a.ts"], "AGENTS.md:10")]);
+        const w = waiver("w1", 2, "AGENTS.md", ["a.ts"]);
+        expect(partitionRuleConflicts(withWaivers(aSource(), w), grounding)).toEqual({
+          open: [found],
+          accepted: [],
+        });
+      });
+
+      it("lapses when a re-grounding puts the file inside the boundaries", () => {
+        const grounding = groundingFor(2, [claim(["a.ts"], "AGENTS.md:10")], ["a.ts"]);
+        const w = waiver("w1", 2, "AGENTS.md", ["a.ts"]);
+        expect(partitionRuleConflicts(withWaivers(aSource(), w), grounding)).toEqual({ open: [], accepted: [] });
+      });
+
+      it("accepts every conflict one waiver matches", () => {
+        const grounding = groundingFor(2, [
+          claim(["a.ts"], "AGENTS.md:10"),
+          claim(["a.ts"], "AGENTS.md:40"),
+        ]);
+        const w = waiver("w1", 2, "AGENTS.md", ["a.ts"]);
+        expect(partitionRuleConflicts(withWaivers(aSource(), w), grounding)).toEqual({
+          open: [],
+          accepted: [
+            { ...conflictOn(2, "AGENTS.md:10", ["a.ts"]), waiverId: "w1", reason: REASON },
+            { ...conflictOn(2, "AGENTS.md:40", ["a.ts"]), waiverId: "w1", reason: REASON },
+          ],
+        });
+      });
+
+      it("takes the reason and id of the first waiver that applies", () => {
+        const grounding = groundingFor(2, [claim(["a.ts"], "AGENTS.md:10")]);
+        const first = waiver("w1", 2, "AGENTS.md", ["a.ts"], "first");
+        const second = waiver("w2", 2, "AGENTS.md", ["a.ts"], "second");
+        expect(partitionRuleConflicts(withWaivers(aSource(), first, second), grounding).accepted).toEqual([
+          { ...conflictOn(2, "AGENTS.md:10", ["a.ts"]), waiverId: "w1", reason: "first" },
+        ]);
+      });
+
+      it("keeps ruleConflicts order in both lists", () => {
+        const grounding = groundingOf([
+          entry(1, ["x.ts"], [claim(["a.ts"], "AGENTS.md:1")]),
+          entry(2, ["x.ts"], [claim(["b.ts"], "AGENTS.md:2"), claim(["c.ts"], "AGENTS.md:3")]),
+          entry(3, ["x.ts"], [claim(["d.ts"], "AGENTS.md:4")]),
+        ]);
+        const source = withWaivers(
+          aSource(),
+          waiver("w1", 3, "AGENTS.md", ["d.ts"]),
+          waiver("w2", 2, "AGENTS.md", ["b.ts"]),
+        );
+        const { open, accepted } = partitionRuleConflicts(source, grounding);
+        expect(open.map((each) => each.citation)).toEqual(["AGENTS.md:1", "AGENTS.md:3"]);
+        expect(accepted.map((each) => each.citation)).toEqual(["AGENTS.md:2", "AGENTS.md:4"]);
+      });
+    });
+
+    describe("renders accepted rule conflicts with their reason", () => {
+      const HEADING = "## Questions the spec and tickets leave open";
+      const NEXT = "\n\n## Delegation lifecycle";
+      const OPEN_INTRO =
+        "**Rule conflicts.** A repository rule requires each of these tickets to change files outside its file boundaries. Before delegating one, widen its boundaries and ground the briefs again, or tell its builder in the delegation prompt how to handle the rule; otherwise its brief tells the builder to stop and report.";
+      const ACCEPTED_INTRO =
+        "**Rule conflicts accepted as is.** The owner accepted each of these with the reason given. The ticket keeps its file boundaries; its brief tells the builder to leave the files outside them alone.";
+      const BRIEF_ACCEPTED_INTRO =
+        "**Accepted rule conflicts.** The owner accepted these as is: this ticket leaves the files below alone on purpose. Do not edit them, and do not stop and report over these rules:";
+      const openBlock = (lines: string[]) => [OPEN_INTRO, "", ...lines].join("\n");
+      const acceptedBlock = (lines: string[]) => [ACCEPTED_INTRO, "", ...lines].join("\n");
+      const handoffLine = (label: string, title: string, citation: string, files: string, tail = "") =>
+        `- **${label} ${title}**: \`${citation}\` requires ${files}, outside its file boundaries.${tail}`;
+      const BRIEF_OPEN_SECTION = `## Open questions on this ticket\n\n${BRIEF_BLOCK}`;
+      const renderWith = (source: HandoffSource, grounding: HandoffGrounding) =>
+        renderHandoffMarkdown(source, false, undefined, grounding);
+
+      const NGINE_WAIVER = waiver("w1", 2, ".claude/rules/versioning.md", ["consumers/db-writer/package.json"]);
+      const acceptedLine02 = (reason: string) =>
+        handoffLine(
+          "02",
+          "Export the bundle",
+          CITE,
+          "`consumers/db-writer/package.json`",
+          ` Accepted: ${reason}`,
+        );
+      const openLine02 = handoffLine("02", "Export the bundle", CITE, "`consumers/db-writer/package.json`");
+
+      it("moves a waived conflict from the open block to the accepted block in HANDOFF", () => {
+        for (const deliveryRecipe of RECIPES) {
+          const source = aSource({ deliveryRecipe });
+          const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])]);
+          const reference = renderWith(source, grounding);
+          const text = renderWith(withWaivers(source, NGINE_WAIVER), grounding);
+          const accepted = acceptedBlock([acceptedLine02(REASON)]);
+          expect(reference, deliveryRecipe).toContain(openBlock([openLine02]));
+          expect(text, deliveryRecipe).toContain(`${HEADING}\n\n${accepted}${NEXT}`);
+          expect(text, deliveryRecipe).not.toContain("**Rule conflicts.**");
+          expect(text, deliveryRecipe).toBe(reference.replace(openBlock([openLine02]), () => accepted));
+        }
+      });
+
+      it("moves a waived conflict from the open question to the Codebase facts in the brief", () => {
+        for (const deliveryRecipe of RECIPES) {
+          const source = aSource({ deliveryRecipe });
+          const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])]);
+          const reference = briefOf(source, grounding);
+          const brief = briefOf(withWaivers(source, NGINE_WAIVER), grounding);
+          const accepted = `${BRIEF_ACCEPTED_INTRO}\n\n- \`${CITE}\` requires \`consumers/db-writer/package.json\`. Reason: ${REASON}`;
+          expect(reference, deliveryRecipe).toContain(BRIEF_OPEN_SECTION);
+          expect(brief, deliveryRecipe).toContain(`${RULE_LINE}\n\n${accepted}`);
+          expect(brief, deliveryRecipe).not.toContain("Open questions on this ticket");
+          expect(brief, deliveryRecipe).toBe(
+            reference
+              .replace(`${BRIEF_OPEN_SECTION}\n\n`, () => "")
+              .replace(RULE_LINE, () => `${RULE_LINE}\n\n${accepted}`),
+          );
+        }
+      });
+
+      it("renders the exact Codebase facts of a ticket with one fact and one accepted rule claim", () => {
+        const grounding = groundingOf([
+          entry(
+            2,
+            ["package.json"],
+            [claim(["package.json", "web/package.json"], "AGENTS.md:10", "Bump every package.json")],
+            [{ statement: "Versions live in package.json.", citation: "src/x.ts:3" }],
+          ),
+        ]);
+        const source = withWaivers(aSource(), waiver("w1", 2, "AGENTS.md", ["web/package.json"], "Web is versioned separately."));
+        const brief = briefOf(source, grounding);
+        const expected = [
+          "- Versions live in package.json. (`src/x.ts:3`)",
+          "- Repository rule: Bump every package.json (`AGENTS.md:10`). It requires `package.json`, `web/package.json`.",
+          "",
+          BRIEF_ACCEPTED_INTRO,
+          "",
+          "- `AGENTS.md:10` requires `web/package.json`. Reason: Web is versioned separately.",
+        ].join("\n");
+        expect(brief).toContain(`## Codebase facts\n\n${expected}\n\n`);
+      });
+
+      it("renders the reason verbatim, with no terminator added", () => {
+        for (const deliveryRecipe of RECIPES) {
+          const source = withWaivers(aSource({ deliveryRecipe }), { ...NGINE_WAIVER, reason: "no period" });
+          const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])]);
+          expect(renderWith(source, grounding), deliveryRecipe).toContain(`boundaries. Accepted: no period\n\n`);
+          expect(briefOf(source, grounding), deliveryRecipe).toContain(
+            "`consumers/db-writer/package.json`. Reason: no period\n\n",
+          );
+        }
+      });
+
+      it("shows the open one and the accepted one when only one of two conflicts is waived", () => {
+        for (const deliveryRecipe of RECIPES) {
+          const grounding = groundingOf([
+            entry(2, ["x.ts"], [claim(["c.ts"], "AGENTS.md:10"), claim(["d.ts"], "AGENTS.md:40")]),
+          ]);
+          const source = withWaivers(aSource({ deliveryRecipe }), waiver("w1", 2, "AGENTS.md", ["c.ts"]));
+          const line10 = (tail = "") => handoffLine("02", "Export the bundle", "AGENTS.md:10", "`c.ts`", tail);
+          const line40 = handoffLine("02", "Export the bundle", "AGENTS.md:40", "`d.ts`");
+          const reference = renderWith(aSource({ deliveryRecipe }), grounding);
+          const text = renderWith(source, grounding);
+          expect(text, deliveryRecipe).toContain(
+            `${openBlock([line40])}\n\n${acceptedBlock([line10(` Accepted: ${REASON}`)])}${NEXT}`,
+          );
+          expect(text, deliveryRecipe).toBe(
+            reference.replace(
+              openBlock([line10(), line40]),
+              () => `${openBlock([line40])}\n\n${acceptedBlock([line10(` Accepted: ${REASON}`)])}`,
+            ),
+          );
+          const brief = briefOf(source, grounding);
+          expect(brief, deliveryRecipe).toContain(
+            [
+              "## Open questions on this ticket",
+              "",
+              "**Rule conflicts.** A repository rule requires files outside this ticket's file boundaries. Do not edit them, and do not skip the rule: unless your prompt tells you how to handle it, stop and report the conflict instead of building around it.",
+              "",
+              `- \`AGENTS.md:40\` (${STATEMENT}) requires \`d.ts\`, outside your file boundaries.`,
+            ].join("\n"),
+          );
+          expect(brief, deliveryRecipe).not.toContain("`AGENTS.md:10` (");
+          expect(brief, deliveryRecipe).toContain(
+            `${BRIEF_ACCEPTED_INTRO}\n\n- \`AGENTS.md:10\` requires \`c.ts\`. Reason: ${REASON}`,
+          );
+        }
+      });
+
+      it("separates the cards, the open block and the accepted block by one blank line", () => {
+        for (const deliveryRecipe of RECIPES) {
+          const base = { ...aSource({ deliveryRecipe }), openCards: scenarioOpenCards() };
+          const grounding = groundingOf([
+            entry(2, ["x.ts"], [claim(["c.ts"], "AGENTS.md:10")]),
+            entry(3, ["x.ts"], [claim(["d.ts"], "CLAUDE.md:4")]),
+          ]);
+          const line02 = handoffLine("02", "Export the bundle", "AGENTS.md:10", "`c.ts`");
+          const line03 = handoffLine("03", "Propose a slug", "CLAUDE.md:4", "`d.ts`");
+          const reference = renderWith(base, grounding);
+          const text = renderWith(withWaivers(base, waiver("w1", 3, "CLAUDE.md", ["d.ts"], "Bumped in a follow-up.")), grounding);
+          const accepted = acceptedBlock([`${line03} Accepted: Bumped in a follow-up.`]);
+          expect(text, deliveryRecipe).toContain(`${openBlock([line02])}\n\n${accepted}${NEXT}`);
+          expect(text, deliveryRecipe).toBe(
+            reference.replace(openBlock([line02, line03]), () => `${openBlock([line02])}\n\n${accepted}`),
+          );
+        }
+      });
+
+      it("keeps the not-judged paragraph first and the accepted block last", () => {
+        const base = { ...aSource(), consistencyNotCurrent: true };
+        const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])]);
+        const text = renderWith(withWaivers(base, NGINE_WAIVER), grounding);
+        const section = text.slice(text.indexOf(HEADING), text.indexOf(NEXT));
+        expect(section.startsWith(`${HEADING}\n\nThe consistency check has not judged`)).toBe(true);
+        expect(section.endsWith(acceptedBlock([acceptedLine02(REASON)]))).toBe(true);
+        expect(section.split("\n\n").length).toBe(4);
+      });
+
+      it("renders a lapsed waiver nowhere", () => {
+        for (const deliveryRecipe of RECIPES) {
+          const source = aSource({ deliveryRecipe });
+          const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])]);
+          const lapsed = withWaivers(source, { ...NGINE_WAIVER, missingFiles: ["other.json"] });
+          expect(renderWith(lapsed, grounding), deliveryRecipe).toBe(renderWith(source, grounding));
+          expect(briefOf(lapsed, grounding), deliveryRecipe).toBe(briefOf(source, grounding));
+          const widened = groundingOf([entry(2, [...NGINE_FILES, "consumers/db-writer/package.json"], [NGINE_CLAIM])]);
+          const withWaiver = withWaivers(source, NGINE_WAIVER);
+          expect(renderWith(withWaiver, widened), deliveryRecipe).not.toContain("accepted as is");
+          expect(briefOf(withWaiver, widened), deliveryRecipe).not.toContain("Accepted rule conflicts");
+        }
+      });
+    });
+
+    it("waivers never change the handoff fingerprint", () => {
+      const none = handoffFingerprint(aSource());
+      const one = handoffFingerprint(withWaivers(aSource(), waiver("w1", 2, "AGENTS.md", ["a.ts"])));
+      const two = handoffFingerprint(
+        withWaivers(aSource(), waiver("w1", 2, "AGENTS.md", ["a.ts"]), waiver("w2", 3, "CLAUDE.md", ["b.ts"], "Other.")),
+      );
+      expect(one).toBe(none);
+      expect(two).toBe(none);
+    });
   });
 });

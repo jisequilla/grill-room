@@ -33,6 +33,7 @@ import previewExport from "./preview-export.js";
 import registerProject from "./register-project.js";
 import setTicketBlockedBy from "./set-ticket-blocked-by.js";
 import updateHandoff from "./update-handoff.js";
+import waiveRuleConflict from "./waive-rule-conflict.js";
 
 const repos = useTempGitRepos();
 
@@ -1419,6 +1420,37 @@ describe("export writes grounded briefs", () => {
     expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(edited);
     const handoff = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
     expect(handoff).toContain(CONFLICT_LINE);
+  });
+
+  it("keeps a hand-edited brief verbatim while HANDOFF lists its accepted rule conflict", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    const edited = "# Brief 01: Hand-edited\n\nSomeone already wrote this by hand.\n";
+    await updateHandoff.run({ sessionId: session.id, briefs: [{ ticketNumber: 1, markdown: edited }] });
+    await groundNow(session.id, root);
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(edited);
+
+    await groundNow(session.id, root, aResultWithRuleConflict());
+    await waiveRuleConflict.run({
+      sessionId: session.id,
+      ticket: 1,
+      citation: "AGENTS.md:7",
+      missingFiles: ["CHANGELOG.md"],
+      reason: "The changelog is written at release.",
+    });
+    const result = await exportSession.run({
+      sessionId: session.id,
+      slug: "grill-room",
+      overridePaths: ["HANDOFF.md", "briefs/01-build-the-workspace.md"],
+    });
+    expect(result.ungroundedBriefs).toContainEqual({ ticket: 1, reason: "edited" });
+    expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(edited);
+    const handoff = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoff).toContain(`${CONFLICT_LINE} Accepted: The changelog is written at release.`);
+    expect(handoff).not.toContain(`${CONFLICT_LINE}\n`);
+    expect(handoff).not.toContain("**Rule conflicts.**");
   });
 
   it("grounds a brief stored under an older template: editedAt null overrides the text mismatch", async () => {

@@ -881,6 +881,12 @@ const messages = {
     exportRuleConflictsHeading: "Rule conflicts",
     exportRuleConflict:
       "Ticket {{ticket}} {{title}}: {{citation}} requires {{files}}, outside its file boundaries.",
+    exportRuleConflictReasonLabel: "Reason for accepting it as is",
+    exportRuleConflictAccept: "Accept as is",
+    exportRuleConflictRemove: "Remove",
+    exportAcceptedRuleConflictsHeading: "Rule conflicts accepted as is",
+    exportAcceptedRuleConflict:
+      "Ticket {{ticket}} {{title}}: {{citation}} requires {{files}}. Accepted: {{reason}}",
     exportRuleConflictsAdvice:
       "Widen the ticket's file boundaries and ground the briefs again, or export as is: HANDOFF and the brief ask the builder to stop and report.",
 

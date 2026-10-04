@@ -16,6 +16,7 @@ import previewExport from "./preview-export.js";
 import registerProject from "./register-project.js";
 import setTicketBlockedBy from "./set-ticket-blocked-by.js";
 import updateHandoff from "./update-handoff.js";
+import waiveRuleConflict from "./waive-rule-conflict.js";
 
 const repos = useTempGitRepos();
 
@@ -362,5 +363,65 @@ describe("preview-export: rule conflicts", () => {
     expect({ exportBlocked: preview.exportBlocked, exportBlockedReason: preview.exportBlockedReason }).toEqual(
       baseline,
     );
+  });
+});
+
+describe("preview-export: accepted rule conflicts", () => {
+  useTestDatabase();
+
+  const CITATION = "CLAUDE.md:12";
+  const withClaim = (): HandoffScoutResult => {
+    const base = aHandoffScoutResult();
+    return {
+      ...base,
+      tickets: base.tickets.map((ticket) =>
+        ticket.number === 2
+          ? {
+              ...ticket,
+              rules: [{ citation: CITATION, statement: "Docs follow the code.", requiredFiles: ["docs/actions.md"] }],
+            }
+          : ticket,
+      ),
+    };
+  };
+
+  it("lists a waived conflict with its reason, not among the open ones, and leaves the export gate alone", async () => {
+    const { root, session } = await aSessionWithHandoff();
+    await groundNow(session.id, root, withClaim());
+    const before = await previewExport.run({ sessionId: session.id });
+    expect(before.ruleConflicts).toHaveLength(1);
+    expect(before.acceptedRuleConflicts).toEqual([]);
+
+    const { waiverId } = await waiveRuleConflict.run({
+      sessionId: session.id,
+      ticket: 2,
+      citation: CITATION,
+      missingFiles: ["docs/actions.md"],
+      reason: "Docs are regenerated.",
+    });
+    const after = await previewExport.run({ sessionId: session.id });
+
+    expect(after.ruleConflicts).toEqual([]);
+    expect(after.acceptedRuleConflicts).toEqual([
+      {
+        ticket: 2,
+        title: "Ticket 2",
+        citation: CITATION,
+        statement: "Docs follow the code.",
+        missingFiles: ["docs/actions.md"],
+        waiverId,
+        reason: "Docs are regenerated.",
+      },
+    ]);
+    expect({ exportBlocked: after.exportBlocked, exportBlockedReason: after.exportBlockedReason }).toEqual({
+      exportBlocked: before.exportBlocked,
+      exportBlockedReason: before.exportBlockedReason,
+    });
+  });
+
+  it("is empty with no waiver", async () => {
+    const { root, session } = await aSessionWithHandoff();
+    await groundNow(session.id, root, withClaim());
+    expect((await previewExport.run({ sessionId: session.id })).acceptedRuleConflicts).toEqual([]);
   });
 });

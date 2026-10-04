@@ -160,6 +160,7 @@ import {
   collisionKey,
   currentBriefGrounding,
   type BriefGroundingStaleReason,
+  type BriefGroundingWithStaleness,
 } from "./brief-grounding.js";
 import { getDb, schema } from "./db/index.js";
 import { pendingForProject, type PendingDelegationProposal } from "./delegation-values.js";
@@ -188,11 +189,12 @@ import {
   loadHandoffSource,
   renderBrief,
   renderHandoffMarkdown,
-  ruleConflicts,
+  partitionRuleConflicts,
   type ExportFacts,
   type ExportGateReason,
   type HandoffGrounding,
   type HandoffRow,
+  type HandoffSource,
   parseBriefs,
 } from "./handoff.js";
 import { getProject, measuredVisibility } from "./projects.js";
@@ -314,11 +316,53 @@ export interface ExportBundlePlan {
    */
   delegationProposals: PendingDelegationProposal[];
   /**
-   * Each rule conflict of the grounding (current or stale), in the order
-   * `ruleConflicts` returns them; empty with no handoff or no grounding.
-   * Never part of the export gate.
+   * Each open rule conflict of the grounding (current or stale), the ones no
+   * waiver accepts, in the order `ruleConflicts` returns them; empty with no
+   * handoff or no grounding. Never part of the export gate.
    */
   ruleConflicts: PreviewRuleConflict[];
+  /** The conflicts the owner accepted as is, with the waiver and its reason; same order and rules as `ruleConflicts`. */
+  acceptedRuleConflicts: PreviewAcceptedRuleConflict[];
+}
+
+export type PreviewAcceptedRuleConflict = PreviewRuleConflict & { waiverId: string; reason: string };
+
+/** The preview's two conflict lists, with each entry's ticket title added. */
+export function ruleConflictLists(
+  source: HandoffSource,
+  grounding: HandoffGrounding | null,
+): { ruleConflicts: PreviewRuleConflict[]; acceptedRuleConflicts: PreviewAcceptedRuleConflict[] } {
+  const titleOf = (ticket: number) => source.tickets.find((candidate) => candidate.number === ticket)?.title ?? "";
+  const { open, accepted } = partitionRuleConflicts(source, grounding);
+  return {
+    ruleConflicts: open.map((conflict) => ({ ...conflict, title: titleOf(conflict.ticket) })),
+    acceptedRuleConflicts: accepted.map((conflict) => ({ ...conflict, title: titleOf(conflict.ticket) })),
+  };
+}
+
+/** The grounding as the renderers take it. */
+export function handoffGroundingOf(grounding: BriefGroundingWithStaleness | null): HandoffGrounding | null {
+  return grounding
+    ? {
+        tickets: grounding.result.tickets,
+        commitRead: grounding.commitRead,
+        current: grounding.current,
+        staleReason: grounding.staleReason,
+        rulesRead: grounding.result.rulesRead,
+        delegationProposals: grounding.result.delegationProposals,
+      }
+    : null;
+}
+
+/** The session's conflict lists, both empty with no handoff or no loadable source. */
+export async function loadRuleConflictLists(
+  sessionId: string,
+): Promise<{ ruleConflicts: PreviewRuleConflict[]; acceptedRuleConflicts: PreviewAcceptedRuleConflict[] }> {
+  const empty = { ruleConflicts: [], acceptedRuleConflicts: [] };
+  if (!(await getHandoffRow(sessionId))) return empty;
+  const loaded = await loadHandoffSource(sessionId);
+  if (!("source" in loaded)) return empty;
+  return ruleConflictLists(loaded.source, handoffGroundingOf(await currentBriefGrounding(sessionId)));
 }
 
 /** One rule conflict, as the preview lists it. */
@@ -705,16 +749,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       ? "current"
       : "stale";
   const briefGroundingStaleReason = grounding && !grounding.current ? grounding.staleReason : null;
-  const groundingForRender: HandoffGrounding | null = grounding
-    ? {
-        tickets: grounding.result.tickets,
-        commitRead: grounding.commitRead,
-        current: grounding.current,
-        staleReason: grounding.staleReason,
-        rulesRead: grounding.result.rulesRead,
-        delegationProposals: grounding.result.delegationProposals,
-      }
-    : null;
+  const groundingForRender = handoffGroundingOf(grounding);
   const groundingCurrent = groundingForRender?.current === true;
 
   // Hoisted above the `if (handoff)` block so `preview-export` can report
@@ -727,7 +762,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   // whether the hash guard will keep any brief's file.
   const groundedBriefs: number[] = [];
   const ungroundedBriefs: UngroundedBrief[] = [];
-  const previewRuleConflicts: PreviewRuleConflict[] = [];
+  let previewLists: ReturnType<typeof ruleConflictLists> = { ruleConflicts: [], acceptedRuleConflicts: [] };
   if (handoff) {
     // Export is the one place grounding reaches the handoff's text: it
     // applies here, not at generation time, because grounding happens after
@@ -767,10 +802,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     const briefSource = "source" in loadedSource ? loadedSource.source : null;
     const wasEdited = handoff.editedAt !== null;
     if (briefSource) {
-      for (const conflict of ruleConflicts(briefSource, groundingForRender)) {
-        const title = briefSource.tickets.find((ticket) => ticket.number === conflict.ticket)?.title ?? "";
-        previewRuleConflicts.push({ ...conflict, title });
-      }
+      previewLists = ruleConflictLists(briefSource, groundingForRender);
     }
 
     // Only a current grounding says which files each ticket changes today, so
@@ -954,7 +986,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     groundedBriefs,
     ungroundedBriefs,
     delegationProposals: pendingForProject(project, grounding?.result.delegationProposals),
-    ruleConflicts: previewRuleConflicts,
+    ...previewLists,
   };
 }
 

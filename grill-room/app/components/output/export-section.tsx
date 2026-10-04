@@ -114,6 +114,7 @@ export function canExport({
 }
 
 type RuleConflict = PreviewResult["ruleConflicts"][number];
+type AcceptedRuleConflict = PreviewResult["acceptedRuleConflicts"][number];
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 
@@ -124,24 +125,136 @@ function delegationValueText(entry: { value: number } | { command: string } | { 
   return null;
 }
 
-/** Each rule conflict of the grounding as one advisory line, with the way out. No controls: export stays available. */
-export function RuleConflictList({ conflicts, t }: { conflicts: readonly RuleConflict[]; t: Translate }) {
+/** The key of one open conflict's reason text: its ticket, citation and missing files, never its position. */
+export function ruleConflictKey(conflict: {
+  ticket: number;
+  citation: string;
+  missingFiles: readonly string[];
+}): string {
+  return `${conflict.ticket}|${conflict.citation}|${conflict.missingFiles.join(",")}`;
+}
+
+/**
+ * Each open rule conflict of the grounding as one advisory line, with the way
+ * out. Without `onAccept` the lines carry no controls. Export stays available.
+ */
+export function RuleConflictList({
+  conflicts,
+  t,
+  reasons,
+  onReasonChange,
+  onAccept,
+  busy,
+}: {
+  conflicts: readonly RuleConflict[];
+  t: Translate;
+  /** Reason text per line, keyed by `ruleConflictKey(conflict)`. */
+  reasons?: Readonly<Record<string, string>>;
+  onReasonChange?: (key: string, reason: string) => void;
+  onAccept?: (ticket: number, citation: string, missingFiles: readonly string[], reason: string) => void;
+  /** True while either waiver mutation runs. */
+  busy?: boolean;
+}) {
   return (
     <div className="space-y-1">
       <h3 className="text-xs font-medium">{t("output.exportRuleConflictsHeading")}</h3>
-      <ul className="space-y-0.5 text-xs text-owed" data-testid="export-rule-conflicts">
-        {conflicts.map((conflict, index) => (
-          <li key={index} data-testid={`export-rule-conflict-${conflict.ticket}-${index}`}>
-            {t("output.exportRuleConflict", {
-              ticket: conflict.ticket,
-              title: conflict.title,
-              citation: conflict.citation,
-              files: conflict.missingFiles.join(", "),
-            })}
+      <ul className="space-y-1 text-xs text-owed" data-testid="export-rule-conflicts">
+        {conflicts.map((conflict, index) => {
+          const key = ruleConflictKey(conflict);
+          const reason = reasons?.[key] ?? "";
+          return (
+            <li
+              key={`${key}#${index}`}
+              className="space-y-1"
+              data-testid={`export-rule-conflict-${conflict.ticket}-${index}`}
+            >
+              <span>
+                {t("output.exportRuleConflict", {
+                  ticket: conflict.ticket,
+                  title: conflict.title,
+                  citation: conflict.citation,
+                  files: conflict.missingFiles.join(", "),
+                })}
+              </span>
+              {onAccept ? (
+                <span className="flex flex-wrap items-center gap-2">
+                  <Input
+                    type="text"
+                    maxLength={500}
+                    value={reason}
+                    aria-label={t("output.exportRuleConflictReasonLabel")}
+                    placeholder={t("output.exportRuleConflictReasonLabel")}
+                    className="h-7 max-w-md text-xs"
+                    data-testid={`export-rule-conflict-reason-${conflict.ticket}-${index}`}
+                    onChange={(event) => onReasonChange?.(key, event.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy === true || reason.trim().length === 0}
+                    data-testid={`export-rule-conflict-accept-${conflict.ticket}-${index}`}
+                    onClick={() =>
+                      onAccept(conflict.ticket, conflict.citation, conflict.missingFiles, reason.trim())
+                    }
+                  >
+                    {t("output.exportRuleConflictAccept")}
+                  </Button>
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-xs text-muted-foreground">{t("output.exportRuleConflictsAdvice")}</p>
+    </div>
+  );
+}
+
+/** The conflicts the owner accepted as is, each with its reason and a Remove button. Presentational: the section holds the mutation. */
+export function AcceptedRuleConflictList({
+  accepted,
+  t,
+  onRemove,
+  busy,
+}: {
+  accepted: readonly AcceptedRuleConflict[];
+  t: Translate;
+  onRemove?: (waiverId: string) => void;
+  busy?: boolean;
+}) {
+  return (
+    <div className="space-y-1">
+      <h3 className="text-xs font-medium">{t("output.exportAcceptedRuleConflictsHeading")}</h3>
+      <ul className="space-y-1 text-xs" data-testid="export-accepted-rule-conflicts">
+        {accepted.map((conflict, index) => (
+          <li
+            key={conflict.waiverId + index}
+            className="flex flex-wrap items-center gap-2"
+            data-testid={`export-accepted-rule-conflict-${conflict.ticket}-${index}`}
+          >
+            <span>
+              {t("output.exportAcceptedRuleConflict", {
+                ticket: conflict.ticket,
+                title: conflict.title,
+                citation: conflict.citation,
+                files: conflict.missingFiles.join(", "),
+                reason: conflict.reason,
+              })}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy === true}
+              data-testid={`export-accepted-rule-conflict-remove-${conflict.ticket}-${index}`}
+              onClick={() => onRemove?.(conflict.waiverId)}
+            >
+              {t("output.exportRuleConflictRemove")}
+            </Button>
           </li>
         ))}
       </ul>
-      <p className="text-xs text-muted-foreground">{t("output.exportRuleConflictsAdvice")}</p>
     </div>
   );
 }
@@ -300,6 +413,8 @@ export function ExportSection({
   const [visibilityOverride, setVisibilityOverride] =
     useState<VisibilityResult | null>(null);
   const [recheckingVisibility, setRecheckingVisibility] = useState(false);
+  /** The reason typed on each open rule conflict, keyed by `ruleConflictKey`. */
+  const [conflictReasons, setConflictReasons] = useState<Record<string, string>>({});
 
   const debouncedSlug = useDebounced(slugDraft, SLUG_DEBOUNCE_MS);
   const slugBlank = slugDraft !== null && slugDraft.trim().length === 0;
@@ -348,6 +463,25 @@ export function ExportSection({
   };
   const confirmDelegation = useActionMutation("confirm-delegation-value", refreshAfterDecision);
   const dismissDelegation = useActionMutation("dismiss-delegation-proposal", refreshAfterDecision);
+  const refetchPreview = () => {
+    void queryClient.invalidateQueries({ queryKey: ["action"] });
+  };
+  const waiveConflict = useActionMutation("waive-rule-conflict", {
+    onSuccess: (_result, variables) => {
+      setConflictReasons((current) => {
+        const rest = { ...current };
+        delete rest[ruleConflictKey(variables)];
+        return rest;
+      });
+      refetchPreview();
+    },
+    onError: refetchPreview,
+  });
+  const removeWaiver = useActionMutation("remove-rule-waiver", {
+    onSuccess: refetchPreview,
+    onError: refetchPreview,
+  });
+  const waiverBusy = waiveConflict.isPending || removeWaiver.isPending;
   const busyDelegationSlot =
     (confirmDelegation.isPending ? confirmDelegation.variables?.slot : undefined) ??
     (dismissDelegation.isPending ? dismissDelegation.variables?.slot : undefined) ??
@@ -581,7 +715,24 @@ export function ExportSection({
               ) : null}
             </div>
             {plan.ruleConflicts.length > 0 ? (
-              <RuleConflictList conflicts={plan.ruleConflicts} t={t} />
+              <RuleConflictList
+                conflicts={plan.ruleConflicts}
+                t={t}
+                reasons={conflictReasons}
+                onReasonChange={(key, reason) => setConflictReasons((current) => ({ ...current, [key]: reason }))}
+                onAccept={(ticket, citation, missingFiles, reason) =>
+                  waiveConflict.mutate({ sessionId, ticket, citation, missingFiles: [...missingFiles], reason })
+                }
+                busy={waiverBusy}
+              />
+            ) : null}
+            {plan.acceptedRuleConflicts.length > 0 ? (
+              <AcceptedRuleConflictList
+                accepted={plan.acceptedRuleConflicts}
+                t={t}
+                onRemove={(waiverId) => removeWaiver.mutate({ sessionId, waiverId })}
+                busy={waiverBusy}
+              />
             ) : null}
             {plan.delegationProposals.length > 0 ? (
               <DelegationProposalList
