@@ -959,6 +959,45 @@ function lifecycleSection(
 }
 
 /**
+ * The two-lens block of "Reviewing a ticket": the tickets the grounding's
+ * scout flagged for two review lenses, each with the rule line that flags it,
+ * then the two lenses and how the delivery recipe ends the review. Null when
+ * no build ticket of this handoff is flagged. A stale grounding's flags
+ * still count; gates and tickets not in the handoff are skipped.
+ */
+function twoLensBlock(source: HandoffSource, grounding: HandoffGrounding | null): string[] | null {
+  if (grounding === null) return null;
+  const total = source.tickets.length;
+  const flagged = source.tickets
+    .filter((ticket) => !isGate(ticket))
+    .sort((a, b) => a.number - b.number)
+    .flatMap((ticket) => {
+      const flag = groundingEntryFor(grounding, ticket)?.twoLensReview ?? null;
+      return flag === null
+        ? []
+        : [`- **${padTicketNumber(ticket.number, total)} ${ticket.title}** (${inlineCode(flag.citation)})`];
+    });
+  if (flagged.length === 0) return null;
+  const recipeSentence =
+    source.project.deliveryRecipe === "pull-request"
+      ? "For these tickets, neither reviewer runs `gh pr ready`: you mark the pull request ready once both approve, and merge only then."
+      : "For these tickets, merge only once both reviewers approve, and record both verdicts.";
+  return [
+    "**Two lenses.** These tickets get two reviewers instead of one, each with fresh context and its own lens, because the repository's review rule says so for them:",
+    "",
+    ...flagged,
+    "",
+    "Each of the two reviewers takes one lens:",
+    "",
+    "- **Correctness lens.** Tries to break the change against the spec and the ticket: every example the ticket gives, the seams with the tickets it builds on, files changed outside its boundaries, and claims the diff does not support.",
+    "- **Tests lens.** Checks that every acceptance criterion has a test that fails with its change reverted, that every example the ticket gives is tested, and, when the change touches both a model prompt and the check that enforces it, that a seam test shows every answer the prompt describes passes the check.",
+    "",
+    recipeSentence,
+    "",
+  ];
+}
+
+/**
  * The fixed "Reviewing a ticket" section, present only when the project's
  * adversarial review switch is on. Its verdict paragraph is the one part
  * that varies: a pull-request comment and `gh pr ready`, or, for local
@@ -1000,6 +1039,7 @@ function reviewingSection(source: HandoffSource, grounding: HandoffGrounding | n
     "Every ticket is reviewed by a second, fresh-context agent before it can be merged.",
     "",
     ...ruleParagraph,
+    ...(twoLensBlock(source, grounding) ?? []),
     "**Inputs.** The reviewer gets the spec, the ticket, its delegation brief and the diff — never the builder's report.",
     "",
     "**What to try to break.** Unmet acceptance criteria, changes outside the file boundaries, untested edge cases, seams with the tickets this one builds on, and claims the diff does not support.",

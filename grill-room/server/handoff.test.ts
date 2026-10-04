@@ -2819,3 +2819,145 @@ describe("the repository's delegation values in HANDOFF", () => {
     }
   });
 });
+
+describe("two review lenses in HANDOFF", () => {
+  const RECIPES = ["pull-request", "local-merge"] as const;
+  const RECIPE_SENTENCE = {
+    "pull-request":
+      "For these tickets, neither reviewer runs `gh pr ready`: you mark the pull request ready once both approve, and merge only then.",
+    "local-merge": "For these tickets, merge only once both reviewers approve, and record both verdicts.",
+  } as const;
+  const LENSES = [
+    "Each of the two reviewers takes one lens:",
+    "",
+    "- **Correctness lens.** Tries to break the change against the spec and the ticket: every example the ticket gives, the seams with the tickets it builds on, files changed outside its boundaries, and claims the diff does not support.",
+    "- **Tests lens.** Checks that every acceptance criterion has a test that fails with its change reverted, that every example the ticket gives is tested, and, when the change touches both a model prompt and the check that enforces it, that a seam test shows every answer the prompt describes passes the check.",
+  ];
+
+  function groundingFlagging(flags: Record<number, string | null>, extra: Partial<HandoffGrounding> = {}): HandoffGrounding {
+    return {
+      tickets: Object.entries(flags).map(
+        ([number, citation]) =>
+          ({ number: Number(number), twoLensReview: citation === null ? null : { citation } }) as unknown as HandoffGrounding["tickets"][number],
+      ),
+      commitRead: null,
+      current: true,
+      staleReason: null,
+      ...extra,
+    };
+  }
+
+  function unflagged(grounding: HandoffGrounding): HandoffGrounding {
+    return { ...grounding, tickets: grounding.tickets.map((entry) => ({ ...entry, twoLensReview: null })) };
+  }
+
+  function block(recipe: (typeof RECIPES)[number], lines: string[]): string {
+    return [
+      "**Two lenses.** These tickets get two reviewers instead of one, each with fresh context and its own lens, because the repository's review rule says so for them:",
+      "",
+      ...lines,
+      "",
+      ...LENSES,
+      "",
+      RECIPE_SENTENCE[recipe],
+      "",
+    ].join("\n");
+  }
+
+  function renderWith(source: HandoffSource, grounding: HandoffGrounding | null): string {
+    return renderHandoffMarkdown(source, false, undefined, grounding);
+  }
+
+  it("lists the tickets flagged for two review lenses with the rule that flags each", () => {
+    const CITE = "`.claude/rules/worktrees.md:75`";
+    for (const deliveryRecipe of RECIPES) {
+      const source = aSource({ deliveryRecipe });
+      const gateSource = aSourceWithGate({ deliveryRecipe });
+      const insertAt = "**Inputs.**";
+      const expectBlock = (src: HandoffSource, grounding: HandoffGrounding, lines: string[], label: string) => {
+        const text = renderWith(src, grounding);
+        const expected = block(deliveryRecipe, lines);
+        expect(text, label).toContain(expected);
+        const reference = renderWith(src, unflagged(grounding));
+        expect(reference.split(insertAt).length, label).toBe(2);
+        expect(text, label).toBe(reference.replace(insertAt, () => `${expected}\n${insertAt}`));
+      };
+      const expectNone = (src: HandoffSource, grounding: HandoffGrounding | null, label: string) => {
+        expect(renderWith(src, grounding), `${deliveryRecipe} ${label}`).not.toContain("Two lenses");
+      };
+
+      expectNone(source, null, "no grounding");
+      expectNone(source, groundingFlagging({ 1: null, 2: null, 3: null }), "no ticket flagged");
+      expectBlock(source, groundingFlagging({ 2: ".claude/rules/worktrees.md:75" }), [`- **02 Export the bundle** (${CITE})`], `${deliveryRecipe} one flag`);
+      expectBlock(
+        source,
+        groundingFlagging({ 3: ".claude/rules/worktrees.md:75", 1: "AGENTS.md:7" }),
+        [`- **01 Register projects** (\`AGENTS.md:7\`)`, `- **03 Propose a slug** (${CITE})`],
+        `${deliveryRecipe} number order`,
+      );
+      expectBlock(
+        gateSource,
+        groundingFlagging({ 2: "AGENTS.md:7", 3: ".claude/rules/worktrees.md:75" }),
+        [`- **03 Export the bundle** (${CITE})`],
+        `${deliveryRecipe} gate skipped`,
+      );
+      expectNone(gateSource, groundingFlagging({ 2: "AGENTS.md:7" }), "only a gate flagged");
+      expectBlock(
+        source,
+        groundingFlagging({ 9: "AGENTS.md:7", 2: ".claude/rules/worktrees.md:75" }),
+        [`- **02 Export the bundle** (${CITE})`],
+        `${deliveryRecipe} unknown ticket`,
+      );
+      expectBlock(
+        source,
+        groundingFlagging({ 2: ".claude/rules/worktrees.md:75" }, { current: false, staleReason: "head-moved" }),
+        [`- **02 Export the bundle** (${CITE})`],
+        `${deliveryRecipe} stale`,
+      );
+
+      const flagged = groundingFlagging({ 2: ".claude/rules/worktrees.md:75" });
+      const confirmed = renderHandoffMarkdown(
+        aSource({
+          deliveryRecipe,
+          delegationValuesJson: serializeDelegationValues({ reviewRule: { citation: ".claude/rules/worktrees.md:90-96" } }),
+        }),
+        false,
+        undefined,
+        flagged,
+      );
+      const ruleAt = confirmed.indexOf("**The repository's review rule.**");
+      expect(ruleAt, deliveryRecipe).toBeGreaterThan(-1);
+      expect(ruleAt, deliveryRecipe).toBeLessThan(confirmed.indexOf("**Two lenses.**"));
+      expect(confirmed.indexOf("**Two lenses.**"), deliveryRecipe).toBeLessThan(confirmed.indexOf("**Inputs.**"));
+
+      const pending = renderWith(source, {
+        ...flagged,
+        delegationProposals: { maxTicketsInFlight: null, pruneCommand: null, reviewRule: { citation: "AGENTS.md:7" }, preflight: null },
+      });
+      const proposedAt = pending.indexOf("**A proposed review rule.**");
+      expect(proposedAt, deliveryRecipe).toBeGreaterThan(-1);
+      expect(proposedAt, deliveryRecipe).toBeLessThan(pending.indexOf("**Two lenses.**"));
+
+      expect(renderHandoff(source).markdown, deliveryRecipe).not.toContain("Two lenses");
+    }
+  });
+
+  it("renders nothing about two lenses when the review switch is off", () => {
+    for (const deliveryRecipe of RECIPES) {
+      const text = renderWith(aSource({ deliveryRecipe, adversarialReview: false }), groundingFlagging({ 2: ".claude/rules/worktrees.md:75" }));
+      for (const phrase of ["Two lenses", "Correctness lens", "Tests lens"]) {
+        expect(text, `${deliveryRecipe} ${phrase}`).not.toContain(phrase);
+      }
+    }
+  });
+
+  it("a grounding with no flags leaves the review section as it was", () => {
+    for (const deliveryRecipe of RECIPES) {
+      const source = aSource({ deliveryRecipe });
+      const grounded = renderWith(source, groundingFlagging({ 1: null, 2: null, 3: null }));
+      expect(section(grounded, "## Reviewing a ticket"), deliveryRecipe).toBe(
+        section(renderHandoff(source).markdown, "## Reviewing a ticket"),
+      );
+    }
+  });
+});
