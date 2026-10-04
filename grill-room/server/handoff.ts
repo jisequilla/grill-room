@@ -154,6 +154,21 @@ export interface HandoffSource {
    * hashes as before.
    */
   consistencyNotCurrent?: boolean;
+  /**
+   * The owner's accepted rule conflicts, earliest first. Applied at export
+   * only, to the conflicts a grounding finds, so they never enter
+   * {@link handoffFingerprint}.
+   */
+  ruleWaivers?: readonly HandoffRuleWaiver[];
+}
+
+/** An owner's acceptance of a rule conflict on one ticket, with the reason. */
+export interface HandoffRuleWaiver {
+  id: string;
+  ticket: number;
+  rulePath: string;
+  missingFiles: string[];
+  reason: string;
 }
 
 /** An open reopen card, as the handoff renders it. */
@@ -628,7 +643,7 @@ function preflightLines(source: HandoffSource, grounding: HandoffGrounding | nul
     : [PREFLIGHT_BULLET, "", PREFLIGHT_PROMPT];
 }
 
-function citationPath(citation: string): string {
+export function citationPath(citation: string): string {
   return citation.slice(0, citation.lastIndexOf(":"));
 }
 
@@ -1223,13 +1238,53 @@ export function ruleConflicts(source: HandoffSource, grounding: HandoffGrounding
     });
 }
 
+export type AcceptedRuleConflict = RuleConflict & { waiverId: string; reason: string };
+
+function normalizedPathSet(paths: readonly string[]): string[] {
+  return [...new Set(paths.map((file) => path.posix.normalize(file)))].sort();
+}
+
+function waiverApplies(waiver: HandoffRuleWaiver, conflict: RuleConflict): boolean {
+  if (waiver.ticket !== conflict.ticket) return false;
+  if (path.posix.normalize(waiver.rulePath) !== path.posix.normalize(citationPath(conflict.citation))) return false;
+  const waived = normalizedPathSet(waiver.missingFiles);
+  const missing = normalizedPathSet(conflict.missingFiles);
+  return waived.length === missing.length && waived.every((file, index) => file === missing[index]);
+}
+
+/** The rule conflicts split into the open ones and those the owner accepted, each in `ruleConflicts` order. */
+export function partitionRuleConflicts(
+  source: HandoffSource,
+  grounding: HandoffGrounding | null,
+): { open: RuleConflict[]; accepted: AcceptedRuleConflict[] } {
+  const open: RuleConflict[] = [];
+  const accepted: AcceptedRuleConflict[] = [];
+  for (const conflict of ruleConflicts(source, grounding)) {
+    const waiver = (source.ruleWaivers ?? []).find((candidate) => waiverApplies(candidate, conflict));
+    if (waiver) accepted.push({ ...conflict, waiverId: waiver.id, reason: waiver.reason });
+    else open.push(conflict);
+  }
+  return { open, accepted };
+}
+
 const OPEN_QUESTIONS_HEADING = "## Questions the spec and tickets leave open";
 
 /** The open-questions section, or the not-judged paragraph in its place; null when neither applies. */
 function openQuestionsSection(source: HandoffSource, grounding: HandoffGrounding | null): string | null {
   const total = source.tickets.length;
   const titles = new Map(source.tickets.map((ticket) => [ticket.number, ticket.title]));
-  const conflicts = ruleConflicts(source, grounding);
+  const { open: conflicts, accepted } = partitionRuleConflicts(source, grounding);
+  const acceptedBlock =
+    accepted.length === 0
+      ? []
+      : [
+          "**Rule conflicts accepted as is.** The owner accepted each of these with the reason given. The ticket keeps its file boundaries; its brief tells the builder to leave the files outside them alone.",
+          "",
+          ...accepted.map(
+            (conflict) =>
+              `- **${padTicketNumber(conflict.ticket, total)} ${titles.get(conflict.ticket)}**: ${inlineCode(conflict.citation)} requires ${conflict.missingFiles.map(inlineCode).join(", ")}, outside its file boundaries. Accepted: ${conflict.reason}`,
+          ),
+        ];
   const conflictBlock =
     conflicts.length === 0
       ? []
@@ -1262,8 +1317,9 @@ function openQuestionsSection(source: HandoffSource, grounding: HandoffGrounding
             ),
           ];
   }
-  if (body.length === 0 && conflictBlock.length === 0) return null;
-  const parts = body.length > 0 && conflictBlock.length > 0 ? [...body, "", ...conflictBlock] : [...body, ...conflictBlock];
+  const blocks = [body, conflictBlock, acceptedBlock].filter((block) => block.length > 0);
+  if (blocks.length === 0) return null;
+  const parts = blocks.flatMap((block, index) => (index === 0 ? block : ["", ...block]));
   return [OPEN_QUESTIONS_HEADING, "", ...parts].join("\n");
 }
 
@@ -1279,7 +1335,9 @@ function briefOpenQuestionsSection(
     );
     return side ? [`- ${card.question} ("${side.quote}")`] : [];
   });
-  const conflicts = ruleConflicts(source, grounding).filter((conflict) => conflict.ticket === ticket.number);
+  const conflicts = partitionRuleConflicts(source, grounding).open.filter(
+    (conflict) => conflict.ticket === ticket.number,
+  );
   if (quoting.length === 0 && conflicts.length === 0) return null;
   const cards =
     quoting.length === 0
@@ -1568,7 +1626,12 @@ function fileBoundariesContent(
   return groups.length > 0 ? groups.join("\n\n") : "No files to create or edit.";
 }
 
-function codebaseFactsContent(entry: HandoffTicketGrounding): string {
+function codebaseFactsContent(
+  source: HandoffSource,
+  ticket: HandoffTicket,
+  grounding: HandoffGrounding | null,
+  entry: HandoffTicketGrounding,
+): string {
   const lines = [
     ...entry.facts.map((fact) => `- ${fact.statement} (\`${fact.citation}\`)`),
     ...(entry.rules ?? []).map((rule) => {
@@ -1577,7 +1640,21 @@ function codebaseFactsContent(entry: HandoffTicketGrounding): string {
       return `- Repository rule: ${rule.statement} (${inlineCode(rule.citation)}).${required}`;
     }),
   ];
-  return lines.length === 0 ? "No codebase facts cited." : lines.join("\n");
+  if (lines.length === 0) return "No codebase facts cited.";
+  const accepted = partitionRuleConflicts(source, grounding).accepted.filter(
+    (conflict) => conflict.ticket === ticket.number,
+  );
+  if (accepted.length === 0) return lines.join("\n");
+  return [
+    ...lines,
+    "",
+    "**Accepted rule conflicts.** The owner accepted these as is: this ticket leaves the files below alone on purpose. Do not edit them, and do not stop and report over these rules:",
+    "",
+    ...accepted.map(
+      (conflict) =>
+        `- ${inlineCode(conflict.citation)} requires ${conflict.missingFiles.map(inlineCode).join(", ")}. Reason: ${conflict.reason}`,
+    ),
+  ].join("\n");
 }
 
 /**
@@ -1609,7 +1686,11 @@ function fileBoundariesSection(
 }
 
 /** The "Codebase facts" section: today's empty slot, or the grounded facts, cited. */
-function codebaseFactsSection(ticket: HandoffTicket, grounding: HandoffGrounding | null): string {
+function codebaseFactsSection(
+  source: HandoffSource,
+  ticket: HandoffTicket,
+  grounding: HandoffGrounding | null,
+): string {
   const entry = groundingEntryFor(grounding, ticket);
   if (!entry) {
     return [
@@ -1620,7 +1701,7 @@ function codebaseFactsSection(ticket: HandoffTicket, grounding: HandoffGrounding
       "_Slot for the orchestrating session: verified facts about the code this ticket touches._",
     ].join("\n");
   }
-  return ["## Codebase facts", "", codebaseFactsContent(entry)].join("\n");
+  return ["## Codebase facts", "", codebaseFactsContent(source, ticket, grounding, entry)].join("\n");
 }
 
 /**
@@ -1714,7 +1795,7 @@ export function renderBrief(
     ].join("\n"),
     briefOpenQuestionsSection(source, ticket, grounding),
     fileBoundariesSection(source, ticket, grounding),
-    codebaseFactsSection(ticket, grounding),
+    codebaseFactsSection(source, ticket, grounding),
     buildsOnSection(source, ticket, grounding),
     provedBySection(ticket, grounding),
     [
@@ -1872,6 +1953,28 @@ export async function loadHandoffSource(
     : [];
   const consistencyNotCurrent = spec.consistencyAttemptedFor != null && !current;
 
+  const numberById = new Map(tickets.map((ticket) => [ticket.id, ticket.number]));
+  const ruleWaivers: HandoffRuleWaiver[] = (
+    await db
+      .select()
+      .from(schema.ruleWaivers)
+      .where(eq(schema.ruleWaivers.sessionId, sessionId))
+      .orderBy(schema.ruleWaivers.createdAt, schema.ruleWaivers.id)
+  ).flatMap((row) => {
+    const ticket = numberById.get(row.ticketId);
+    return ticket === undefined
+      ? []
+      : [
+          {
+            id: row.id,
+            ticket,
+            rulePath: row.rulePath,
+            missingFiles: JSON.parse(row.missingFilesJson) as string[],
+            reason: row.reason,
+          },
+        ];
+  });
+
   return {
     source: {
       session: { id: session.id, title: session.title, idea: session.idea },
@@ -1909,6 +2012,7 @@ export async function loadHandoffSource(
       uncoveredStories: uncovered,
       openCards,
       consistencyNotCurrent,
+      ruleWaivers,
     },
   };
 }

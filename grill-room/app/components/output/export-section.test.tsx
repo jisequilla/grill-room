@@ -4,7 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import enUS from "@/i18n/en-US";
 
-import { canExport, DelegationProposalList, RuleConflictList } from "@/components/output/export-section";
+import {
+  AcceptedRuleConflictList,
+  canExport,
+  DelegationProposalList,
+  RuleConflictList,
+  ruleConflictKey,
+} from "@/components/output/export-section";
 
 type Proposal = Parameters<typeof DelegationProposalList>[0]["proposals"][number];
 
@@ -181,6 +187,128 @@ describe("RuleConflictList", () => {
     );
     expect(positions.every((position) => position >= 0)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+});
+
+describe("RuleConflictList controls", () => {
+  const keyOf = ruleConflictKey;
+  const props = (overrides: Partial<Parameters<typeof RuleConflictList>[0]> = {}) => ({
+    conflicts: [TWO, THREE],
+    t,
+    onAccept: vi.fn(),
+    onReasonChange: vi.fn(),
+    ...overrides,
+  });
+  const buttonOf = (tree: ReactNode, testId: string) => byTestId(tree, testId);
+
+  it("renders a reason input and an Accept button per line only when onAccept is given", () => {
+    const withControls = renderToStaticMarkup(<RuleConflictList {...props()} />);
+    expect(withControls).toContain('data-testid="export-rule-conflict-reason-2-0"');
+    expect(withControls).toContain('data-testid="export-rule-conflict-accept-2-0"');
+    expect(withControls).toContain('data-testid="export-rule-conflict-reason-3-1"');
+    expect(withControls).toContain('data-testid="export-rule-conflict-accept-3-1"');
+    expect(withControls).toContain('maxLength="500"');
+    expect(withControls).toContain(">Accept as is<");
+
+    const without = renderToStaticMarkup(<RuleConflictList conflicts={[TWO, THREE]} t={t} />);
+    expect(without).not.toContain("export-rule-conflict-reason");
+    expect(without).not.toContain("export-rule-conflict-accept");
+  });
+
+  it("disables Accept with an empty reason, enables it with one, and disables it while busy", () => {
+    const empty = RuleConflictList(props({ reasons: { [keyOf(THREE)]: "  " } }));
+    expect(buttonOf(empty, "export-rule-conflict-accept-2-0").props.disabled).toBe(true);
+    expect(buttonOf(empty, "export-rule-conflict-accept-3-1").props.disabled).toBe(true);
+
+    const typed = RuleConflictList(props({ reasons: { [keyOf(THREE)]: "Later." } }));
+    expect(buttonOf(typed, "export-rule-conflict-accept-2-0").props.disabled).toBe(true);
+    expect(buttonOf(typed, "export-rule-conflict-accept-3-1").props.disabled).toBe(false);
+
+    const busy = RuleConflictList(props({ reasons: { [keyOf(THREE)]: "Later." }, busy: true }));
+    expect(buttonOf(busy, "export-rule-conflict-accept-3-1").props.disabled).toBe(true);
+
+    const markup = (reasons: Record<string, string>) =>
+      renderToStaticMarkup(<RuleConflictList {...props({ reasons })} />);
+    const acceptMarkup = (html: string, id: string) =>
+      html.slice(html.indexOf(`data-testid="${id}"`) - 120, html.indexOf(`data-testid="${id}"`) + 60);
+    expect(acceptMarkup(markup({}), "export-rule-conflict-accept-3-1")).toContain('disabled=""');
+    expect(acceptMarkup(markup({ [keyOf(THREE)]: "Later." }), "export-rule-conflict-accept-3-1")).not.toContain(
+      'disabled=""',
+    );
+  });
+
+  it("calls onAccept with the line's ticket, citation, missing files and trimmed reason", () => {
+    const onAccept = vi.fn();
+    const tree = RuleConflictList(
+      props({ onAccept, reasons: { [keyOf(TWO)]: "  Docs are generated.  ", [keyOf(THREE)]: "Other." } }),
+    );
+    (buttonOf(tree, "export-rule-conflict-accept-2-0").props.onClick as () => void)();
+    expect(onAccept).toHaveBeenCalledExactlyOnceWith(
+      2,
+      "CLAUDE.md:12",
+      ["AGENTS.md", "docs/actions.md"],
+      "Docs are generated.",
+    );
+  });
+
+  it("reports typed text under the line's key", () => {
+    const onReasonChange = vi.fn();
+    const tree = RuleConflictList(props({ onReasonChange }));
+    (
+      byTestId(tree, "export-rule-conflict-reason-3-1").props.onChange as (event: {
+        target: { value: string };
+      }) => void
+    )({ target: { value: "Typed" } });
+    expect(onReasonChange).toHaveBeenCalledExactlyOnceWith(keyOf(THREE), "Typed");
+  });
+
+  it("keeps each line's own text when another line leaves the list", () => {
+    const reasons = { [keyOf(TWO)]: "First reason", [keyOf(THREE)]: "Second reason" };
+    const before = renderToStaticMarkup(<RuleConflictList {...props({ reasons })} />);
+    expect(before).toContain('value="First reason"');
+    expect(before).toContain('value="Second reason"');
+
+    const after = renderToStaticMarkup(<RuleConflictList {...props({ conflicts: [THREE], reasons })} />);
+    expect(after).toContain('data-testid="export-rule-conflict-reason-3-0"');
+    expect(after).toContain('value="Second reason"');
+    expect(after).not.toContain("First reason");
+  });
+});
+
+describe("AcceptedRuleConflictList", () => {
+  type Accepted = Parameters<typeof AcceptedRuleConflictList>[0]["accepted"][number];
+  const ACCEPTED: Accepted[] = [
+    { ...TWO, waiverId: "w-1", reason: "Docs are generated." },
+    { ...THREE, waiverId: "w-2", reason: "No period" },
+  ];
+
+  it("renders the heading, each line with its reason and a Remove button", () => {
+    const html = renderToStaticMarkup(<AcceptedRuleConflictList accepted={ACCEPTED} t={t} onRemove={noop} />);
+    expect(html).toContain("Rule conflicts accepted as is");
+    expect(html).toContain('data-testid="export-accepted-rule-conflicts"');
+    expect(html).toContain(
+      "Ticket 2 Store on disk: CLAUDE.md:12 requires AGENTS.md, docs/actions.md. Accepted: Docs are generated.",
+    );
+    expect(html).toContain("Ticket 3 Wire the UI: AGENTS.md:40 requires e2e/ui.spec.ts. Accepted: No period");
+    expect(html).toContain('data-testid="export-accepted-rule-conflict-2-0"');
+    expect(html).toContain('data-testid="export-accepted-rule-conflict-3-1"');
+    expect(html).toContain('data-testid="export-accepted-rule-conflict-remove-2-0"');
+    expect(html).toContain('data-testid="export-accepted-rule-conflict-remove-3-1"');
+    expect(html.match(/>Remove</g)).toHaveLength(2);
+  });
+
+  it("calls onRemove with the line's waiver id", () => {
+    const onRemove = vi.fn();
+    const tree = AcceptedRuleConflictList({ accepted: ACCEPTED, t, onRemove });
+    (byTestId(tree, "export-accepted-rule-conflict-remove-3-1").props.onClick as () => void)();
+    expect(onRemove).toHaveBeenCalledExactlyOnceWith("w-2");
+  });
+
+  it("disables Remove while busy", () => {
+    const tree = AcceptedRuleConflictList({ accepted: ACCEPTED, t, onRemove: noop, busy: true });
+    expect(byTestId(tree, "export-accepted-rule-conflict-remove-2-0").props.disabled).toBe(true);
+    const idle = AcceptedRuleConflictList({ accepted: ACCEPTED, t, onRemove: noop });
+    expect(byTestId(idle, "export-accepted-rule-conflict-remove-2-0").props.disabled).toBe(false);
   });
 });
 
