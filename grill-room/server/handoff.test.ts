@@ -3452,6 +3452,13 @@ describe("rule conflicts", () => {
       const handoffLine = (label: string, title: string, citation: string, files: string, tail = "") =>
         `- **${label} ${title}**: \`${citation}\` requires ${files}, outside its file boundaries.${tail}`;
       const BRIEF_OPEN_SECTION = `## Open questions on this ticket\n\n${BRIEF_BLOCK}`;
+      const briefOpenSection = (lines: string[]) =>
+        `## Open questions on this ticket\n\n${[BRIEF_BLOCK.split("\n")[0], "", ...lines].join("\n")}`;
+      const briefOpenLine = (citation: string, files: string) =>
+        `- \`${citation}\` (${STATEMENT}) requires ${files}, outside your file boundaries.`;
+      const briefRuleLine = (citation: string, files: string) =>
+        `- Repository rule: ${STATEMENT} (\`${citation}\`). It requires ${files}.`;
+      const briefAccepted = (lines: string[]) => [BRIEF_ACCEPTED_INTRO, "", ...lines].join("\n");
       const renderWith = (source: HandoffSource, grounding: HandoffGrounding) =>
         renderHandoffMarkdown(source, false, undefined, grounding);
 
@@ -3522,11 +3529,24 @@ describe("rule conflicts", () => {
 
       it("renders the reason verbatim, with no terminator added", () => {
         for (const deliveryRecipe of RECIPES) {
-          const source = withWaivers(aSource({ deliveryRecipe }), { ...NGINE_WAIVER, reason: "no period" });
+          const base = aSource({ deliveryRecipe });
+          const source = withWaivers(base, { ...NGINE_WAIVER, reason: "no period" });
           const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])]);
           expect(renderWith(source, grounding), deliveryRecipe).toContain(`boundaries. Accepted: no period\n\n`);
-          expect(briefOf(source, grounding), deliveryRecipe).toContain(
-            "`consumers/db-writer/package.json`. Reason: no period\n\n",
+          expect(renderWith(source, grounding), deliveryRecipe).toBe(
+            renderWith(base, grounding).replace(
+              openBlock([openLine02]),
+              () => acceptedBlock([acceptedLine02("no period")]),
+            ),
+          );
+          const brief = briefOf(source, grounding);
+          expect(brief, deliveryRecipe).toContain("`consumers/db-writer/package.json`. Reason: no period\n\n");
+          const reference = briefOf(base, grounding);
+          const accepted = briefAccepted(["- `" + CITE + "` requires `consumers/db-writer/package.json`. Reason: no period"]);
+          expect(brief, deliveryRecipe).toBe(
+            reference
+              .replace(`${BRIEF_OPEN_SECTION}\n\n`, () => "")
+              .replace(RULE_LINE, () => `${RULE_LINE}\n\n${accepted}`),
           );
         }
       });
@@ -3564,6 +3584,43 @@ describe("rule conflicts", () => {
           expect(brief, deliveryRecipe).toContain(
             `${BRIEF_ACCEPTED_INTRO}\n\n- \`AGENTS.md:10\` requires \`c.ts\`. Reason: ${REASON}`,
           );
+          const open10 = briefOpenLine("AGENTS.md:10", "`c.ts`");
+          const open40 = briefOpenLine("AGENTS.md:40", "`d.ts`");
+          const rule40 = briefRuleLine("AGENTS.md:40", "`d.ts`");
+          const acceptedBrief = briefAccepted([`- \`AGENTS.md:10\` requires \`c.ts\`. Reason: ${REASON}`]);
+          expect(brief, deliveryRecipe).toBe(
+            briefOf(aSource({ deliveryRecipe }), grounding)
+              .replace(briefOpenSection([open10, open40]), () => briefOpenSection([open40]))
+              .replace(rule40, () => `${rule40}\n\n${acceptedBrief}`),
+          );
+        }
+      });
+
+      it("accepts only the conflict whose missing files the waiver names", () => {
+        for (const deliveryRecipe of RECIPES) {
+          const base = aSource({ deliveryRecipe });
+          const grounding = groundingOf([
+            entry(2, ["x.ts"], [claim(["a.ts"], "AGENTS.md:10"), claim(["b.ts"], "AGENTS.md:10")]),
+          ]);
+          const lineA = handoffLine("02", "Export the bundle", "AGENTS.md:10", "`a.ts`");
+          const lineB = (tail = "") => handoffLine("02", "Export the bundle", "AGENTS.md:10", "`b.ts`", tail);
+          const source = withWaivers(base, waiver("w1", 2, "AGENTS.md", ["b.ts"]));
+          const accepted = acceptedBlock([lineB(` Accepted: ${REASON}`)]);
+          expect(renderWith(source, grounding), deliveryRecipe).toBe(
+            renderWith(base, grounding).replace(
+              openBlock([lineA, lineB()]),
+              () => `${openBlock([lineA])}\n\n${accepted}`,
+            ),
+          );
+          const openA = briefOpenLine("AGENTS.md:10", "`a.ts`");
+          const openB = briefOpenLine("AGENTS.md:10", "`b.ts`");
+          const ruleB = briefRuleLine("AGENTS.md:10", "`b.ts`");
+          const acceptedBrief = briefAccepted([`- \`AGENTS.md:10\` requires \`b.ts\`. Reason: ${REASON}`]);
+          expect(briefOf(source, grounding), deliveryRecipe).toBe(
+            briefOf(base, grounding)
+              .replace(briefOpenSection([openA, openB]), () => briefOpenSection([openA]))
+              .replace(ruleB, () => `${ruleB}\n\n${acceptedBrief}`),
+          );
         }
       });
 
@@ -3583,6 +3640,16 @@ describe("rule conflicts", () => {
           expect(text, deliveryRecipe).toBe(
             reference.replace(openBlock([line02, line03]), () => `${openBlock([line02])}\n\n${accepted}`),
           );
+          const waived = withWaivers(base, waiver("w1", 3, "CLAUDE.md", ["d.ts"], "Bumped in a follow-up."));
+          expect(briefOf(waived, grounding, 2), deliveryRecipe).toBe(briefOf(base, grounding, 2));
+          const rule03 = briefRuleLine("CLAUDE.md:4", "`d.ts`");
+          const acceptedBrief = briefAccepted(["- `CLAUDE.md:4` requires `d.ts`. Reason: Bumped in a follow-up."]);
+          expect(briefOf(waived, grounding, 3), deliveryRecipe).toBe(
+            briefOf(base, grounding, 3)
+              .replace(`${briefOpenSection([briefOpenLine("CLAUDE.md:4", "`d.ts`")]).split("\n\n").slice(1).join("\n\n")}\n\n`, () => "")
+              .replace(rule03, () => `${rule03}\n\n${acceptedBrief}`),
+          );
+          expect(briefOf(waived, grounding, 2), deliveryRecipe).not.toContain("Accepted rule conflicts");
         }
       });
 
@@ -3607,6 +3674,8 @@ describe("rule conflicts", () => {
           const withWaiver = withWaivers(source, NGINE_WAIVER);
           expect(renderWith(withWaiver, widened), deliveryRecipe).not.toContain("accepted as is");
           expect(briefOf(withWaiver, widened), deliveryRecipe).not.toContain("Accepted rule conflicts");
+          expect(renderWith(withWaiver, widened), deliveryRecipe).toBe(renderWith(source, widened));
+          expect(briefOf(withWaiver, widened), deliveryRecipe).toBe(briefOf(source, widened));
         }
       });
     });
