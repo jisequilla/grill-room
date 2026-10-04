@@ -53,7 +53,10 @@ What gr-c0t.26 to .34 added, on a real repository:
 
 ## Findings
 
-1. **Step 0 assumes a committed bundle.** Both briefs say "The bundle is committed in this repository, so your worktree has it." The export is untracked until the owner commits it, so a builder's worktree would lack `spec.md` and the issue file. This is the tracked-visibility recipe working as designed, but nothing in the export result or HANDOFF tells the owner the commit is the step that makes the briefs true.
+Findings 2 to 4 are filed as gr-c0t.36 and gr-c0t.37.
+
+
+1. **Step 0 assumes a committed bundle, and the export says to commit it.** Both briefs say "The bundle is committed in this repository, so your worktree has it." The export leaves the bundle untracked, as designed, and says so twice: `export-session` returned `visibility.hasUntracked: true` with the warning that worktree agents will not see untracked files and the exact `git add`/`commit` remedy, which the UI shows as an "Agents may not see these files" alert; and HANDOFF.md's lifecycle has the operator commit the bundle once before delegating. The briefs' sentence holds once that step is done. Nothing to fix.
 2. **The test-name rule refuses data-driven suites.** See "The refusal". It cost 35.5 s and $0.32 and left a misleading edit target.
 3. **A Builds-on check that greps for a spelling.** Ticket 02's check passes only if ticket 01 writes the literal `Proxy-Authorization`. The check should test behaviour (run the corpus) or the ticket that produces the symbol should name its spelling.
 4. **A docs ticket's proof is a version grep.** `grep -q '0.23.2'` proves a version is mentioned, not that the rule, the 20-versus-32 departure or the residue are documented.
