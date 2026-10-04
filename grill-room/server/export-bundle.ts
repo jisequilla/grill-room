@@ -188,6 +188,7 @@ import {
   loadHandoffSource,
   renderBrief,
   renderHandoffMarkdown,
+  ruleConflicts,
   type ExportFacts,
   type ExportGateReason,
   type HandoffGrounding,
@@ -312,6 +313,22 @@ export interface ExportBundlePlan {
    * Never part of the export gate.
    */
   delegationProposals: PendingDelegationProposal[];
+  /**
+   * Each rule conflict of the grounding (current or stale), in the order
+   * `ruleConflicts` returns them; empty with no handoff or no grounding.
+   * Never part of the export gate.
+   */
+  ruleConflicts: PreviewRuleConflict[];
+}
+
+/** One rule conflict, as the preview lists it. */
+export interface PreviewRuleConflict {
+  ticket: number;
+  /** The ticket's title, as `source.tickets` holds it. */
+  title: string;
+  citation: string;
+  statement: string;
+  missingFiles: string[];
 }
 
 export interface PlanExportBundleInput {
@@ -710,6 +727,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   // whether the hash guard will keep any brief's file.
   const groundedBriefs: number[] = [];
   const ungroundedBriefs: UngroundedBrief[] = [];
+  const previewRuleConflicts: PreviewRuleConflict[] = [];
   if (handoff) {
     // Export is the one place grounding reaches the handoff's text: it
     // applies here, not at generation time, because grounding happens after
@@ -748,6 +766,12 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     const loadedSource = await loadHandoffSource(session.id);
     const briefSource = "source" in loadedSource ? loadedSource.source : null;
     const wasEdited = handoff.editedAt !== null;
+    if (briefSource) {
+      for (const conflict of ruleConflicts(briefSource, groundingForRender)) {
+        const title = briefSource.tickets.find((ticket) => ticket.number === conflict.ticket)?.title ?? "";
+        previewRuleConflicts.push({ ...conflict, title });
+      }
+    }
 
     // Only a current grounding says which files each ticket changes today, so
     // only then may HANDOFF.md separate overlapping tickets and say that
@@ -930,6 +954,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     groundedBriefs,
     ungroundedBriefs,
     delegationProposals: pendingForProject(project, grounding?.result.delegationProposals),
+    ruleConflicts: previewRuleConflicts,
   };
 }
 

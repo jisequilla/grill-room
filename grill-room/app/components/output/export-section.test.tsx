@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import enUS from "@/i18n/en-US";
 
-import { DelegationProposalList } from "@/components/output/export-section";
+import { canExport, DelegationProposalList, RuleConflictList } from "@/components/output/export-section";
 
 type Proposal = Parameters<typeof DelegationProposalList>[0]["proposals"][number];
 
@@ -135,5 +135,67 @@ describe("DelegationProposalList", () => {
     (byTestId(tree, "export-delegation-dismiss-pruneCommand").props.onClick as () => void)();
     expect(onDismiss).toHaveBeenCalledExactlyOnceWith("pruneCommand");
     expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+});
+
+type Conflict = Parameters<typeof RuleConflictList>[0]["conflicts"][number];
+type Plan = NonNullable<Parameters<typeof canExport>[0]["plan"]>;
+
+const TWO: Conflict = {
+  ticket: 2,
+  title: "Store on disk",
+  citation: "CLAUDE.md:12",
+  statement: "A new action is listed in the docs.",
+  missingFiles: ["AGENTS.md", "docs/actions.md"],
+};
+const THREE: Conflict = {
+  ticket: 3,
+  title: "Wire the UI",
+  citation: "AGENTS.md:40",
+  statement: "UI changes add a scenario.",
+  missingFiles: ["e2e/ui.spec.ts"],
+};
+
+describe("RuleConflictList", () => {
+  const html = renderToStaticMarkup(<RuleConflictList conflicts={[TWO, THREE, THREE]} t={t} />);
+
+  it("renders the heading and the advice line", () => {
+    expect(html).toContain("Rule conflicts");
+    expect(html).toContain(t("output.exportRuleConflictsAdvice").replace("'", "&#x27;"));
+    expect(html).toContain('data-testid="export-rule-conflicts"');
+  });
+
+  it("renders one item per conflict with ticket, title, citation and every missing file", () => {
+    expect(html).toContain(
+      "Ticket 2 Store on disk: CLAUDE.md:12 requires AGENTS.md, docs/actions.md, outside its file boundaries.",
+    );
+    expect(html).toContain(
+      "Ticket 3 Wire the UI: AGENTS.md:40 requires e2e/ui.spec.ts, outside its file boundaries.",
+    );
+    expect(html.match(/<li /g)).toHaveLength(3);
+  });
+
+  it("indexes items by their position in the whole list, in the order given", () => {
+    const positions = ["export-rule-conflict-2-0", "export-rule-conflict-3-1", "export-rule-conflict-3-2"].map(
+      (id) => html.indexOf(`data-testid="${id}"`),
+    );
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+});
+
+describe("canExport ignores rule conflicts", () => {
+  const inputs = { slugBlank: false, settling: false, fetching: false, exporting: false };
+  const planWith = (exportBlocked: boolean, ruleConflicts: Conflict[]) =>
+    ({ exportBlocked, ruleConflicts }) as unknown as Plan;
+
+  it("allows export with or without conflicts when otherwise allowed", () => {
+    expect(canExport({ ...inputs, plan: planWith(false, []) })).toBe(true);
+    expect(canExport({ ...inputs, plan: planWith(false, [TWO]) })).toBe(true);
+  });
+
+  it("refuses export with or without conflicts when exportBlocked", () => {
+    expect(canExport({ ...inputs, plan: planWith(true, []) })).toBe(false);
+    expect(canExport({ ...inputs, plan: planWith(true, [TWO]) })).toBe(false);
   });
 });
