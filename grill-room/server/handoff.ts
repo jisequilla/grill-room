@@ -1184,50 +1184,124 @@ function handoffCardPlaces(card: HandoffCard): ConsistencyPlace[] {
     : [card.at, card.against];
 }
 
+export interface RuleConflict {
+  ticket: number;
+  citation: string;
+  statement: string;
+  missingFiles: string[];
+}
+
+/** The required files of one claim that no boundary path matches, each once, in the claim's order and spelling. */
+function missingRequiredFiles(entry: HandoffTicketGrounding, requiredFiles: readonly string[]): string[] {
+  const boundaries = new Set(entry.filesToChange.map((file) => path.posix.normalize(file.path)));
+  const seen = new Set<string>();
+  const missing: string[] = [];
+  for (const file of requiredFiles) {
+    const normalized = path.posix.normalize(file);
+    if (boundaries.has(normalized) || seen.has(normalized)) continue;
+    seen.add(normalized);
+    missing.push(file);
+  }
+  return missing;
+}
+
+/** Every rule conflict of the handoff's build tickets, by ticket number, then claim order. */
+export function ruleConflicts(source: HandoffSource, grounding: HandoffGrounding | null): RuleConflict[] {
+  if (grounding === null) return [];
+  return [...source.tickets]
+    .filter((ticket) => !isGate(ticket))
+    .sort((a, b) => a.number - b.number)
+    .flatMap((ticket) => {
+      const entry = groundingEntryFor(grounding, ticket);
+      if (entry === null) return [];
+      return (entry.rules ?? []).flatMap((claim) => {
+        const missingFiles = missingRequiredFiles(entry, claim.requiredFiles);
+        return missingFiles.length === 0
+          ? []
+          : [{ ticket: ticket.number, citation: claim.citation, statement: claim.statement, missingFiles }];
+      });
+    });
+}
+
 const OPEN_QUESTIONS_HEADING = "## Questions the spec and tickets leave open";
 
 /** The open-questions section, or the not-judged paragraph in its place; null when neither applies. */
-function openQuestionsSection(source: HandoffSource): string | null {
-  if (source.consistencyNotCurrent === true) {
-    return [
-      OPEN_QUESTIONS_HEADING,
-      "",
-      'The consistency check has not judged these tickets: it failed, it was skipped because the breakdown has more tickets than one check covers, or it ran on an earlier spec or breakdown. So nothing here lists what the spec and tickets leave a builder to decide. Before delegating a ticket, read it for a limit with no value, a rule stated for one case only, an "X or Y" left open, a value called defined with no default, or a target named only by its role, and get the owner\'s answer to each.',
-    ].join("\n");
-  }
-  const cards = source.openCards ?? [];
-  if (cards.length === 0) return null;
+function openQuestionsSection(source: HandoffSource, grounding: HandoffGrounding | null): string | null {
   const total = source.tickets.length;
-  return [
-    OPEN_QUESTIONS_HEADING,
-    "",
-    "The consistency check found these statements, which leave a builder to decide something the owner never decided. Before delegating a ticket a question quotes, get the owner's answer and put it in the delegation prompt; the question is also in that ticket's brief. Answer the rest before calling the feature done.",
-    "",
-    ...cards.map(
-      (card) =>
-        `- ${card.question} (${handoffCardPlaces(card)
-          .map((place) => handoffCardPlace(place, total))
-          .join("; ")})`,
-    ),
-  ].join("\n");
+  const titles = new Map(source.tickets.map((ticket) => [ticket.number, ticket.title]));
+  const conflicts = ruleConflicts(source, grounding);
+  const conflictBlock =
+    conflicts.length === 0
+      ? []
+      : [
+          "**Rule conflicts.** A repository rule requires each of these tickets to change files outside its file boundaries. Before delegating one, widen its boundaries and ground the briefs again, or tell its builder in the delegation prompt how to handle the rule; otherwise its brief tells the builder to stop and report.",
+          "",
+          ...conflicts.map(
+            (conflict) =>
+              `- **${padTicketNumber(conflict.ticket, total)} ${titles.get(conflict.ticket)}**: ${inlineCode(conflict.citation)} requires ${conflict.missingFiles.map(inlineCode).join(", ")}, outside its file boundaries.`,
+          ),
+        ];
+  let body: string[];
+  if (source.consistencyNotCurrent === true) {
+    body = [
+      'The consistency check has not judged these tickets: it failed, it was skipped because the breakdown has more tickets than one check covers, or it ran on an earlier spec or breakdown. So nothing here lists what the spec and tickets leave a builder to decide. Before delegating a ticket, read it for a limit with no value, a rule stated for one case only, an "X or Y" left open, a value called defined with no default, or a target named only by its role, and get the owner\'s answer to each.',
+    ];
+  } else {
+    const cards = source.openCards ?? [];
+    body =
+      cards.length === 0
+        ? []
+        : [
+            "The consistency check found these statements, which leave a builder to decide something the owner never decided. Before delegating a ticket a question quotes, get the owner's answer and put it in the delegation prompt; the question is also in that ticket's brief. Answer the rest before calling the feature done.",
+            "",
+            ...cards.map(
+              (card) =>
+                `- ${card.question} (${handoffCardPlaces(card)
+                  .map((place) => handoffCardPlace(place, total))
+                  .join("; ")})`,
+            ),
+          ];
+  }
+  if (body.length === 0 && conflictBlock.length === 0) return null;
+  const parts = body.length > 0 && conflictBlock.length > 0 ? [...body, "", ...conflictBlock] : [...body, ...conflictBlock];
+  return [OPEN_QUESTIONS_HEADING, "", ...parts].join("\n");
 }
 
 /** The open cards quoting this ticket, each with this ticket's side; null when none does. */
-function briefOpenQuestionsSection(source: HandoffSource, ticket: HandoffTicket): string | null {
+function briefOpenQuestionsSection(
+  source: HandoffSource,
+  ticket: HandoffTicket,
+  grounding: HandoffGrounding | null,
+): string | null {
   const quoting = (source.openCards ?? []).flatMap((card) => {
     const side = [card.at, card.against].find(
       (place) => place !== null && place.artefact === "ticket" && place.ticket === ticket.number,
     );
     return side ? [`- ${card.question} ("${side.quote}")`] : [];
   });
-  if (quoting.length === 0) return null;
-  return [
-    "## Open questions on this ticket",
-    "",
-    "The consistency check found that this ticket leaves these questions to the owner. Do not choose an answer yourself: if your prompt does not give you the owner's answer to one, stop and report the question instead of building around it.",
-    "",
-    ...quoting,
-  ].join("\n");
+  const conflicts = ruleConflicts(source, grounding).filter((conflict) => conflict.ticket === ticket.number);
+  if (quoting.length === 0 && conflicts.length === 0) return null;
+  const cards =
+    quoting.length === 0
+      ? []
+      : [
+          "The consistency check found that this ticket leaves these questions to the owner. Do not choose an answer yourself: if your prompt does not give you the owner's answer to one, stop and report the question instead of building around it.",
+          "",
+          ...quoting,
+        ];
+  const block =
+    conflicts.length === 0
+      ? []
+      : [
+          "**Rule conflicts.** A repository rule requires files outside this ticket's file boundaries. Do not edit them, and do not skip the rule: unless your prompt tells you how to handle it, stop and report the conflict instead of building around it.",
+          "",
+          ...conflicts.map(
+            (conflict) =>
+              `- ${inlineCode(conflict.citation)} (${conflict.statement}) requires ${conflict.missingFiles.map(inlineCode).join(", ")}, outside your file boundaries.`,
+          ),
+        ];
+  const gap = cards.length > 0 && block.length > 0 ? [""] : [];
+  return ["## Open questions on this ticket", "", ...cards, ...gap, ...block].join("\n");
 }
 
 export function renderHandoffMarkdown(
@@ -1269,7 +1343,7 @@ export function renderHandoffMarkdown(
     ...(source.uncoveredStories && source.uncoveredStories.length > 0
       ? [uncoveredStoriesSection(source.uncoveredStories)]
       : []),
-    ...[openQuestionsSection(source)].filter((section): section is string => section !== null),
+    ...[openQuestionsSection(source, grounding)].filter((section): section is string => section !== null),
     lifecycleSection(source, groundingCurrent, grounding),
   ];
   if (source.project.adversarialReview) sections.push(reviewingSection(source, grounding));
@@ -1495,8 +1569,15 @@ function fileBoundariesContent(
 }
 
 function codebaseFactsContent(entry: HandoffTicketGrounding): string {
-  if (entry.facts.length === 0) return "No codebase facts cited.";
-  return entry.facts.map((fact) => `- ${fact.statement} (\`${fact.citation}\`)`).join("\n");
+  const lines = [
+    ...entry.facts.map((fact) => `- ${fact.statement} (\`${fact.citation}\`)`),
+    ...(entry.rules ?? []).map((rule) => {
+      const required =
+        rule.requiredFiles.length === 0 ? "" : ` It requires ${rule.requiredFiles.map(inlineCode).join(", ")}.`;
+      return `- Repository rule: ${rule.statement} (${inlineCode(rule.citation)}).${required}`;
+    }),
+  ];
+  return lines.length === 0 ? "No codebase facts cited." : lines.join("\n");
 }
 
 /**
@@ -1631,7 +1712,7 @@ export function renderBrief(
       "",
       ticket.body,
     ].join("\n"),
-    briefOpenQuestionsSection(source, ticket),
+    briefOpenQuestionsSection(source, ticket, grounding),
     fileBoundariesSection(source, ticket, grounding),
     codebaseFactsSection(ticket, grounding),
     buildsOnSection(source, ticket, grounding),
