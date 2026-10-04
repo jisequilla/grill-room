@@ -910,7 +910,7 @@ what they name, and not re-read files for the entries it keeps.
 stricter contract, `handoffScoutContractSchema`, which `jsonSchemaFor` hands
 the command line: the citation pattern, and the three `buildsOn` forms as an
 `anyOf`. What the contract cannot say, and the server cannot verify, the
-prompt states: a dependency's check must fail until the blocker lands.
+prompt states: a dependency's check must fail until the blocker lands, a grep check searches only for text the blocker's ticket states, and a grep proof chains one grep per thing the ticket adds.
 
 The grounding is **current** only while the handoff's fingerprint over today's
 inputs is the one it was made for and the project's `HEAD` is the commit it

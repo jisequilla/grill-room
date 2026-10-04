@@ -1748,6 +1748,46 @@ describe("what the adapter sends for a handoff scout", () => {
     expect(prompt).not.toContain("do not\n  add one");
   });
 
+  it("says a grep check searches only for text the blocker's ticket states", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  A grep `check` searches only for text the blocker's ticket states word",
+        "  for word. A path or `symbol` you name yourself counts only when that",
+        "  ticket states it too. Text the blocker's builder may spell another way,",
+        "  such as a name a case-insensitive pattern can match, does not prove the",
+        "  blocker landed. When the blocker's ticket fixes no spelling, the",
+        "  `check` runs what the blocker provides instead: its test, or a command",
+        "  that exercises it.",
+      ].join("\n"),
+    );
+    expect(prompt).toContain(
+      [
+        "  a command that already passes on today's code proves nothing. A ticket",
+        "  with no blockers has an empty list.",
+        "  A grep `check` searches only for text the blocker's ticket states word",
+      ].join("\n"),
+    );
+  });
+
+  it("says a grep proof chains one grep per thing the ticket adds", async () => {
+    const { prompt } = await handoffInvocation();
+
+    expect(prompt).toContain(
+      [
+        "  A grep proof searches for text this ticket's body requires the change",
+        "  to add, word for word. When the body requires several things, chain one",
+        "  grep per thing with `&&`, so the proof fails while any of them is",
+        "  missing. A version number, a date, or a word that can appear for another",
+        "  reason proves only that it was mentioned.",
+      ].join("\n"),
+    );
+    expect(prompt).toContain(
+      ["  say in a fact that the spec excludes tests.", "  A grep proof searches for text this ticket's body requires the change"].join("\n"),
+    );
+  });
+
   it("tells the scout how to ground a ticket that sets up the test runner, and one whose blocker sets it up", async () => {
     const { prompt } = await handoffInvocation();
 
