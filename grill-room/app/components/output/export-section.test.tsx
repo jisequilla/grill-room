@@ -157,7 +157,7 @@ const THREE: Conflict = {
 };
 
 describe("RuleConflictList", () => {
-  const html = renderToStaticMarkup(<RuleConflictList conflicts={[TWO, THREE, TWO]} t={t} />);
+  const html = renderToStaticMarkup(<RuleConflictList conflicts={[TWO, THREE, THREE]} t={t} />);
 
   it("renders the heading and the advice line", () => {
     expect(html).toContain("Rule conflicts");
@@ -176,7 +176,7 @@ describe("RuleConflictList", () => {
   });
 
   it("indexes items by their position in the whole list, in the order given", () => {
-    const positions = ["export-rule-conflict-2-0", "export-rule-conflict-3-1", "export-rule-conflict-2-2"].map(
+    const positions = ["export-rule-conflict-2-0", "export-rule-conflict-3-1", "export-rule-conflict-3-2"].map(
       (id) => html.indexOf(`data-testid="${id}"`),
     );
     expect(positions.every((position) => position >= 0)).toBe(true);
