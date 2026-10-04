@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { storeBriefGrounding } from "../server/brief-grounding.js";
 import { handoffFingerprint, loadHandoffSource } from "../server/handoff.js";
+import type { HandoffScoutResult } from "../server/interviewer/index.js";
 import { aHandoffScoutResult } from "../server/interviewer/test-fixtures.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
@@ -120,12 +121,16 @@ async function aSessionWithHandoff() {
 }
 
 /** Grounds `session` right now: a valid result, today's fingerprint, HEAD as read. */
-async function groundNow(sessionId: string, root: string): Promise<void> {
+async function groundNow(
+  sessionId: string,
+  root: string,
+  result: HandoffScoutResult = aHandoffScoutResult(),
+): Promise<void> {
   const loaded = await loadHandoffSource(sessionId);
   if (!("source" in loaded)) throw new Error("expected a handoff source");
   await storeBriefGrounding({
     sessionId,
-    result: aHandoffScoutResult(),
+    result,
     commitRead: headOf(root),
     handoffFingerprint: handoffFingerprint(loaded.source),
     model: "sonnet",
@@ -213,5 +218,48 @@ describe("preview-export: brief grounding state", () => {
     expect(preview.groundingStaleReason).toBe("head-moved");
     expect(preview.exportBlocked).toBe(false);
     expect(preview.exportBlockedReason).toBeNull();
+  });
+});
+
+describe("preview-export: delegation proposals", () => {
+  useTestDatabase();
+
+  it("lists the grounding's pending delegation proposals; export stays available", async () => {
+    const { root, session } = await aSessionWithHandoff();
+    const base = aHandoffScoutResult();
+    const prune = { command: "just prune", citation: "CLAUDE.md:4" };
+    await groundNow(session.id, root, {
+      ...base,
+      delegationProposals: { ...base.delegationProposals, pruneCommand: prune },
+    });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.delegationProposals).toEqual([
+      { slot: "pruneCommand", proposal: prune, confirmed: null },
+    ]);
+    expect(preview.exportBlocked).toBe(false);
+    expect(preview.exportBlockedReason).toBeNull();
+  });
+
+  it("lists nothing without a grounding", async () => {
+    const { session } = await aSessionWithHandoff();
+
+    expect((await previewExport.run({ sessionId: session.id })).delegationProposals).toEqual([]);
+  });
+
+  it("still lists them from a stale grounding", async () => {
+    const { root, session } = await aSessionWithHandoff();
+    const base = aHandoffScoutResult();
+    await groundNow(session.id, root, {
+      ...base,
+      delegationProposals: { ...base.delegationProposals, reviewRule: { citation: "CLAUDE.md:3" } },
+    });
+    commitMore(root);
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.groundingState).toBe("stale");
+    expect(preview.delegationProposals.map((entry) => entry.slot)).toEqual(["reviewRule"]);
   });
 });

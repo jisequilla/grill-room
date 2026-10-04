@@ -31,6 +31,7 @@ import breakIntoTickets from "./break-into-tickets.js";
 import createSession from "./create-session.js";
 import generateHandoff from "./generate-handoff.js";
 import getBriefGrounding from "./get-brief-grounding.js";
+import getProject from "./get-project.js";
 import getSession from "./get-session.js";
 import getTurn from "./get-turn.js";
 import groundBriefs from "./ground-briefs.js";
@@ -332,6 +333,30 @@ describe("ground-briefs", () => {
     expect(read.grounding!.result.tickets[0]!.rules).toEqual(scripted.tickets[0]!.rules);
     expect(read.grounding!.result.tickets[0]!.twoLensReview).toEqual({ citation: "CLAUDE.md:1" });
     expect(read.grounding!.result.delegationProposals).toEqual(scripted.delegationProposals);
+  });
+
+  it("an accepted grounding with proposals leaves the project's delegation columns and cap unchanged", async () => {
+    const { session } = await aSessionWithHandoff();
+    const projectId = (await getSession.run({ id: session.id })).projectId!;
+    const before = await getProject.run({ id: projectId });
+    const scripted = aHandoffScoutResult();
+    scripted.delegationProposals = {
+      maxTicketsInFlight: { value: 2, citation: "CLAUDE.md:1" },
+      pruneCommand: { command: "just prune", citation: "CLAUDE.md:1" },
+      reviewRule: { citation: "CLAUDE.md:1" },
+      preflight: { citation: "CLAUDE.md:1" },
+    };
+    scriptInterviewer([{ kind: "handoff-scout", result: scripted }]);
+
+    await groundBriefs.run({ sessionId: session.id });
+
+    const stored = await getBriefGrounding.run({ sessionId: session.id });
+    expect(stored.grounding!.result.delegationProposals).toEqual(scripted.delegationProposals);
+    const after = await getProject.run({ id: projectId });
+    expect(after.delegationValuesJson).toBeNull();
+    expect(after.delegationProposalsJson).toBeNull();
+    expect(after.maxTicketsInFlight).toBe(before.maxTicketsInFlight);
+    expect(after).toEqual(before);
   });
 
   it("refuses a report that skips a glob-matched rule, and stores the retry that answers it", async () => {

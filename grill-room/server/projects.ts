@@ -788,6 +788,31 @@ export async function updateProject(
 }
 
 /**
+ * Write the owner's decision on a delegation proposal: only the columns given
+ * change, plus `updatedAt`. Callers pass values made by the serializers in
+ * `delegation-values.ts`.
+ */
+export async function setDelegationDecision(
+  id: string,
+  patch: {
+    delegationValuesJson?: string | null;
+    delegationProposalsJson?: string | null;
+    maxTicketsInFlight?: number;
+  },
+): Promise<{ project: Project } | Refused> {
+  const existing = await getProject(id);
+  if (!existing) {
+    return refuse("project-not-found", `Project not found: ${id}`);
+  }
+  const [row] = await getDb()
+    .update(schema.projects)
+    .set({ ...patch, updatedAt: new Date().toISOString() })
+    .where(eq(schema.projects.id, id))
+    .returning();
+  return { project: toProject(row) };
+}
+
+/**
  * Re-read a project's declared tracker and update only what it governs: the
  * stored commands and diagnostic always, and the export folder and slug
  * pattern only when the tracker is valid. A `tickets_dir` that overlaps the
