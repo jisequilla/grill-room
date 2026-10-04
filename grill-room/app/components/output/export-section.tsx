@@ -88,6 +88,33 @@ const DELEGATION_SLOT_LABEL_KEY: Record<DelegationProposal["slot"], string> = {
   preflight: "output.exportDelegationSlotPreflight",
 };
 
+/** Whether the export button is enabled. Rule conflicts are advisory and never read here. */
+export function canExport({
+  plan,
+  slugBlank,
+  settling,
+  fetching,
+  exporting,
+}: {
+  plan: PreviewResult | null | undefined;
+  slugBlank: boolean;
+  settling: boolean;
+  fetching: boolean;
+  exporting: boolean;
+}): boolean {
+  return (
+    plan !== undefined &&
+    plan !== null &&
+    !plan.exportBlocked &&
+    !slugBlank &&
+    !settling &&
+    !fetching &&
+    !exporting
+  );
+}
+
+type RuleConflict = PreviewResult["ruleConflicts"][number];
+
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 
 /** A confirmed value or a proposed one: the number or command when the slot has one, nothing for a rule that is only a citation. */
@@ -95,6 +122,28 @@ function delegationValueText(entry: { value: number } | { command: string } | { 
   if ("value" in entry) return String(entry.value);
   if ("command" in entry) return entry.command;
   return null;
+}
+
+/** Each rule conflict of the grounding as one advisory line, with the way out. No controls: export stays available. */
+export function RuleConflictList({ conflicts, t }: { conflicts: readonly RuleConflict[]; t: Translate }) {
+  return (
+    <div className="space-y-1">
+      <h3 className="text-xs font-medium">{t("output.exportRuleConflictsHeading")}</h3>
+      <ul className="space-y-0.5 text-xs text-owed" data-testid="export-rule-conflicts">
+        {conflicts.map((conflict, index) => (
+          <li key={index} data-testid={`export-rule-conflict-${conflict.ticket}-${index}`}>
+            {t("output.exportRuleConflict", {
+              ticket: conflict.ticket,
+              title: conflict.title,
+              citation: conflict.citation,
+              files: conflict.missingFiles.join(", "),
+            })}
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted-foreground">{t("output.exportRuleConflictsAdvice")}</p>
+    </div>
+  );
 }
 
 /**
@@ -368,21 +417,20 @@ export function ExportSection({
       : (actionErrorMessage(preview.error) ?? t("output.exportPreviewFailed"))
     : null;
 
-  const canExport =
-    plan !== undefined &&
-    plan !== null &&
-    !plan.exportBlocked &&
-    !slugBlank &&
-    !settling &&
-    !preview.isFetching &&
-    !exportSession.isPending;
+  const exportAllowed = canExport({
+    plan,
+    slugBlank,
+    settling,
+    fetching: preview.isFetching,
+    exporting: exportSession.isPending,
+  });
 
   const gateKey = plan?.exportBlockedReason
     ? EXPORT_GATE_KEY[plan.exportBlockedReason]
     : undefined;
 
   function runExport() {
-    if (!canExport || !plan) return;
+    if (!exportAllowed || !plan) return;
     setExportError(null);
     exportSession.mutate({
       sessionId,
@@ -532,6 +580,9 @@ export function ExportSection({
                 </ul>
               ) : null}
             </div>
+            {plan.ruleConflicts.length > 0 ? (
+              <RuleConflictList conflicts={plan.ruleConflicts} t={t} />
+            ) : null}
             {plan.delegationProposals.length > 0 ? (
               <DelegationProposalList
                 proposals={plan.delegationProposals}
@@ -555,7 +606,7 @@ export function ExportSection({
 
         <Button
           type="button"
-          disabled={!canExport}
+          disabled={!exportAllowed}
           onClick={runExport}
           data-testid="export-action"
         >

@@ -15,6 +15,7 @@ import listTickets from "./list-tickets.js";
 import previewExport from "./preview-export.js";
 import registerProject from "./register-project.js";
 import setTicketBlockedBy from "./set-ticket-blocked-by.js";
+import updateHandoff from "./update-handoff.js";
 
 const repos = useTempGitRepos();
 
@@ -261,5 +262,105 @@ describe("preview-export: delegation proposals", () => {
 
     expect(preview.groundingState).toBe("stale");
     expect(preview.delegationProposals.map((entry) => entry.slot)).toEqual(["reviewRule"]);
+  });
+});
+
+describe("preview-export: rule conflicts", () => {
+  useTestDatabase();
+
+  const CONFLICT = {
+    citation: "CLAUDE.md:12",
+    statement: "A new action is listed in the docs.",
+    missingFiles: ["AGENTS.md", "docs/actions.md"],
+  };
+
+  /** The scout result with one rule on ticket 2 that requires `requiredFiles`. */
+  function withRuleOnTicketTwo(requiredFiles: string[]): HandoffScoutResult {
+    const base = aHandoffScoutResult();
+    return {
+      ...base,
+      tickets: base.tickets.map((ticket) =>
+        ticket.number === 2
+          ? {
+              ...ticket,
+              rules: [{ citation: CONFLICT.citation, statement: CONFLICT.statement, requiredFiles }],
+            }
+          : ticket,
+      ),
+    };
+  }
+
+  const conflicting = () => withRuleOnTicketTwo(["src/ingest/queue.ts", ...CONFLICT.missingFiles]);
+
+  async function theBaseline(sessionId: string) {
+    const { exportBlocked, exportBlockedReason } = await previewExport.run({ sessionId });
+    return { exportBlocked, exportBlockedReason };
+  }
+
+  it("is empty with no handoff", async () => {
+    const root = repos.create();
+    const project = await registerProject.run({ root, verifyCommand: "pnpm test", workingExportFolder: ".scratch" });
+    const session = await createSession.run({ title: "No handoff", idea: "An idea.", projectId: project.id });
+    await insertSpec(session.id);
+
+    expect((await previewExport.run({ sessionId: session.id })).ruleConflicts).toEqual([]);
+  });
+
+  it("is empty with a handoff and no grounding", async () => {
+    const { session } = await aSessionWithHandoff();
+
+    expect((await previewExport.run({ sessionId: session.id })).ruleConflicts).toEqual([]);
+  });
+
+  it("is empty for a grounding with no conflict", async () => {
+    const { root, session } = await aSessionWithHandoff();
+    await groundNow(session.id, root, withRuleOnTicketTwo(["src/ingest/queue.ts"]));
+
+    expect((await previewExport.run({ sessionId: session.id })).ruleConflicts).toEqual([]);
+  });
+
+  it("lists a conflict on ticket 2 with its title; export stays as without it", async () => {
+    const { root, session } = await aSessionWithHandoff();
+    const baseline = await theBaseline(session.id);
+    await groundNow(session.id, root, conflicting());
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.ruleConflicts).toEqual([{ ticket: 2, title: "Ticket 2", ...CONFLICT }]);
+    expect({ exportBlocked: preview.exportBlocked, exportBlockedReason: preview.exportBlockedReason }).toEqual(
+      baseline,
+    );
+  });
+
+  it("lists the same conflict when ticket 2's brief is hand-edited", async () => {
+    const { root, session } = await aSessionWithHandoff();
+    await updateHandoff.run({
+      sessionId: session.id,
+      briefs: [{ ticketNumber: 2, markdown: "# Brief 02: Hand-edited\n\nWritten by hand.\n" }],
+    });
+    const baseline = await theBaseline(session.id);
+    await groundNow(session.id, root, conflicting());
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.ruleConflicts).toEqual([{ ticket: 2, title: "Ticket 2", ...CONFLICT }]);
+    expect({ exportBlocked: preview.exportBlocked, exportBlockedReason: preview.exportBlockedReason }).toEqual(
+      baseline,
+    );
+  });
+
+  it("lists the same conflict from a stale grounding", async () => {
+    const { root, session } = await aSessionWithHandoff();
+    const baseline = await theBaseline(session.id);
+    await groundNow(session.id, root, conflicting());
+    commitMore(root);
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.groundingState).toBe("stale");
+    expect(preview.ruleConflicts).toEqual([{ ticket: 2, title: "Ticket 2", ...CONFLICT }]);
+    expect({ exportBlocked: preview.exportBlocked, exportBlockedReason: preview.exportBlockedReason }).toEqual(
+      baseline,
+    );
   });
 });

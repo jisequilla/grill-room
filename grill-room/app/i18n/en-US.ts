@@ -878,6 +878,12 @@ const messages = {
     exportDelegationTradeoff:
       "Confirming or dismissing changes the handoff: regenerate it and ground the briefs again before exporting.",
 
+    exportRuleConflictsHeading: "Rule conflicts",
+    exportRuleConflict:
+      "Ticket {{ticket}} {{title}}: {{citation}} requires {{files}}, outside its file boundaries.",
+    exportRuleConflictsAdvice:
+      "Widen the ticket's file boundaries and ground the briefs again, or export as is: HANDOFF and the brief ask the builder to stop and report.",
+
     visibilityHeading: "File visibility",
     visibilityTracked: "Tracked",
     visibilityIgnored: "Ignored",
