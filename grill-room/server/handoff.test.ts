@@ -2834,11 +2834,17 @@ describe("two review lenses in HANDOFF", () => {
     "- **Tests lens.** Checks that every acceptance criterion has a test that fails with its change reverted, that every example the ticket gives is tested, and, when the change touches both a model prompt and the check that enforces it, that a seam test shows every answer the prompt describes passes the check.",
   ];
 
-  function groundingFlagging(flags: Record<number, string | null>, extra: Partial<HandoffGrounding> = {}): HandoffGrounding {
+  function groundingFlagging(
+    flags: Record<number, string | null> | Array<[number, string | null]>,
+    extra: Partial<HandoffGrounding> = {},
+  ): HandoffGrounding {
+    const entries: Array<[number, string | null]> = Array.isArray(flags)
+      ? flags
+      : Object.entries(flags).map(([number, citation]) => [Number(number), citation]);
     return {
-      tickets: Object.entries(flags).map(
+      tickets: entries.map(
         ([number, citation]) =>
-          ({ number: Number(number), twoLensReview: citation === null ? null : { citation } }) as unknown as HandoffGrounding["tickets"][number],
+          ({ number, twoLensReview: citation === null ? null : { citation } }) as unknown as HandoffGrounding["tickets"][number],
       ),
       commitRead: null,
       current: true,
@@ -2889,9 +2895,13 @@ describe("two review lenses in HANDOFF", () => {
       expectNone(source, null, "no grounding");
       expectNone(source, groundingFlagging({ 1: null, 2: null, 3: null }), "no ticket flagged");
       expectBlock(source, groundingFlagging({ 2: ".claude/rules/worktrees.md:75" }), [`- **02 Export the bundle** (${CITE})`], `${deliveryRecipe} one flag`);
+      const outOfOrderSource = { ...source, tickets: [...source.tickets].reverse() };
       expectBlock(
-        source,
-        groundingFlagging({ 3: ".claude/rules/worktrees.md:75", 1: "AGENTS.md:7" }),
+        outOfOrderSource,
+        groundingFlagging([
+          [3, ".claude/rules/worktrees.md:75"],
+          [1, "AGENTS.md:7"],
+        ]),
         [`- **01 Register projects** (\`AGENTS.md:7\`)`, `- **03 Propose a slug** (${CITE})`],
         `${deliveryRecipe} number order`,
       );
@@ -2916,24 +2926,22 @@ describe("two review lenses in HANDOFF", () => {
       );
 
       const flagged = groundingFlagging({ 2: ".claude/rules/worktrees.md:75" });
-      const confirmed = renderHandoffMarkdown(
-        aSource({
-          deliveryRecipe,
-          delegationValuesJson: serializeDelegationValues({ reviewRule: { citation: ".claude/rules/worktrees.md:90-96" } }),
-        }),
-        false,
-        undefined,
-        flagged,
-      );
+      const confirmedSource = aSource({
+        deliveryRecipe,
+        delegationValuesJson: serializeDelegationValues({ reviewRule: { citation: ".claude/rules/worktrees.md:90-96" } }),
+      });
+      expectBlock(confirmedSource, flagged, [`- **02 Export the bundle** (${CITE})`], `${deliveryRecipe} confirmed review rule`);
+      const confirmed = renderWith(confirmedSource, flagged);
       const ruleAt = confirmed.indexOf("**The repository's review rule.**");
       expect(ruleAt, deliveryRecipe).toBeGreaterThan(-1);
       expect(ruleAt, deliveryRecipe).toBeLessThan(confirmed.indexOf("**Two lenses.**"));
-      expect(confirmed.indexOf("**Two lenses.**"), deliveryRecipe).toBeLessThan(confirmed.indexOf("**Inputs.**"));
 
-      const pending = renderWith(source, {
+      const pendingGrounding: HandoffGrounding = {
         ...flagged,
         delegationProposals: { maxTicketsInFlight: null, pruneCommand: null, reviewRule: { citation: "AGENTS.md:7" }, preflight: null },
-      });
+      };
+      expectBlock(source, pendingGrounding, [`- **02 Export the bundle** (${CITE})`], `${deliveryRecipe} pending review rule`);
+      const pending = renderWith(source, pendingGrounding);
       const proposedAt = pending.indexOf("**A proposed review rule.**");
       expect(proposedAt, deliveryRecipe).toBeGreaterThan(-1);
       expect(proposedAt, deliveryRecipe).toBeLessThan(pending.indexOf("**Two lenses.**"));
