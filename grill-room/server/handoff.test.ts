@@ -2473,6 +2473,13 @@ describe("the repository's delegation values in HANDOFF", () => {
     return { tickets: [], commitRead: null, current: true, staleReason: null, ...extra };
   }
 
+  const NO_PROPOSALS = { maxTicketsInFlight: null, pruneCommand: null, reviewRule: null, preflight: null };
+
+  /** A grounding whose scout proposed the given slots, which is where pending proposals come from. */
+  function proposing(proposals: DelegationProposals, extra: Partial<HandoffGrounding> = {}): HandoffGrounding {
+    return aGrounding({ delegationProposals: { ...NO_PROPOSALS, ...proposals }, ...extra });
+  }
+
   function render(overrides: Partial<HandoffSource["project"]>, grounding: HandoffGrounding | null = null): string {
     return renderHandoffMarkdown(aSource(overrides), false, undefined, grounding);
   }
@@ -2526,10 +2533,7 @@ describe("the repository's delegation values in HANDOFF", () => {
         [1, "one ticket"],
         [4, "at most 4 tickets"],
       ] as const) {
-        const capPending = render({
-          ...common,
-          ...stored({}, { maxTicketsInFlight: { value, citation: "CLAUDE.md:12" } }),
-        });
+        const capPending = render(common, proposing({ maxTicketsInFlight: { value, citation: "CLAUDE.md:12" } }));
         const bullet = `- The repository proposes ${words} at a time (\`CLAUDE.md:12\`); it is not confirmed, so the cap above stands.`;
         expect(capPending, deliveryRecipe).toContain(`\n${bullet}\n`);
         expect(capPending, deliveryRecipe).toBe(
@@ -2548,10 +2552,10 @@ describe("the repository's delegation values in HANDOFF", () => {
         withNote(swap(base, pruneLine(true), confirmedStep), precedence(".claude/rules/worktrees.md")),
       );
 
-      const prunePending = render({
-        ...common,
-        ...stored({}, { pruneCommand: { command: "just prune-worktrees", citation: "CLAUDE.md:40" } }),
-      });
+      const prunePending = render(
+        common,
+        proposing({ pruneCommand: { command: "just prune-worktrees", citation: "CLAUDE.md:40" } }),
+      );
       const pendingPrune =
         "The repository proposes its own prune command, `just prune-worktrees` (`CLAUDE.md:40`); it is not confirmed, so the last step uses the default.";
       expect(prunePending, deliveryRecipe).toContain(`${pruneLine(true)}\n\n${pendingPrune}`);
@@ -2572,7 +2576,7 @@ describe("the repository's delegation values in HANDOFF", () => {
         withNote(swap(base, "\n\n**Inputs.**", `\n\n${confirmedRule}\n\n**Inputs.**`), precedence(".claude/rules/worktrees.md")),
       );
 
-      const reviewPending = render({ ...common, ...stored({}, { reviewRule: { citation: "AGENTS.md:7" } }) });
+      const reviewPending = render(common, proposing({ reviewRule: { citation: "AGENTS.md:7" } }));
       const pendingRule =
         "**A proposed review rule.** The repository may set its own review rule at `AGENTS.md:7`; it is not confirmed, so this section stands as written.";
       expect(reviewPending, deliveryRecipe).toContain(
@@ -2594,7 +2598,7 @@ describe("the repository's delegation values in HANDOFF", () => {
         withNote(swap(base, span, pointer), precedence(".claude/templates/delegation/preflight.md")),
       );
 
-      const preflightPending = render({ ...common, ...stored({}, { preflight: { citation: "AGENTS.md:30" } }) });
+      const preflightPending = render(common, proposing({ preflight: { citation: "AGENTS.md:30" } }));
       const pendingPreflight =
         "- The repository may have its own pre-flight procedure at `AGENTS.md:30`; it is not confirmed, so use the prompt above.";
       expect(preflightPending, deliveryRecipe).toContain(`\`PREFLIGHT: needs changes\` otherwise.\n\`\`\`\n\n${pendingPreflight}`);
@@ -2648,16 +2652,19 @@ describe("the repository's delegation values in HANDOFF", () => {
   });
 
   it("a proposal for a confirmed slot renders the confirmed text only", () => {
-    const confirmed = stored({ pruneCommand: { command: "just prune-worktrees", citation: "CLAUDE.md:40" } });
-    const both = stored(
-      { pruneCommand: { command: "just prune-worktrees", citation: "CLAUDE.md:40" } },
-      { pruneCommand: { command: "make prune", citation: "CLAUDE.md:41" } },
-    );
+    const confirmed = stored({ pruneCommand: { command: "just prune-worktrees", citation: "docs/prune.md:2" } });
+    const proposed = proposing({ pruneCommand: { command: "make prune", citation: "CLAUDE.md:4" } });
     for (const deliveryRecipe of RECIPES) {
-      const markdown = render({ deliveryRecipe, ...both });
+      const markdown = render({ deliveryRecipe, ...confirmed }, proposed);
       expect(markdown, deliveryRecipe).not.toContain("proposes its own prune command");
       expect(markdown, deliveryRecipe).not.toContain("make prune");
+      expect(markdown, deliveryRecipe).toContain(precedence("docs/prune.md"));
+      expect(markdown, deliveryRecipe).not.toContain("CLAUDE.md");
       expect(markdown, deliveryRecipe).toBe(render({ deliveryRecipe, ...confirmed }));
+      // The same proposal, with nothing confirmed, is pending: the grounding is what feeds the page.
+      expect(render({ deliveryRecipe }, proposed), deliveryRecipe).toContain(
+        "The repository proposes its own prune command, `make prune` (`CLAUDE.md:4`)",
+      );
     }
   });
 
@@ -2671,31 +2678,28 @@ describe("the repository's delegation values in HANDOFF", () => {
       expect(base, deliveryRecipe).not.toContain("the repository's rule wins");
       expect(base, deliveryRecipe).not.toContain("No repository delegation rules");
 
-      const twice = render({
-        deliveryRecipe,
-        ...stored(
-          {
+      const twice = render(
+        {
+          deliveryRecipe,
+          ...stored({
             pruneCommand: { command: "just prune", citation: ".claude/rules/worktrees.md:120" },
             reviewRule: { citation: ".claude/rules/worktrees.md:90-96" },
-          },
-          { maxTicketsInFlight: { value: 2, citation: "CLAUDE.md:12" } },
-        ),
-      });
+          }),
+        },
+        proposing({ maxTicketsInFlight: { value: 2, citation: "CLAUDE.md:12" } }),
+      );
       expect(twice, deliveryRecipe).toContain(
         `${precedence(".claude/rules/worktrees.md", "CLAUDE.md")}\n\n### Before launching a ticket`,
       );
 
-      const codePointOrder = render({
-        deliveryRecipe,
-        ...stored(
-          {},
-          {
-            maxTicketsInFlight: { value: 2, citation: "docs/x.md:1" },
-            pruneCommand: { command: "just prune", citation: "CLAUDE.md:2" },
-            reviewRule: { citation: "AGENTS.md:3" },
-          },
-        ),
-      });
+      const codePointOrder = render(
+        { deliveryRecipe },
+        proposing({
+          maxTicketsInFlight: { value: 2, citation: "docs/x.md:1" },
+          pruneCommand: { command: "just prune", citation: "CLAUDE.md:2" },
+          reviewRule: { citation: "AGENTS.md:3" },
+        }),
+      );
       expect(codePointOrder, deliveryRecipe).toContain(precedence("AGENTS.md", "CLAUDE.md", "docs/x.md"));
 
       // The paragraph follows the lifecycle's opening paragraph and sits before the first subsection.
@@ -2716,16 +2720,17 @@ describe("the repository's delegation values in HANDOFF", () => {
       expect(render({ deliveryRecipe }, aGrounding()), deliveryRecipe).toBe(base);
       expect(render({ deliveryRecipe }, aGrounding({ rulesRead: false })), deliveryRecipe).toBe(base);
       expect(render({ deliveryRecipe }, aGrounding({ delegationProposals: noProposals })), deliveryRecipe).toBe(base);
-      expect(
-        render(
-          { deliveryRecipe },
-          aGrounding({
-            rulesRead: true,
-            delegationProposals: { ...noProposals, pruneCommand: { command: "just prune", citation: "CLAUDE.md:1" } },
-          }),
-        ),
-        deliveryRecipe,
-      ).toBe(base);
+      const proposesPrune = aGrounding({
+        rulesRead: true,
+        delegationProposals: { ...noProposals, pruneCommand: { command: "just prune", citation: "CLAUDE.md:1" } },
+      });
+      const pendingPrune =
+        "The repository proposes its own prune command, `just prune` (`CLAUDE.md:1`); it is not confirmed, so the last step uses the default.";
+      const pendingRender = render({ deliveryRecipe }, proposesPrune);
+      expect(pendingRender, deliveryRecipe).toBe(
+        withNote(swap(base, pruneLine(true), `${pruneLine(true)}\n\n${pendingPrune}`), precedence("CLAUDE.md")),
+      );
+      expect(pendingRender, deliveryRecipe).not.toContain("No repository delegation rules");
 
       // Stored values win over the none-found line.
       const values = stored({ preflight: { citation: "AGENTS.md:9" } });
@@ -2754,15 +2759,62 @@ describe("the repository's delegation values in HANDOFF", () => {
   });
 
   it("renders the same text from the same stored inputs twice", () => {
-    const overrides = stored(
-      { pruneCommand: { command: "just prune", citation: "CLAUDE.md:4" } },
-      { preflight: { citation: "AGENTS.md:9" } },
-    );
+    const overrides = stored({ pruneCommand: { command: "just prune", citation: "CLAUDE.md:4" } });
     for (const deliveryRecipe of RECIPES) {
-      const grounding = aGrounding({ rulesRead: true });
+      const grounding = proposing({ preflight: { citation: "AGENTS.md:9" } }, { rulesRead: true });
       expect(render({ deliveryRecipe, ...overrides }, grounding)).toBe(render({ deliveryRecipe, ...overrides }, grounding));
+      expect(render({ deliveryRecipe, ...overrides }, grounding)).toContain(
+        "- The repository may have its own pre-flight procedure at `AGENTS.md:9`; it is not confirmed, so use the prompt above.",
+      );
       expect(renderHandoff(aSource({ deliveryRecipe, ...overrides })).markdown).toBe(
         renderHandoff(aSource({ deliveryRecipe, ...overrides })).markdown,
+      );
+    }
+  });
+
+  it("reads pending proposals from the grounding, and never from the dismissals column", () => {
+    const prune = { command: "just prune", citation: "CLAUDE.md:4" };
+    const rule = { citation: "AGENTS.md:7" };
+    const pendingPrune =
+      "The repository proposes its own prune command, `just prune` (`CLAUDE.md:4`); it is not confirmed, so the last step uses the default.";
+    const pendingRule =
+      "**A proposed review rule.** The repository may set its own review rule at `AGENTS.md:7`; it is not confirmed, so this section stands as written.";
+    for (const deliveryRecipe of RECIPES) {
+      const base = render({ deliveryRecipe });
+      const withPrune = swap(base, pruneLine(true), `${pruneLine(true)}\n\n${pendingPrune}`);
+      const withRule = swap(base, "\n\n**Inputs.**", `\n\n${pendingRule}\n\n**Inputs.**`);
+
+      // The grounding proposes a prune command; nothing confirmed or dismissed.
+      expect(render({ deliveryRecipe }, proposing({ pruneCommand: prune })), deliveryRecipe).toBe(
+        withNote(withPrune, precedence("CLAUDE.md")),
+      );
+
+      // The same, dismissed: nothing renders, not even the none-found line.
+      expect(
+        render({ deliveryRecipe, ...stored({}, { pruneCommand: prune }) }, proposing({ pruneCommand: prune }, { rulesRead: true })),
+        deliveryRecipe,
+      ).toBe(base);
+
+      // Prune dismissed, review rule still pending: only the rule's file is cited.
+      const twoProposed = proposing({ pruneCommand: prune, reviewRule: rule });
+      expect(render({ deliveryRecipe, ...stored({}, { pruneCommand: prune }) }, twoProposed), deliveryRecipe).toBe(
+        withNote(withRule, precedence("AGENTS.md")),
+      );
+
+      // The prune proposal confirmed: the confirmed step, citing the confirmed file.
+      const confirmedStep =
+        "8. Prune merged worktrees with the repository's command: `just prune` (`docs/prune.md:2`).";
+      const confirmed = render({ deliveryRecipe, ...stored({ pruneCommand: { command: "just prune", citation: "docs/prune.md:2" } }) }, twoProposed);
+      expect(confirmed, deliveryRecipe).toContain(confirmedStep);
+      expect(confirmed, deliveryRecipe).not.toContain("proposes its own prune command");
+      expect(confirmed, deliveryRecipe).toBe(
+        withNote(swap(withRule, pruneLine(true), confirmedStep), precedence("AGENTS.md", "docs/prune.md")),
+      );
+
+      // A proposal in the dismissals column with no grounding never renders.
+      expect(render({ deliveryRecipe, ...stored({}, { pruneCommand: prune }) }), deliveryRecipe).toBe(base);
+      expect(renderHandoff(aSource({ deliveryRecipe, ...stored({}, { pruneCommand: prune }) })).markdown, deliveryRecipe).toBe(
+        renderHandoff(aSource({ deliveryRecipe })).markdown,
       );
     }
   });

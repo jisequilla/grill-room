@@ -79,6 +79,106 @@ export function visibleUngroundedBriefs<T extends { reason: string }>(
   return groundingState === "absent" ? [] : ungroundedBriefs;
 }
 
+type DelegationProposal = PreviewResult["delegationProposals"][number];
+
+const DELEGATION_SLOT_LABEL_KEY: Record<DelegationProposal["slot"], string> = {
+  maxTicketsInFlight: "output.exportDelegationSlotMaxTicketsInFlight",
+  pruneCommand: "output.exportDelegationSlotPruneCommand",
+  reviewRule: "output.exportDelegationSlotReviewRule",
+  preflight: "output.exportDelegationSlotPreflight",
+};
+
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+/** A confirmed value or a proposed one: the number or command when the slot has one, nothing for a rule that is only a citation. */
+function delegationValueText(entry: { value: number } | { command: string } | { citation: string }): string | null {
+  if ("value" in entry) return String(entry.value);
+  if ("command" in entry) return entry.command;
+  return null;
+}
+
+/**
+ * What the repository proposes for each delegation slot the owner has neither
+ * confirmed nor dismissed, with the two controls. Presentational: the section
+ * holds the mutations.
+ */
+export function DelegationProposalList({
+  proposals,
+  busySlot,
+  onConfirm,
+  onDismiss,
+  t,
+}: {
+  proposals: readonly DelegationProposal[];
+  busySlot: DelegationProposal["slot"] | null;
+  onConfirm: (slot: DelegationProposal["slot"]) => void;
+  onDismiss: (slot: DelegationProposal["slot"]) => void;
+  t: Translate;
+}) {
+  return (
+    <div className="space-y-1">
+      <h3 className="text-xs font-medium">{t("output.exportDelegationHeading")}</h3>
+      <ul className="space-y-2 text-xs" data-testid="export-delegation-proposals">
+        {proposals.map((entry) => {
+          const value = delegationValueText(entry.proposal);
+          const confirmedValue = entry.confirmed ? delegationValueText(entry.confirmed) : null;
+          const busy = busySlot === entry.slot;
+          return (
+            <li
+              key={entry.slot}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1"
+              data-testid={`export-delegation-proposal-${entry.slot}`}
+            >
+              <span className="font-medium">{t(DELEGATION_SLOT_LABEL_KEY[entry.slot])}</span>
+              {value !== null ? (
+                entry.slot === "maxTicketsInFlight" ? (
+                  <span>{value}</span>
+                ) : (
+                  <code>{value}</code>
+                )
+              ) : null}
+              <code className="text-muted-foreground">{entry.proposal.citation}</code>
+              {entry.confirmed ? (
+                <span className="text-muted-foreground">
+                  {t("output.exportDelegationConfirmedNow")}{" "}
+                  {confirmedValue !== null ? (
+                    entry.slot === "maxTicketsInFlight" ? (
+                      <span>{confirmedValue}</span>
+                    ) : (
+                      <code>{confirmedValue}</code>
+                    )
+                  ) : null}{" "}
+                  <code>{entry.confirmed.citation}</code>
+                </span>
+              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                data-testid={`export-delegation-confirm-${entry.slot}`}
+                onClick={() => onConfirm(entry.slot)}
+              >
+                {t("output.exportDelegationConfirm")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                data-testid={`export-delegation-dismiss-${entry.slot}`}
+                onClick={() => onDismiss(entry.slot)}
+              >
+                {t("output.exportDelegationDismiss")}
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-xs text-muted-foreground">{t("output.exportDelegationTradeoff")}</p>
+    </div>
+  );
+}
+
 /** How long the slug must sit still before the preview is refreshed. */
 const SLUG_DEBOUNCE_MS = 250;
 
@@ -191,6 +291,18 @@ export function ExportSection({
       }
     },
   });
+
+  const refreshAfterDecision = {
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["action"] });
+    },
+  };
+  const confirmDelegation = useActionMutation("confirm-delegation-value", refreshAfterDecision);
+  const dismissDelegation = useActionMutation("dismiss-delegation-proposal", refreshAfterDecision);
+  const busyDelegationSlot =
+    (confirmDelegation.isPending ? confirmDelegation.variables?.slot : undefined) ??
+    (dismissDelegation.isPending ? dismissDelegation.variables?.slot : undefined) ??
+    null;
 
   /** Re-checks the same files export-session just wrote, without exporting again. */
   async function recheckVisibility() {
@@ -420,6 +532,15 @@ export function ExportSection({
                 </ul>
               ) : null}
             </div>
+            {plan.delegationProposals.length > 0 ? (
+              <DelegationProposalList
+                proposals={plan.delegationProposals}
+                busySlot={busyDelegationSlot}
+                onConfirm={(slot) => confirmDelegation.mutate({ sessionId, slot })}
+                onDismiss={(slot) => dismissDelegation.mutate({ sessionId, slot })}
+                t={t}
+              />
+            ) : null}
           </div>
         ) : null}
 

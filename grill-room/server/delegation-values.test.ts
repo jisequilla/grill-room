@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { NO_DELEGATION_PROPOSALS } from "./interviewer/test-fixtures.js";
 import {
   parseDelegationProposals,
+  pendingDelegationProposals,
+  type DelegationProposals,
+  type DelegationValues,
   parseDelegationValues,
   serializeDelegationProposals,
   serializeDelegationValues,
@@ -165,5 +169,148 @@ describe("serializeDelegationValues", () => {
       preflight: { citation: "c.md:9" },
     };
     expect(parseDelegationValues(serializeDelegationValues(values))).toEqual(values);
+  });
+});
+
+describe("pendingDelegationProposals", () => {
+  const proposedPrune = { command: "just prune", citation: "CLAUDE.md:4" };
+  const proposedCap = { value: 2, citation: "CLAUDE.md:7" };
+
+  function pending(input: {
+    proposed?: Partial<typeof NO_DELEGATION_PROPOSALS>;
+    values?: DelegationValues;
+    dismissed?: DelegationProposals;
+    cap?: number;
+  }) {
+    return pendingDelegationProposals({
+      proposed: { ...NO_DELEGATION_PROPOSALS, ...input.proposed },
+      values: input.values ?? {},
+      dismissed: input.dismissed ?? {},
+      maxTicketsInFlight: input.cap ?? 3,
+    });
+  }
+
+  it("lists a prune proposal nothing confirmed or dismissed", () => {
+    expect(pending({ proposed: { pruneCommand: proposedPrune } })).toEqual([
+      { slot: "pruneCommand", proposal: proposedPrune, confirmed: null },
+    ]);
+  });
+
+  it("drops a prune proposal whose command is already confirmed, whatever the citation", () => {
+    expect(
+      pending({
+        proposed: { pruneCommand: proposedPrune },
+        values: { pruneCommand: { command: "just prune", citation: "CLAUDE.md:9" } },
+      }),
+    ).toEqual([]);
+  });
+
+  it("lists a prune proposal that differs from the confirmed command, with the confirmed value", () => {
+    expect(
+      pending({
+        proposed: { pruneCommand: proposedPrune },
+        values: { pruneCommand: { command: "make prune", citation: "CLAUDE.md:9" } },
+      }),
+    ).toEqual([
+      {
+        slot: "pruneCommand",
+        proposal: proposedPrune,
+        confirmed: { command: "make prune", citation: "CLAUDE.md:9" },
+      },
+    ]);
+  });
+
+  it("drops a prune proposal the owner dismissed", () => {
+    expect(
+      pending({ proposed: { pruneCommand: proposedPrune }, dismissed: { pruneCommand: proposedPrune } }),
+    ).toEqual([]);
+  });
+
+  it("lists a prune proposal again when the dismissal was for another line", () => {
+    expect(
+      pending({
+        proposed: { pruneCommand: proposedPrune },
+        dismissed: { pruneCommand: { command: "just prune", citation: "CLAUDE.md:5" } },
+      }),
+    ).toEqual([{ slot: "pruneCommand", proposal: proposedPrune, confirmed: null }]);
+  });
+
+  it("drops a cap proposal equal to the confirmed cap", () => {
+    expect(
+      pending({
+        proposed: { maxTicketsInFlight: proposedCap },
+        values: { maxTicketsInFlight: { citation: "CLAUDE.md:7" } },
+        cap: 2,
+      }),
+    ).toEqual([]);
+  });
+
+  it("lists a cap proposal the cap matches but was never confirmed from the repository", () => {
+    expect(pending({ proposed: { maxTicketsInFlight: proposedCap }, cap: 2 })).toEqual([
+      { slot: "maxTicketsInFlight", proposal: proposedCap, confirmed: null },
+    ]);
+  });
+
+  it("lists a cap proposal the confirmed cap has since been edited away from", () => {
+    expect(
+      pending({
+        proposed: { maxTicketsInFlight: proposedCap },
+        values: { maxTicketsInFlight: { citation: "CLAUDE.md:7" } },
+        cap: 5,
+      }),
+    ).toEqual([
+      {
+        slot: "maxTicketsInFlight",
+        proposal: proposedCap,
+        confirmed: { value: 5, citation: "CLAUDE.md:7" },
+      },
+    ]);
+  });
+
+  it("drops a review rule with the confirmed citation", () => {
+    expect(
+      pending({
+        proposed: { reviewRule: { citation: "CLAUDE.md:3" } },
+        values: { reviewRule: { citation: "CLAUDE.md:3" } },
+      }),
+    ).toEqual([]);
+  });
+
+  it("lists a pre-flight proposal whose citation differs from the confirmed one", () => {
+    expect(
+      pending({
+        proposed: { preflight: { citation: "CLAUDE.md:8" } },
+        values: { preflight: { citation: "CLAUDE.md:3" } },
+      }),
+    ).toEqual([
+      {
+        slot: "preflight",
+        proposal: { citation: "CLAUDE.md:8" },
+        confirmed: { citation: "CLAUDE.md:3" },
+      },
+    ]);
+  });
+
+  it("lists every slot in the order cap, prune, review rule, pre-flight", () => {
+    expect(
+      pending({
+        proposed: {
+          preflight: { citation: "CLAUDE.md:1" },
+          reviewRule: { citation: "CLAUDE.md:2" },
+          pruneCommand: proposedPrune,
+          maxTicketsInFlight: proposedCap,
+        },
+      }).map((entry) => entry.slot),
+    ).toEqual(["maxTicketsInFlight", "pruneCommand", "reviewRule", "preflight"]);
+  });
+
+  it("lists nothing when all four proposals are null", () => {
+    expect(pending({ values: { reviewRule: { citation: "CLAUDE.md:3" } }, dismissed: { preflight: { citation: "a.md:1" } } })).toEqual([]);
+  });
+
+  it("lists nothing when the grounding has no proposals", () => {
+    expect(
+      pendingDelegationProposals({ proposed: undefined, values: {}, dismissed: {}, maxTicketsInFlight: 3 }),
+    ).toEqual([]);
   });
 });

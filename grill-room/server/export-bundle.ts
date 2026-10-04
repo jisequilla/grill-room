@@ -162,6 +162,7 @@ import {
   type BriefGroundingStaleReason,
 } from "./brief-grounding.js";
 import { getDb, schema } from "./db/index.js";
+import { pendingForProject, type PendingDelegationProposal } from "./delegation-values.js";
 import {
   applySlugPattern,
   buildExportManifest,
@@ -305,6 +306,12 @@ export interface ExportBundlePlan {
   groundedBriefs: number[];
   /** Every other brief this plan writes, with why it is not grounded. See "Handoff" above. */
   ungroundedBriefs: UngroundedBrief[];
+  /**
+   * The grounding's delegation proposals the owner has neither confirmed nor
+   * dismissed, from the current or stale grounding; empty with no grounding.
+   * Never part of the export gate.
+   */
+  delegationProposals: PendingDelegationProposal[];
 }
 
 export interface PlanExportBundleInput {
@@ -922,6 +929,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     briefGroundingStaleReason,
     groundedBriefs,
     ungroundedBriefs,
+    delegationProposals: pendingForProject(project, grounding?.result.delegationProposals),
   };
 }
 

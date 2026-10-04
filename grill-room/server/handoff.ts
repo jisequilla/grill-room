@@ -49,6 +49,7 @@ import { cardsCurrent } from "./consistency.js";
 import {
   parseDelegationProposals,
   parseDelegationValues,
+  pendingDelegationProposals,
   type DelegationProposals,
   type DelegationValues,
 } from "./delegation-values.js";
@@ -554,11 +555,25 @@ interface DelegationRules {
   proposals: DelegationProposals;
 }
 
-function delegationRules(source: HandoffSource): DelegationRules {
-  return {
-    values: parseDelegationValues(source.project.delegationValuesJson ?? null),
-    proposals: parseDelegationProposals(source.project.delegationProposalsJson ?? null),
-  };
+/**
+ * The confirmed values from the project, and the scout's pending proposals
+ * from the grounding. A slot with a confirmed value carries no proposal here:
+ * the page renders its confirmed text only. The project's dismissals never
+ * render.
+ */
+function delegationRules(source: HandoffSource, grounding: HandoffGrounding | null): DelegationRules {
+  const values = parseDelegationValues(source.project.delegationValuesJson ?? null);
+  const pending = pendingDelegationProposals({
+    proposed: grounding?.delegationProposals,
+    values,
+    dismissed: parseDelegationProposals(source.project.delegationProposalsJson ?? null),
+    maxTicketsInFlight: maxTicketsInFlight(source),
+  });
+  const proposals: DelegationProposals = {};
+  for (const entry of pending) {
+    if (entry.confirmed === null) Object.assign(proposals, { [entry.slot]: entry.proposal });
+  }
+  return { values, proposals };
 }
 
 type DelegationSlot = keyof DelegationValues;
@@ -592,9 +607,9 @@ function pendingPruneLines(rules: DelegationRules): string[] {
 }
 
 /** The pre-flight bullet and its prompt, last in "Before launching a ticket"; absent means on. */
-function preflightLines(source: HandoffSource): string[] {
+function preflightLines(source: HandoffSource, grounding: HandoffGrounding | null): string[] {
   if (source.project.preflightStep === false) return [];
-  const rules = delegationRules(source);
+  const rules = delegationRules(source, grounding);
   const confirmed = rules.values.preflight;
   if (confirmed) {
     return [
@@ -623,7 +638,7 @@ function citationPath(citation: string): string {
  * rule sources and proposed nothing, otherwise nothing.
  */
 function delegationRulesNote(source: HandoffSource, grounding: HandoffGrounding | null): string | null {
-  const { values, proposals } = delegationRules(source);
+  const { values, proposals } = delegationRules(source, grounding);
   const citations = [...Object.values(values), ...Object.values(proposals)].map((entry) => entry.citation);
   if (citations.length > 0) {
     const files = [...new Set(citations.map(citationPath))].sort().map(inlineCode).join(", ");
@@ -729,7 +744,11 @@ function maxTicketsInFlight(source: HandoffSource): number {
  * Waves section shows, and when overlaps were checked the chain follows the
  * orderings that separation added. Computed, never estimated.
  */
-function executionPlanSection(source: HandoffSource, exportFacts?: ExportFacts): string {
+function executionPlanSection(
+  source: HandoffSource,
+  grounding: HandoffGrounding | null,
+  exportFacts?: ExportFacts,
+): string {
   const total = source.tickets.length;
   const byNumber = new Map(source.tickets.map((ticket) => [ticket.number, ticket]));
   const checked = exportFacts?.waves !== undefined;
@@ -765,7 +784,7 @@ function executionPlanSection(source: HandoffSource, exportFacts?: ExportFacts):
   const cap = maxTicketsInFlight(source);
   const why =
     "Every ticket in flight draws on the same subscription's rate limit, and a rate-limited failure reads like a failed ticket; each one's reports also need your attention before it can merge.";
-  const rules = delegationRules(source);
+  const rules = delegationRules(source, grounding);
   const confirmedCap = rules.values.maxTicketsInFlight;
   const repositorySets = confirmedCap ? ` The repository sets this cap: ${inlineCode(confirmedCap.citation)}.` : "";
   const capLine =
@@ -802,7 +821,7 @@ function pullRequestLifecycle(
   grounding: HandoffGrounding | null,
 ): string {
   const verify = `\`${source.project.verifyCommand}\``;
-  const rules = delegationRules(source);
+  const rules = delegationRules(source, grounding);
   const pruneStep = pruneStepText(rules);
   const note = delegationRulesNote(source, grounding);
   const review = source.project.adversarialReview;
@@ -842,7 +861,7 @@ function pullRequestLifecycle(
     "",
     "- Local `main` holds nothing unpushed (`git status`, `git log origin/main..main`). Push it first if it does, so the worktree's base includes it.",
     fillSlotsLine(groundingCurrent),
-    ...preflightLines(source),
+    ...preflightLines(source, grounding),
     "",
     "### The subagent",
     "",
@@ -874,7 +893,7 @@ function localMergeLifecycle(
   grounding: HandoffGrounding | null,
 ): string {
   const verify = `\`${source.project.verifyCommand}\``;
-  const rules = delegationRules(source);
+  const rules = delegationRules(source, grounding);
   const pruneStep = pruneStepText(rules);
   const note = delegationRulesNote(source, grounding);
   const review = source.project.adversarialReview;
@@ -914,7 +933,7 @@ function localMergeLifecycle(
     "",
     "- Local `main` holds every change you want the next worktree to start from — commit it before delegating.",
     fillSlotsLine(groundingCurrent),
-    ...preflightLines(source),
+    ...preflightLines(source, grounding),
     "",
     "### The subagent",
     "",
@@ -950,7 +969,7 @@ function lifecycleSection(
  * appended to the ticket file, since the one-line `Status:` line has no room
  * for a rejected round's findings.
  */
-function reviewingSection(source: HandoffSource): string {
+function reviewingSection(source: HandoffSource, grounding: HandoffGrounding | null): string {
   let verdict: string;
   if (source.project.deliveryRecipe === "pull-request") {
     verdict =
@@ -961,7 +980,7 @@ function reviewingSection(source: HandoffSource): string {
         ? 'It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it through the project\'s tracker, the same way you record the merge: as a comment on the ticket\'s bead.'
         : 'It reports its verdict to you — approved, or changes requested with each finding — starting "Review verdict: approved" or "Review verdict: changes requested"; it writes to neither the tracker nor the bundle. You record it yourself: append a `## Review` section to the ticket file with the verdict and any findings — the one-line `Status:` line has no room for them — then set `Status:` once the ticket actually closes.';
   }
-  const rules = delegationRules(source);
+  const rules = delegationRules(source, grounding);
   const confirmedRule = rules.values.reviewRule;
   const pendingRule = pendingProposal(rules, "reviewRule");
   const ruleParagraph = confirmedRule
@@ -1205,7 +1224,7 @@ export function renderHandoffMarkdown(
       ...(facts.greenfield ? ["", greenfieldVerifyLine(source)] : []),
     ].join("\n"),
     beforeDelegatingSection(source, facts),
-    executionPlanSection(source, exportFacts),
+    executionPlanSection(source, grounding, exportFacts),
     wavesSection(source, exportFacts),
     ...(source.uncoveredStories && source.uncoveredStories.length > 0
       ? [uncoveredStoriesSection(source.uncoveredStories)]
@@ -1213,7 +1232,7 @@ export function renderHandoffMarkdown(
     ...[openQuestionsSection(source)].filter((section): section is string => section !== null),
     lifecycleSection(source, groundingCurrent, grounding),
   ];
-  if (source.project.adversarialReview) sections.push(reviewingSection(source));
+  if (source.project.adversarialReview) sections.push(reviewingSection(source, grounding));
   sections.push(recordingSection(), trackingSection(source));
   const buildRecords = source.project.buildRecordLogging ? buildRecordSection(source) : null;
   if (buildRecords !== null) sections.push(buildRecords);

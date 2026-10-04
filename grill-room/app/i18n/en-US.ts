@@ -867,6 +867,17 @@ const messages = {
     exportUngroundedReasonNotCovered: "not covered by the grounding",
     exportUngroundedReasonKept: "edited on disk since the last export, kept",
 
+    exportDelegationHeading: "Delegation values the repository proposes",
+    exportDelegationSlotMaxTicketsInFlight: "Tickets in flight",
+    exportDelegationSlotPruneCommand: "Prune command",
+    exportDelegationSlotReviewRule: "Review rule",
+    exportDelegationSlotPreflight: "Pre-flight procedure",
+    exportDelegationConfirmedNow: "Confirmed now:",
+    exportDelegationConfirm: "Confirm",
+    exportDelegationDismiss: "Dismiss",
+    exportDelegationTradeoff:
+      "Confirming or dismissing changes the handoff: regenerate it and ground the briefs again before exporting.",
+
     visibilityHeading: "File visibility",
     visibilityTracked: "Tracked",
     visibilityIgnored: "Ignored",
