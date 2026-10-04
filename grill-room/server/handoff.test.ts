@@ -2652,13 +2652,19 @@ describe("the repository's delegation values in HANDOFF", () => {
   });
 
   it("a proposal for a confirmed slot renders the confirmed text only", () => {
-    const confirmed = stored({ pruneCommand: { command: "just prune-worktrees", citation: "CLAUDE.md:40" } });
-    const proposed = proposing({ pruneCommand: { command: "make prune", citation: "CLAUDE.md:41" } });
+    const confirmed = stored({ pruneCommand: { command: "just prune-worktrees", citation: "docs/prune.md:2" } });
+    const proposed = proposing({ pruneCommand: { command: "make prune", citation: "CLAUDE.md:4" } });
     for (const deliveryRecipe of RECIPES) {
       const markdown = render({ deliveryRecipe, ...confirmed }, proposed);
       expect(markdown, deliveryRecipe).not.toContain("proposes its own prune command");
       expect(markdown, deliveryRecipe).not.toContain("make prune");
+      expect(markdown, deliveryRecipe).toContain(precedence("docs/prune.md"));
+      expect(markdown, deliveryRecipe).not.toContain("CLAUDE.md");
       expect(markdown, deliveryRecipe).toBe(render({ deliveryRecipe, ...confirmed }));
+      // The same proposal, with nothing confirmed, is pending: the grounding is what feeds the page.
+      expect(render({ deliveryRecipe }, proposed), deliveryRecipe).toContain(
+        "The repository proposes its own prune command, `make prune` (`CLAUDE.md:4`)",
+      );
     }
   });
 
@@ -2757,6 +2763,9 @@ describe("the repository's delegation values in HANDOFF", () => {
     for (const deliveryRecipe of RECIPES) {
       const grounding = proposing({ preflight: { citation: "AGENTS.md:9" } }, { rulesRead: true });
       expect(render({ deliveryRecipe, ...overrides }, grounding)).toBe(render({ deliveryRecipe, ...overrides }, grounding));
+      expect(render({ deliveryRecipe, ...overrides }, grounding)).toContain(
+        "- The repository may have its own pre-flight procedure at `AGENTS.md:9`; it is not confirmed, so use the prompt above.",
+      );
       expect(renderHandoff(aSource({ deliveryRecipe, ...overrides })).markdown).toBe(
         renderHandoff(aSource({ deliveryRecipe, ...overrides })).markdown,
       );
