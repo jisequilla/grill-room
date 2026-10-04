@@ -581,7 +581,7 @@ session, and is readable and editable in the output page's Handoff block.
   appended to the ticket file, since the one-line `Status:` line has no room
   for a rejected round's findings — the reviewer itself never touching the
   tracker or the bundle), and the
-  same-branch fix loop with its two-round cap. With the switch off, the
+  same-branch fix loop with its two-round cap. At export, when the grounding flags build tickets for two review lenses (`twoLensReview`, stale or current), the section also lists them in ticket order, each with its citation, with a correctness lens and a tests lens and, per recipe, the sentence that the main session marks the pull request ready (or merges) only once both reviewers approve; no flag, no grounding or the switch off renders none of it. With the switch off, the
   section is absent and the lifecycle text has no review step. In both
   recipes "Before launching a ticket" ends with a pre-flight step (a bullet
   stating its measured cost, plus an embedded read-only prompt that names no
@@ -800,7 +800,7 @@ source none of the ticket's `filesToChange` match, a `requiredFiles` entry that
 is not an existing file inside the root, and a ticket silent on a rule source
 its `filesToChange` match; HANDOFF reads the grounding's proposals: a proposal the owner has not confirmed or dismissed renders as a pending note, and the none-found line
 renders only for a grounding marked `rulesRead: true` whose four proposals are
-all null, while the project confirms no delegation value. The export section lists the pending proposals with Confirm and Dismiss (`export-delegation-proposals`); a decision writes the project, so the handoff and the grounding then read as stale until regenerated. The
+all null, while the project confirms no delegation value. Each ticket's `twoLensReview` flag renders in HANDOFF's "Reviewing a ticket" two-lens block, read from the grounding at export like the proposals and never part of the fingerprint. The export section lists the pending proposals with Confirm and Dismiss (`export-delegation-proposals`); a decision writes the project, so the handoff and the grounding then read as stale until regenerated. The
 server also stamps `rulesRead: true` on every grounding it stores (the
 validator accepts the field, the contract never carries it): it means the scout
 was handed the rule-source list, and a grounding stored before it reads as not
