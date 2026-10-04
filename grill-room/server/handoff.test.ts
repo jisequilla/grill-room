@@ -3163,13 +3163,20 @@ describe("rule conflicts", () => {
     });
 
     it("renders the same for a stale grounding", () => {
-      const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM], [FACT])], {
-        current: false,
-        staleReason: "head-moved",
-      });
-      const brief = briefOf(aSource(), grounding);
-      expect(brief).toContain(RULE_LINE);
-      expect(brief).toContain(BRIEF_BLOCK);
+      for (const deliveryRecipe of RECIPES) {
+        const source = aSource({ deliveryRecipe });
+        const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM], [FACT])], {
+          current: false,
+          staleReason: "head-moved",
+        });
+        const brief = briefOf(source, grounding);
+        const reference = briefOf(source, withoutRules(grounding));
+        const questions = `## Open questions on this ticket\n\n${BRIEF_BLOCK}`;
+        expect(brief, deliveryRecipe).toContain(RULE_LINE);
+        expect(brief, deliveryRecipe).toContain(questions);
+        const withLine = reference.replace(FACT_LINE, () => `${FACT_LINE}\n${RULE_LINE}`);
+        expect(brief, deliveryRecipe).toBe(withLine.replace("## File boundaries", () => `${questions}\n\n## File boundaries`));
+      }
     });
 
     it("renders a ticket with no grounding entry as before", () => {
@@ -3256,11 +3263,13 @@ describe("rule conflicts", () => {
     });
 
     it("renders the same for a stale grounding", () => {
-      const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])], {
-        current: false,
-        staleReason: "head-moved",
-      });
-      expectInserted(aSource(), grounding, handoffBlock([line02]), false, "stale");
+      for (const deliveryRecipe of RECIPES) {
+        const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])], {
+          current: false,
+          staleReason: "head-moved",
+        });
+        expectInserted(aSource({ deliveryRecipe }), grounding, handoffBlock([line02]), false, deliveryRecipe);
+      }
     });
 
     it("carries no conflict for a stored handoff rendered with no grounding", () => {
@@ -3269,18 +3278,30 @@ describe("rule conflicts", () => {
   });
 
   it("a grounding with no rule claims renders HANDOFF and briefs as before", () => {
+    const HANDOFF_HEADING = "## Questions the spec and tickets leave open";
+    const BRIEF_HEADING = "## Open questions on this ticket";
+    const count = (text: string, part: string) => text.split(part).length - 1;
     for (const deliveryRecipe of RECIPES) {
-      const source = { ...aSource({ deliveryRecipe }), openCards: scenarioOpenCards() };
-      const grounding = groundingOf([entry(1, ["a.ts"], [], [FACT]), entry(2, ["b.ts"]), entry(3, ["c.ts"])]);
-      const claimless = withoutRules(grounding);
-      const handoff = renderHandoffMarkdown(source, false, undefined, grounding);
-      expect(handoff, deliveryRecipe).toBe(renderHandoffMarkdown(source, false, undefined, claimless));
-      expect(handoff, deliveryRecipe).not.toContain("Rule conflicts");
-      for (const ticket of source.tickets) {
-        const brief = renderBrief(source, ticket, { grounding });
-        expect(brief, deliveryRecipe).toBe(renderBrief(source, ticket, { grounding: claimless }));
-        expect(brief, deliveryRecipe).not.toContain("Repository rule");
-        expect(brief, deliveryRecipe).not.toContain("Rule conflicts");
+      for (const openCards of [[], scenarioOpenCards()]) {
+        const source = { ...aSource({ deliveryRecipe }), openCards };
+        const grounding = groundingOf([entry(1, ["a.ts"], [], [FACT]), entry(2, ["b.ts"]), entry(3, ["c.ts"])]);
+        const label = `${deliveryRecipe} with ${openCards.length} cards`;
+        const handoff = renderHandoffMarkdown(source, false, undefined, grounding);
+        const ungrounded = renderHandoffMarkdown(source, false, undefined, null);
+        expect(handoff, label).toBe(renderHandoffMarkdown(source, false, undefined, withoutRules(grounding)));
+        expect(count(handoff, HANDOFF_HEADING), label).toBe(count(ungrounded, HANDOFF_HEADING));
+        expect(handoff, label).not.toContain("Rule conflicts");
+        for (const ticket of source.tickets) {
+          const brief = renderBrief(source, ticket, { grounding });
+          const ungroundedBrief = renderBrief(source, ticket, { grounding: null });
+          expect(brief, label).toBe(renderBrief(source, ticket, { grounding: withoutRules(grounding) }));
+          expect(count(brief, BRIEF_HEADING), label).toBe(count(ungroundedBrief, BRIEF_HEADING));
+          expect(brief, label).not.toContain(HANDOFF_HEADING);
+          expect(brief, label).not.toContain("Repository rule");
+          expect(brief, label).not.toContain("Rule conflicts");
+          const hasFacts = ticket.number === 1;
+          expect(brief.includes("No codebase facts cited."), `${label} ticket ${ticket.number}`).toBe(!hasFacts);
+        }
       }
     }
   });
