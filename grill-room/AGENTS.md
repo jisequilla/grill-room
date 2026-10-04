@@ -692,7 +692,12 @@ before. The fingerprint holds the open cards only when there are some, and
 `consistencyNotCurrent` only when true, so such a session hashes as before;
 dismissing or asking a card makes the stored handoff stale until it is
 regenerated, keeping a hand-edited brief as outdated when its render
-changed, and a grounding made before reads `handoff-changed`.
+changed, and a grounding made before reads `handoff-changed`. At export, when
+`ruleConflicts` finds a repository rule requiring files outside a build
+ticket's file boundaries, the same section also lists each conflict after the
+cards (or the not-judged paragraph), in ticket order, with what to do before
+delegating that ticket; a stored handoff rendered with no grounding carries
+none, and nothing enters the fingerprint.
 
 The handoff is **stale** when a fingerprint over everything it renders
 differs from the one it was generated from: the session's title and idea,
@@ -800,7 +805,7 @@ source none of the ticket's `filesToChange` match, a `requiredFiles` entry that
 is not an existing file inside the root, and a ticket silent on a rule source
 its `filesToChange` match; HANDOFF reads the grounding's proposals: a proposal the owner has not confirmed or dismissed renders as a pending note, and the none-found line
 renders only for a grounding marked `rulesRead: true` whose four proposals are
-all null, while the project confirms no delegation value. Each ticket's `twoLensReview` flag renders in HANDOFF's "Reviewing a ticket" two-lens block, read from the grounding at export like the proposals and never part of the fingerprint. The export section lists the pending proposals with Confirm and Dismiss (`export-delegation-proposals`); a decision writes the project, so the handoff and the grounding then read as stale until regenerated. The
+all null, while the project confirms no delegation value. Each ticket's `twoLensReview` flag renders in HANDOFF's "Reviewing a ticket" two-lens block, read from the grounding at export like the proposals and never part of the fingerprint. Each ticket's `rules` render in its brief's Codebase facts as cited facts, and a rule with any `requiredFiles` entry that matches none of the ticket's `filesToChange` paths (compared after `path.posix.normalize`) is a conflict that `ruleConflicts` (`server/handoff.ts`) computes from the grounding, never declared by the scout: it renders as an open question in the brief and in HANDOFF's open questions, and never blocks export. The export section lists the pending proposals with Confirm and Dismiss (`export-delegation-proposals`); a decision writes the project, so the handoff and the grounding then read as stale until regenerated. The
 server also stamps `rulesRead: true` on every grounding it stores (the
 validator accepts the field, the contract never carries it): it means the scout
 was handed the rule-source list, and a grounding stored before it reads as not
@@ -917,7 +922,10 @@ fresh:
   **File boundaries** lists the files to create, the files to edit (one a
   blocker creates as `` `path` (created by ticket NN) ``), and the
   existing files it builds on, cited; **Codebase facts** lists each cited
-  statement. Two new sections appear: **Builds on**, one line per blocker
+  statement, then one line per rule claim, and each rule conflict
+  (a required file outside the file boundaries) also renders as a
+  **Rule conflicts** block in "Open questions on this ticket" telling the
+  builder to stop and report; a hand-edited brief gets neither. Two new sections appear: **Builds on**, one line per blocker
   naming what this ticket needs from it, where — a citation, "created by
   ticket NN at `<path>`" for a dependency on a path that blocker has not
   created yet, or "ticket NN adds `<symbol>` to `<path>`" for one on what

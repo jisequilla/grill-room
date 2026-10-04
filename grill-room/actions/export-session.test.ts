@@ -1358,6 +1358,69 @@ describe("export writes grounded briefs", () => {
     expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(edited);
   });
 
+  /** The default scout result with a rule on ticket 1 that requires a file outside its boundaries. */
+  function aResultWithRuleConflict(): HandoffScoutResult {
+    const base = aHandoffScoutResult();
+    return {
+      ...base,
+      tickets: base.tickets.map((entry) =>
+        entry.number === 1
+          ? {
+              ...entry,
+              rules: [
+                {
+                  citation: "AGENTS.md:7",
+                  statement: "Every change updates the changelog.",
+                  requiredFiles: ["src/ingest/metrics.ts", "CHANGELOG.md"],
+                },
+              ],
+            }
+          : entry,
+      ),
+    };
+  }
+  const CONFLICT_LINE =
+    "- **01 Ticket 1**: `AGENTS.md:7` requires `CHANGELOG.md`, outside its file boundaries.";
+
+  it("exports with rule conflicts present", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    await groundNow(session.id, root, aResultWithRuleConflict());
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(result.groundedBriefs).toContain(1);
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    const brief = await readBrief(bundleDir, "01-build-the-workspace.md");
+    expect(brief).toContain("**Rule conflicts.**");
+    expect(brief).toContain(
+      "- `AGENTS.md:7` (Every change updates the changelog.) requires `CHANGELOG.md`, outside your file boundaries.",
+    );
+    const handoff = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoff).toContain(CONFLICT_LINE);
+  });
+
+  it("keeps a hand-edited brief verbatim while HANDOFF lists its rule conflict", async () => {
+    const { root, session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    const edited = "# Brief 01: Hand-edited\n\nSomeone already wrote this by hand.\n";
+    await updateHandoff.run({ sessionId: session.id, briefs: [{ ticketNumber: 1, markdown: edited }] });
+    await groundNow(session.id, root);
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(edited);
+
+    await groundNow(session.id, root, aResultWithRuleConflict());
+    const result = await exportSession.run({
+      sessionId: session.id,
+      slug: "grill-room",
+      overridePaths: ["HANDOFF.md", "briefs/01-build-the-workspace.md"],
+    });
+    expect(result.ungroundedBriefs).toContainEqual({ ticket: 1, reason: "edited" });
+    expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(edited);
+    const handoff = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoff).toContain(CONFLICT_LINE);
+  });
+
   it("grounds a brief stored under an older template: editedAt null overrides the text mismatch", async () => {
     const { root, session } = await aReadySession();
     await generateHandoff.run({ sessionId: session.id });

@@ -21,6 +21,7 @@ import {
   renderBrief,
   renderHandoff,
   renderHandoffMarkdown,
+  ruleConflicts,
 } from "./handoff.js";
 import { consistencyFindingsResult } from "./interviewer/fake.js";
 
@@ -2966,6 +2967,342 @@ describe("two review lenses in HANDOFF", () => {
       expect(section(grounded, "## Reviewing a ticket"), deliveryRecipe).toBe(
         section(renderHandoff(source).markdown, "## Reviewing a ticket"),
       );
+    }
+  });
+});
+
+describe("rule conflicts", () => {
+  type Claim = { citation: string; statement: string; requiredFiles: string[] };
+  const CITE = ".claude/rules/versioning.md:3";
+  const STATEMENT = "Every release bumps the version in each package.json.";
+  const claim = (requiredFiles: string[], citation = CITE, statement = STATEMENT): Claim => ({
+    citation,
+    statement,
+    requiredFiles,
+  });
+
+  function entry(
+    number: number,
+    files: string[],
+    rules: Claim[] = [],
+    facts: { statement: string; citation: string }[] = [],
+  ): HandoffGrounding["tickets"][number] {
+    return {
+      number,
+      filesToChange: files.map((file, index) => ({ path: file, change: index === 0 ? "create" : "edit" })),
+      reach: [{ symbol: "reachOnly", files: 1 }],
+      buildsOnFiles: [],
+      facts,
+      buildsOn: [],
+      rules,
+      twoLensReview: null,
+      provedBy: { testPath: "a.test.ts", command: "pnpm test" },
+    } as HandoffGrounding["tickets"][number];
+  }
+
+  function groundingOf(
+    tickets: HandoffGrounding["tickets"][number][],
+    extra: Partial<HandoffGrounding> = {},
+  ): HandoffGrounding {
+    return { tickets, commitRead: "abcdef1234567890", current: true, staleReason: null, ...extra };
+  }
+
+  function withoutRules(grounding: HandoffGrounding): HandoffGrounding {
+    return { ...grounding, tickets: grounding.tickets.map((each) => ({ ...each, rules: [] })) };
+  }
+
+  describe("ruleConflicts", () => {
+    const conflictsFor = (files: string[], requiredFiles: string[]) =>
+      ruleConflicts(aSource(), groundingOf([entry(2, files, [claim(requiredFiles)])]));
+    const conflict = (missingFiles: string[]) => [
+      { ticket: 2, citation: CITE, statement: STATEMENT, missingFiles },
+    ];
+
+    it("finds nothing for a claim that requires no file", () => {
+      expect(conflictsFor(["a.ts", "b.ts"], [])).toEqual([]);
+    });
+    it("finds nothing when the required file is a boundary", () => {
+      expect(conflictsFor(["a.ts", "b.ts"], ["a.ts"])).toEqual([]);
+    });
+    it("lists a required file outside the boundaries", () => {
+      expect(conflictsFor(["a.ts"], ["a.ts", "c.ts"])).toEqual(conflict(["c.ts"]));
+    });
+    it("compares paths after normalizing", () => {
+      expect(conflictsFor(["src/a.ts"], ["./src/a.ts"])).toEqual([]);
+    });
+    it("lists a duplicated missing file once", () => {
+      expect(conflictsFor(["a.ts"], ["c.ts", "c.ts"])).toEqual(conflict(["c.ts"]));
+    });
+    it("lists a missing file once, in its first spelling", () => {
+      expect(conflictsFor(["a.ts"], ["c.ts", "./c.ts"])).toEqual(conflict(["c.ts"]));
+      expect(conflictsFor(["a.ts"], ["./c.ts", "c.ts"])).toEqual(conflict(["./c.ts"]));
+    });
+    it("does not count a file only a reach symbol touches as a boundary", () => {
+      expect(conflictsFor(["a.ts"], ["c.ts"])).toEqual(conflict(["c.ts"]));
+    });
+    it("the ngine-monitor case: one of four required package.json files outside the boundaries", () => {
+      expect(
+        conflictsFor(
+          ["package.json", "server/package.json", "web/package.json"],
+          ["package.json", "server/package.json", "web/package.json", "consumers/db-writer/package.json"],
+        ),
+      ).toEqual(conflict(["consumers/db-writer/package.json"]));
+    });
+    it("skips a gate ticket", () => {
+      expect(ruleConflicts(aSourceWithGate(), groundingOf([entry(2, ["a.ts"], [claim(["c.ts"])])]))).toEqual([]);
+    });
+    it("returns nothing for no grounding, and skips tickets outside the handoff or without an entry", () => {
+      expect(ruleConflicts(aSource(), null)).toEqual([]);
+      expect(ruleConflicts(aSource(), groundingOf([entry(9, ["a.ts"], [claim(["c.ts"])])]))).toEqual([]);
+      expect(ruleConflicts(aSource(), groundingOf([]))).toEqual([]);
+    });
+    it("orders by ticket number, then claim order, and reads a stale grounding", () => {
+      const grounding = groundingOf(
+        [
+          entry(3, ["a.ts"], [claim(["z.ts"], "AGENTS.md:1", "Third.")]),
+          entry(1, ["a.ts"], [claim(["x.ts"], "AGENTS.md:2", "First."), claim(["y.ts"], "AGENTS.md:3", "Second.")]),
+        ],
+        { current: false, staleReason: "head-moved" },
+      );
+      expect(ruleConflicts(aSource(), grounding).map((each) => [each.ticket, each.citation])).toEqual([
+        [1, "AGENTS.md:2"],
+        [1, "AGENTS.md:3"],
+        [3, "AGENTS.md:1"],
+      ]);
+    });
+  });
+
+  const NGINE_FILES = ["package.json", "server/package.json", "web/package.json"];
+  const NGINE_REQUIRED = [...NGINE_FILES, "consumers/db-writer/package.json"];
+  const NGINE_CLAIM = claim(NGINE_REQUIRED);
+  const RULE_LINE = `- Repository rule: ${STATEMENT} (\`${CITE}\`). It requires ${NGINE_REQUIRED.map((file) => `\`${file}\``).join(", ")}.`;
+  const BRIEF_BLOCK = [
+    "**Rule conflicts.** A repository rule requires files outside this ticket's file boundaries. Do not edit them, and do not skip the rule: unless your prompt tells you how to handle it, stop and report the conflict instead of building around it.",
+    "",
+    `- \`${CITE}\` (${STATEMENT}) requires \`consumers/db-writer/package.json\`, outside your file boundaries.`,
+  ].join("\n");
+  const CARDS_INTRO =
+    "The consistency check found that this ticket leaves these questions to the owner. Do not choose an answer yourself: if your prompt does not give you the owner's answer to one, stop and report the question instead of building around it.";
+  const FACT = { statement: "Versions live in package.json.", citation: "package.json:1" };
+  const FACT_LINE = `- ${FACT.statement} (\`${FACT.citation}\`)`;
+  const RECIPES = ["pull-request", "local-merge"] as const;
+
+  const briefOf = (source: HandoffSource, grounding: HandoffGrounding | null, number = 2) =>
+    renderBrief(source, source.tickets.find((ticket) => ticket.number === number)!, { grounding });
+
+  describe("renders rule claims and conflicts in the brief", () => {
+    it("adds a rule line to the Codebase facts of a claim with no conflict", () => {
+      for (const deliveryRecipe of RECIPES) {
+        const source = aSource({ deliveryRecipe });
+        const grounding = groundingOf([entry(2, ["a.ts", "b.ts"], [claim(["a.ts", "b.ts"])], [FACT])]);
+        const line = `- Repository rule: ${STATEMENT} (\`${CITE}\`). It requires \`a.ts\`, \`b.ts\`.`;
+        const brief = briefOf(source, grounding);
+        const reference = briefOf(source, withoutRules(grounding));
+        expect(brief, deliveryRecipe).toContain(`${FACT_LINE}\n${line}`);
+        expect(brief, deliveryRecipe).toBe(reference.replace(FACT_LINE, () => `${FACT_LINE}\n${line}`));
+        expect(brief, deliveryRecipe).not.toContain("Rule conflicts");
+      }
+    });
+
+    it("ends the rule line after the citation when the claim requires no file", () => {
+      const grounding = groundingOf([entry(2, ["a.ts"], [claim([])], [FACT])]);
+      const brief = briefOf(aSource(), grounding);
+      expect(brief).toContain(`- Repository rule: ${STATEMENT} (\`${CITE}\`).\n`);
+      expect(brief).not.toContain("It requires");
+    });
+
+    it("lists required files verbatim, duplicates included", () => {
+      const grounding = groundingOf([entry(2, ["a.ts"], [claim(["c.ts", "c.ts"])], [FACT])]);
+      expect(briefOf(aSource(), grounding)).toContain(
+        `- Repository rule: ${STATEMENT} (\`${CITE}\`). It requires \`c.ts\`, \`c.ts\`.\n`,
+      );
+    });
+
+    it("replaces the no-facts line with the rule lines", () => {
+      for (const deliveryRecipe of RECIPES) {
+        const source = aSource({ deliveryRecipe });
+        const grounding = groundingOf([entry(2, ["a.ts"], [claim(["a.ts"])])]);
+        const line = `- Repository rule: ${STATEMENT} (\`${CITE}\`). It requires \`a.ts\`.`;
+        const brief = briefOf(source, grounding);
+        const reference = briefOf(source, withoutRules(grounding));
+        expect(reference, deliveryRecipe).toContain("No codebase facts cited.");
+        expect(brief, deliveryRecipe).toContain(line);
+        expect(brief, deliveryRecipe).not.toContain("No codebase facts cited.");
+        expect(brief, deliveryRecipe).toBe(reference.replace("No codebase facts cited.", () => line));
+      }
+    });
+
+    it("renders the ngine-monitor claim as a rule line and a conflict block", () => {
+      for (const deliveryRecipe of RECIPES) {
+        const source = aSource({ deliveryRecipe });
+        const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM], [FACT])]);
+        const brief = briefOf(source, grounding);
+        const reference = briefOf(source, withoutRules(grounding));
+        const questions = `## Open questions on this ticket\n\n${BRIEF_BLOCK}`;
+        expect(brief, deliveryRecipe).toContain(RULE_LINE);
+        expect(brief, deliveryRecipe).toContain(questions);
+        expect(reference, deliveryRecipe).not.toContain("Open questions on this ticket");
+        const withLine = reference.replace(FACT_LINE, () => `${FACT_LINE}\n${RULE_LINE}`);
+        expect(brief, deliveryRecipe).toBe(withLine.replace("## File boundaries", () => `${questions}\n\n## File boundaries`));
+      }
+    });
+
+    it("puts the cards first and the conflict block after them", () => {
+      for (const deliveryRecipe of RECIPES) {
+        const source = { ...aSource({ deliveryRecipe }), openCards: [scenarioOpenCards()[1]!] };
+        const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM], [FACT])]);
+        const brief = briefOf(source, grounding);
+        const reference = briefOf(source, withoutRules(grounding));
+        expect(reference, deliveryRecipe).toContain(CARDS_INTRO);
+        const expected = reference
+          .replace(FACT_LINE, () => `${FACT_LINE}\n${RULE_LINE}`)
+          .replace("\n\n## File boundaries", () => `\n\n${BRIEF_BLOCK}\n\n## File boundaries`);
+        expect(brief, deliveryRecipe).toBe(expected);
+        expect(brief.indexOf(CARDS_INTRO), deliveryRecipe).toBeLessThan(brief.indexOf("**Rule conflicts.**"));
+      }
+    });
+
+    it("renders the same for a stale grounding", () => {
+      for (const deliveryRecipe of RECIPES) {
+        const source = aSource({ deliveryRecipe });
+        const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM], [FACT])], {
+          current: false,
+          staleReason: "head-moved",
+        });
+        const brief = briefOf(source, grounding);
+        const reference = briefOf(source, withoutRules(grounding));
+        const questions = `## Open questions on this ticket\n\n${BRIEF_BLOCK}`;
+        expect(brief, deliveryRecipe).toContain(RULE_LINE);
+        expect(brief, deliveryRecipe).toContain(questions);
+        const withLine = reference.replace(FACT_LINE, () => `${FACT_LINE}\n${RULE_LINE}`);
+        expect(brief, deliveryRecipe).toBe(withLine.replace("## File boundaries", () => `${questions}\n\n## File boundaries`));
+      }
+    });
+
+    it("renders a ticket with no grounding entry as before", () => {
+      const grounding = groundingOf([entry(1, ["a.ts"], [claim(["c.ts"])])]);
+      const brief = briefOf(aSource(), grounding, 2);
+      expect(brief).toBe(briefOf(aSource(), groundingOf([]), 2));
+      expect(brief).not.toContain("Repository rule");
+    });
+  });
+
+  describe("lists rule conflicts among the questions left open", () => {
+    const HEADING = "## Questions the spec and tickets leave open";
+    const NEXT = "\n\n## Delegation lifecycle";
+    const handoffBlock = (lines: string[]) =>
+      [
+        "**Rule conflicts.** A repository rule requires each of these tickets to change files outside its file boundaries. Before delegating one, widen its boundaries and ground the briefs again, or tell its builder in the delegation prompt how to handle the rule; otherwise its brief tells the builder to stop and report.",
+        "",
+        ...lines,
+      ].join("\n");
+    const line02 = `- **02 Export the bundle**: \`${CITE}\` requires \`consumers/db-writer/package.json\`, outside its file boundaries.`;
+    const renderWith = (source: HandoffSource, grounding: HandoffGrounding | null) =>
+      renderHandoffMarkdown(source, false, undefined, grounding);
+
+    /** `text` must equal the reference with the block inserted ahead of the lifecycle section. */
+    function expectInserted(
+      source: HandoffSource,
+      grounding: HandoffGrounding,
+      block: string,
+      sectionPresentInReference: boolean,
+      label: string,
+    ): void {
+      const text = renderWith(source, grounding);
+      const reference = renderWith(source, withoutRules(grounding));
+      expect(reference.split(NEXT).length, label).toBe(2);
+      expect(text, label).toContain(block);
+      const lead = sectionPresentInReference ? "" : `${HEADING}\n\n`;
+      expect(text, label).toBe(reference.replace(NEXT, () => `\n\n${lead}${block}${NEXT}`));
+    }
+
+    it("adds the section when nothing else is open", () => {
+      for (const deliveryRecipe of RECIPES) {
+        const source = aSource({ deliveryRecipe });
+        const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])]);
+        expect(renderWith(source, withoutRules(grounding)), deliveryRecipe).not.toContain(HEADING);
+        expectInserted(source, grounding, handoffBlock([line02]), false, deliveryRecipe);
+      }
+    });
+
+    it("puts the cards first", () => {
+      for (const deliveryRecipe of RECIPES) {
+        const source = { ...aSource({ deliveryRecipe }), openCards: scenarioOpenCards() };
+        const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])]);
+        expectInserted(source, grounding, handoffBlock([line02]), true, deliveryRecipe);
+      }
+    });
+
+    it("puts the not-judged paragraph first", () => {
+      for (const deliveryRecipe of RECIPES) {
+        const source = { ...aSource({ deliveryRecipe }), consistencyNotCurrent: true };
+        const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])]);
+        expectInserted(source, grounding, handoffBlock([line02]), true, deliveryRecipe);
+      }
+    });
+
+    it("lists conflicts by ticket number, whatever order the source and grounding use", () => {
+      for (const deliveryRecipe of RECIPES) {
+        const base = aSource({ deliveryRecipe });
+        const source = { ...base, tickets: [...base.tickets].reverse() };
+        const grounding = groundingOf([
+          entry(3, ["a.ts"], [claim(["c.ts"], "AGENTS.md:7", "Three.")]),
+          entry(1, ["a.ts"], [claim(["d.ts"], "AGENTS.md:9", "One.")]),
+        ]);
+        expectInserted(
+          source,
+          grounding,
+          handoffBlock([
+            "- **01 Register projects**: `AGENTS.md:9` requires `d.ts`, outside its file boundaries.",
+            "- **03 Propose a slug**: `AGENTS.md:7` requires `c.ts`, outside its file boundaries.",
+          ]),
+          false,
+          deliveryRecipe,
+        );
+      }
+    });
+
+    it("renders the same for a stale grounding", () => {
+      for (const deliveryRecipe of RECIPES) {
+        const grounding = groundingOf([entry(2, NGINE_FILES, [NGINE_CLAIM])], {
+          current: false,
+          staleReason: "head-moved",
+        });
+        expectInserted(aSource({ deliveryRecipe }), grounding, handoffBlock([line02]), false, deliveryRecipe);
+      }
+    });
+
+    it("carries no conflict for a stored handoff rendered with no grounding", () => {
+      expect(renderHandoff(aSource()).markdown).not.toContain("Rule conflicts");
+    });
+  });
+
+  it("a grounding with no rule claims renders HANDOFF and briefs as before", () => {
+    const HANDOFF_HEADING = "## Questions the spec and tickets leave open";
+    const BRIEF_HEADING = "## Open questions on this ticket";
+    const count = (text: string, part: string) => text.split(part).length - 1;
+    for (const deliveryRecipe of RECIPES) {
+      for (const openCards of [[], scenarioOpenCards()]) {
+        const source = { ...aSource({ deliveryRecipe }), openCards };
+        const grounding = groundingOf([entry(1, ["a.ts"], [], [FACT]), entry(2, ["b.ts"]), entry(3, ["c.ts"])]);
+        const label = `${deliveryRecipe} with ${openCards.length} cards`;
+        const handoff = renderHandoffMarkdown(source, false, undefined, grounding);
+        const ungrounded = renderHandoffMarkdown(source, false, undefined, null);
+        expect(handoff, label).toBe(renderHandoffMarkdown(source, false, undefined, withoutRules(grounding)));
+        expect(count(handoff, HANDOFF_HEADING), label).toBe(count(ungrounded, HANDOFF_HEADING));
+        expect(handoff, label).not.toContain("Rule conflicts");
+        for (const ticket of source.tickets) {
+          const brief = renderBrief(source, ticket, { grounding });
+          const ungroundedBrief = renderBrief(source, ticket, { grounding: null });
+          expect(brief, label).toBe(renderBrief(source, ticket, { grounding: withoutRules(grounding) }));
+          expect(count(brief, BRIEF_HEADING), label).toBe(count(ungroundedBrief, BRIEF_HEADING));
+          expect(brief, label).not.toContain(HANDOFF_HEADING);
+          expect(brief, label).not.toContain("Repository rule");
+          expect(brief, label).not.toContain("Rule conflicts");
+          const hasFacts = ticket.number === 1;
+          expect(brief.includes("No codebase facts cited."), `${label} ticket ${ticket.number}`).toBe(!hasFacts);
+        }
+      }
     }
   });
 });
