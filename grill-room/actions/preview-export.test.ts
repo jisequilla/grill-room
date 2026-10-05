@@ -460,7 +460,12 @@ describe("preview-export: two roots", () => {
   }
 
   it("reports the durable bundle directory, and whether it exists: not before the first export, then yes", async () => {
-    const { root, session } = await aTwoRootSession();
+    // The working bundle folder already exists; the durable one does not.
+    const { root, session } = await aTwoRootSession({
+      prepare: async (root) => {
+        await fs.mkdir(path.join(root, ".scratch", "grill-room"), { recursive: true });
+      },
+    });
     const durableBundleDir = path.join(root, "docs", "specs", "grill-room");
 
     const before = await previewExport.run({ sessionId: session.id });
@@ -469,7 +474,7 @@ describe("preview-export: two roots", () => {
       durableBundleDir,
       durableBundleExists: false,
       bundleDir: path.join(root, ".scratch", "grill-room"),
-      bundleExists: false,
+      bundleExists: true,
     });
 
     await exportSession.run({ sessionId: session.id, slug: before.slug });
@@ -479,11 +484,15 @@ describe("preview-export: two roots", () => {
     expect(after.durableBundleExists).toBe(true);
   });
 
-  it("gives a repo-relative durableBundlePath when git says the durable folder is not ignored", async () => {
-    const { session } = await aTwoRootSession({ visibility: "ignored" });
+  it("gives a repo-relative durableBundlePath when git says the durable folder is not ignored, whatever the working folder", async () => {
+    const { root, session } = await aTwoRootSession({
+      gitignore: ".scratch/\n",
+      visibility: "ignored",
+    });
 
     const preview = await previewExport.run({ sessionId: session.id });
     expect(preview.durableBundlePath).toBe("docs/specs/grill-room");
+    expect(preview.bundlePath).toBe(path.join(root, ".scratch", "grill-room"));
   });
 
   it("gives an absolute durableBundlePath when git ignores the durable folder", async () => {
@@ -498,16 +507,21 @@ describe("preview-export: two roots", () => {
     expect(preview.bundlePath).toBe(".scratch/grill-room");
   });
 
-  const symlinkCases: ReadonlyArray<["tracked" | "ignored", (root: string) => string]> = [
-    ["tracked", () => "docs/specs/grill-room"],
-    ["ignored", (root) => path.join(root, "docs", "specs", "grill-room")],
+  // The working folder is measured the other way each time, so only the
+  // stored flag can give the expected path.
+  const symlinkCases: ReadonlyArray<
+    ["tracked" | "ignored", string | undefined, (root: string) => string]
+  > = [
+    ["tracked", ".scratch/\n", () => "docs/specs/grill-room"],
+    ["ignored", undefined, (root) => path.join(root, "docs", "specs", "grill-room")],
   ];
 
   it.each(symlinkCases)(
     "follows the stored flag (%s) when git cannot tell: a symlinked durable folder",
-    async (visibility, expected) => {
+    async (visibility, gitignore, expected) => {
       const { root, session } = await aTwoRootSession({
         visibility,
+        gitignore,
         prepare: async (root) => {
           await fs.mkdir(path.join(root, "real-specs"));
           await fs.mkdir(path.join(root, "docs"));
