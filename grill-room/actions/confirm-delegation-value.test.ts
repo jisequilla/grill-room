@@ -138,7 +138,7 @@ describe("confirm-delegation-value", () => {
     await expect(
       confirmDelegationValue.run({ sessionId: session.id, slot: "pruneCommand" }),
     ).rejects.toMatchObject({ errorCode: "no-pending-proposal", statusCode: 409 });
-    expect(await getProject.run({ id: project.id })).toMatchObject(project);
+    expect(await getProject.run({ id: project.id })).toEqual({ ...project, hasRemote: false });
   });
 
   it("refuses a slot the grounding left null, writing nothing", async () => {
@@ -147,7 +147,7 @@ describe("confirm-delegation-value", () => {
     await expect(
       confirmDelegationValue.run({ sessionId: session.id, slot: "reviewRule" }),
     ).rejects.toMatchObject({ errorCode: "no-pending-proposal", statusCode: 409 });
-    expect(await getProject.run({ id: project.id })).toMatchObject(project);
+    expect(await getProject.run({ id: project.id })).toEqual({ ...project, hasRemote: false });
   });
 
   it("refuses a proposal the owner dismissed, writing nothing", async () => {
