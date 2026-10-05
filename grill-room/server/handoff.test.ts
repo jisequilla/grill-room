@@ -10,6 +10,8 @@ import {
   BUNDLE_TOKEN,
   bundlePathFor,
   CODEBASE_FACTS_SLOT,
+  describeHandoffEdits,
+  DOCS_TOKEN,
   type ExportFacts,
   FILE_BOUNDARIES_SLOT,
   fillBundlePath,
@@ -24,7 +26,10 @@ import {
   renderHandoff,
   renderHandoffMarkdown,
   ruleConflicts,
+  withDocsToken,
 } from "./handoff.js";
+import { hashExportContent } from "./export.js";
+import { withBundleToken } from "../shared/bundle-tokens.js";
 import { consistencyFindingsResult } from "./interviewer/fake.js";
 
 const ROOT = "/repos/target";
@@ -154,7 +159,7 @@ describe("HANDOFF.md", () => {
     const { markdown } = renderHandoff(aSource());
     expect(markdown).toMatchSnapshot();
     expect(markdown).toContain("relative to the repository root");
-    expect(markdown).toContain(`git add ${BUNDLE_TOKEN}`);
+    expect(markdown).toContain(`git add ${DOCS_TOKEN} ${BUNDLE_TOKEN}`);
     expect(markdown).toContain("Commit and push again whenever the bundle is re-exported.");
     expect(markdown).not.toContain("never reaches a worktree");
   });
@@ -189,7 +194,7 @@ describe("HANDOFF.md", () => {
       "",
       "Paths below are relative to the repository root (`/repos/target`). The bundle lives in `.scratch`, which git tracks.",
       "",
-      `- Spec: \`${BUNDLE_TOKEN}/spec.md\``,
+      `- Spec: \`${DOCS_TOKEN}/spec.md\``,
       "",
     ].join("\n");
     const withSpec = renderHandoff(aSource()).markdown;
@@ -218,7 +223,7 @@ describe("HANDOFF.md", () => {
     const { markdown } = renderHandoff(aSource());
     expect(markdown.startsWith("# Handoff: Export anywhere\n")).toBe(true);
     expect(markdown).toContain("Export a grilled session into any repository.");
-    expect(markdown).toContain(`- Spec: \`${BUNDLE_TOKEN}/spec.md\``);
+    expect(markdown).toContain(`- Spec: \`${DOCS_TOKEN}/spec.md\``);
     expect(markdown).toContain("```bash\njust verify\n```");
   });
 
@@ -522,9 +527,68 @@ describe("bundle paths", () => {
     const bundleDir = `${ROOT}/.scratch/export-anywhere`;
     expect(bundlePathFor("tracked", ROOT, bundleDir)).toBe(".scratch/export-anywhere");
     expect(bundlePathFor("ignored", ROOT, bundleDir)).toBe(bundleDir);
-    expect(fillBundlePath(`${BUNDLE_TOKEN}/spec.md and ${BUNDLE_TOKEN}/briefs/`, "x")).toBe(
-      "x/spec.md and x/briefs/",
+    expect(fillBundlePath(`${DOCS_TOKEN}/spec.md and ${BUNDLE_TOKEN}/briefs/`, "x", "d")).toBe(
+      "d/spec.md and x/briefs/",
     );
+  });
+
+  it("fills {{DOCS}} and moves old spec, intent and decisions paths to it", () => {
+    const fill = (markdown: string) => fillBundlePath(markdown, ".grill-room/a", "docs/specs/a");
+    expect(fill("`{{DOCS}}/spec.md`")).toBe("`docs/specs/a/spec.md`");
+    expect(fill("`{{BUNDLE}}/spec.md`")).toBe("`docs/specs/a/spec.md`");
+    expect(fill("`{{BUNDLE}}/intent.md` and `{{BUNDLE}}/decisions.md`")).toBe(
+      "`docs/specs/a/intent.md` and `docs/specs/a/decisions.md`",
+    );
+    expect(fill("[{{BUNDLE}}/spec.md](x) and {{BUNDLE}}/spec.md")).toBe(
+      "[docs/specs/a/spec.md](x) and docs/specs/a/spec.md",
+    );
+    expect(fill("`{{BUNDLE}}/issues/01-x.md`")).toBe("`.grill-room/a/issues/01-x.md`");
+    expect(fill("`{{BUNDLE}}/specs.md`")).toBe("`.grill-room/a/specs.md`");
+    expect(fill("`{{BUNDLE}}/spec.md.bak` and `{{BUNDLE}}/spec.mdx`")).toBe(
+      "`.grill-room/a/spec.md.bak` and `.grill-room/a/spec.mdx`",
+    );
+    expect(fill("See {{BUNDLE}}/spec.md.")).toBe("See docs/specs/a/spec.md.");
+    expect(fill("See {{BUNDLE}}/spec.md. Then")).toBe("See docs/specs/a/spec.md. Then");
+    expect(fillBundlePath("git add {{DOCS}} {{BUNDLE}}", "/r/.grill-room/a", "/r/docs/specs/a")).toBe(
+      "git add /r/docs/specs/a /r/.grill-room/a",
+    );
+  });
+});
+
+describe("describeHandoffEdits", () => {
+  const withOldSpecPath = (text: string) => text.split(`${DOCS_TOKEN}/spec.md`).join(`${BUNDLE_TOKEN}/spec.md`);
+
+  it("an edited brief baselined on today's render in the old-token form is edited but not outdated", () => {
+    const source = aSource();
+    const rendered = renderHandoff(source);
+    const [first, second, third] = rendered.briefs;
+    const fresh = (index: number) => renderBrief(source, source.tickets[index]!);
+    expect(fresh(0)).toContain(`${DOCS_TOKEN}/spec.md`);
+
+    const stored = {
+      markdown: rendered.markdown,
+      markdownGeneratedSha256: hashExportContent(rendered.markdown),
+      editedAt: "2026-10-05T10:00:00.000Z",
+      briefs: [
+        // Baselined before {{DOCS}}: only the spec path differs from today's render.
+        { ...first!, markdown: "An edit.\n", generatedSha256: hashExportContent(withOldSpecPath(fresh(0))) },
+        // Baselined on a render that differs in something else too: outdated.
+        {
+          ...second!,
+          markdown: "An edit.\n",
+          generatedSha256: hashExportContent(withOldSpecPath(fresh(1)).replace("Step 0", "Step zero")),
+        },
+        // Baselined on a render that differs only in something else: outdated.
+        {
+          ...third!,
+          markdown: "An edit.\n",
+          generatedSha256: hashExportContent(fresh(2).replace("Step 0", "Step zero")),
+        },
+      ],
+    };
+    const edits = describeHandoffEdits(stored, source);
+    expect(edits.editedBriefs).toEqual([1, 2, 3]);
+    expect(edits.outdatedBriefs).toEqual([2, 3]);
   });
 });
 
@@ -1148,7 +1212,7 @@ describe("export-time facts", () => {
   const IGNORED_NOTE = `Paths below are absolute, into the main checkout at \`${ROOT}\`. The bundle lives in \`.scratch\`, which git ignores: it never reaches a worktree through git.`;
   const GREENFIELD_PARAGRAPH =
     "This repository has no commits yet (greenfield). A worktree branches from a commit, so make the first commit before delegating the first ticket.";
-  const SPEC = `\`${BUNDLE_TOKEN}/spec.md\``;
+  const SPEC = `\`${DOCS_TOKEN}/spec.md\``;
   const TICKET = `\`${BUNDLE_TOKEN}/issues/01-register-projects.md\``;
   const TRACKED_ACCESS = `The bundle is committed in this repository, so your worktree has it. Read the spec at ${SPEC} and your ticket at ${TICKET}, relative to the repository root in your worktree.`;
   const TRACKED_GREENFIELD_ACCESS = `This repository had no commits when the bundle was exported. HANDOFF.md has the operator commit the bundle before delegating, so your worktree should have it: read the spec at ${SPEC} and your ticket at ${TICKET}, relative to the repository root in your worktree. If they are missing, stop and report.`;
@@ -1284,6 +1348,218 @@ describe("export-time facts", () => {
     expect(briefAt(stale, 0, { visibility: "ignored", greenfield: false })).toBe(
       briefAt(aSource({ visibility: "ignored" }), 0),
     );
+  });
+
+  describe("agreeing roots", () => {
+    /**
+     * The text as it read before `{{DOCS}}` existed: the spec path under
+     * `{{BUNDLE}}`, the `git add` line naming one folder, and the ignored
+     * sentence naming one.
+     */
+    function beforeDocs(text: string): string {
+      return withBundleToken(text)
+        .replace(`git add ${DOCS_TOKEN} ${BUNDLE_TOKEN}`, `git add ${BUNDLE_TOKEN}`)
+        .replace(`(\`${DOCS_TOKEN}\` and \`${BUNDLE_TOKEN}\`)`, `(\`${BUNDLE_TOKEN}\`)`);
+    }
+
+    const VARIANTS: readonly [string, ExportFacts][] = [
+      ["tracked", { visibility: "tracked", greenfield: false }],
+      ["tracked greenfield", { visibility: "tracked", greenfield: true }],
+      ["ignored", { visibility: "ignored", greenfield: false }],
+      ["tracked unchecked", { visibility: "tracked", greenfield: false, visibilityUnchecked: true }],
+      ["ignored unchecked", { visibility: "ignored", greenfield: false, visibilityUnchecked: true }],
+    ];
+    const CASES = VARIANTS.flatMap(([name, facts]) =>
+      (["pull-request", "local-merge"] as const).map((recipe) => [name, recipe, facts] as const),
+    );
+
+    it.each(CASES)(
+      "%s, %s: HANDOFF and the brief are today's text with only the spec path, the git add line and the both-ignored sentence changed",
+      (_name, deliveryRecipe, facts) => {
+        const source = aSource({ deliveryRecipe });
+        const agreeing: ExportFacts = { ...facts, durableVisibility: facts.visibility };
+
+        const handoff = renderHandoffMarkdown(source, false, agreeing);
+        expect(handoff).toBe(renderHandoffMarkdown(source, false, facts));
+        const handoffBefore = beforeDocs(handoff);
+        expect(handoffBefore).not.toContain(DOCS_TOKEN);
+        expect(handoffBefore).toContain(`- Spec: \`${BUNDLE_TOKEN}/spec.md\``);
+        expect(withDocsToken(handoffBefore)).toBe(
+          handoff
+            .replace(`git add ${DOCS_TOKEN} ${BUNDLE_TOKEN}`, `git add ${BUNDLE_TOKEN}`)
+            .replace(`(\`${DOCS_TOKEN}\` and \`${BUNDLE_TOKEN}\`)`, `(\`${BUNDLE_TOKEN}\`)`),
+        );
+
+        const brief = renderBrief(source, source.tickets[0]!, {}, agreeing);
+        expect(brief).toBe(renderBrief(source, source.tickets[0]!, {}, facts));
+        expect(withBundleToken(brief)).not.toContain(DOCS_TOKEN);
+        expect(withDocsToken(withBundleToken(brief))).toBe(brief);
+        const access =
+          facts.visibility === "ignored"
+            ? IGNORED_ACCESS
+            : facts.greenfield
+              ? TRACKED_GREENFIELD_ACCESS
+              : TRACKED_ACCESS;
+        expect(withBundleToken(brief)).toContain(access.split(SPEC).join(`\`${BUNDLE_TOKEN}/spec.md\``));
+        expect(brief).toContain(access);
+      },
+    );
+
+    it.each(["pull-request", "local-merge"] as const)(
+      "both tracked (%s): git add names both folders",
+      (deliveryRecipe) => {
+        const markdown = renderHandoffMarkdown(aSource({ deliveryRecipe }), false, {
+          visibility: "tracked",
+          greenfield: false,
+          durableVisibility: "tracked",
+        });
+        expect(markdown).toContain(`\ngit add ${DOCS_TOKEN} ${BUNDLE_TOKEN}\n`);
+        expect(markdown).not.toContain(`git add ${BUNDLE_TOKEN}\n`);
+      },
+    );
+
+    it.each(["pull-request", "local-merge"] as const)(
+      "both ignored (%s): the ignored sentence names both folders",
+      (deliveryRecipe) => {
+        const markdown = renderHandoffMarkdown(aSource({ deliveryRecipe }), false, {
+          visibility: "ignored",
+          greenfield: false,
+          durableVisibility: "ignored",
+        });
+        expect(markdown).toContain(
+          `The bundle is ignored by git, so no worktree will ever contain it. Worktree agents must read the spec, their ticket and their brief by absolute path into this main checkout (\`${DOCS_TOKEN}\` and \`${BUNDLE_TOKEN}\`); every brief says so. Do not copy the bundle into a worktree and do not commit it.`,
+        );
+        expect(markdown).not.toContain("git add");
+      },
+    );
+  });
+
+  describe("durable and working visibility differ", () => {
+    const DURABLE_TRACKED: ExportFacts = { visibility: "ignored", greenfield: false, durableVisibility: "tracked" };
+    const DURABLE_IGNORED: ExportFacts = { visibility: "tracked", greenfield: false, durableVisibility: "ignored" };
+    const LOCAL_MERGE_PARAGRAPH =
+      'Add the `worktree.baseRef` key, set to `"head"`, to this repository\'s `.claude/settings.json` — merge it into whatever settings are already there, never replace the file — before delegating the first ticket, and keep `main` checked out in this session for as long as you keep delegating: with this recipe, a new worktree branches from your current local `main`, so each one needs it to already hold everything merged so far. Use `.claude/settings.local.json` instead when this setting should stay personal rather than shared with the repository.';
+    const SPEC_TRACKED_NOTE = `The spec lives in \`${DOCS_TOKEN}\`, which git tracks: that path is relative to the repository root.`;
+    const SPEC_TRACKED_GREENFIELD_NOTE = `The spec lives in \`${DOCS_TOKEN}\`, which git will track once it is committed: that path is relative to the repository root.`;
+    const SPEC_IGNORED_NOTE = `The spec lives in \`${DOCS_TOKEN}\`, which git ignores: that path is absolute, into the main checkout.`;
+    const BUNDLE_IGNORED_TAIL = `The bundle in \`${BUNDLE_TOKEN}\` is ignored by git, so no worktree will ever contain it. Worktree agents must read their ticket and their brief by absolute path into this main checkout (\`${BUNDLE_TOKEN}\`); every brief says so. Do not copy it into a worktree and do not commit it.`;
+    const SPEC_IGNORED_TAIL = `The spec in \`${DOCS_TOKEN}\` is ignored by git, so no worktree will ever contain it. Worktree agents must read the spec by absolute path into this main checkout (\`${DOCS_TOKEN}\`); every brief says so. Do not copy it into a worktree and do not commit it.`;
+    const SPEC_TRACKED_ACCESS = `The spec is committed in this repository, so your worktree has it: read it at ${SPEC}, relative to the repository root in your worktree.`;
+    const SPEC_TRACKED_GREENFIELD_ACCESS = `The spec is committed by the operator before delegating (this repository had no commits at export), so your worktree should have it: read it at ${SPEC}, relative to the repository root in your worktree. If it is missing, stop and report.`;
+    const SPEC_IGNORED_ACCESS = `The spec is ignored by git, so it is NOT in your worktree: read it by absolute path from the main checkout at ${SPEC}. Never write to it.`;
+    const TICKET_TRACKED_ACCESS = `Your ticket is committed in this repository, so your worktree has it: read it at ${TICKET}, relative to the repository root in your worktree.`;
+    const TICKET_TRACKED_GREENFIELD_ACCESS = `Your ticket is committed by the operator before delegating (this repository had no commits at export), so your worktree should have it: read it at ${TICKET}, relative to the repository root in your worktree. If it is missing, stop and report.`;
+    const TICKET_IGNORED_ACCESS = `Your ticket is ignored by git, so it is NOT in your worktree: read it by absolute path from the main checkout at ${TICKET}. Never write to it.`;
+
+    function commitBlock(added: string, push: boolean): string {
+      return [
+        "```bash",
+        `git add ${added}`,
+        'git commit -m "Add the Export anywhere handoff bundle"',
+        ...(push ? ["git push"] : []),
+        "```",
+      ].join("\n");
+    }
+
+    const ROWS = [
+      {
+        name: "durable tracked, working ignored",
+        facts: DURABLE_TRACKED,
+        note: `${IGNORED_NOTE} ${SPEC_TRACKED_NOTE}`,
+        added: DOCS_TOKEN,
+        pullRequestOpening:
+          "Worktree agents start from `origin/main`, so they see the spec only once it is committed and pushed. Grill Room never commits in this repository; do it yourself, once, before delegating:",
+        localMergeOpening:
+          "Grill Room never commits in this repository; commit the spec yourself, once, before delegating, so the first worktree contains it:",
+        tail: BUNDLE_IGNORED_TAIL,
+        access: `${SPEC_TRACKED_ACCESS} ${TICKET_IGNORED_ACCESS}`,
+      },
+      {
+        name: "durable ignored, working tracked",
+        facts: DURABLE_IGNORED,
+        note: `${TRACKED_NOTE} ${SPEC_IGNORED_NOTE}`,
+        added: BUNDLE_TOKEN,
+        pullRequestOpening:
+          "Worktree agents start from `origin/main`, so they see the tickets and briefs only once they are committed and pushed. Grill Room never commits in this repository; do it yourself, once, before delegating:",
+        localMergeOpening:
+          "Grill Room never commits in this repository; commit the tickets and briefs yourself, once, before delegating, so the first worktree contains them:",
+        tail: SPEC_IGNORED_TAIL,
+        access: `${SPEC_IGNORED_ACCESS} ${TICKET_TRACKED_ACCESS}`,
+      },
+    ];
+
+    describe.each(ROWS)("$name", (row) => {
+      it("pull-request: the paths note, the whole before-delegating block, and Step 0", () => {
+        const source = aSource({ deliveryRecipe: "pull-request" });
+        const markdown = renderHandoffMarkdown(source, false, row.facts);
+        expect(markdown).toContain(`\n\n${row.note}\n\n`);
+        expect(beforeDelegating(markdown).trimEnd()).toBe(
+          [
+            "## Before delegating the first ticket",
+            "",
+            row.pullRequestOpening,
+            "",
+            commitBlock(row.added, true),
+            "",
+            "Commit and push again whenever the bundle is re-exported.",
+            "",
+            row.tail,
+          ].join("\n"),
+        );
+        expect(renderBrief(source, source.tickets[0]!, {}, row.facts)).toContain(`\n\n${row.access}\n`);
+      });
+
+      it("local-merge: the paths note, the whole before-delegating block, and Step 0", () => {
+        const source = aSource({ deliveryRecipe: "local-merge" });
+        const markdown = renderHandoffMarkdown(source, false, row.facts);
+        expect(markdown).toContain(`\n\n${row.note}\n\n`);
+        expect(beforeDelegating(markdown).trimEnd()).toBe(
+          [
+            "## Before delegating the first ticket",
+            "",
+            LOCAL_MERGE_PARAGRAPH,
+            "",
+            row.localMergeOpening,
+            "",
+            commitBlock(row.added, false),
+            "",
+            "Commit again whenever the bundle is re-exported.",
+            "",
+            row.tail,
+          ].join("\n"),
+        );
+        expect(renderBrief(source, source.tickets[0]!, {}, row.facts)).toContain(`\n\n${row.access}\n`);
+      });
+    });
+
+    it("greenfield, durable tracked: the spec sentence says the operator commits it, the ticket stays ignored", () => {
+      const facts: ExportFacts = { ...DURABLE_TRACKED, greenfield: true };
+      const source = aSource();
+      expect(renderBrief(source, source.tickets[0]!, {}, facts)).toContain(
+        `\n\n${SPEC_TRACKED_GREENFIELD_ACCESS} ${TICKET_IGNORED_ACCESS}\n`,
+      );
+      expect(renderHandoffMarkdown(source, false, facts)).toContain(
+        `\n\n${IGNORED_NOTE} ${SPEC_TRACKED_GREENFIELD_NOTE}\n\n`,
+      );
+    });
+
+    it("greenfield, working tracked: the ticket sentence says the operator commits it, the spec stays ignored", () => {
+      const facts: ExportFacts = { ...DURABLE_IGNORED, greenfield: true };
+      const source = aSource();
+      expect(renderBrief(source, source.tickets[0]!, {}, facts)).toContain(
+        `\n\n${SPEC_IGNORED_ACCESS} ${TICKET_TRACKED_GREENFIELD_ACCESS}\n`,
+      );
+      expect(renderHandoffMarkdown(source, false, facts)).toContain(
+        `\n\n${TRACKED_GREENFIELD_NOTE} ${SPEC_IGNORED_NOTE}\n\n`,
+      );
+    });
+
+    it("a working note git could not check is followed by the spec's sentence", () => {
+      const markdown = renderHandoffMarkdown(aSource(), false, { ...DURABLE_TRACKED, visibilityUnchecked: true });
+      expect(markdown).toContain(
+        `\n\nPaths below are absolute, into the main checkout at \`${ROOT}\`. The bundle lives in \`.scratch\`; git could not say at export whether it ignores that folder, so these paths follow the project's visibility flag, \`ignored\`. ${SPEC_TRACKED_NOTE}\n\n`,
+      );
+    });
   });
 
   describe("the verify command in a repository with no commits yet", () => {

@@ -3,7 +3,7 @@ import { useT } from "@agent-native/core/client/i18n";
 import { useSetPageTitle } from "@agent-native/toolkit/app-shell";
 import type { SessionModel } from "@shared/session-constants";
 import { useIsMutating, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useParams } from "react-router";
 
 import { BuildRecordsSection } from "@/components/output/build-records-section";
@@ -56,6 +56,12 @@ export default function SessionOutputRoute() {
 
   /** What `{{BUNDLE}}` becomes in the plan `ExportSection` currently shows; the Handoff viewer fills its brief links with it. */
   const [bundlePath, setBundlePath] = useState<string | null>(null);
+  /** What `{{DOCS}}` becomes in that same plan: the durable bundle folder, where the spec lives. */
+  const [docsPath, setDocsPath] = useState<string | null>(null);
+  const setBundlePaths = useCallback((working: string | null, durable: string | null) => {
+    setBundlePath(working);
+    setDocsPath(durable);
+  }, []);
 
   const startingTurn = useIsMutating() > 0;
 
@@ -162,7 +168,7 @@ export default function SessionOutputRoute() {
 
       <Separator />
 
-      <HandoffSection sessionId={id} bundlePath={bundlePath} />
+      <HandoffSection sessionId={id} bundlePath={bundlePath} docsPath={docsPath} />
 
       <GroundBriefsControl
         sessionId={id}
@@ -185,7 +191,7 @@ export default function SessionOutputRoute() {
       <ExportSection
         sessionId={id}
         projectId={session.projectId}
-        onBundlePathChange={setBundlePath}
+        onBundlePathChange={setBundlePaths}
       />
     </div>
   );

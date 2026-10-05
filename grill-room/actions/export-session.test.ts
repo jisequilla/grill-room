@@ -1459,6 +1459,12 @@ describe("export by lifetime", () => {
       expect(await listFiles(durable)).toEqual(
         ["spec.md", "intent.md", "decisions.md", MANIFEST].map((file) => path.join(durable, file)).sort(),
       );
+      for (const file of ["HANDOFF.md", "briefs/01-build-the-workspace.md", "briefs/02-store-on-disk.md"]) {
+        const content = await fs.readFile(path.join(working, file), "utf8");
+        expect(content, file).toContain("docs/specs/a/spec.md");
+        expect(content, file).not.toContain("{{DOCS}}");
+        expect(content, file).not.toContain(".scratch/a/spec.md");
+      }
       expect(await listFiles(working)).toEqual(
         absolute(root, workingWrites()).sort(),
       );
@@ -1821,6 +1827,7 @@ describe("export writes grounded briefs", () => {
     sessionId: string,
     ticketNumber: number,
     markdown: string,
+    generatedSha256?: string,
   ): Promise<void> {
     const [row] = await getDb()
       .select()
@@ -1833,7 +1840,9 @@ describe("export writes grounded briefs", () => {
       markdown: string;
     }[];
     const updated = briefs.map((brief) =>
-      brief.ticketNumber === ticketNumber ? { ...brief, markdown } : brief,
+      brief.ticketNumber === ticketNumber
+        ? { ...brief, markdown, ...(generatedSha256 === undefined ? {} : { generatedSha256 }) }
+        : brief,
     );
     await getDb()
       .update(schema.handoffs)
@@ -2096,26 +2105,26 @@ describe("export writes grounded briefs", () => {
     if (!("source" in loaded)) throw new Error("expected a handoff source");
     const ticket1 = loaded.source.tickets.find((ticket) => ticket.number === 1)!;
     const bundlePath = bundlePathFor(loaded.source.project.visibility, loaded.source.project.rootPath, bundleDir);
-    const expected = fillBundlePath(renderBrief(loaded.source, ticket1), bundlePath);
+    const expected = fillBundlePath(renderBrief(loaded.source, ticket1), bundlePath, "docs/specs/grill-room");
 
     expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(expected);
   });
 
-  it("an older-template handoff with one brief hand-edited: HANDOFF.md keeps the fill wording, and the lists are accurate", async () => {
+  it("an older-template handoff with one brief hand-edited: the untouched brief still matches its baseline and is grounded, the edited one is not", async () => {
     const { root, session } = await aReadySession();
     await generateHandoff.run({ sessionId: session.id });
 
-    // Ticket 2's brief is left sitting under an older template — nobody
-    // touches it, and `editedAt` is still null at this point.
+    // Ticket 2's brief sits under an older template, with the baseline
+    // `generate-handoff` stored for it then: nobody touches it, and
+    // `editedAt` is still null at this point.
     const olderTemplateText =
       "# Brief 02: Store on disk\n\nAn older rendering of this brief, before a template wording change.\n\n<!-- slot: file-boundaries -->\n\n<!-- slot: codebase-facts -->\n";
-    await overwriteStoredBriefText(session.id, 2, olderTemplateText);
+    await overwriteStoredBriefText(session.id, 2, olderTemplateText, hashExportContent(olderTemplateText));
     expect(await editedAtOf(session.id)).toBeNull();
 
     // Editing ticket 1's brief through update-handoff sets `editedAt` for the
-    // whole handoff. From here, the equality check decides eligibility for
-    // *every* text — including ticket 2's, which nobody touched but which
-    // still no longer matches today's template.
+    // whole handoff. Ticket 1's text no longer matches its baseline, so it is
+    // ineligible; ticket 2's still matches its own, so it stays eligible.
     const handEdited = "# Brief 01: Hand-edited\n\nSomeone already wrote this by hand.\n";
     await updateHandoff.run({ sessionId: session.id, briefs: [{ ticketNumber: 1, markdown: handEdited }] });
     expect(await editedAtOf(session.id)).not.toBeNull();
@@ -2124,23 +2133,14 @@ describe("export writes grounded briefs", () => {
 
     const preview = await previewExport.run({ sessionId: session.id });
     expect(preview.groundingState).toBe("current");
-    expect(preview.groundedBriefs).toEqual([]);
-    expect(
-      [...preview.ungroundedBriefs].sort((a: { ticket: number }, b: { ticket: number }) => a.ticket - b.ticket),
-    ).toEqual([
-      { ticket: 1, reason: "edited" },
-      { ticket: 2, reason: "edited" },
-    ]);
+    expect(preview.groundedBriefs).toEqual([2]);
+    expect(preview.ungroundedBriefs).toEqual([{ ticket: 1, reason: "edited" }]);
 
     const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
-    expect(result.groundedBriefs).toEqual([]);
-    expect(
-      [...result.ungroundedBriefs].sort((a: { ticket: number }, b: { ticket: number }) => a.ticket - b.ticket),
-    ).toEqual([
-      { ticket: 1, reason: "edited" },
-      { ticket: 2, reason: "edited" },
-    ]);
+    expect(result.groundedBriefs).toEqual([2]);
+    expect(result.ungroundedBriefs).toEqual([{ ticket: 1, reason: "edited" }]);
 
+    // Not every brief is grounded, so HANDOFF.md keeps the fill wording.
     const bundleDir = path.join(root, ".scratch", "grill-room");
     const handoffMarkdown = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
     expect(handoffMarkdown).toContain("Fill the brief's **File boundaries** slot");
@@ -2149,8 +2149,138 @@ describe("export writes grounded briefs", () => {
 
     expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(handEdited);
     const second = await readBrief(bundleDir, "02-store-on-disk.md");
-    expect(second).toBe(olderTemplateText);
-    expect(second).not.toContain("## Proved by");
+    expect(second).not.toContain("An older rendering of this brief");
+    expect(second).toContain("## Proved by");
+  });
+
+  describe("a handoff stored before {{DOCS}}", () => {
+    const DURABLE = "docs/specs/grill-room";
+    const WORKING = ".scratch/grill-room";
+
+    /** A text as `generate-handoff` wrote it before {{DOCS}}: the spec under {{BUNDLE}}, one folder in `git add`. */
+    function beforeDocs(text: string): string {
+      return text
+        .split("{{DOCS}}/spec.md")
+        .join("{{BUNDLE}}/spec.md")
+        .split("git add {{DOCS}} {{BUNDLE}}")
+        .join("git add {{BUNDLE}}");
+    }
+
+    /**
+     * Rewrites the stored row in the old-token form, written directly into
+     * the row. With baselines, each is the hash of its old text, as
+     * `generate-handoff` stored them; without, both are null, as a row
+     * stored before baselines existed has none.
+     */
+    async function storeBeforeDocs(sessionId: string, options: { baselines: boolean }) {
+      const [row] = await getDb()
+        .select()
+        .from(schema.handoffs)
+        .where(eq(schema.handoffs.sessionId, sessionId))
+        .limit(1);
+      const markdown = beforeDocs(row!.markdown);
+      expect(markdown).toContain("- Spec: `{{BUNDLE}}/spec.md`");
+      expect(markdown).toContain("git add {{BUNDLE}}\n");
+      const briefs = (
+        JSON.parse(row!.briefsJson) as { ticketNumber: number; relativePath: string; markdown: string }[]
+      ).map(({ ticketNumber, relativePath, markdown: text }) => {
+        const old = beforeDocs(text);
+        expect(old).toContain("{{BUNDLE}}/spec.md");
+        return options.baselines
+          ? { ticketNumber, relativePath, markdown: old, generatedSha256: hashExportContent(old) }
+          : { ticketNumber, relativePath, markdown: old };
+      });
+      await getDb()
+        .update(schema.handoffs)
+        .set({
+          markdown,
+          markdownGeneratedSha256: options.baselines ? hashExportContent(markdown) : null,
+          briefsJson: JSON.stringify(briefs),
+        })
+        .where(eq(schema.handoffs.id, row!.id));
+      return { markdown, briefs };
+    }
+
+    it("an unedited old brief beside an edited one is grounded, and the unedited old HANDOFF.md is re-rendered", async () => {
+      const { root, session } = await aReadySession();
+      await generateHandoff.run({ sessionId: session.id });
+      await storeBeforeDocs(session.id, { baselines: true });
+      await updateHandoff.run({
+        sessionId: session.id,
+        briefs: [{ ticketNumber: 1, markdown: "# Brief 01: hand-edited\n" }],
+      });
+      await groundNow(session.id, root);
+
+      const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+      expect(result.groundedBriefs).toEqual([2]);
+      expect(result.ungroundedBriefs).toEqual([{ ticket: 1, reason: "edited" }]);
+      const bundleDir = path.join(root, WORKING);
+      expect(await readBrief(bundleDir, "02-store-on-disk.md")).toContain("## Proved by");
+      const handoff = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+      expect(handoff).toContain(`- Spec: \`${DURABLE}/spec.md\``);
+      expect(handoff).toContain(`\ngit add ${DURABLE} ${WORKING}\n`);
+      expect(handoff).not.toContain(`${WORKING}/spec.md`);
+    });
+
+    it("an edited old brief is written with its spec path moved to the durable folder and its other text kept", async () => {
+      const { root, session } = await aReadySession();
+      await generateHandoff.run({ sessionId: session.id });
+      const { briefs } = await storeBeforeDocs(session.id, { baselines: true });
+      const edited = `${briefs[0]!.markdown}\nOwner note: keep the store small.\n`;
+      await updateHandoff.run({ sessionId: session.id, briefs: [{ ticketNumber: 1, markdown: edited }] });
+
+      const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+      expect(result.ungroundedBriefs).toEqual(expect.arrayContaining([{ ticket: 1, reason: "edited" }]));
+      const written = await readBrief(path.join(root, WORKING), "01-build-the-workspace.md");
+      expect(written).toBe(fillBundlePath(edited, WORKING, DURABLE));
+      expect(written).toContain(`\`${DURABLE}/spec.md\``);
+      expect(written).not.toContain(`${WORKING}/spec.md`);
+      expect(written).toContain("Owner note: keep the store small.");
+    });
+
+    it("a hand-edited old HANDOFF.md keeps its wording, with its spec path moved and its old git add line filled", async () => {
+      const { root, session } = await aReadySession();
+      await generateHandoff.run({ sessionId: session.id });
+      const { markdown } = await storeBeforeDocs(session.id, { baselines: true });
+      const edited = `${markdown}\nOwner note: commit the bundle first.\n`;
+      await updateHandoff.run({ sessionId: session.id, markdown: edited });
+
+      await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+      const handoff = await fs.readFile(path.join(root, WORKING, "HANDOFF.md"), "utf8");
+      expect(handoff).toBe(fillBundlePath(edited, WORKING, DURABLE));
+      expect(handoff).toContain(`- Spec: \`${DURABLE}/spec.md\``);
+      expect(handoff).toContain(`\ngit add ${WORKING}\n`);
+      expect(handoff).not.toContain(`git add ${DURABLE}`);
+      expect(handoff).toContain("Owner note: commit the bundle first.");
+    });
+
+    it("with null baselines, HANDOFF.md is the stored text with its spec path moved and its old git add line kept", async () => {
+      const { root, session } = await aReadySession();
+      await generateHandoff.run({ sessionId: session.id });
+      const { markdown } = await storeBeforeDocs(session.id, { baselines: false });
+      await updateHandoff.run({
+        sessionId: session.id,
+        briefs: [{ ticketNumber: 1, markdown: "# Brief 01: hand-edited\n" }],
+      });
+
+      const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+      const handoff = await fs.readFile(path.join(root, WORKING, "HANDOFF.md"), "utf8");
+      expect(handoff).toBe(fillBundlePath(markdown, WORKING, DURABLE));
+      expect(handoff).toContain(`- Spec: \`${DURABLE}/spec.md\``);
+      expect(handoff).toContain(`\ngit add ${WORKING}\n`);
+      expect(handoff).not.toContain(`git add ${DURABLE}`);
+      // Brief 02 has no baseline either: with its spec path moved it equals today's render, so it stays eligible.
+      expect(result.ungroundedBriefs).toEqual(
+        expect.arrayContaining([
+          { ticket: 1, reason: "edited" },
+          { ticket: 2, reason: "no-grounding" },
+        ]),
+      );
+    });
   });
 
   it("a brief the hash guard kept is not reported as grounded", async () => {
@@ -2240,10 +2370,13 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
     const expectedBundlePath = row.effective === "ignored" ? bundleDir : ".scratch/grill-room";
     expect(plan.bundlePath).toBe(expectedBundlePath);
     const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
-    expect(handoff.content).toContain(`- Spec: \`${expectedBundlePath}/spec.md\``);
+    // The spec lives in the durable folder, which no row's rule ignores.
+    expect(handoff.content).toContain("- Spec: `docs/specs/grill-room/spec.md`");
+    expect(handoff.content).toContain(`- Tickets: \`${expectedBundlePath}/issues/\``);
     expect(handoff.content).not.toContain("git could not say at export");
     const brief = plan.files.find((file) => file.relativePath === "briefs/01-build-the-workspace.md")!;
-    expect(brief.content).toContain(`\`${expectedBundlePath}/spec.md\``);
+    expect(brief.content).toContain("`docs/specs/grill-room/spec.md`");
+    expect(brief.content).toContain(`\`${expectedBundlePath}/issues/01-build-the-workspace.md\``);
   });
 
   it("root no longer a git repository, stored tracked: falls back to the stored flag, greenfield", async () => {
@@ -2256,7 +2389,7 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
     expect(plan.effectiveVisibility).toBe("tracked");
     expect(plan.greenfield).toBe(true);
     const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
-    expect(handoff.content).toContain("- Spec: `.scratch/grill-room/spec.md`");
+    expect(handoff.content).toContain("- Spec: `docs/specs/grill-room/spec.md`");
     expect(handoff.content).toContain(
       "git could not say at export whether it ignores that folder, so these paths follow the project's visibility flag, `tracked`",
     );
@@ -2271,14 +2404,14 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
     expect(plan.project.visibility).toBe("ignored");
     expect(plan.effectiveVisibility).toBe("ignored");
     expect(plan.greenfield).toBe(true);
-    const bundleDir = path.join(root, ".scratch", "grill-room");
+    const durableBundleDir = path.join(root, "docs", "specs", "grill-room");
     const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
-    expect(handoff.content).toContain(`- Spec: \`${bundleDir}/spec.md\``);
+    expect(handoff.content).toContain(`- Spec: \`${durableBundleDir}/spec.md\``);
     expect(handoff.content).toContain(
       "git could not say at export whether it ignores that folder, so these paths follow the project's visibility flag, `ignored`",
     );
     const brief = plan.files.find((file) => file.relativePath === "briefs/01-build-the-workspace.md")!;
-    expect(brief.content).toContain(`the spec at \`${bundleDir}/spec.md\``);
+    expect(brief.content).toContain(`the spec at \`${durableBundleDir}/spec.md\``);
   });
 
   it("export folder is a symlink, stored tracked: the path note says git could not check", async () => {
@@ -2307,7 +2440,7 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
     expect(plan.effectiveVisibility).toBe("tracked");
     expect(plan.greenfield).toBe(false);
     const handoff = plan.files.find((file) => file.relativePath === "HANDOFF.md")!;
-    expect(handoff.content).toContain("- Spec: `.scratch/grill-room/spec.md`");
+    expect(handoff.content).toContain("- Spec: `docs/specs/grill-room/spec.md`");
     expect(handoff.content).toContain(`${root}\`). The bundle lives in \`.scratch\`, which git tracks.`);
   });
 
@@ -2358,13 +2491,15 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
     // No remote, so the recipe is local-merge: greenfield first, then its settings paragraph, then the ignored text.
     const section = handoff.slice(handoff.indexOf("## Before delegating the first ticket"));
     expect(section.startsWith(`## Before delegating the first ticket\n\n${GREENFIELD_PARAGRAPH}\n\n`)).toBe(true);
-    const ignoredText = section.indexOf("The bundle is ignored by git, so no worktree will ever contain it.");
+    // The durable docs/specs folder is tracked, so the spec is committed and the bundle is read by absolute path.
+    const ignoredText = section.indexOf(`The bundle in \`${bundleDir}\` is ignored by git, so no worktree will ever contain it.`);
     expect(section.indexOf("worktree.baseRef")).toBeGreaterThan(section.indexOf(GREENFIELD_PARAGRAPH));
-    expect(ignoredText).toBeGreaterThan(section.indexOf("worktree.baseRef"));
-    expect(handoff).toContain(`- Spec: \`${bundleDir}/spec.md\``);
+    expect(section.indexOf("git add docs/specs/grill-room\n")).toBeGreaterThan(section.indexOf("worktree.baseRef"));
+    expect(ignoredText).toBeGreaterThan(section.indexOf("git add docs/specs/grill-room\n"));
+    expect(handoff).toContain("- Spec: `docs/specs/grill-room/spec.md`");
     for (const brief of ["01-build-the-workspace.md", "02-store-on-disk.md"]) {
       expect(files[path.join(bundleDir, "briefs", brief)]).toContain(
-        "The bundle is ignored by git, so it is NOT in your worktree.",
+        "Your ticket is ignored by git, so it is NOT in your worktree:",
       );
     }
   });
@@ -2387,7 +2522,7 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
 
     const bundleDir = path.join(root, ".scratch", "grill-room");
     const handoff = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
-    expect(handoff).toBe(fillBundlePath(edited, bundleDir));
+    expect(handoff).toBe(fillBundlePath(edited, bundleDir, "docs/specs/grill-room"));
     expect(handoff).toContain("which git tracks");
     expect(handoff).not.toContain(GREENFIELD_PARAGRAPH);
   });
@@ -2413,8 +2548,36 @@ describe("export-time facts: visibility and greenfield measured from git", () =>
       "# Brief 01: hand-edited\n",
     );
     expect(await fs.readFile(path.join(bundleDir, "briefs", "02-store-on-disk.md"), "utf8")).toContain(
-      "The bundle is ignored by git, so it is NOT in your worktree.",
+      "Your ticket is ignored by git, so it is NOT in your worktree:",
     );
+  });
+});
+
+describe("durable folder tracked, working folder ignored", () => {
+  useTestDatabase();
+
+  it("writes the mixed Step 0 in every brief and stages only the durable folder in HANDOFF", async () => {
+    const { root, session } = await aReadySession({ gitignore: ".scratch/\n" });
+    await generateHandoff.run({ sessionId: session.id });
+
+    const plan = await planExportBundle({ sessionId: session.id, slug: "grill-room" });
+    expect(plan.effectiveVisibility).toBe("ignored");
+    expect(plan.durableBundlePath).toBe("docs/specs/grill-room");
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    const bundleDir = path.join(root, ".scratch", "grill-room");
+    for (const brief of ["01-build-the-workspace", "02-store-on-disk"]) {
+      expect(await fs.readFile(path.join(bundleDir, "briefs", `${brief}.md`), "utf8")).toContain(
+        `\n\nThe spec is committed in this repository, so your worktree has it: read it at \`docs/specs/grill-room/spec.md\`, relative to the repository root in your worktree. Your ticket is ignored by git, so it is NOT in your worktree: read it by absolute path from the main checkout at \`${bundleDir}/issues/${brief}.md\`. Never write to it.\n`,
+      );
+    }
+    const handoff = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
+    expect(handoff).toContain("```bash\ngit add docs/specs/grill-room\ngit commit -m");
+    expect(handoff).toContain(
+      `The bundle in \`${bundleDir}\` is ignored by git, so no worktree will ever contain it.`,
+    );
+    expect(handoff).toContain("- Spec: `docs/specs/grill-room/spec.md`");
   });
 });
 
@@ -2553,7 +2716,7 @@ describe("export separates tickets in one wave that change the same file", () =>
 
     const bundleDir = path.join(root, ".scratch", "grill-room");
     const handoff = await exportedHandoff(root);
-    expect(handoff).toBe(fillBundlePath(edited, bundlePathFor("tracked", root, bundleDir)));
+    expect(handoff).toBe(fillBundlePath(edited, bundlePathFor("tracked", root, bundleDir), "docs/specs/grill-room"));
     expect(handoff).not.toContain("waits for ticket");
   });
 
@@ -2603,7 +2766,7 @@ describe("export after a regeneration that kept an edited brief", () => {
     ] as const) {
       const ticket = loaded.source.tickets.find((candidate) => candidate.number === number)!;
       expect(await fs.readFile(path.join(bundleDir, "briefs", file), "utf8")).toBe(
-        fillBundlePath(renderBrief(loaded.source, ticket), bundlePath),
+        fillBundlePath(renderBrief(loaded.source, ticket), bundlePath, "docs/specs/grill-room"),
       );
     }
   });

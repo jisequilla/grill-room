@@ -9,13 +9,19 @@
  *
  * The bundle's folder name is only fixed at export (the slug is confirmed in
  * the export preview, and `{seq}`/`{date}` depend on the day and on what is
- * already on disk). The stored markdown therefore writes every bundle path as
- * {@link BUNDLE_TOKEN}, and export fills it in with {@link fillBundlePath}:
- * the path relative to the repository root when the bundle is `tracked`, or
- * the absolute path into the main checkout when it is `ignored`. At export,
- * that visibility (and whether the repository has any commits yet) is
- * measured fresh from git and passed to the templates as {@link ExportFacts};
- * anywhere else the stored visibility flag decides.
+ * already on disk). The stored markdown therefore writes every working
+ * bundle path (HANDOFF.md, issues, briefs) as {@link BUNDLE_TOKEN} and every
+ * durable one (spec.md, intent.md, decisions.md) as {@link DOCS_TOKEN}, and
+ * export fills both in with {@link fillBundlePath}: each folder's path
+ * relative to the repository root when git tracks it, or its absolute path
+ * into the main checkout when git ignores it. At export, each folder's
+ * visibility (and whether the repository has any commits yet) is measured
+ * fresh from git and passed to the templates as {@link ExportFacts}; anywhere
+ * else the stored visibility flag decides, for both. When the two folders
+ * differ in visibility, each one's paths and instructions follow its own.
+ * Text stored before {@link DOCS_TOKEN} existed names the durable files under
+ * {@link BUNDLE_TOKEN}; {@link withDocsToken} moves them on every read that
+ * fills or compares it.
  *
  * ## Staleness
  *
@@ -44,6 +50,7 @@ import type {
   ProjectVisibility,
   TicketKind,
 } from "../shared/session-constants.js";
+import { BUNDLE_TOKEN, DOCS_TOKEN, withBundleToken, withDocsToken } from "../shared/bundle-tokens.js";
 import { DEFAULT_MAX_TICKETS_IN_FLIGHT } from "../shared/session-constants.js";
 import { cardsCurrent } from "./consistency.js";
 import {
@@ -70,8 +77,7 @@ import {
   userStories,
 } from "./tickets.js";
 
-/** Stands for the bundle directory in stored markdown; export replaces it. */
-export const BUNDLE_TOKEN = "{{BUNDLE}}";
+export { BUNDLE_TOKEN, DOCS_TOKEN, fillBundlePath, withDocsToken } from "../shared/bundle-tokens.js";
 
 /** The handoff's file name at the top of the bundle. */
 export const HANDOFF_FILE = "HANDOFF.md";
@@ -202,6 +208,13 @@ export interface ExportFacts {
    */
   visibilityUnchecked?: boolean;
   /**
+   * The durable bundle folder's visibility, measured at export (following
+   * the stored flag when git cannot tell). Absent means the same as
+   * `visibility`. `visibility` and `visibilityUnchecked` describe the
+   * working bundle folder.
+   */
+  durableVisibility?: ProjectVisibility;
+  /**
    * Present exactly when the brief grounding is current: the waves in which
    * no two tickets change the same file, and the orderings that separation
    * added. Absent, HANDOFF says overlaps were not checked.
@@ -213,6 +226,16 @@ export interface ExportFacts {
 /** The facts a render uses: the export's when given, otherwise the stored flag and not greenfield. */
 function factsFor(source: HandoffSource, exportFacts?: ExportFacts): ExportFacts {
   return exportFacts ?? { visibility: source.project.visibility, greenfield: false };
+}
+
+/** The durable bundle folder's visibility: its own when measured, otherwise the working folder's. */
+function durableVisibilityOf(facts: ExportFacts): ProjectVisibility {
+  return facts.durableVisibility ?? facts.visibility;
+}
+
+/** Whether both bundle folders have the same visibility, so one wording covers both. */
+function rootsAgree(facts: ExportFacts): boolean {
+  return durableVisibilityOf(facts) === facts.visibility;
 }
 
 /** Why a brief grounding no longer describes the session's handoff and project. */
@@ -405,10 +428,6 @@ export function bundlePathFor(
   return relative.split("\\").join("/");
 }
 
-export function fillBundlePath(markdown: string, bundlePath: string): string {
-  return markdown.split(BUNDLE_TOKEN).join(bundlePath);
-}
-
 interface TicketNames {
   label: string;
   fileStem: string;
@@ -443,7 +462,25 @@ function inlineCode(value: string): string {
   return `${fence}${padded}${fence}`;
 }
 
+/**
+ * HANDOFF.md's note on how its paths read: the working folder's note, and,
+ * when the durable folder differs in visibility, one sentence on the spec's.
+ */
 function pathsNote(source: HandoffSource, facts: ExportFacts): string {
+  const note = workingPathsNote(source, facts);
+  return rootsAgree(facts) ? note : `${note} ${durablePathsSentence(facts)}`;
+}
+
+function durablePathsSentence(facts: ExportFacts): string {
+  if (durableVisibilityOf(facts) === "ignored") {
+    return `The spec lives in \`${DOCS_TOKEN}\`, which git ignores: that path is absolute, into the main checkout.`;
+  }
+  return facts.greenfield
+    ? `The spec lives in \`${DOCS_TOKEN}\`, which git will track once it is committed: that path is relative to the repository root.`
+    : `The spec lives in \`${DOCS_TOKEN}\`, which git tracks: that path is relative to the repository root.`;
+}
+
+function workingPathsNote(source: HandoffSource, facts: ExportFacts): string {
   const { project } = source;
   if (facts.visibilityUnchecked) {
     if (facts.visibility === "tracked") {
@@ -494,14 +531,30 @@ function beforeDelegatingSection(source: HandoffSource, facts: ExportFacts): str
     );
   }
 
-  if (visibility === "tracked") {
+  const durableVisibility = durableVisibilityOf(facts);
+  const added =
+    visibility === "tracked" && durableVisibility === "tracked"
+      ? `${DOCS_TOKEN} ${BUNDLE_TOKEN}`
+      : durableVisibility === "tracked"
+        ? DOCS_TOKEN
+        : visibility === "tracked"
+          ? BUNDLE_TOKEN
+          : null;
+  if (added !== null) {
+    const committed = rootsAgree(facts) ? "bundle" : durableVisibility === "tracked" ? "spec" : "tickets and briefs";
     if (deliveryRecipe === "pull-request") {
+      const opening =
+        committed === "bundle"
+          ? "Worktree agents start from `origin/main`, so they see the bundle only once it is committed and pushed."
+          : committed === "spec"
+            ? "Worktree agents start from `origin/main`, so they see the spec only once it is committed and pushed."
+            : "Worktree agents start from `origin/main`, so they see the tickets and briefs only once they are committed and pushed.";
       lines.push(
-        "Worktree agents start from `origin/main`, so they see the bundle only once it is committed and pushed. Grill Room never commits in this repository; do it yourself, once, before delegating:",
+        `${opening} Grill Room never commits in this repository; do it yourself, once, before delegating:`,
         "",
         codeBlock(
           [
-            `git add ${BUNDLE_TOKEN}`,
+            `git add ${added}`,
             `git commit -m "Add the ${source.session.title} handoff bundle"`,
             "git push",
           ].join("\n"),
@@ -510,21 +563,37 @@ function beforeDelegatingSection(source: HandoffSource, facts: ExportFacts): str
         "Commit and push again whenever the bundle is re-exported.",
       );
     } else {
+      const opening =
+        committed === "bundle"
+          ? "commit the bundle yourself, once, before delegating, so the first worktree contains it:"
+          : committed === "spec"
+            ? "commit the spec yourself, once, before delegating, so the first worktree contains it:"
+            : "commit the tickets and briefs yourself, once, before delegating, so the first worktree contains them:";
       lines.push(
-        "Grill Room never commits in this repository; commit the bundle yourself, once, before delegating, so the first worktree contains it:",
+        `Grill Room never commits in this repository; ${opening}`,
         "",
         codeBlock(
-          [`git add ${BUNDLE_TOKEN}`, `git commit -m "Add the ${source.session.title} handoff bundle"`].join(
-            "\n",
-          ),
+          [`git add ${added}`, `git commit -m "Add the ${source.session.title} handoff bundle"`].join("\n"),
         ),
         "",
         "Commit again whenever the bundle is re-exported.",
       );
     }
-  } else {
+  }
+
+  if (visibility === "ignored" && durableVisibility === "ignored") {
     lines.push(
-      `The bundle is ignored by git, so no worktree will ever contain it. Worktree agents must read the spec, their ticket and their brief by absolute path into this main checkout (\`${BUNDLE_TOKEN}\`); every brief says so. Do not copy the bundle into a worktree and do not commit it.`,
+      `The bundle is ignored by git, so no worktree will ever contain it. Worktree agents must read the spec, their ticket and their brief by absolute path into this main checkout (\`${DOCS_TOKEN}\` and \`${BUNDLE_TOKEN}\`); every brief says so. Do not copy the bundle into a worktree and do not commit it.`,
+    );
+  } else if (visibility === "ignored") {
+    lines.push(
+      "",
+      `The bundle in \`${BUNDLE_TOKEN}\` is ignored by git, so no worktree will ever contain it. Worktree agents must read their ticket and their brief by absolute path into this main checkout (\`${BUNDLE_TOKEN}\`); every brief says so. Do not copy it into a worktree and do not commit it.`,
+    );
+  } else if (durableVisibility === "ignored") {
+    lines.push(
+      "",
+      `The spec in \`${DOCS_TOKEN}\` is ignored by git, so no worktree will ever contain it. Worktree agents must read the spec by absolute path into this main checkout (\`${DOCS_TOKEN}\`); every brief says so. Do not copy it into a worktree and do not commit it.`,
     );
   }
   return lines.join("\n");
@@ -1380,7 +1449,7 @@ export function renderHandoffMarkdown(
       "",
       pathsNote(source, facts),
       "",
-      `- Spec: \`${BUNDLE_TOKEN}/spec.md\``,
+      `- Spec: \`${DOCS_TOKEN}/spec.md\``,
       `- Tickets: \`${BUNDLE_TOKEN}/issues/\``,
       groundingCurrent
         ? `- Briefs: \`${BUNDLE_TOKEN}/briefs/\`, ${briefsPerTicket}, grounded and ready to paste as a delegation prompt`
@@ -1411,9 +1480,26 @@ export function renderHandoffMarkdown(
   return `${sections.join("\n\n")}\n`;
 }
 
+/** One file's Step 0 sentence when the two bundle folders differ in visibility: the file follows its own folder's. */
+function accessSentence(subject: string, filePath: string, visibility: ProjectVisibility, greenfield: boolean): string {
+  if (visibility === "ignored") {
+    return `${subject} is ignored by git, so it is NOT in your worktree: read it by absolute path from the main checkout at ${filePath}. Never write to it.`;
+  }
+  if (greenfield) {
+    return `${subject} is committed by the operator before delegating (this repository had no commits at export), so your worktree should have it: read it at ${filePath}, relative to the repository root in your worktree. If it is missing, stop and report.`;
+  }
+  return `${subject} is committed in this repository, so your worktree has it: read it at ${filePath}, relative to the repository root in your worktree.`;
+}
+
 function bundleAccess(facts: ExportFacts, fileStem: string): string {
-  const specPath = `\`${BUNDLE_TOKEN}/spec.md\``;
+  const specPath = `\`${DOCS_TOKEN}/spec.md\``;
   const ticketPath = `\`${BUNDLE_TOKEN}/issues/${fileStem}.md\``;
+  if (!rootsAgree(facts)) {
+    return [
+      accessSentence("The spec", specPath, durableVisibilityOf(facts), facts.greenfield),
+      accessSentence("Your ticket", ticketPath, facts.visibility, facts.greenfield),
+    ].join(" ");
+  }
   if (facts.visibility === "tracked" && facts.greenfield) {
     return `This repository had no commits when the bundle was exported. HANDOFF.md has the operator commit the bundle before delegating, so your worktree should have it: read the spec at ${specPath} and your ticket at ${ticketPath}, relative to the repository root in your worktree. If they are missing, stop and report.`;
   }
@@ -2115,7 +2201,13 @@ export function describeHandoffEdits(stored: StoredHandoffText, source: HandoffS
       ? []
       : edited.filter((brief) => {
           const ticket = source.tickets.find((candidate) => candidate.number === brief.ticketNumber);
-          return !ticket || hashExportContent(renderBrief(source, ticket)) !== brief.generatedSha256;
+          if (!ticket) return true;
+          // A baseline taken before {{DOCS}} existed hashed the spec path under {{BUNDLE}}.
+          const rendered = renderBrief(source, ticket);
+          return (
+            hashExportContent(rendered) !== brief.generatedSha256 &&
+            hashExportContent(withBundleToken(rendered)) !== brief.generatedSha256
+          );
         });
   return {
     handoffEdited: hashExportContent(stored.markdown) !== stored.markdownGeneratedSha256,
@@ -2213,18 +2305,30 @@ export function regenerateHandoff(
  * outdated. A text saved back to a baseline that is still today's render
  * therefore keeps it and is not an edit, while a brief kept through a
  * regeneration and saved back to its old generated text is a reviewed edit
- * like any other. Anything else (a legacy row, a stale handoff, no source, a
- * ticket that is gone) leaves the baseline alone.
+ * like any other. A brief stored before {{DOCS}} existed and saved back
+ * unchanged keeps its old baseline too: its text matches that baseline and
+ * differs from today's render only by the token, so the token change alone
+ * never makes it an edit. Anything else (a legacy row, a stale handoff, no
+ * source, a ticket that is gone) leaves the baseline alone.
+ *
+ * `brief` is the stored brief before the save; `savedMarkdown` is the text
+ * being saved.
  */
 export function baselineAfterEdit(
   brief: StoredHandoffBrief,
+  savedMarkdown: string,
   context: { legacy: boolean; current: boolean; source: HandoffSource | null },
 ): string | undefined {
   const old = brief.generatedSha256;
   if (context.legacy || old === undefined || !context.current || context.source === null) return old;
   const ticket = context.source.tickets.find((candidate) => candidate.number === brief.ticketNumber);
   if (!ticket) return old;
-  return hashExportContent(renderBrief(context.source, ticket));
+  const rendered = renderBrief(context.source, ticket);
+  const oldTokenSavedUnchanged =
+    hashExportContent(savedMarkdown) === old &&
+    savedMarkdown !== rendered &&
+    withDocsToken(savedMarkdown) === rendered;
+  return oldTokenSavedUnchanged ? old : hashExportContent(rendered);
 }
 
 /** Writes a regenerated handoff over the session's row (or creates it), with today's fingerprint. */

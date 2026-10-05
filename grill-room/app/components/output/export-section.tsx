@@ -390,14 +390,15 @@ export function ExportSection({
   sessionId: string;
   projectId: string | null;
   /**
-   * Reports the bundle path (what `{{BUNDLE}}` becomes) of the preview
-   * currently shown on screen, or `null` whenever that preview is not
-   * current: the slug is blank, the project is null, the query is disabled
-   * or errored, or the query is showing placeholder data while the next
-   * preview loads. `preview.data?.bundlePath` alone would keep reporting the
-   * previous plan's path through that placeholder window.
+   * Reports the bundle path (what `{{BUNDLE}}` becomes) and the durable
+   * bundle path (what `{{DOCS}}` becomes) of the preview currently shown on
+   * screen, or `null` for both whenever that preview is not current: the
+   * slug is blank, the project is null, the query is disabled or errored, or
+   * the query is showing placeholder data while the next preview loads.
+   * `preview.data?.bundlePath` alone would keep reporting the previous
+   * plan's path through that placeholder window.
    */
-  onBundlePathChange?: (bundlePath: string | null) => void;
+  onBundlePathChange?: (bundlePath: string | null, docsPath: string | null) => void;
 }) {
   const t = useT();
   const queryClient = useQueryClient();
@@ -510,7 +511,10 @@ export function ExportSection({
     if (!onBundlePathChange) return;
     const current =
       projectId !== null && !slugBlank && !preview.isError && !preview.isPlaceholderData;
-    onBundlePathChange(current ? (preview.data?.bundlePath ?? null) : null);
+    const bundlePath = current ? (preview.data?.bundlePath ?? null) : null;
+    const docsPath = current ? (preview.data?.durableBundlePath ?? null) : null;
+    if (bundlePath === null || docsPath === null) onBundlePathChange(null, null);
+    else onBundlePathChange(bundlePath, docsPath);
   }, [
     onBundlePathChange,
     projectId,

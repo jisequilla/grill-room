@@ -4,6 +4,7 @@ import {
   useActionQuery,
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
+import { BUNDLE_TOKEN, DOCS_TOKEN, fillBundlePath } from "@shared/bundle-tokens";
 import { IconFileDescription, IconPencil, IconRefresh } from "@tabler/icons-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -76,14 +77,18 @@ function documentText(handoff: Handoff, key: string): string {
 }
 
 /**
- * Fills every `{{BUNDLE}}` token in `markdown` with `bundlePath`, the same
- * operation export's own `fillBundlePath` (`server/handoff.ts:366-368`)
- * performs at export time. With no current plan (`bundlePath` null), the
- * text is returned unchanged, token intact.
+ * Fills `{{BUNDLE}}` with `bundlePath` and `{{DOCS}}` with `docsPath`, moving
+ * an old `{{BUNDLE}}/spec.md` to the durable folder first: exactly what
+ * export's {@link fillBundlePath} writes. With no current plan (either path
+ * null), the text is returned unchanged, tokens intact.
  */
-export function viewedDocumentText(markdown: string, bundlePath: string | null): string {
-  if (bundlePath === null) return markdown;
-  return markdown.split("{{BUNDLE}}").join(bundlePath);
+export function viewedDocumentText(
+  markdown: string,
+  bundlePath: string | null,
+  docsPath: string | null,
+): string {
+  if (bundlePath === null || docsPath === null) return markdown;
+  return fillBundlePath(markdown, bundlePath, docsPath);
 }
 
 /**
@@ -97,9 +102,11 @@ export function viewedDocumentText(markdown: string, bundlePath: string | null):
 export function HandoffSection({
   sessionId,
   bundlePath,
+  docsPath,
 }: {
   sessionId: string;
   bundlePath: string | null;
+  docsPath: string | null;
 }) {
   const t = useT();
   const [selected, setSelected] = useState(HANDOFF_DOC);
@@ -300,7 +307,7 @@ export function HandoffSection({
           {draft === null ? (
             <div className="rounded-xl border bg-card px-5 py-4" data-testid="handoff-document-view">
               <Markdown
-                text={viewedDocumentText(documentText(handoff, activeKey), bundlePath)}
+                text={viewedDocumentText(documentText(handoff, activeKey), bundlePath, docsPath)}
                 className="text-sm leading-relaxed text-foreground"
               />
             </div>
@@ -326,9 +333,14 @@ export function HandoffSection({
           )}
 
           <p className="text-xs text-muted-foreground">
-            {bundlePath === null
-              ? t("output.handoffBundleHint", { token: "{{BUNDLE}}" })
-              : t("output.handoffBundleShownHint", { path: bundlePath, token: "{{BUNDLE}}" })}
+            {bundlePath === null || docsPath === null
+              ? t("output.handoffBundleHint", { token: BUNDLE_TOKEN, docsToken: DOCS_TOKEN })
+              : t("output.handoffBundleShownHint", {
+                  path: bundlePath,
+                  docsPath,
+                  token: BUNDLE_TOKEN,
+                  docsToken: DOCS_TOKEN,
+                })}
           </p>
         </div>
       )}

@@ -57,7 +57,9 @@ test.afterEach(() => {
  * path the export section currently plans, instead of showing the raw
  * `[`{{BUNDLE}}/briefs/01-x.md`](briefs/01-x.md)` markdown as text — and
  * follows the export slug as it changes, while the editor keeps the stored
- * token. Walks the canned fake scenario to a generated handoff the same way
+ * token. gr-0hy.6: the spec path is `{{DOCS}}`, filled with the durable
+ * bundle folder (`docs/specs/…`), while the briefs stay under the working
+ * one. Walks the canned fake scenario to a generated handoff the same way
  * `handoff-regenerate.spec.ts` does.
  */
 test("shows brief links as the planned bundle path, and follows the export slug", async ({
@@ -124,22 +126,29 @@ test("shows brief links as the planned bundle path, and follows the export slug"
 
   // ---- 1. The viewer shows the planned bundle path, not the raw token ---
   await expect(view).toContainText(/\.scratch\/[^\s]*handoff-bundle-paths-e2e\/briefs\/01-/);
+  await expect(view).toContainText(/docs\/specs\/[^\s]*handoff-bundle-paths-e2e\/spec\.md/);
+  await expect(view).not.toContainText(/\.scratch\/[^\s]*\/spec\.md/);
   await expect(view).not.toContainText("{{BUNDLE}}");
+  await expect(view).not.toContainText("{{DOCS}}");
   await expect(view).not.toContainText("](briefs/");
   await expect(handoff).toContainText("Bundle paths are shown as the export below would write them");
+  await expect(handoff).toContainText(/in \.scratch\/[^\s]*handoff-bundle-paths-e2e and docs\/specs\/[^\s]*handoff-bundle-paths-e2e\./);
 
   // ---- 2. Following the export slug moves the path -----------------------
   const exportSection = page.getByTestId("output-export-section");
   const slugInput = exportSection.getByTestId("export-slug-input");
   await slugInput.fill("renamed-bundle");
   await expect(view).toContainText(/\.scratch\/[^\s]*renamed-bundle\/briefs\/01-/);
+  await expect(view).toContainText(/docs\/specs\/[^\s]*renamed-bundle\/spec\.md/);
 
   // ---- 3. A blank slug: no current plan, the viewer shows the token again
   await slugInput.fill("");
   await expect(view).toContainText("{{BUNDLE}}");
+  await expect(view).toContainText("{{DOCS}}/spec.md");
   await expect(view).not.toContainText(/renamed-bundle/);
 
   // ---- 4. Edit mode still shows the stored token -------------------------
   await handoff.getByTestId("edit-handoff").click();
   await expect(handoff.getByTestId("handoff-editor")).toHaveValue(/\{\{BUNDLE\}\}\/briefs\/01-/);
+  await expect(handoff.getByTestId("handoff-editor")).toHaveValue(/\{\{DOCS\}\}\/spec\.md/);
 });
