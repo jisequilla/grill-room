@@ -9,7 +9,7 @@ import {
   type PreviousRepoDecision,
   type ScoutProjectResult,
 } from "../server/interviewer/index.js";
-import { collectProjectFacts } from "../server/project-facts.js";
+import { collectProjectFacts, lastExportFolders } from "../server/project-facts.js";
 import { failWithProjectFactsRefusal } from "../server/project-refusal.js";
 import { getProject, type Project } from "../server/projects.js";
 import {
@@ -98,10 +98,7 @@ export async function scoutProjectCore(input: {
 }): Promise<ScoutReportWithStaleness | null> {
   const { session, project } = input;
 
-  const collected = await collectProjectFacts(
-    project.rootPath,
-    session.lastExportFolder ?? undefined,
-  );
+  const collected = await collectProjectFacts(project.rootPath, lastExportFolders(session));
   if ("refusal" in collected) failWithProjectFactsRefusal(collected.refusal);
   const { facts } = collected;
 

@@ -14,6 +14,7 @@ import { headCommit } from "../server/export-bundle.js";
 import { collectHandoffFactPack } from "../server/handoff-fact-pack.js";
 import { getInterviewer, MAX_HANDOFF_SCOUT_TICKETS } from "../server/interviewer/index.js";
 import type { BreakIntoTicketsResult } from "../server/interviewer/index.js";
+import { lastExportFolders } from "../server/project-facts.js";
 import { getProject } from "../server/projects.js";
 import {
   chainNote,
@@ -150,7 +151,7 @@ export default defineAction({
         // breakdown still runs without them when collecting fails.
         const trackedFiles = project
           ? await collectHandoffFactPack(project.rootPath, {
-              excludeFolder: session!.lastExportFolder ?? undefined,
+              excludeFolders: lastExportFolders(session!),
             }).then(
               (pack) => ({ files: pack.trackedFiles, omitted: pack.trackedFilesOmitted }),
               () => null,

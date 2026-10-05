@@ -953,9 +953,12 @@ describe("the export manifest", () => {
     return { relativePath, content, kept };
   }
 
-  it("records the session, revision 1, both commits and a hash per written file, with no timestamps", () => {
+  const durableRoot = { root: "durable", otherRootFolder: ".grill-room/a" } as const;
+
+  it("records the session, revision 1, its root, the other root's folder, both commits and a hash per written file, with no timestamps", () => {
     const manifest = buildExportManifest({
       sessionId: "session-1",
+      ...durableRoot,
       previous: null,
       scoutCommit: "abc123",
       headCommit: "def456",
@@ -966,9 +969,11 @@ describe("the export manifest", () => {
     expect(renderExportManifest(manifest)).toBe(
       [
         "{",
-        '  "version": 2,',
+        '  "version": 3,',
         '  "sessionId": "session-1",',
         '  "revision": 1,',
+        '  "root": "durable",',
+        '  "otherRootFolder": ".grill-room/a",',
         '  "scoutCommit": "abc123",',
         '  "headCommit": "def456",',
         '  "files": [',
@@ -990,6 +995,8 @@ describe("the export manifest", () => {
   it("records null commits outside a repository and without a scout report", () => {
     const manifest = buildExportManifest({
       sessionId: "session-1",
+      root: "working",
+      otherRootFolder: "docs/specs/a",
       previous: null,
       scoutCommit: null,
       headCommit: null,
@@ -997,9 +1004,11 @@ describe("the export manifest", () => {
       keptRemovals: [],
     });
     expect(manifest).toEqual({
-      version: 2,
+      version: 3,
       sessionId: "session-1",
       revision: 1,
+      root: "working",
+      otherRootFolder: "docs/specs/a",
       scoutCommit: null,
       headCommit: null,
       files: [],
@@ -1007,7 +1016,14 @@ describe("the export manifest", () => {
   });
 
   it("numbers revisions one past the previous manifest's, counting a version-1 manifest as 0", () => {
-    const base = { sessionId: "s", scoutCommit: null, headCommit: null, planned: [], keptRemovals: [] };
+    const base = {
+      sessionId: "s",
+      ...durableRoot,
+      scoutCommit: null,
+      headCommit: null,
+      planned: [],
+      keptRemovals: [],
+    };
 
     const v1 = parseExportManifest(JSON.stringify({ version: 1, files: ["spec.md"] }));
     expect(v1?.revision).toBe(0);
@@ -1048,6 +1064,7 @@ describe("the export manifest", () => {
 
     const manifest = buildExportManifest({
       sessionId: "s",
+      ...durableRoot,
       previous,
       scoutCommit: null,
       headCommit: null,
@@ -1067,7 +1084,7 @@ describe("the export manifest", () => {
     ]);
   });
 
-  it("parses both versions and refuses anything malformed", () => {
+  it("parses all three versions and refuses anything malformed", () => {
     expect(parseExportManifest(JSON.stringify({ version: 1, files: ["a.md"] }))).toEqual({
       version: 1,
       sessionId: null,
@@ -1077,25 +1094,44 @@ describe("the export manifest", () => {
       files: [{ path: "a.md", sha256: null }],
     });
 
-    const v2 = buildExportManifest({
+    // A version-2 manifest as a pre-split export wrote it parses exactly as
+    // before: no root, no other root's folder.
+    const v2 = {
+      version: 2,
       sessionId: "s",
+      revision: 2,
+      scoutCommit: "c",
+      headCommit: null,
+      files: [{ path: "a.md", sha256: sha("a") }],
+    };
+    expect(parseExportManifest(`${JSON.stringify(v2, null, 2)}\n`)).toEqual(v2);
+
+    const v3 = buildExportManifest({
+      sessionId: "s",
+      ...durableRoot,
       previous: null,
       scoutCommit: "c",
       headCommit: null,
       planned: [planned("a.md", "a")],
       keptRemovals: [],
     });
-    expect(parseExportManifest(renderExportManifest(v2))).toEqual(v2);
+    expect(parseExportManifest(renderExportManifest(v3))).toEqual(v3);
 
     for (const malformed of [
       "{ not json",
       JSON.stringify({ version: 1 }),
       JSON.stringify({ version: 1, files: ["a.md", 7] }),
       JSON.stringify({ version: 3, files: [] }),
+      JSON.stringify({ ...v2, version: 4 }),
+      JSON.stringify({ ...v3, version: 4 }),
       JSON.stringify({ ...v2, files: [{ path: "a.md", sha256: "not-a-hash" }] }),
       JSON.stringify({ ...v2, files: ["a.md"] }),
       JSON.stringify({ ...v2, revision: 0 }),
       JSON.stringify({ ...v2, sessionId: 7 }),
+      JSON.stringify({ ...v3, root: "elsewhere" }),
+      JSON.stringify({ ...v3, root: undefined }),
+      JSON.stringify({ ...v3, otherRootFolder: 7 }),
+      JSON.stringify({ ...v3, files: [{ path: "a.md", sha256: "not-a-hash" }] }),
     ]) {
       expect(parseExportManifest(malformed)).toBeNull();
     }

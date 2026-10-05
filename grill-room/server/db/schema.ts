@@ -173,11 +173,19 @@ export const sessions = table("gr_sessions", {
   /** A read-only folder the interviewer may read while grilling, or null for the tool-less interview. */
   docsFolder: text("docs_folder"),
   /**
-   * The bundle folder the session's last successful export wrote to, relative
-   * to its project's root, or null until the first export. A scout on this
-   * session leaves out the `decisions.md` under it: the session's own record.
+   * The working bundle folder the session's last successful export wrote to
+   * (HANDOFF.md, issues, briefs), relative to its project's root, or null
+   * until the first export. A scout or grounding on this session leaves out
+   * what lies under it: the session's own export.
    */
-  lastExportFolder: text("last_export_folder"),
+  lastWorkingExportFolder: text("last_working_export_folder"),
+  /**
+   * The durable bundle folder the session's last successful export wrote to
+   * (spec.md, intent.md, decisions.md), relative to its project's root, or
+   * null until the first export. A scout on this session leaves out the
+   * `decisions.md` under it: the session's own record.
+   */
+  lastDurableExportFolder: text("last_durable_export_folder"),
   /**
    * The batch of reopens running on this session right now, as JSON: how many
    * items it holds, how many are done, which one it is on, and the outcome of

@@ -405,7 +405,7 @@ export function ExportSection({
   const [slugDraft, setSlugDraft] = useState<string | null>(null);
   const [lastResult, setLastResult] = useState<ExportResult | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  /** Bundle-relative paths of edited files ticked "overwrite/remove anyway". */
+  /** Project-root-relative paths of edited files ticked "overwrite/remove anyway". */
   const [overridePaths, setOverridePaths] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -573,11 +573,11 @@ export function ExportSection({
     });
   }
 
-  function toggleOverride(relativePath: string, override: boolean) {
+  function toggleOverride(rootRelativePath: string, override: boolean) {
     setOverridePaths((current) => {
       const next = new Set(current);
-      if (override) next.add(relativePath);
-      else next.delete(relativePath);
+      if (override) next.add(rootRelativePath);
+      else next.delete(rootRelativePath);
       return next;
     });
   }
@@ -597,8 +597,12 @@ export function ExportSection({
               {t("output.exportProjectLabel")}:{" "}
             </span>
             <span className="font-medium">{plan.projectName}</span>
-            <span className="font-mono text-xs text-muted-foreground">
+            <span
+              className="font-mono text-xs text-muted-foreground"
+              data-testid="export-project-folders"
+            >
               {" "}
+              {plan.projectRoot}/{plan.durableExportFolder},{" "}
               {plan.projectRoot}/{plan.workingExportFolder}
             </span>
           </p>

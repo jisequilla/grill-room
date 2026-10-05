@@ -53,7 +53,7 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | --- | --- |
 | `create-session` | Start a grilling session from a loose idea, defaulting the interviewer model to the global default. Optionally names the registered project it exports into (`projectId`); refused with `project-not-found` for an unknown one. |
 | `list-sessions` | Every session with its title, state, last activity, and `readinessVerdict` (`ready`, `not-ready`, or null when the current idea has not been judged), and `looseEndCount`, how many loose ends `list-loose-ends` would list for it, most recently active first. |
-| `get-session` | One session by id, so resuming lands where it left off; carries a derived `modelLocked` flag. |
+| `get-session` | One session by id, so resuming lands where it left off; carries a derived `modelLocked` flag, and `lastWorkingExportFolder` and `lastDurableExportFolder`, the two bundle folders its last successful export wrote (relative to the project root, null before the first). |
 | `update-session-idea` | Replace a session's idea before its first round: trimmed, refused empty (`idea-required`). Clears the stored readiness judgment. Refused with `has-rounds` once any round exists and `turn-working` while a turn is working. Returns the session. |
 | `assess-readiness` | Ask the interviewer whether a session's idea is ready to be grilled, store the judgment, and return it. Refused with `has-rounds`, `turn-working`, or `wrong-session-state` outside interviewing. Never blocks starting the interview. See "Idea readiness" below. |
 | `delete-session` | A session and everything under it: decisions, history, rounds, spec, tickets, build records. |
@@ -103,9 +103,9 @@ The app's capabilities, in `actions/`. Reads are GET actions; the rest mutate.
 | `get-scout-report` | Read a session's scout report, or null when it has none: the server facts, the current state and proposed repo decisions, the commit and idea it read, the model, when it ran, its turn record, the keep/drop state of each proposal, and `stale`. |
 | `keep-repo-decision` | Keep one decision the session's scout report proposes: it enters the design tree settled, introduced by the repo, with the project's statement as its answer. Refused with `no-scout-report`, `proposal-not-found`, `already-kept`, `key-in-use`, `wrong-session-state`, or `turn-working`. See "Project scout" below. |
 | `drop-repo-decision` | Drop one decision the session's scout report proposes: recorded as dropped, still reaching the interviewer as unenforced context. Refused with `no-scout-report`, `proposal-not-found`, `already-kept`, `wrong-session-state`, or `turn-working`. |
-| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to, the absolute bundle directory, `bundlePath`, what `{{BUNDLE}}` becomes in HANDOFF.md and the briefs for this plan, every file the export will write as an absolute path (spec.md, intent.md, decisions.md when the tree holds decisions or out-of-scope items, HANDOFF.md and briefs/NN-slug.md when a handoff exists, and the manifest), `handoffIncluded`, the files the previous manifest lists that the plan drops, the project's tracker diagnostic, and the export gate as `exportBlocked`/`exportBlockedReason` (`handoff-missing` or `handoff-stale`, null once clear) — the same gate `export-session` refuses on, reported here without refusing so the UI can explain it first. `plannedWrites` and `plannedRemovals` repeat every planned write and removal as `{ path, relativePath, edited }`: `edited` is true when the file on disk no longer matches the hash the previous manifest recorded for it, or was never written by Grill Room at all — see "Exporting a session" below for the guard. Also reports the session's brief grounding as `groundingState` (`absent`, `current` or `stale`) and `groundingStaleReason` (`head-moved` or `handoff-changed`, null while current or absent) — informational, like the other gate: it never blocks export — plus `groundedBriefs` (ticket numbers this plan actually writes grounded) and `ungroundedBriefs` (every other brief, as `{ ticket, reason }` — `edited`, `no-grounding`, `not-covered`, or `kept` — see "Grounding the briefs" below). Also lists `delegationProposals`, the grounding's delegation proposals the owner has neither confirmed nor dismissed (`{ slot, proposal, confirmed }`, from a current or stale grounding, empty with none); it never blocks export. Also lists `ruleConflicts` (`{ ticket, title, citation, statement, missingFiles }`, one per open rule conflict: a rule claim whose required files fall outside its ticket's file boundaries and that the owner has not accepted as is, from a current or stale grounding, empty with none) and `acceptedRuleConflicts` (the accepted ones, each with its `waiverId` and `reason`); both advisory, neither blocks export. Built by the same plan `export-session` writes, so the two cannot disagree; export-session checks for edits again when it writes, so this preview is not a lock. |
-| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`: `<root>/<workingExportFolder>/<folderName>/spec.md`, `intent.md`, `decisions.md` (when the tree holds decisions or out-of-scope items), `issues/NN-slug.md` per ticket (tickets only when current), and `HANDOFF.md` plus `briefs/NN-slug.md` from the session's generated handoff, re-rendered fresh with the session's current brief grounding wherever the text is eligible (recording that export on the handoff), creating missing folders. Also writes a provenance manifest (`.grill-room-export.json`: session id, export revision, scout commit, HEAD at export, and a CRLF-insensitive sha256 of every file written). Re-export removes files the previous manifest lists that the new export no longer writes. Edited files are kept: a planned write or removal already on disk that no longer matches the hash the previous manifest recorded, or that the previous manifest never listed, is neither overwritten nor removed unless its bundle-relative path is in `overridePaths` (a version-1 manifest's files are trusted as unedited once). The check is repeated from disk at write time, so a file edited after `preview-export` is kept unless overridden. An override resolving outside the bundle is refused with `override-outside-bundle`. Refuses, writing nothing, with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, `export-outside-root` when any path resolves (through symlinks) outside the real project root, `handoff-missing` when the session has no handoff, or `handoff-stale` when its handoff no longer matches today's spec, tickets or project; `preview-export` reports the same gate as `exportBlocked`/`exportBlockedReason` without refusing, and marks each edited file, so the UI can explain both before the operator tries. Returns `written`, `removed` and `kept` as absolute paths, `groundedBriefs` (ticket numbers actually written grounded) and `ungroundedBriefs` (every other brief written, as `{ ticket, reason }` — `edited`, `no-grounding`, `not-covered`, or `kept` when the hash guard left an already-edited copy on disk instead of writing the grounded text), plus a post-export visibility report — see "Exporting a session" below and "Grounding the briefs" below. |
-| `get-export-visibility` | Classify every file a session's export wrote (or would write) as `tracked`, `ignored`, `untracked`, or `unchecked` ("could not check": git could not tell) in the project's repository, given the same `sessionId` and `slug` as `preview-export`/`export-session`. Read-only and side-effect-free, so the UI can re-check without exporting again. See "Exporting a session" below. |
+| `preview-export` | What exporting a session would do, with no side effects: the slug proposed from the title (its first four words), the slug used (the optional `slug` input, sanitized), the folder name the project's slug pattern resolves to (one name for both roots), the absolute working bundle directory (`bundleDir`, with `bundleExists`) and durable bundle directory (`durableBundleDir`, with `durableBundleExists` and `durableBundlePath`, the durable folder as HANDOFF.md would name it), `bundlePath`, what `{{BUNDLE}}` becomes in HANDOFF.md and the briefs for this plan, every file the export will write as an absolute path, durable root first (spec.md, intent.md, decisions.md when the tree holds decisions or out-of-scope items, and a manifest, to the durable root; HANDOFF.md, issues, briefs/NN-slug.md when a handoff exists, and a manifest, to the working root), `handoffIncluded`, the files each root's previous manifest lists that the plan drops from that root, the project's tracker diagnostic, and the export gate as `exportBlocked`/`exportBlockedReason` (`handoff-missing` or `handoff-stale`, null once clear) — the same gate `export-session` refuses on, reported here without refusing so the UI can explain it first. `plannedWrites` and `plannedRemovals` repeat every planned write and removal as `{ path, root, relativePath, rootRelativePath, edited }` (`root` `durable` or `working`, `relativePath` bundle-relative, `rootRelativePath` project-root-relative, what `overridePaths` takes): `edited` is true when the file on disk no longer matches the hash its root's previous manifest recorded for it, or was never written by Grill Room at all — see "Exporting a session" below for the guard. Also reports the session's brief grounding as `groundingState` (`absent`, `current` or `stale`) and `groundingStaleReason` (`head-moved` or `handoff-changed`, null while current or absent) — informational, like the other gate: it never blocks export — plus `groundedBriefs` (ticket numbers this plan actually writes grounded) and `ungroundedBriefs` (every other brief, as `{ ticket, reason }` — `edited`, `no-grounding`, `not-covered`, or `kept` — see "Grounding the briefs" below). Also lists `delegationProposals`, the grounding's delegation proposals the owner has neither confirmed nor dismissed (`{ slot, proposal, confirmed }`, from a current or stale grounding, empty with none); it never blocks export. Also lists `ruleConflicts` (`{ ticket, title, citation, statement, missingFiles }`, one per open rule conflict: a rule claim whose required files fall outside its ticket's file boundaries and that the owner has not accepted as is, from a current or stale grounding, empty with none) and `acceptedRuleConflicts` (the accepted ones, each with its `waiverId` and `reason`); both advisory, neither blocks export. Built by the same plan `export-session` writes, so the two cannot disagree; export-session checks for edits again when it writes, so this preview is not a lock. |
+| `export-session` | Export a session into its project, given `sessionId` and the confirmed `slug`, split by lifetime across two bundle folders sharing one `folderName`: the durable files `<root>/<durableExportFolder>/<folderName>/spec.md`, `intent.md` and `decisions.md` (when the tree holds decisions or out-of-scope items), and the working files `<root>/<workingExportFolder>/<folderName>/issues/NN-slug.md` per ticket (tickets only when current), and `HANDOFF.md` plus `briefs/NN-slug.md` from the session's generated handoff, re-rendered fresh with the session's current brief grounding wherever the text is eligible (recording that export on the handoff), creating missing folders. Also writes a provenance manifest in each bundle folder (`.grill-room-export.json`, version 3: session id, that root's export revision, which root it is, the other root's bundle folder, scout commit, HEAD at export, and a CRLF-insensitive sha256 of every file written in that folder). Re-export removes files a root's previous manifest lists that the new export no longer writes in that root. Edited files are kept: a planned write or removal already on disk that no longer matches the hash its root's previous manifest recorded, or that the manifest never listed, is neither overwritten nor removed unless its project-root-relative path (`preview-export`'s `rootRelativePath`) is in `overridePaths` (a version-1 manifest's files are trusted as unedited once). The check is repeated from disk at write time, so a file edited after `preview-export` is kept unless overridden. An override resolving, through symlinks, inside neither bundle folder (a bare bundle-relative `spec.md` included) is refused with `override-outside-bundle`. A successful export stores both bundle folders on the session. Refuses, writing nothing, with `no-project`, `project-not-found`, `project-root-missing`, `spec-missing`, `spec-not-current`, `invalid-slug`, `invalid-folder-name`, `export-outside-root` when any path resolves (through symlinks) outside the real project root, `handoff-missing` when the session has no handoff, or `handoff-stale` when its handoff no longer matches today's spec, tickets or project; `preview-export` reports the same gate as `exportBlocked`/`exportBlockedReason` without refusing, and marks each edited file, so the UI can explain both before the operator tries. Returns `bundleDir` (the working bundle folder) and `durableBundleDir`, `written`, `removed` and `kept` as absolute paths (durable root first), `groundedBriefs` (ticket numbers actually written grounded) and `ungroundedBriefs` (every other brief written, as `{ ticket, reason }` — `edited`, `no-grounding`, `not-covered`, or `kept` when the hash guard left an already-edited copy on disk instead of writing the grounded text), plus a post-export visibility report — see "Exporting a session" below and "Grounding the briefs" below. |
+| `get-export-visibility` | Classify every file a session's export wrote (or would write), in both the durable and the working bundle folder, as `tracked`, `ignored`, `untracked`, or `unchecked` ("could not check": git could not tell) in the project's repository, given the same `sessionId` and `slug` as `preview-export`/`export-session`. Read-only and side-effect-free, so the UI can re-check without exporting again. See "Exporting a session" below. |
 | `generate-handoff` | Generate or regenerate a session's handoff from deterministic templates (no model call): `HANDOFF.md` plus one brief per ticket, except a gate, which gets none. Regenerating rewrites every unedited text and keeps each hand-edited brief whose build ticket still exists, word for word. Refuses with `no-project`, `project-not-found`, `spec-missing`, `no-tickets` or `ticket-cycle`, and with `handoff-edited` when keeping an edit is impossible (HANDOFF.md was edited, an edited brief's ticket is gone, or a legacy handoff carries edits) unless `overwriteEdits` is true, which rewrites everything. See "Handoff" below. |
 | `get-handoff` | A session's handoff (HANDOFF.md, briefs by ticket number, timestamps) or null, with `stale` (its inputs changed since generation), `exportStale` (edited or regenerated after the last export that included it), `handoffEdited`, `editedBriefs`, `outdatedBriefs` (see "Handoff" below), `canGenerate`, `cannotGenerateReason`, and `recipeWarning` (`pull-request-without-remote` when the session's project delivers by pull request but its repository has no remote, shown with or without a handoff; never part of the fingerprint or HANDOFF.md). |
 | `update-handoff` | Edit a generated handoff: replace HANDOFF.md's `markdown` and/or `briefs` by `ticketNumber`. Marks it edited. Saving an edited brief while the handoff is current marks it reviewed, dropping it from `outdatedBriefs`. Refuses with `handoff-missing` or `brief-not-found`. |
@@ -458,17 +458,43 @@ diagnostic) regardless. Generate or regenerate the handoff (`generate-handoff`)
 to clear it. This means a bundle can no longer reach disk without an entry
 point — see "Handoff" below.
 
-The bundle is one directory per session:
+The bundle is split by lifetime across the project's two export roots, one
+bundle folder in each, both named `folderName`. **Durable** files explain the
+built system and stay in the repository's docs; **working** files drive the
+build and can be deleted after it:
 
 ```
+<root>/<durableExportFolder>/<folderName>/spec.md
+<root>/<durableExportFolder>/<folderName>/intent.md
+<root>/<durableExportFolder>/<folderName>/decisions.md        # when the tree holds decisions or out-of-scope items
+<root>/<durableExportFolder>/<folderName>/.grill-room-export.json
 <root>/<workingExportFolder>/<folderName>/HANDOFF.md
-<root>/<workingExportFolder>/<folderName>/spec.md
-<root>/<workingExportFolder>/<folderName>/intent.md
-<root>/<workingExportFolder>/<folderName>/decisions.md        # when the tree holds decisions or out-of-scope items
 <root>/<workingExportFolder>/<folderName>/issues/NN-slug.md   # "Blocked by: NN, NN" line, then "Implements: user stories 2-3, 5" when it cites any
 <root>/<workingExportFolder>/<folderName>/briefs/NN-slug.md
 <root>/<workingExportFolder>/<folderName>/.grill-room-export.json
 ```
+
+Everything that lists files across both roots (the plan, `preview-export`'s
+`files`, `plannedWrites` and `plannedRemovals`, `export-session`'s `written`
+and `removed`) lists the durable root first, then the working root, each in
+the order above. `kept` lists the kept writes of both roots, durable first,
+then the kept removals of both roots, durable first. Each planned write and
+removal carries its `root` (`durable` or `working`), its `relativePath`
+(relative to its root's bundle folder) and its `rootRelativePath` (relative
+to the project root, forward slashes: `docs/specs/<folderName>/spec.md`).
+The plan's existing bundle fields (`bundleDir`, `bundleFolder`, `bundlePath`,
+`bundleExists`) describe the working bundle; `durableBundleDir`,
+`durableBundleFolder`, `durableBundleExists` and `durableBundlePath` describe
+the durable one. `durableBundlePath` is the durable bundle folder as HANDOFF.md
+would name it: repo-relative unless git ignores it, absolute when it does, and
+following the stored flag when git cannot tell.
+
+A successful export stores both bundle folders on the session
+(`lastWorkingExportFolder`, `lastDurableExportFolder`; a failed one stores
+neither). Every reader of the project leaves out both: the project scout and
+the brief grounding drop the `decisions.md` under either from the recorded
+decision sources, and the handoff fact pack and the breakdown's tracked files
+drop every file under either.
 
 `intent.md` is the why, for people: rendered from stored data alone, no model
 call, so it states exactly what the session holds and nothing it does not.
@@ -487,37 +513,55 @@ when the project has moved since). No scout section when the session was
 never scouted. `intent.md` is always planned; it is not a decision source,
 so the scout prompt never reads it.
 
-`.grill-room-export.json` is the export's provenance manifest: the session
-id, the export revision (the previous manifest's plus one, starting at 1, no
-database column), the scout report's commit, the project's `HEAD` at export
-time, and, for every file Grill Room wrote, its path and the sha256 of its
-content with CRLF normalised to LF — no timestamps. It is part of the plan,
-listed in the preview and checked for containment like every other file. A
-version-1 manifest (paths only, no hashes) still parses; its files are
-treated as written by Grill Room and unedited, once.
+`.grill-room-export.json` is the export's provenance manifest, one in each
+root's bundle folder, listing only that root's files. Version 3, in this key
+order: `version`, the session id, that root's export revision (its previous
+manifest's plus one, starting at 1, no database column), `root` (`durable` or
+`working`), `otherRootFolder` (the other root's bundle folder, relative to the
+project root), the scout report's commit, the project's `HEAD` at export time,
+and, for every file Grill Room wrote in that folder, its path and the sha256
+of its content with CRLF normalised to LF — no timestamps. Both manifests
+carry the same session and commits. It is part of the plan, listed in the
+preview and checked for containment like every other file. A version-2
+manifest (one per pre-split bundle, every file in one folder) and a version-1
+manifest (paths only, no hashes) still parse and govern whichever root's
+folder they sit in; a version-1 manifest's files are treated as written by
+Grill Room and unedited, once. A version-3 manifest naming the other root
+counts as no previous manifest for the folder it was read from.
 
 **The edited-file guard.** Before writing, every planned file already on disk,
-and every file the previous manifest lists that the new plan drops, is
-classified from disk: **unedited** when the previous manifest has its hash and
-the file matches it (or the previous manifest is version 1 and lists the
-path), **edited** otherwise — including a file the previous manifest never
-listed at all. An edited file is kept — neither overwritten nor removed —
-unless its bundle-relative path is passed in `overridePaths`; a kept file
-stays in the new manifest with the hash Grill Room last wrote for it, and one
-that was never hashed is not added. `preview-export`'s `plannedWrites` and
-`plannedRemovals` mark each planned path `edited` so the UI can flag it before
-the operator tries; `export-session` recomputes the classification from disk
-at the moment it writes, so a file edited after the preview is still kept
-unless its path was overridden. Every override must resolve inside the bundle
-directory, through symlinks, or the plan is refused with
-`override-outside-bundle`. `export-session` returns `written`, `removed` and
-`kept` as absolute paths.
+and every file a root's previous manifest lists that the new plan drops from
+that root, is classified from disk against its own root's previous manifest:
+**unedited** when that manifest has its hash and the file matches it (or the
+manifest is version 1 and lists the path), **edited** otherwise — including a
+file the manifest never listed at all. An edited file is kept — neither
+overwritten nor removed — unless its `rootRelativePath` is passed in
+`overridePaths`; a kept file stays in its root's new manifest with the hash
+Grill Room last wrote for it, and one that was never hashed is not added.
+`preview-export`'s `plannedWrites` and `plannedRemovals` mark each planned
+path `edited` so the UI can flag it before the operator tries;
+`export-session` recomputes the classification from disk at the moment it
+writes, so a file edited after the preview is still kept unless its path was
+overridden. An override is a project-root-relative path, since a
+bundle-relative one cannot tell a durable write from a working removal of the
+same name: one that does not resolve, through symlinks, inside either bundle
+folder (a bare `spec.md` included) is refused with `override-outside-bundle`.
+`export-session` returns `written`, `removed` and `kept` as absolute paths.
 
 Re-export overwrites every planned, unkept file and removes only the unkept
-paths the previous manifest lists that the new plan no longer contains (a
-dropped ticket, say). A file the previous manifest does not list is never
-removed, whatever its name or folder; a bundle with no manifest, or a
-malformed one, gets no removals.
+paths a root's previous manifest lists that the new plan no longer puts in
+that root (a dropped ticket, say). A file the manifest does not list is never
+removed, whatever its name or folder; a bundle folder with no manifest, or a
+malformed one, gets no removals. A bundle exported before the split has one
+version-1 or version-2 manifest, in whichever folder it was written to, so its
+first re-export moves it: when that folder became the working root, the
+working root removes its `spec.md`, `intent.md` and `decisions.md` and the
+durable root is written fresh (a durable file already on disk that no
+manifest lists is edited and kept); when it was under `docs/` and became the
+durable root (migration 66), the durable root removes its `HANDOFF.md`,
+`issues/` and `briefs/`, judges `spec.md`, `intent.md` and `decisions.md`
+against that same manifest, and the working root is written fresh. Every
+removal is under the guard.
 
 `folderName` is the project's slug pattern with its placeholders filled:
 
@@ -526,25 +570,35 @@ malformed one, gets no removals.
   four words. A slug that sanitizes to nothing is refused (`invalid-slug`).
 - `{date}`: today's local date, `YYYY-MM-DD`.
 - `{seq}`: if a folder already matches the pattern with the same slug and date,
-  it is reused, so re-exporting lands in the same folder. Otherwise it is one
-  more than the highest numeric prefix among existing folders in the export
-  folder, padded to two digits (`01` when there are none).
+  it is reused, so re-exporting lands in the same folder; with matches in
+  both roots, the highest number wins. Otherwise it is one more than the
+  highest numeric prefix among the existing folders of both export roots,
+  padded to two digits (`01` when there are none), so the name is free in
+  both.
+
+The name is resolved once and shared by both roots.
 
 Before anything is written, every path is resolved with `fs.realpath` (the
 deepest existing ancestor of each) and refused with `export-outside-root`
-unless it lands inside the real project root. That covers an export folder,
-or an `issues/` folder, that is a symlink out of the repository.
+unless it lands inside the real project root: both bundle folders and every
+planned and removal path in both roots. That covers an export folder (either
+root's), or an `issues/` folder, that is a symlink out of the repository.
+Nothing is written in either root when any check refuses.
 
 `export-session` also returns a post-export visibility report (`server/visibility.ts`),
 built the same way `get-export-visibility` builds it on demand: every written
-file classified `tracked`, `ignored`, `untracked`, or `unchecked` ("could not
-check": git could not tell whether the file is ignored, e.g. it sits behind a
-symlink `check-ignore` refuses to resolve) with two batched read-only git
-calls, a plain warning plus the exact command to run when agents will not see
-a file, a separate warning naming each unchecked file's git error, and a
+file of both roots classified `tracked`, `ignored`, `untracked`, or
+`unchecked` ("could not check": git could not tell whether the file is
+ignored, e.g. it sits behind a symlink `check-ignore` refuses to resolve) with
+two batched read-only git calls, a plain warning plus the exact command to run
+when agents will not see a file (the untracked remedy stages, in one
+`git add`, only the bundle folders that hold an untracked file, durable
+first), a separate warning naming each unchecked file's git error, and a
 separate warning when the project's `visibility` flag disagrees with what was
-observed. Grill Room never stages or commits in the target repo — the remedy
-commands are for the operator to run by hand.
+observed in the working bundle folder: the single flag describes the working
+root, so the durable root's files never trigger it. Grill Room never stages or
+commits in the target repo — the remedy commands are for the operator to run
+by hand.
 
 ### Handoff
 
@@ -790,9 +844,9 @@ never edits the handoff itself.
 The scout's prompt carries a server fact pack beside the facts
 (`collectHandoffFactPack`, `server/handoff-fact-pack.ts`; collected per
 turn, never stored, and sent in full to the handoff scout; the break-into-tickets turn gets only its file list): the files git tracks
-(sorted, at most 3,000, with the count of the rest; leaving out the export
-folder, every file a secret pattern names, and files gone from the working
-tree), the root `CLAUDE.md`, `AGENTS.md` and `package.json` numbered like
+(sorted, at most 3,000, with the count of the rest; leaving out both bundle
+folders of the session's last export, durable and working, every file a
+secret pattern names, and files gone from the working tree), the root `CLAUDE.md`, `AGENTS.md` and `package.json` numbered like
 `cat -n` (at most 400 lines each, each line cut at 500 characters with a note naming the cut lines, and at most 40,000 bytes of lines per document; the file list is also capped at 100,000 bytes, and the count of the rest includes paths the byte budget dropped; names resolving to one real file become
 one entry; a symlink leading outside the root, to a secret file or into
 `.git` is left out), and the verify command. The documents count as opened:

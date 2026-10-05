@@ -246,7 +246,7 @@ describe("collectProjectFacts", () => {
         },
       });
 
-      const result = facts(await collectProjectFacts(root, ".scratch/a"));
+      const result = facts(await collectProjectFacts(root, [".scratch/a"]));
 
       expect(result.decisionFiles).toEqual([".scratch/ab/decisions.md", "kept/decisions.md"]);
     });
@@ -256,9 +256,25 @@ describe("collectProjectFacts", () => {
       // still treat an exact path match as excluded, not just a prefix.
       const root = repos.create({ files: { "bundle/decisions.md": "# bundle\n" } });
 
-      const result = facts(await collectProjectFacts(root, "bundle/decisions.md"));
+      const result = facts(await collectProjectFacts(root, ["bundle/decisions.md"]));
 
       expect(result.decisionFiles).toEqual([]);
+    });
+
+    it("leaves out a decisions.md under each of the excluded folders, keeping one outside both", async () => {
+      const root = repos.create({
+        files: {
+          "docs/specs/a/decisions.md": "# durable\n",
+          ".grill-room/a/decisions.md": "# working\n",
+          "docs/specs/b/decisions.md": "# another session\n",
+        },
+      });
+
+      const result = facts(
+        await collectProjectFacts(root, ["docs/specs/a", ".grill-room/a"]),
+      );
+
+      expect(result.decisionFiles).toEqual(["docs/specs/b/decisions.md"]);
     });
 
     it("gets an empty list when a project has no decisions.md", async () => {

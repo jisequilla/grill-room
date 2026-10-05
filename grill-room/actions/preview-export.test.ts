@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +12,7 @@ import { aHandoffScoutResult } from "../server/interviewer/test-fixtures.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 import createSession from "./create-session.js";
+import exportSession from "./export-session.js";
 import generateHandoff from "./generate-handoff.js";
 import listTickets from "./list-tickets.js";
 import previewExport from "./preview-export.js";
@@ -424,4 +427,110 @@ describe("preview-export: accepted rule conflicts", () => {
     await groundNow(session.id, root, withClaim());
     expect((await previewExport.run({ sessionId: session.id })).acceptedRuleConflicts).toEqual([]);
   });
+});
+
+describe("preview-export: two roots", () => {
+  useTestDatabase();
+
+  /** A session ready to export into a fresh project, with `prepare` run on its root first. */
+  async function aTwoRootSession(
+    options: {
+      gitignore?: string;
+      visibility?: "tracked" | "ignored";
+      prepare?: (root: string) => Promise<void>;
+    } = {},
+  ) {
+    const root = repos.create({ gitignore: options.gitignore });
+    await options.prepare?.(root);
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+      visibility: options.visibility,
+    });
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A local app that grills me about an idea until it is decided.",
+      projectId: project.id,
+    });
+    await insertTicket(session.id, { number: 1, slug: "build-the-workspace" });
+    await insertSpec(session.id);
+    await generateHandoff.run({ sessionId: session.id });
+    return { root, session };
+  }
+
+  it("reports the durable bundle directory, and whether it exists: not before the first export, then yes", async () => {
+    // The working bundle folder already exists; the durable one does not.
+    const { root, session } = await aTwoRootSession({
+      prepare: async (root) => {
+        await fs.mkdir(path.join(root, ".scratch", "grill-room"), { recursive: true });
+      },
+    });
+    const durableBundleDir = path.join(root, "docs", "specs", "grill-room");
+
+    const before = await previewExport.run({ sessionId: session.id });
+    expect(before).toMatchObject({
+      durableExportFolder: "docs/specs",
+      durableBundleDir,
+      durableBundleExists: false,
+      bundleDir: path.join(root, ".scratch", "grill-room"),
+      bundleExists: true,
+    });
+
+    await exportSession.run({ sessionId: session.id, slug: before.slug });
+
+    const after = await previewExport.run({ sessionId: session.id });
+    expect(after.durableBundleDir).toBe(durableBundleDir);
+    expect(after.durableBundleExists).toBe(true);
+  });
+
+  it("gives a repo-relative durableBundlePath when git says the durable folder is not ignored, whatever the working folder", async () => {
+    const { root, session } = await aTwoRootSession({
+      gitignore: ".scratch/\n",
+      visibility: "ignored",
+    });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.durableBundlePath).toBe("docs/specs/grill-room");
+    expect(preview.bundlePath).toBe(path.join(root, ".scratch", "grill-room"));
+  });
+
+  it("gives an absolute durableBundlePath when git ignores the durable folder", async () => {
+    const { root, session } = await aTwoRootSession({
+      gitignore: "docs/specs/\n",
+      visibility: "tracked",
+    });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.durableBundlePath).toBe(path.join(root, "docs", "specs", "grill-room"));
+    // The working folder is not ignored, so the working bundle path stays repo-relative.
+    expect(preview.bundlePath).toBe(".scratch/grill-room");
+  });
+
+  // The working folder is measured the other way each time, so only the
+  // stored flag can give the expected path.
+  const symlinkCases: ReadonlyArray<
+    ["tracked" | "ignored", string | undefined, (root: string) => string]
+  > = [
+    ["tracked", ".scratch/\n", () => "docs/specs/grill-room"],
+    ["ignored", undefined, (root) => path.join(root, "docs", "specs", "grill-room")],
+  ];
+
+  it.each(symlinkCases)(
+    "follows the stored flag (%s) when git cannot tell: a symlinked durable folder",
+    async (visibility, gitignore, expected) => {
+      const { root, session } = await aTwoRootSession({
+        visibility,
+        gitignore,
+        prepare: async (root) => {
+          await fs.mkdir(path.join(root, "real-specs"));
+          await fs.mkdir(path.join(root, "docs"));
+          await fs.symlink(path.join(root, "real-specs"), path.join(root, "docs", "specs"));
+        },
+      });
+
+      const preview = await previewExport.run({ sessionId: session.id });
+      expect(preview.durableBundlePath).toBe(expected(root));
+    },
+  );
 });

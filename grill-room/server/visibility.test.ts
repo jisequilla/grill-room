@@ -6,7 +6,12 @@ import { describe, expect, it } from "vitest";
 
 import { useTempGitRepos } from "../test/git-repos.js";
 import { runGit } from "./git.js";
-import { buildVisibilityReport, buildVisibilityWarnings, classifyVisibility } from "./visibility.js";
+import {
+  buildVisibilityReport,
+  buildVisibilityWarnings,
+  classifyVisibility,
+  type FileVisibility,
+} from "./visibility.js";
 
 const repos = useTempGitRepos();
 
@@ -200,7 +205,10 @@ describe("classifyVisibility", () => {
 
 describe("buildVisibilityWarnings", () => {
   const root = "/repo";
-  const bundleRelativePath = ".scratch/05-feature";
+  const durable = "docs/specs/05-feature";
+  const working = ".scratch/05-feature";
+  const bundleRelativePaths = [durable, working];
+  const workingBundleRelativePath = working;
 
   function file(relativePath: string, visibility: "tracked" | "ignored" | "untracked" | "unchecked") {
     return { path: `/repo/${relativePath}`, relativePath, visibility };
@@ -209,8 +217,9 @@ describe("buildVisibilityWarnings", () => {
   it("warns about nothing when every file is tracked and the flag says tracked", () => {
     const result = buildVisibilityWarnings({
       root,
-      bundleRelativePath,
-      files: [file("spec.md", "tracked"), file("issues/01-a.md", "tracked")],
+      bundleRelativePaths,
+      workingBundleRelativePath,
+      files: [file(`${durable}/spec.md`, "tracked"), file(`${working}/issues/01-a.md`, "tracked")],
       visibility: "tracked",
     });
 
@@ -229,15 +238,16 @@ describe("buildVisibilityWarnings", () => {
   it("warns and gives the add/commit/push remedy for untracked files, naming the real root and bundle path", () => {
     const result = buildVisibilityWarnings({
       root,
-      bundleRelativePath,
-      files: [file("spec.md", "tracked"), file("issues/01-a.md", "untracked")],
+      bundleRelativePaths,
+      workingBundleRelativePath,
+      files: [file(`${durable}/spec.md`, "tracked"), file(`${working}/issues/01-a.md`, "untracked")],
       visibility: "tracked",
     });
 
     expect(result.hasUntracked).toBe(true);
     expect(result.hasIgnored).toBe(false);
     expect(result.warning).toMatch(/will not see/);
-    expect(result.untrackedRemedy).toContain(`git -C ${root} add ${bundleRelativePath}`);
+    expect(result.untrackedRemedy).toContain(`git -C ${root} add ${working}\n`);
     expect(result.untrackedRemedy).toMatch(/git -C \/repo commit -m/);
     expect(result.untrackedRemedy).toContain(`git -C ${root} push`);
     expect(result.ignoredRemedy).toBeNull();
@@ -247,24 +257,26 @@ describe("buildVisibilityWarnings", () => {
   it("warns and gives the check-ignore remedy per ignored file, naming the real root", () => {
     const result = buildVisibilityWarnings({
       root,
-      bundleRelativePath,
-      files: [file("issues/01-a.md", "ignored"), file("issues/02-b.md", "ignored")],
+      bundleRelativePaths,
+      workingBundleRelativePath,
+      files: [file(`${working}/issues/01-a.md`, "ignored"), file(`${working}/issues/02-b.md`, "ignored")],
       visibility: "ignored",
     });
 
     expect(result.hasIgnored).toBe(true);
     expect(result.warning).toMatch(/will not see/);
     expect(result.ignoredRemedy).toMatch(/cannot be committed/i);
-    expect(result.ignoredRemedy).toContain(`git -C ${root} check-ignore -v issues/01-a.md`);
-    expect(result.ignoredRemedy).toContain(`git -C ${root} check-ignore -v issues/02-b.md`);
+    expect(result.ignoredRemedy).toContain(`git -C ${root} check-ignore -v ${working}/issues/01-a.md`);
+    expect(result.ignoredRemedy).toContain(`git -C ${root} check-ignore -v ${working}/issues/02-b.md`);
     expect(result.untrackedRemedy).toBeNull();
   });
 
   it("reports both remedies at once when a bundle has both untracked and ignored files", () => {
     const result = buildVisibilityWarnings({
       root,
-      bundleRelativePath,
-      files: [file("issues/01-a.md", "untracked"), file("issues/02-b.md", "ignored")],
+      bundleRelativePaths,
+      workingBundleRelativePath,
+      files: [file(`${working}/issues/01-a.md`, "untracked"), file(`${working}/issues/02-b.md`, "ignored")],
       visibility: "tracked",
     });
 
@@ -275,8 +287,9 @@ describe("buildVisibilityWarnings", () => {
   it("sets uncheckedWarning naming each unchecked file, says git could not tell, and does not set hasUntracked or hasIgnored", () => {
     const result = buildVisibilityWarnings({
       root,
-      bundleRelativePath,
-      files: [file("issues/01-a.md", "unchecked"), file("issues/02-b.md", "unchecked")],
+      bundleRelativePaths,
+      workingBundleRelativePath,
+      files: [file(`${working}/issues/01-a.md`, "unchecked"), file(`${working}/issues/02-b.md`, "unchecked")],
       visibility: "tracked",
     });
 
@@ -285,15 +298,16 @@ describe("buildVisibilityWarnings", () => {
     expect(result.hasIgnored).toBe(false);
     expect(result.uncheckedWarning).not.toBeNull();
     expect(result.uncheckedWarning).toMatch(/could not tell/);
-    expect(result.uncheckedWarning).toContain(`git -C ${root} check-ignore -v issues/01-a.md`);
-    expect(result.uncheckedWarning).toContain(`git -C ${root} check-ignore -v issues/02-b.md`);
+    expect(result.uncheckedWarning).toContain(`git -C ${root} check-ignore -v ${working}/issues/01-a.md`);
+    expect(result.uncheckedWarning).toContain(`git -C ${root} check-ignore -v ${working}/issues/02-b.md`);
   });
 
   it("leaves untrackedRemedy null when the only non-tracked files are unchecked", () => {
     const result = buildVisibilityWarnings({
       root,
-      bundleRelativePath,
-      files: [file("spec.md", "tracked"), file("issues/01-a.md", "unchecked")],
+      bundleRelativePaths,
+      workingBundleRelativePath,
+      files: [file(`${durable}/spec.md`, "tracked"), file(`${working}/issues/01-a.md`, "unchecked")],
       visibility: "tracked",
     });
 
@@ -313,12 +327,13 @@ describe("buildVisibilityWarnings", () => {
     // file explains nothing about the tracked one.
     ["ignored", "ignored" as const, ["tracked", "unchecked"], true],
   ] as const)(
-    "mismatch for flag %s with file visibilities %s -> %s",
+    "mismatch for flag %s with working-root file visibilities %s -> %s",
     (_label, flag, visibilities, expectMismatch) => {
       const result = buildVisibilityWarnings({
         root,
-        bundleRelativePath,
-        files: visibilities.map((visibility, index) => file(`f${index}.md`, visibility)),
+        bundleRelativePaths,
+        workingBundleRelativePath,
+        files: visibilities.map((visibility, index) => file(`${working}/f${index}.md`, visibility)),
         visibility: flag,
       });
 
@@ -334,8 +349,9 @@ describe("buildVisibilityWarnings", () => {
   it("names both the flag and the observed state in the mismatch warning", () => {
     const trackedFlagMismatch = buildVisibilityWarnings({
       root,
-      bundleRelativePath,
-      files: [file("spec.md", "ignored")],
+      bundleRelativePaths,
+      workingBundleRelativePath,
+      files: [file(`${working}/HANDOFF.md`, "ignored")],
       visibility: "tracked",
     });
     expect(trackedFlagMismatch.mismatchWarning).toContain("tracked");
@@ -343,11 +359,61 @@ describe("buildVisibilityWarnings", () => {
 
     const ignoredFlagMismatch = buildVisibilityWarnings({
       root,
-      bundleRelativePath,
-      files: [file("spec.md", "tracked")],
+      bundleRelativePaths,
+      workingBundleRelativePath,
+      files: [file(`${working}/HANDOFF.md`, "tracked")],
       visibility: "ignored",
     });
     expect(ignoredFlagMismatch.mismatchWarning).toContain("ignored");
+  });
+
+  describe("two roots: the remedy stages folders with an untracked file, the mismatch reads the working root", () => {
+    const untrackedRemedyLines = (folders: string) => [
+      `git -C ${root} add ${folders}`,
+      `git -C ${root} commit -m "Add exported session bundle"`,
+      `git -C ${root} push`,
+    ].join("\n");
+
+    function bothRoots(durableVisibility: FileVisibility, workingVisibility: FileVisibility) {
+      return buildVisibilityWarnings({
+        root,
+        bundleRelativePaths,
+        workingBundleRelativePath,
+        files: [
+          file(`${durable}/spec.md`, durableVisibility),
+          file(`${durable}/.grill-room-export.json`, durableVisibility),
+          file(`${working}/HANDOFF.md`, workingVisibility),
+          file(`${working}/.grill-room-export.json`, workingVisibility),
+        ],
+        visibility: "tracked",
+      });
+    }
+
+    it("durable untracked, working untracked: stages both, durable first; no mismatch", () => {
+      const result = bothRoots("untracked", "untracked");
+      expect(result.untrackedRemedy).toBe(untrackedRemedyLines(`${durable} ${working}`));
+      expect(result.mismatchWarning).toBeNull();
+    });
+
+    it("durable untracked, working ignored: stages the durable folder only; the mismatch comes from the working root", () => {
+      const result = bothRoots("untracked", "ignored");
+      expect(result.untrackedRemedy).toBe(untrackedRemedyLines(durable));
+      expect(result.mismatchWarning).not.toBeNull();
+      expect(result.mismatchWarning).toContain("tracked");
+    });
+
+    it("durable tracked, working untracked: stages the working folder only; no mismatch", () => {
+      const result = bothRoots("tracked", "untracked");
+      expect(result.untrackedRemedy).toBe(untrackedRemedyLines(working));
+      expect(result.mismatchWarning).toBeNull();
+    });
+
+    it("durable ignored, working tracked: stages nothing; no mismatch, since the flag describes the working root", () => {
+      const result = bothRoots("ignored", "tracked");
+      expect(result.untrackedRemedy).toBeNull();
+      expect(result.hasIgnored).toBe(true);
+      expect(result.mismatchWarning).toBeNull();
+    });
   });
 });
 
@@ -361,7 +427,8 @@ describe("buildVisibilityReport", () => {
 
     const report = await buildVisibilityReport({
       root,
-      bundleDir,
+      bundleDirs: [path.join(root, "docs", "specs", "05-feature"), bundleDir],
+      workingBundleDir: bundleDir,
       absolutePaths: [specFile],
       visibility: "tracked",
     });

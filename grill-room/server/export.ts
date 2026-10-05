@@ -53,22 +53,29 @@ export interface ExportPlan {
 }
 
 /**
- * The manifest every export writes at the top of its bundle: the provenance
- * record of what Grill Room wrote there. Version 2 names the session, counts
- * exports (`revision`), records the scout report's commit and the project's
- * HEAD at export time, and holds, for each file Grill Room wrote, the sha256
- * of its content with CRLF normalised to LF. It carries no timestamps, so it
- * changes only when something real changes.
+ * The manifest every export writes at the top of each of its two bundle
+ * folders, the durable one and the working one: the provenance record of what
+ * Grill Room wrote there. Version 3 names the session, counts that root's
+ * exports (`revision`), says which root it describes (`root`) and where the
+ * other root's bundle folder is (`otherRootFolder`, repo-root-relative),
+ * records the scout report's commit and the project's HEAD at export time,
+ * and holds, for each file Grill Room wrote in that folder, the sha256 of its
+ * content with CRLF normalised to LF. It carries no timestamps, so it changes
+ * only when something real changes.
  *
  * A re-export compares each file already on disk with the hash recorded here
  * to tell whether it was edited in the repo, and removes only paths listed
  * here, so a file the export did not write is never removed or overwritten
- * unasked. Version 1 (paths only) still parses: its files count as written by
- * Grill Room and unedited, once.
+ * unasked. Version 2 (one manifest for a bundle holding every file) and
+ * version 1 (paths only) still parse; a version-1 manifest's files count as
+ * written by Grill Room and unedited, once.
  */
 export const EXPORT_MANIFEST_FILE = ".grill-room-export.json";
 
-export const EXPORT_MANIFEST_VERSION = 2;
+export const EXPORT_MANIFEST_VERSION = 3;
+
+/** The two roots an export writes into: durable files explain the system, working files drive its build. */
+export type ExportRootKind = "durable" | "working";
 
 export interface ExportManifestFile {
   /** Relative to the bundle directory, forward slashes. */
@@ -77,25 +84,31 @@ export interface ExportManifestFile {
   sha256: string;
 }
 
-/** What {@link renderExportManifest} writes. */
-export interface ExportManifestV2 {
-  version: 2;
+/** What {@link renderExportManifest} writes, in this key order. */
+export interface ExportManifestV3 {
+  version: 3;
   sessionId: string;
   revision: number;
+  root: ExportRootKind;
+  /** The other root's bundle folder, relative to the repository root, forward slashes. */
+  otherRootFolder: string;
   scoutCommit: string | null;
   headCommit: string | null;
   files: ExportManifestFile[];
 }
 
 /**
- * A previous manifest as {@link parseExportManifest} reads it, either
- * version. A version-1 manifest has revision 0, no session or commits, and a
- * null hash for every file.
+ * A previous manifest as {@link parseExportManifest} reads it, any version.
+ * A version-1 manifest has revision 0, no session or commits, and a null hash
+ * for every file. Only a version-3 manifest carries `root` and
+ * `otherRootFolder`.
  */
 export interface ParsedExportManifest {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   sessionId: string | null;
   revision: number;
+  root?: ExportRootKind;
+  otherRootFolder?: string;
   scoutCommit: string | null;
   headCommit: string | null;
   files: { path: string; sha256: string | null }[];
@@ -108,7 +121,11 @@ export function hashExportContent(content: string): string {
 
 export interface BuildExportManifestInput {
   sessionId: string;
-  /** The bundle's previous manifest, or null when it has none (or an unreadable one). */
+  /** The root this manifest describes. */
+  root: ExportRootKind;
+  /** The other root's bundle folder, relative to the repository root. */
+  otherRootFolder: string;
+  /** This root's previous manifest, or null when it has none (or an unreadable one). */
   previous: ParsedExportManifest | null;
   scoutCommit: string | null;
   headCommit: string | null;
@@ -129,7 +146,7 @@ export interface BuildExportManifestInput {
  * The revision is one past the previous manifest's (a version-1 manifest
  * counts as revision 0), or 1 when there was none.
  */
-export function buildExportManifest(input: BuildExportManifestInput): ExportManifestV2 {
+export function buildExportManifest(input: BuildExportManifestInput): ExportManifestV3 {
   const previousHashes = new Map<string, string>();
   for (const file of input.previous?.files ?? []) {
     if (file.sha256 !== null) previousHashes.set(file.path, file.sha256);
@@ -151,6 +168,8 @@ export function buildExportManifest(input: BuildExportManifestInput): ExportMani
     version: EXPORT_MANIFEST_VERSION,
     sessionId: input.sessionId,
     revision: (input.previous?.revision ?? 0) + 1,
+    root: input.root,
+    otherRootFolder: input.otherRootFolder,
     scoutCommit: input.scoutCommit,
     headCommit: input.headCommit,
     files,
@@ -158,7 +177,7 @@ export function buildExportManifest(input: BuildExportManifestInput): ExportMani
 }
 
 /** The manifest file's content. */
-export function renderExportManifest(manifest: ExportManifestV2): string {
+export function renderExportManifest(manifest: ExportManifestV3): string {
   return `${JSON.stringify(manifest, null, 2)}\n`;
 }
 
@@ -171,7 +190,7 @@ function isNullableString(value: unknown): value is string | null {
 }
 
 /**
- * A manifest's content, read as either version, or null when it is not a
+ * A manifest's content, read as any version, or null when it is not a
  * manifest Grill Room wrote (unparseable JSON, an unknown version, or any
  * malformed field). Null means "no previous export": a manifest is never
  * guessed at. Content with no `version` is read as version 1.
@@ -200,7 +219,7 @@ export function parseExportManifest(content: string): ParsedExportManifest | nul
     };
   }
 
-  if (record.version !== 2) return null;
+  if (record.version !== 2 && record.version !== 3) return null;
   const { sessionId, revision, scoutCommit, headCommit } = record;
   if (typeof sessionId !== "string") return null;
   if (typeof revision !== "number" || !Number.isInteger(revision) || revision < 1) return null;
@@ -212,7 +231,23 @@ export function parseExportManifest(content: string): ParsedExportManifest | nul
     if (typeof path !== "string" || !isSha256(sha256)) return null;
     entries.push({ path, sha256 });
   }
-  return { version: 2, sessionId, revision, scoutCommit, headCommit, files: entries };
+  if (record.version === 2) {
+    return { version: 2, sessionId, revision, scoutCommit, headCommit, files: entries };
+  }
+
+  const { root, otherRootFolder } = record;
+  if (root !== "durable" && root !== "working") return null;
+  if (typeof otherRootFolder !== "string") return null;
+  return {
+    version: 3,
+    sessionId,
+    revision,
+    root,
+    otherRootFolder,
+    scoutCommit,
+    headCommit,
+    files: entries,
+  };
 }
 
 export interface PlanExportInput {

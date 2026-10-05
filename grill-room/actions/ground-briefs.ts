@@ -24,7 +24,7 @@ import {
   type HandoffScoutResult,
 } from "../server/interviewer/index.js";
 import { collectHandoffFactPack } from "../server/handoff-fact-pack.js";
-import { collectProjectFacts } from "../server/project-facts.js";
+import { collectProjectFacts, lastExportFolders } from "../server/project-facts.js";
 import { failWithProjectFactsRefusal } from "../server/project-refusal.js";
 import { getProject } from "../server/projects.js";
 import {
@@ -75,14 +75,11 @@ export default defineAction({
       });
     }
 
-    const collected = await collectProjectFacts(
-      project.rootPath,
-      session.lastExportFolder ?? undefined,
-    );
+    const collected = await collectProjectFacts(project.rootPath, lastExportFolders(session));
     if ("refusal" in collected) failWithProjectFactsRefusal(collected.refusal);
     const { facts } = collected;
     const factPack = await collectHandoffFactPack(project.rootPath, {
-      excludeFolder: session.lastExportFolder ?? undefined,
+      excludeFolders: lastExportFolders(session),
       verifyCommand: project.verifyCommand,
     });
 

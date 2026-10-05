@@ -56,6 +56,10 @@ function createSymlinkedExportProjectRepo(): string {
 
   mkdirSync(path.join(root, "actual-export"));
   symlinkSync("actual-export", path.join(root, ".scratch"));
+  // The durable root (spec, intent, decisions) goes behind a symlink too, so
+  // every exported file sits where git cannot check it.
+  mkdirSync(path.join(root, "actual-docs"));
+  symlinkSync("actual-docs", path.join(root, ".docs"));
 
   return root;
 }
@@ -121,6 +125,7 @@ test("reports a file exported through a symlinked folder as \"could not check\",
     root: repoRoot,
     verifyCommand: "true",
     workingExportFolder: ".scratch",
+    durableExportFolder: ".docs",
   });
   await setSessionProject(request, sessionId, project.id);
 

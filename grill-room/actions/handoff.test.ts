@@ -992,15 +992,17 @@ describe("handoff export", () => {
   });
 
   it("lists HANDOFF.md and the briefs in the preview and manifest, and writes them with repo-relative paths", async () => {
-    const { session, bundleDir } = await aReadySession();
+    const { root, session, bundleDir } = await aReadySession();
     await generateHandoff.run({ sessionId: session.id });
 
     const preview = await previewExport.run({ sessionId: session.id });
+    const durableBundleDir = path.join(root, "docs", "specs", "grill-room");
     expect(preview.handoffIncluded).toBe(true);
     expect(preview.files).toEqual([
+      path.join(durableBundleDir, "spec.md"),
+      path.join(durableBundleDir, "intent.md"),
+      path.join(durableBundleDir, EXPORT_MANIFEST_FILE),
       path.join(bundleDir, "HANDOFF.md"),
-      path.join(bundleDir, "spec.md"),
-      path.join(bundleDir, "intent.md"),
       path.join(bundleDir, "issues", "01-build-the-workspace.md"),
       path.join(bundleDir, "issues", "02-store-on-disk.md"),
       path.join(bundleDir, "issues", "03-export-it.md"),

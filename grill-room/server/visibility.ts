@@ -38,13 +38,17 @@
  * shows: a plain warning once anything is ignored or untracked, the exact
  * manual command to fix each case, a separate warning when git could not
  * check some files at all, and a separate warning when the project's
- * declared `visibility` flag disagrees with what was just observed.
+ * declared `visibility` flag disagrees with what was just observed in the
+ * working bundle folder. An export writes two bundle folders, the durable one
+ * and the working one: both are classified and both may need staging, but the
+ * single flag describes the working folder only.
  */
 import path from "node:path";
 
 import type { ProjectVisibility } from "../shared/session-constants.js";
 import { checkIgnored } from "./check-ignore.js";
 import { runGit } from "./git.js";
+import { isUnderFolder } from "./project-facts.js";
 
 export type FileVisibility = "tracked" | "ignored" | "untracked" | "unchecked";
 
@@ -140,22 +144,23 @@ export async function classifyVisibility(
 
 /**
  * Turn a classification into the plain warnings and remedy commands the UI
- * shows. `bundleRelativePath` is the bundle directory relative to `root`
- * (forward slashes, no trailing slash) — the path the untracked-file remedy
- * stages as a whole.
+ * shows. `bundleRelativePaths` are the bundle directories relative to `root`
+ * (forward slashes, no trailing slash), durable first: the untracked-file
+ * remedy stages, in one line, each of them that holds an untracked file.
+ * `workingBundleRelativePath` is the working one: the mismatch warning
+ * compares the flag with the files under it only (by path segment).
  */
 export function buildVisibilityWarnings(options: {
   root: string;
-  bundleRelativePath: string;
+  bundleRelativePaths: readonly string[];
+  workingBundleRelativePath: string;
   files: readonly ClassifiedFile[];
   visibility: ProjectVisibility;
 }): VisibilityWarnings {
-  const { root, bundleRelativePath, files, visibility } = options;
-  const trackedFiles = files.filter((file) => file.visibility === "tracked");
+  const { root, bundleRelativePaths, workingBundleRelativePath, files, visibility } = options;
   const untrackedFiles = files.filter((file) => file.visibility === "untracked");
   const ignoredFiles = files.filter((file) => file.visibility === "ignored");
   const uncheckedFiles = files.filter((file) => file.visibility === "unchecked");
-  const hasTracked = trackedFiles.length > 0;
   const hasUntracked = untrackedFiles.length > 0;
   const hasIgnored = ignoredFiles.length > 0;
   const hasUnchecked = uncheckedFiles.length > 0;
@@ -166,9 +171,12 @@ export function buildVisibilityWarnings(options: {
         "Grill Room never stages or commits here — use the command below to fix it yourself."
       : null;
 
+  const foldersToStage = bundleRelativePaths.filter((folder) =>
+    untrackedFiles.some((file) => isUnderFolder(file.relativePath, folder)),
+  );
   const untrackedRemedy = hasUntracked
     ? [
-        `git -C ${root} add ${bundleRelativePath}`,
+        `git -C ${root} add ${foldersToStage.join(" ")}`,
         `git -C ${root} commit -m "Add exported session bundle"`,
         `git -C ${root} push`,
       ].join("\n")
@@ -190,12 +198,19 @@ export function buildVisibilityWarnings(options: {
       ].join("\n")
     : null;
 
+  const workingFiles = files.filter((file) =>
+    isUnderFolder(file.relativePath, workingBundleRelativePath),
+  );
+  const workingIgnored = workingFiles.some((file) => file.visibility === "ignored");
+  const workingKnownNotIgnored = workingFiles.some(
+    (file) => file.visibility === "tracked" || file.visibility === "untracked",
+  );
   let mismatchWarning: string | null = null;
-  if (visibility === "tracked" && hasIgnored) {
+  if (visibility === "tracked" && workingIgnored) {
     mismatchWarning =
       `This project's visibility flag says "tracked", but the exported files are ignored by this ` +
       `repository. Update the flag in project settings, or fix .gitignore.`;
-  } else if (visibility === "ignored" && !hasIgnored && (hasTracked || hasUntracked)) {
+  } else if (visibility === "ignored" && !workingIgnored && workingKnownNotIgnored) {
     // A tracked or untracked file directly contradicts the "ignored" flag,
     // whether or not other files in the same bundle are unchecked. The
     // warning stays null only when every non-ignored file is unchecked: with
@@ -219,19 +234,22 @@ export function buildVisibilityWarnings(options: {
 
 /**
  * Classify `absolutePaths` and build their warnings in one call — what
- * `export-session` and `get-export-visibility` both return.
+ * `export-session` and `get-export-visibility` both return. `bundleDirs` are
+ * the absolute bundle directories, durable first; `workingBundleDir` is the
+ * working one.
  */
 export async function buildVisibilityReport(options: {
   root: string;
-  bundleDir: string;
+  bundleDirs: readonly string[];
+  workingBundleDir: string;
   absolutePaths: readonly string[];
   visibility: ProjectVisibility;
 }): Promise<VisibilityReport> {
   const files = await classifyVisibility(options.root, options.absolutePaths);
-  const bundleRelativePath = toRepoRelative(options.root, options.bundleDir);
   const warnings = buildVisibilityWarnings({
     root: options.root,
-    bundleRelativePath,
+    bundleRelativePaths: options.bundleDirs.map((dir) => toRepoRelative(options.root, dir)),
+    workingBundleRelativePath: toRepoRelative(options.root, options.workingBundleDir),
     files,
     visibility: options.visibility,
   });
