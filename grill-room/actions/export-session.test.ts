@@ -2153,6 +2153,22 @@ describe("export writes grounded briefs", () => {
     expect(second).toContain("## Proved by");
   });
 
+  it("defines an `edited` brief by its generated baseline, in preview-export's description and the UngroundedBrief reason", async () => {
+    const baselineRule = "no longer matches its generated baseline (or, with no baseline, today's ungrounded render)";
+    const oldRule = "no longer matches an ungrounded render";
+
+    const description = previewExport.tool.description;
+    expect(description).toContain(`\`edited\` (${baselineRule})`);
+    expect(description).not.toContain(oldRule);
+
+    const source = await fs.readFile(new URL("../server/export-bundle.ts", import.meta.url), "utf8");
+    const reasonComment = source
+      .slice(source.indexOf("Why a brief is not grounded"), source.indexOf("export type UngroundedBriefReason"))
+      .replace(/\n\s*\*\s*/g, " ");
+    expect(reasonComment).toContain(baselineRule);
+    expect(reasonComment).not.toContain(oldRule);
+  });
+
   describe("a handoff stored before {{DOCS}}", () => {
     const DURABLE = "docs/specs/grill-room";
     const WORKING = ".scratch/grill-room";

@@ -219,8 +219,9 @@ const STALE_TICKETS_REASON =
 export type BriefGroundingState = "absent" | "current" | "stale";
 
 /**
- * Why a brief is not grounded: `edited` (ineligible — a hand edit's text no
- * longer matches an ungrounded render), `no-grounding` (eligible, but the
+ * Why a brief is not grounded: `edited` (ineligible — its stored text no
+ * longer matches its generated baseline (or, with no baseline, today's
+ * ungrounded render)), `no-grounding` (eligible, but the
  * session has no grounding at all), `not-covered` (eligible and a grounding
  * exists, but it has no entry for this ticket), or `kept` (eligible, covered,
  * and rendered grounded — but the file already on disk was edited since the
