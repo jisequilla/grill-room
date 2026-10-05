@@ -22,12 +22,14 @@ function render({
   preflightStep = true,
   maxTicketsInFlight = "3",
   maxTicketsInFlightError,
+  hasRemote,
 }: {
   deliveryRecipe?: "pull-request" | "local-merge";
   adversarialReview?: boolean;
   preflightStep?: boolean;
   maxTicketsInFlight?: string;
   maxTicketsInFlightError?: string;
+  hasRemote?: boolean | null;
 } = {}) {
   return renderToStaticMarkup(
     <ProjectDeliverySettings
@@ -40,6 +42,7 @@ function render({
       maxTicketsInFlight={maxTicketsInFlight}
       onMaxTicketsInFlightChange={() => {}}
       maxTicketsInFlightError={maxTicketsInFlightError}
+      hasRemote={hasRemote}
     />,
   );
 }
@@ -244,5 +247,22 @@ describe("withDeliverySettings", () => {
     });
 
     expect(fields).toEqual({ name: "Grill Room" });
+  });
+});
+
+describe("warns when pull-request has no remote", () => {
+  const TESTID = 'data-testid="project-delivery-recipe-warning"';
+
+  it("renders for pull-request with no remote", () => {
+    expect(render({ deliveryRecipe: "pull-request", hasRemote: false })).toContain(TESTID);
+  });
+
+  it.each([
+    ["local-merge", false],
+    ["pull-request", true],
+    ["pull-request", null],
+    ["pull-request", undefined],
+  ] as const)("does not render for %s with hasRemote %s", (deliveryRecipe, hasRemote) => {
+    expect(render({ deliveryRecipe, hasRemote })).not.toContain(TESTID);
   });
 });

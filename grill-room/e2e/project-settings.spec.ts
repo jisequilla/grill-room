@@ -89,6 +89,18 @@ test.describe("project settings", () => {
     await recipeTrigger.click();
     await page.getByRole("option", { name: "Pull request" }).click();
     await expect(recipeTrigger).toHaveText(/Pull request/);
+    await expect(page.getByTestId("project-delivery-recipe-warning")).toBeVisible();
+
+    await expect(page.getByRole("listbox")).toBeHidden();
+    await recipeTrigger.click();
+    await page.getByRole("option", { name: "Local merge" }).click();
+    await expect(recipeTrigger).toHaveText(/Local merge/);
+    await expect(page.getByTestId("project-delivery-recipe-warning")).toHaveCount(0);
+
+    await expect(page.getByRole("listbox")).toBeHidden();
+    await recipeTrigger.click();
+    await page.getByRole("option", { name: "Pull request" }).click();
+    await expect(recipeTrigger).toHaveText(/Pull request/);
 
     const reviewSwitch = page.getByTestId("project-adversarial-review");
     await expect(reviewSwitch).toHaveAttribute("aria-checked", "true");

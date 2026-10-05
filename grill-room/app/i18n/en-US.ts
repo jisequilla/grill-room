@@ -71,6 +71,8 @@ const messages = {
     deliveryRecipeLabel: "Delivery recipe",
     deliveryRecipePullRequest: "Pull request",
     deliveryRecipeLocalMerge: "Local merge",
+    deliveryRecipeNoRemoteWarning:
+      "This repository has no remote, so builders cannot push or open pull requests. Choose Local merge, or add a remote.",
     deliveryRecipePullRequestHint: "Each ticket reaches main through a pull request.",
     deliveryRecipeLocalMergeHint: "Each ticket's branch is merged into main locally, no push.",
     adversarialReviewLabel: "Adversarial review",
@@ -772,6 +774,8 @@ const messages = {
       "{{briefs}} was edited by hand, and what Grill Room generates for it has changed since: its ticket, the project or the template. Your edit is kept. Review it against its ticket, then save it to mark it reviewed.",
     handoffOutdatedEdits_other:
       "{{briefs}} were edited by hand, and what Grill Room generates for them has changed since: their tickets, the project or the template. Your edits are kept. Review each against its ticket, then save it to mark it reviewed.",
+    handoffRecipeNoRemoteWarning:
+      "This project's delivery recipe is Pull request, but its repository has no remote: the handoff tells builders to push and open pull requests that cannot exist. Change the recipe in the project's settings, then regenerate the handoff.",
     handoffCurrent: "Current",
     handoffStale: "Stale",
     handoffStaleHint:
