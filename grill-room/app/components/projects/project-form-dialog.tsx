@@ -2,6 +2,7 @@ import {
   actionErrorMessage,
   callAction,
   useActionMutation,
+  useActionQuery,
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -75,6 +76,11 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
   const [trackerKind, setTrackerKind] = useState<ProjectTrackerKind>("markdown");
   const [buildRecordLogging, setBuildRecordLogging] = useState(false);
   const [visibility, setVisibility] = useState<ProjectVisibility>("tracked");
+  const projectDetail = useActionQuery(
+    "get-project",
+    { id: project?.id ?? "" },
+    { enabled: open && project !== null },
+  );
   const [deliveryRecipe, setDeliveryRecipe] = useState<DeliveryRecipe>("pull-request");
   const [adversarialReview, setAdversarialReview] = useState(true);
   const [preflightStep, setPreflightStep] = useState(true);
@@ -497,6 +503,7 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                 setErrors((current) => ({ ...current, maxTicketsInFlight: undefined }));
               }}
               maxTicketsInFlightError={errors.maxTicketsInFlight}
+              hasRemote={projectDetail.data?.hasRemote}
             />
           ) : null}
 

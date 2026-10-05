@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, symlinkSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { eq } from "@agent-native/core/db/schema";
@@ -11,6 +12,8 @@ import { getDb, schema } from "./db/index.js";
 import { runGit } from "./git.js";
 import {
   getProject,
+  hasGitRemote,
+  recipeRemoteWarning,
   guessDeliveryRecipe,
   inspectProjectFolder,
   listProjects,
@@ -317,6 +320,35 @@ describe("registerProject", () => {
       );
 
       expect(project.visibility).toBe("tracked");
+    });
+  });
+
+  describe("recipe and remote", () => {
+    it("hasGitRemote tells a remote, none, and not a repository apart", async () => {
+      const withRemote = repos.create();
+      addRemote(withRemote);
+      expect(await hasGitRemote(withRemote)).toBe(true);
+      expect(await hasGitRemote(repos.create())).toBe(false);
+
+      const plain = mkdtempSync(path.join(os.tmpdir(), "no-repo-"));
+      try {
+        expect(await hasGitRemote(plain)).toBeNull();
+      } finally {
+        rmSync(plain, { recursive: true, force: true });
+      }
+    });
+
+    it.each([
+      ["pull-request", false, "pull-request-without-remote"],
+      ["pull-request", true, null],
+      ["pull-request", null, null],
+      ["local-merge", false, null],
+      ["local-merge", true, null],
+      ["something-else", false, null],
+      ["something-else", true, null],
+      ["something-else", null, null],
+    ] as const)("recipeRemoteWarning(%s, %s) is %s", (recipe, hasRemote, expected) => {
+      expect(recipeRemoteWarning(recipe, hasRemote)).toBe(expected);
     });
   });
 

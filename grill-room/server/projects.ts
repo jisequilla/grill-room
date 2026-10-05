@@ -329,6 +329,25 @@ export async function guessDeliveryRecipe(root: string): Promise<DeliveryRecipe>
   return result.stdout.trim().length > 0 ? "pull-request" : "local-merge";
 }
 
+/** Whether `git remote -v` lists any remote: null when git cannot tell (not a repository, a missing root, a non-zero exit). */
+export async function hasGitRemote(root: string): Promise<boolean | null> {
+  try {
+    const result = await runGit(root, ["remote", "-v"]);
+    if (result.exitCode !== 0) return null;
+    return result.stdout.trim().length > 0;
+  } catch {
+    return null;
+  }
+}
+
+/** The warning for a recipe and a remote state; null when there is none. */
+export function recipeRemoteWarning(
+  recipe: string,
+  hasRemote: boolean | null,
+): "pull-request-without-remote" | null {
+  return recipe === "pull-request" && hasRemote === false ? "pull-request-without-remote" : null;
+}
+
 /** Recipe or script names that usually mean "verify everything", most specific first. */
 const VERIFY_TARGETS = ["verify", "check", "test"] as const;
 

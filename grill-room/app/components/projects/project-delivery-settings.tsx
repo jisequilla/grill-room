@@ -32,6 +32,8 @@ interface ProjectDeliverySettingsProps {
   onMaxTicketsInFlightChange: (value: string) => void;
   /** The registry's refusal of the field, shown in place of its hint. */
   maxTicketsInFlightError?: string;
+  /** Whether the project's repository lists a git remote; null or undefined when unknown. */
+  hasRemote?: boolean | null;
 }
 
 export interface DeliverySettings {
@@ -101,6 +103,7 @@ export function ProjectDeliverySettings({
   maxTicketsInFlight,
   onMaxTicketsInFlightChange,
   maxTicketsInFlightError,
+  hasRemote,
 }: ProjectDeliverySettingsProps) {
   const t = useT();
 
@@ -134,6 +137,11 @@ export function ProjectDeliverySettings({
         >
           {t(DELIVERY_RECIPE_HINT_KEY[deliveryRecipe])}
         </p>
+        {deliveryRecipe === "pull-request" && hasRemote === false ? (
+          <p data-testid="project-delivery-recipe-warning" className="text-xs text-owed">
+            {t("projects.deliveryRecipeNoRemoteWarning")}
+          </p>
+        ) : null}
       </div>
 
       <div className="flex items-start justify-between gap-4 rounded-lg border px-3.5 py-3">

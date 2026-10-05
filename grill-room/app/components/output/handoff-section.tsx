@@ -34,6 +34,24 @@ import { Textarea } from "@/components/ui/textarea";
 import { Markdown } from "@/components/workspace/markdown";
 import { actionErrorCode } from "@/lib/decisions";
 
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+/** Why the handoff's delivery recipe cannot work, shown with or without a handoff. */
+export function HandoffRecipeWarning({
+  warning,
+  t,
+}: {
+  warning: "pull-request-without-remote" | null;
+  t: Translate;
+}) {
+  if (warning !== "pull-request-without-remote") return null;
+  return (
+    <p className="text-xs text-owed" data-testid="handoff-recipe-warning">
+      {t("output.handoffRecipeNoRemoteWarning")}
+    </p>
+  );
+}
+
 type HandoffResult = AgentNativeActionRegistry["get-handoff"]["result"];
 type Handoff = NonNullable<HandoffResult["handoff"]>;
 
@@ -180,6 +198,8 @@ export function HandoffSection({
           </div>
         ) : null}
       </div>
+
+      <HandoffRecipeWarning warning={data.recipeWarning} t={t} />
 
       {!handoff ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-6 py-10 text-center">
