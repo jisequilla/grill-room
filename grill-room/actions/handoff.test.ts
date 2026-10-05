@@ -8,6 +8,7 @@ import { serializeDelegationProposals, serializeDelegationValues } from "../serv
 import { EXPORT_MANIFEST_FILE, hashExportContent, parseExportManifest } from "../server/export.js";
 import {
   BUNDLE_TOKEN,
+  DOCS_TOKEN,
   loadHandoffSource,
   parseBriefs,
   renderBrief,
@@ -937,6 +938,89 @@ describe("editing a handoff moves baselines", () => {
   });
 });
 
+describe("the durable folder never enters the stored handoff", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  it("stores {{DOCS}}/spec.md, never the durable folder, and a changed durable folder never makes it stale", async () => {
+    const { project, session } = await aReadySession();
+    expect(project.durableExportFolder).toBe("docs/specs");
+
+    await generateHandoff.run({ sessionId: session.id });
+    const stored = await storedHandoff(session.id);
+    expect(stored.markdown).toContain(`${DOCS_TOKEN}/spec.md`);
+    expect(stored.markdown).not.toContain("docs/specs");
+    expect(stored.briefs).toHaveLength(3);
+    for (const brief of stored.briefs) {
+      expect(brief.markdown).toContain(`${DOCS_TOKEN}/spec.md`);
+      expect(brief.markdown).not.toContain("docs/specs");
+    }
+
+    await updateProject.run({ id: project.id, durableExportFolder: "docs/other" });
+
+    const read = await getHandoff.run({ sessionId: session.id });
+    expect(read.handoff?.stale).toBe(false);
+    expect(read.handoff?.markdown).toBe(stored.markdown);
+    expect(read.handoff?.briefs.map((brief) => brief.markdown)).toEqual(
+      stored.briefs.map((brief) => brief.markdown),
+    );
+  });
+});
+
+describe("saving an old brief unchanged keeps its baseline", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  /** Rewrites a brief and its baseline as `generate-handoff` stored them before {{DOCS}}: the spec under {{BUNDLE}}. */
+  async function storeInOldTokenForm(sessionId: string, ticketNumber: number): Promise<string> {
+    const row = await storedHandoff(sessionId);
+    let oldText = "";
+    const briefs = row.briefs.map((brief) => {
+      if (brief.ticketNumber !== ticketNumber) return brief;
+      oldText = brief.markdown.split(`${DOCS_TOKEN}/spec.md`).join(`${BUNDLE_TOKEN}/spec.md`);
+      return { ...brief, markdown: oldText, generatedSha256: hashExportContent(oldText) };
+    });
+    expect(oldText).toContain(`${BUNDLE_TOKEN}/spec.md`);
+    await getDb()
+      .update(schema.handoffs)
+      .set({ briefsJson: JSON.stringify(briefs) })
+      .where(eq(schema.handoffs.sessionId, sessionId));
+    return oldText;
+  }
+
+  it("an old-token brief saved back unchanged keeps its old baseline and is not an edit", async () => {
+    const { session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    const oldText = await storeInOldTokenForm(session.id, 2);
+    expect((await getHandoff.run({ sessionId: session.id })).handoff).toMatchObject({
+      stale: false,
+      editedBriefs: [],
+    });
+
+    const saved = await editBrief(session.id, 2, oldText);
+
+    expect(saved).toMatchObject({ editedBriefs: [], outdatedBriefs: [] });
+    expect((await storedHandoff(session.id)).briefs[1]!.generatedSha256).toBe(hashExportContent(oldText));
+  });
+
+  it("a kept brief saved back to its old generated text is still a reviewed edit, baselined on today's render", async () => {
+    const { session } = await aReadySession();
+    const generated = await generateHandoff.run({ sessionId: session.id });
+    const oldText = generated.briefs[1]!.markdown;
+    await editBrief(session.id, 2, MY_BRIEF_2);
+    await unblockTicket2(session.id);
+    await generateHandoff.run({ sessionId: session.id });
+
+    const savedBack = await editBrief(session.id, 2, oldText);
+
+    const { source } = await renderedToday(session.id);
+    expect((await storedHandoff(session.id)).briefs[1]!.generatedSha256).toBe(
+      hashExportContent(renderBrief(source, source.tickets[1]!)),
+    );
+    expect(savedBack).toMatchObject({ editedBriefs: [2], outdatedBriefs: [] });
+  });
+});
+
 describe("get-handoff's edit report", () => {
   useTestDatabase();
   afterEach(resetInterviewer);
@@ -1018,8 +1102,9 @@ describe("handoff export", () => {
 
     const handoffOnDisk = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
     expect(handoffOnDisk).not.toContain(BUNDLE_TOKEN);
-    expect(handoffOnDisk).toContain("- Spec: `.scratch/grill-room/spec.md`");
-    expect(handoffOnDisk).toContain("git add .scratch/grill-room");
+    expect(handoffOnDisk).not.toContain(DOCS_TOKEN);
+    expect(handoffOnDisk).toContain("- Spec: `docs/specs/grill-room/spec.md`");
+    expect(handoffOnDisk).toContain("git add docs/specs/grill-room .scratch/grill-room\n");
 
     const briefOnDisk = await fs.readFile(path.join(bundleDir, "briefs", "02-store-on-disk.md"), "utf8");
     expect(briefOnDisk).toContain("`.scratch/grill-room/issues/02-store-on-disk.md`");
@@ -1042,9 +1127,13 @@ describe("handoff export", () => {
     await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
     const handoffOnDisk = await fs.readFile(path.join(bundleDir, "HANDOFF.md"), "utf8");
-    expect(handoffOnDisk).toContain(`- Spec: \`${bundleDir}/spec.md\``);
+    // The durable docs/specs folder is not ignored, so the spec path stays repo-relative.
+    expect(handoffOnDisk).toContain("- Spec: `docs/specs/grill-room/spec.md`");
+    expect(handoffOnDisk).toContain(`- Tickets: \`${bundleDir}/issues/\``);
     const briefOnDisk = await fs.readFile(path.join(bundleDir, "briefs", "01-build-the-workspace.md"), "utf8");
-    expect(briefOnDisk).toContain(`by absolute path from the main checkout: the spec at \`${bundleDir}/spec.md\``);
+    expect(briefOnDisk).toContain(
+      `by absolute path from the main checkout at \`${bundleDir}/issues/01-build-the-workspace.md\``,
+    );
   });
 
   it("marks the export stale after an edit or a regeneration, and clears it on re-export", async () => {

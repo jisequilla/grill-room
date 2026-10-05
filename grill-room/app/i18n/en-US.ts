@@ -788,9 +788,9 @@ const messages = {
     handoffSaving: "Saving…",
     handoffSaveFailed: "Could not save the handoff.",
     handoffBundleHint:
-      "{{token}} is replaced at export with the bundle's path: relative to the repository root when the project's export folder is tracked, absolute when it is ignored.",
+      "{{token}} and {{docsToken}} are replaced at export with the working and durable bundle folders: relative to the repository root when the folder is tracked, absolute when it is ignored.",
     handoffBundleShownHint:
-      "Bundle paths are shown as the export below would write them, in {{path}}. Grill Room stores them as {{token}}, so they follow the slug and folder the export uses.",
+      "Bundle paths are shown as the export below would write them, in {{path}} and {{docsPath}}. Grill Room stores them as {{token}} and {{docsToken}}, so they follow the slug and folders the export uses.",
 
     groundBriefsHeading: "Ground the briefs",
     groundBriefsHint:

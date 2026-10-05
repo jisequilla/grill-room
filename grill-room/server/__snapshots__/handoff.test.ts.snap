@@ -21,7 +21,7 @@ This is the entry point for the orchestrating session that builds this feature. 
 
 Paths below are absolute, into the main checkout at \`/repos/target\`. The bundle lives in \`.scratch\`, which git ignores: it never reaches a worktree through git.
 
-- Spec: \`{{BUNDLE}}/spec.md\`
+- Spec: \`{{DOCS}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
 - Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
 - Grill Room session: \`session-123\`
@@ -36,7 +36,7 @@ Run from the repository root: once by the subagent before it hands the ticket ba
 
 ## Before delegating the first ticket
 
-The bundle is ignored by git, so no worktree will ever contain it. Worktree agents must read the spec, their ticket and their brief by absolute path into this main checkout (\`{{BUNDLE}}\`); every brief says so. Do not copy the bundle into a worktree and do not commit it.
+The bundle is ignored by git, so no worktree will ever contain it. Worktree agents must read the spec, their ticket and their brief by absolute path into this main checkout (\`{{DOCS}}\` and \`{{BUNDLE}}\`); every brief says so. Do not copy the bundle into a worktree and do not commit it.
 
 ## Execution plan
 
@@ -163,7 +163,7 @@ This is the entry point for the orchestrating session that builds this feature. 
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
 
-- Spec: \`{{BUNDLE}}/spec.md\`
+- Spec: \`{{DOCS}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
 - Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
 - Grill Room session: \`session-123\`
@@ -181,7 +181,7 @@ Run from the repository root: once by the subagent before it hands the ticket ba
 Worktree agents start from \`origin/main\`, so they see the bundle only once it is committed and pushed. Grill Room never commits in this repository; do it yourself, once, before delegating:
 
 \`\`\`bash
-git add {{BUNDLE}}
+git add {{DOCS}} {{BUNDLE}}
 git commit -m "Add the Export anywhere handoff bundle"
 git push
 \`\`\`
@@ -301,7 +301,7 @@ You are implementing ticket 02 of "Export anywhere". You work only inside the gi
 
 Your worktree was created from \`origin/main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
 
-The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{DOCS}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
 
 ## The ticket
 
@@ -369,7 +369,7 @@ You are implementing ticket 02 of "Export anywhere". You work only inside the gi
 
 Your worktree was created from the main session's current \`main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
 
-The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{DOCS}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
 
 ## The ticket
 
@@ -432,7 +432,7 @@ You are implementing ticket 02 of "Export anywhere". You work only inside the gi
 
 Your worktree was created from the main session's current \`main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
 
-The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{DOCS}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
 
 ## The ticket
 
@@ -497,7 +497,7 @@ You are implementing ticket 02 of "Export anywhere". You work only inside the gi
 
 Your worktree was created from \`origin/main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
 
-The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{DOCS}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
 
 ## The ticket
 
@@ -563,7 +563,7 @@ You are implementing ticket 02 of "Export anywhere". You work only inside the gi
 
 Your worktree was created from \`origin/main\`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
 
-The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{BUNDLE}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
+The bundle is committed in this repository, so your worktree has it. Read the spec at \`{{DOCS}}/spec.md\` and your ticket at \`{{BUNDLE}}/issues/02-export-bundle.md\`, relative to the repository root in your worktree.
 
 ## The ticket
 
@@ -643,7 +643,7 @@ This is the entry point for the orchestrating session that builds this feature. 
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
 
-- Spec: \`{{BUNDLE}}/spec.md\`
+- Spec: \`{{DOCS}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
 - Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
 - Grill Room session: \`session-123\`
@@ -663,7 +663,7 @@ Add the \`worktree.baseRef\` key, set to \`"head"\`, to this repository's \`.cla
 Grill Room never commits in this repository; commit the bundle yourself, once, before delegating, so the first worktree contains it:
 
 \`\`\`bash
-git add {{BUNDLE}}
+git add {{DOCS}} {{BUNDLE}}
 git commit -m "Add the Export anywhere handoff bundle"
 \`\`\`
 
@@ -793,7 +793,7 @@ This is the entry point for the orchestrating session that builds this feature. 
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
 
-- Spec: \`{{BUNDLE}}/spec.md\`
+- Spec: \`{{DOCS}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
 - Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
 - Grill Room session: \`session-123\`
@@ -813,7 +813,7 @@ Add the \`worktree.baseRef\` key, set to \`"head"\`, to this repository's \`.cla
 Grill Room never commits in this repository; commit the bundle yourself, once, before delegating, so the first worktree contains it:
 
 \`\`\`bash
-git add {{BUNDLE}}
+git add {{DOCS}} {{BUNDLE}}
 git commit -m "Add the Export anywhere handoff bundle"
 \`\`\`
 
@@ -927,7 +927,7 @@ This is the entry point for the orchestrating session that builds this feature. 
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
 
-- Spec: \`{{BUNDLE}}/spec.md\`
+- Spec: \`{{DOCS}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
 - Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
 - Grill Room session: \`session-123\`
@@ -947,7 +947,7 @@ Add the \`worktree.baseRef\` key, set to \`"head"\`, to this repository's \`.cla
 Grill Room never commits in this repository; commit the bundle yourself, once, before delegating, so the first worktree contains it:
 
 \`\`\`bash
-git add {{BUNDLE}}
+git add {{DOCS}} {{BUNDLE}}
 git commit -m "Add the Export anywhere handoff bundle"
 \`\`\`
 
@@ -1076,7 +1076,7 @@ This is the entry point for the orchestrating session that builds this feature. 
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
 
-- Spec: \`{{BUNDLE}}/spec.md\`
+- Spec: \`{{DOCS}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
 - Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
 - Grill Room session: \`session-123\`
@@ -1094,7 +1094,7 @@ Run from the repository root: once by the subagent before it hands the ticket ba
 Worktree agents start from \`origin/main\`, so they see the bundle only once it is committed and pushed. Grill Room never commits in this repository; do it yourself, once, before delegating:
 
 \`\`\`bash
-git add {{BUNDLE}}
+git add {{DOCS}} {{BUNDLE}}
 git commit -m "Add the Export anywhere handoff bundle"
 git push
 \`\`\`
@@ -1211,7 +1211,7 @@ This is the entry point for the orchestrating session that builds this feature. 
 
 Paths below are relative to the repository root (\`/repos/target\`). The bundle lives in \`.scratch\`, which git tracks.
 
-- Spec: \`{{BUNDLE}}/spec.md\`
+- Spec: \`{{DOCS}}/spec.md\`
 - Tickets: \`{{BUNDLE}}/issues/\`
 - Briefs: \`{{BUNDLE}}/briefs/\`, one per ticket, each ready to paste as a delegation prompt once its two slots are filled
 - Grill Room session: \`session-123\`
@@ -1229,7 +1229,7 @@ Run from the repository root: once by the subagent before it hands the ticket ba
 Worktree agents start from \`origin/main\`, so they see the bundle only once it is committed and pushed. Grill Room never commits in this repository; do it yourself, once, before delegating:
 
 \`\`\`bash
-git add {{BUNDLE}}
+git add {{DOCS}} {{BUNDLE}}
 git commit -m "Add the Export anywhere handoff bundle"
 git push
 \`\`\`

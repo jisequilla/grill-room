@@ -38,8 +38,12 @@
  * `HANDOFF.md` and briefs are planned files like the spec and tickets: listed
  * in the preview, checked for containment, and recorded in the manifest, so a
  * brief whose ticket is dropped is removed by the next export. Their
- * `{{BUNDLE}}` placeholders are filled with the bundle path — repo-relative
- * for a `tracked` project, absolute for an `ignored` one.
+ * `{{BUNDLE}}` placeholders are filled with the working bundle path and their
+ * `{{DOCS}}` placeholders with the durable one, each repo-relative when git
+ * tracks that folder and absolute when it ignores it. When the two folders
+ * differ in visibility, each one's paths and instructions follow its own.
+ * Text stored before `{{DOCS}}` existed names the spec, intent and decisions
+ * under `{{BUNDLE}}`; `fillBundlePath` moves those paths to `{{DOCS}}` first.
  *
  * `HANDOFF.md` and every eligible brief (see "Eligibility" below) are
  * re-rendered fresh at this point — with the session's current brief
@@ -54,18 +58,17 @@
  * **Eligibility.** A stored text (HANDOFF.md, or one ticket's brief) is
  * eligible for this fresh render when nothing in the handoff has ever been
  * hand-edited (`editedAt` null — `update-handoff` is the only thing that sets
- * it), or, once something has, when this particular text still equals an
- * ungrounded render of it, the same one `generate-handoff` would have
- * written. Checking `editedAt` first, before ever comparing text, is what
- * makes a brief stored under an older template still eligible while nothing
- * has been edited: its exact bytes no longer match today's `renderBrief` once
- * the template's wording changes (as it did once already, in #54), but that
- * mismatch is not an edit. Once `editedAt` is set, though, the equality check
- * decides eligibility for *every* text, not only the one a person actually
- * touched — a brief nobody edited, still under that older template, becomes
- * ineligible the moment anything else in the handoff is edited, and stays
- * that way until the handoff is regenerated. An ineligible text is written
- * exactly as stored; grounding never touches it.
+ * it), or, once something has, when this particular text is unedited: it
+ * still matches its own generated baseline (`markdownGeneratedSha256` for
+ * HANDOFF.md, `generatedSha256` for a brief). A text stored under an older
+ * template therefore stays eligible after another text is edited: its bytes
+ * no longer match today's render, but they still match the baseline they were
+ * generated with, and that mismatch is not an edit. Only a text with no
+ * baseline (stored before baselines existed) still uses the render
+ * comparison: it is eligible when, with its old spec paths moved to
+ * `{{DOCS}}`, it equals an ungrounded render of it, the same one
+ * `generate-handoff` would write today. An ineligible text is written as
+ * stored, with its bundle paths filled; grounding never touches it.
  *
  * **Grounded vs. eligible.** Eligibility alone is not "grounded": an eligible
  * brief with no grounding to apply, or with a grounding that does not cover
@@ -187,6 +190,7 @@ import { runGit } from "./git.js";
 import {
   bundlePathFor,
   fillBundlePath,
+  withDocsToken,
   getExportGate,
   getHandoffRow,
   HANDOFF_FILE,
@@ -215,8 +219,9 @@ const STALE_TICKETS_REASON =
 export type BriefGroundingState = "absent" | "current" | "stale";
 
 /**
- * Why a brief is not grounded: `edited` (ineligible — a hand edit's text no
- * longer matches an ungrounded render), `no-grounding` (eligible, but the
+ * Why a brief is not grounded: `edited` (ineligible — its stored text no
+ * longer matches its generated baseline (or, with no baseline, today's
+ * ungrounded render)), `no-grounding` (eligible, but the
  * session has no grounding at all), `not-covered` (eligible and a grounding
  * exists, but it has no entry for this ticket), or `kept` (eligible, covered,
  * and rendered grounded — but the file already on disk was edited since the
@@ -302,9 +307,10 @@ export interface ExportBundlePlan {
   /** The durable bundle directory relative to the project root, forward slashes. */
   durableBundleFolder: string;
   /**
-   * The durable bundle directory as HANDOFF.md and the briefs would name it:
-   * repo-relative when git says the durable bundle folder is not ignored,
-   * absolute when it is, and following the stored flag when git cannot tell.
+   * The exact string this plan substitutes for `{{DOCS}}` in HANDOFF.md and
+   * the briefs: the durable bundle directory, repo-relative when git says the
+   * durable bundle folder is not ignored, absolute when it is, and following
+   * the stored flag when git cannot tell.
    */
   durableBundlePath: string;
   /** Whether the durable bundle directory already exists. */
@@ -834,6 +840,11 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   const bundleFolder = bundleRelative(project.rootPath, bundleDir);
   const durableBundleDir = path.join(durableExportDir, folderName);
   const durableBundleFolder = bundleRelative(project.rootPath, durableBundleDir);
+  // The durable folder's own visibility, so `{{DOCS}}` and the wording around
+  // it follow it. A durable folder git cannot classify follows the stored flag
+  // silently: `visibilityUnchecked` describes the working folder only.
+  const durableVisibility =
+    (await measuredVisibility(project.rootPath, durableBundleFolder)) ?? project.visibility;
   const rootRelative = (absolutePath: string) => bundleRelative(project.rootPath, absolutePath);
 
   // Measured fresh for this export only: the stored flag goes stale when an
@@ -845,6 +856,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     visibility: measured ?? project.visibility,
     greenfield: head === null,
     ...(measured === null ? { visibilityUnchecked: true } : {}),
+    durableVisibility,
   };
 
   // Hoisted so the handoff block below can work out, per brief, whether the
@@ -911,10 +923,9 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   const groundingCurrent = groundingForRender?.current === true;
 
   // Hoisted above the `if (handoff)` block so `preview-export` can report
-  // what `{{BUNDLE}}` becomes for this plan even before a handoff exists.
+  // what `{{BUNDLE}}` and `{{DOCS}}` become for this plan even before a
+  // handoff exists.
   const bundlePath = bundlePathFor(exportFacts.visibility, project.rootPath, bundleDir);
-  const durableVisibility =
-    (await measuredVisibility(project.rootPath, durableBundleFolder)) ?? project.visibility;
   const durableBundlePath = bundlePathFor(durableVisibility, project.rootPath, durableBundleDir);
 
   const handoffFiles: { relativePath: string; content: string }[] = [];
@@ -931,20 +942,16 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     // is the only way to reflect its current state.
     //
     // A stored text (HANDOFF.md itself, or one ticket's brief) is eligible to
-    // be re-rendered fresh only when nothing in the handoff has been
-    // hand-edited (`editedAt` null — `update-handoff` is the only thing that
-    // sets it), or, once something has, when this particular text still
-    // equals an ungrounded render of it, the same one `generate-handoff`
-    // would have written. `editedAt` null is checked first and short-circuits
-    // the text comparison: a brief stored under an older template (its exact
-    // text no longer matches today's `renderBrief`, because the template
-    // changed after it was generated, not because anyone edited it) still
-    // counts as eligible, so a template change alone can never silently stop
-    // grounding from reaching it. Once `editedAt` is set, the equality check
-    // applies to *every* text, not only the one a person actually touched: a
-    // brief nobody edited, still sitting under an older template, becomes
-    // ineligible the moment anything else in the handoff is edited, and stays
-    // that way until the handoff is regenerated.
+    // be re-rendered fresh when nothing in the handoff has been hand-edited
+    // (`editedAt` null — `update-handoff` is the only thing that sets it),
+    // or, once something has, when this particular text is unedited: it
+    // still hashes to its own generated baseline. A text stored under an
+    // older template (or before `{{DOCS}}` existed) no longer matches today's
+    // render, but it still matches the baseline it was generated with, so a
+    // template change alone never stops grounding from reaching it, even
+    // after another text is edited. Only a text with no baseline (stored
+    // before baselines existed) falls back to comparing it, with its old spec
+    // paths moved to `{{DOCS}}`, against an ungrounded render.
     //
     // Eligibility alone is not "grounded", though: an eligible text with no
     // grounding to apply, or with a grounding that does not cover its ticket,
@@ -996,7 +1003,10 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       const eligible =
         briefSource !== null &&
         ticket !== null &&
-        (!wasEdited || brief.markdown === renderBrief(briefSource, ticket));
+        (!wasEdited ||
+          (brief.generatedSha256 !== undefined
+            ? hashExportContent(brief.markdown) === brief.generatedSha256
+            : withDocsToken(brief.markdown) === renderBrief(briefSource, ticket)));
       const covered =
         groundingForRender?.tickets.some((entry) => entry.number === brief.ticketNumber) ?? false;
       const markdown =
@@ -1021,7 +1031,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
         }
       }
 
-      briefFiles.push({ relativePath: brief.relativePath, content: fillBundlePath(markdown, bundlePath) });
+      briefFiles.push({ relativePath: brief.relativePath, content: fillBundlePath(markdown, bundlePath, durableBundlePath) });
     }
 
     // HANDOFF.md may say "the briefs are grounded" only once every brief this
@@ -1036,14 +1046,18 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     const allBriefsGrounded = briefEntries.length > 0 && ungroundedBriefs.length === 0;
     const useGroundedWording = groundingCurrent && allBriefsGrounded;
     const headerEligible =
-      briefSource !== null && (!wasEdited || handoff.markdown === renderHandoffMarkdown(briefSource));
+      briefSource !== null &&
+      (!wasEdited ||
+        (handoff.markdownGeneratedSha256 !== null
+          ? hashExportContent(handoff.markdown) === handoff.markdownGeneratedSha256
+          : withDocsToken(handoff.markdown) === renderHandoffMarkdown(briefSource)));
     const headerMarkdown =
       headerEligible && briefSource !== null
         ? renderHandoffMarkdown(briefSource, useGroundedWording, handoffExportFacts, groundingForRender)
         : handoff.markdown;
     handoffFiles.push({
       relativePath: HANDOFF_FILE,
-      content: fillBundlePath(headerMarkdown, bundlePath),
+      content: fillBundlePath(headerMarkdown, bundlePath, durableBundlePath),
     });
     handoffFiles.push(...briefFiles);
   }

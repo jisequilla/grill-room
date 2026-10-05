@@ -662,7 +662,7 @@ export const handoffs = table("gr_handoffs", {
     .notNull()
     .unique()
     .references(() => sessions.id, { onDelete: "cascade" }),
-  /** HANDOFF.md, with `{{BUNDLE}}` standing for the bundle path export fills in. */
+  /** HANDOFF.md, with `{{BUNDLE}}` and `{{DOCS}}` standing for the working and durable bundle paths export fills in. */
   markdown: text("markdown").notNull(),
   /**
    * JSON array of `{ ticketNumber, relativePath, markdown, generatedSha256? }`, one per ticket,
