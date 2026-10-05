@@ -1377,8 +1377,24 @@ describe("export by lifetime", () => {
     };
   }
 
-  async function aSessionToExport(options: Parameters<typeof aReadySession>[0] = {}) {
+  async function aSessionToExport(
+    options: Parameters<typeof aReadySession>[0] & { withDecision?: boolean } = {},
+  ) {
     const ready = await aReadySession(options);
+    if (options.withDecision) {
+      const now = new Date().toISOString();
+      await getDb().insert(schema.decisions).values({
+        id: randomUUID(),
+        sessionId: ready.session.id,
+        key: "storage",
+        questionTitle: "Title of storage",
+        currentAnswer: "Answer of storage",
+        answerKind: "own-answer",
+        settledAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
     await generateHandoff.run({ sessionId: ready.session.id });
     return {
       ...ready,
@@ -1571,6 +1587,7 @@ describe("export by lifetime", () => {
       expect(plan.removals).toEqual([]);
 
       const kept = await exportSession.run({ sessionId: session.id, slug: SLUG });
+      expect(kept.removed).toEqual([]);
       expect(kept.kept).toEqual([specPath]);
       expect(kept.written).toEqual(
         absolute(root, [...durableWrites(), ...workingWrites()]).filter((file) => file !== specPath),
@@ -1587,7 +1604,8 @@ describe("export by lifetime", () => {
         overridePaths: ["docs/specs/a/spec.md"],
       });
       expect(written.kept).toEqual([]);
-      expect(written.written).toContain(specPath);
+      expect(written.removed).toEqual([]);
+      expect(written.written).toEqual(absolute(root, [...durableWrites(), ...workingWrites()]));
       expect(await fs.readFile(specPath, "utf8")).not.toBe("Edited by hand.\n");
     });
 
@@ -1631,21 +1649,23 @@ describe("export by lifetime", () => {
       expect(await manifestOf(working)).toMatchObject({ revision: 5, root: "working" });
     });
 
-    it("first re-export of a v66 project (working .grill-room, a pre-split bundle in the durable folder): the durable root removes HANDOFF, issues and briefs, judging spec and intent against the old manifest; the working root is written fresh", async () => {
-      const preSplit = aPreSplitBundle("docs/specs/a");
-      delete preSplit["docs/specs/a/decisions.md"];
+    it("first re-export of a v66 project (working .grill-room, a pre-split bundle in the durable folder): the durable root removes HANDOFF, issues and briefs, judging spec, intent and decisions against the old manifest; the working root is written fresh", async () => {
       const { session, root, durable, working } = await aSessionToExport({
         workingExportFolder: ".grill-room",
-        files: preSplit,
+        files: aPreSplitBundle("docs/specs/a"),
+        withDecision: true,
       });
       // Hand-edited since that export: judged against the old manifest's hash.
       await fs.writeFile(path.join(durable, "spec.md"), "old spec, edited by hand\n");
 
+      const durablePlan = [
+        entry("durable", "docs/specs/a/spec.md", { edited: true, kept: true }),
+        entry("durable", "docs/specs/a/intent.md"),
+        entry("durable", "docs/specs/a/decisions.md"),
+        entry("durable", `docs/specs/a/${MANIFEST}`),
+      ];
       const plan = await planned(session.id);
-      expect(plan.files).toEqual([
-        ...durableWrites({ "spec.md": { edited: true, kept: true } }),
-        ...workingWrites(".grill-room/a"),
-      ]);
+      expect(plan.files).toEqual([...durablePlan, ...workingWrites(".grill-room/a")]);
       expect(plan.removals).toEqual([
         entry("durable", "docs/specs/a/HANDOFF.md"),
         entry("durable", "docs/specs/a/briefs/01-build-the-workspace.md"),
@@ -1657,6 +1677,17 @@ describe("export by lifetime", () => {
       const result = await exportSession.run({ sessionId: session.id, slug: SLUG });
       expect(result.removed).toEqual(absolute(root, plan.removals));
       expect(result.kept).toEqual([path.join(durable, "spec.md")]);
+      expect(result.written).toEqual(
+        absolute(root, [...durablePlan, ...workingWrites(".grill-room/a")]).filter(
+          (file) => file !== path.join(durable, "spec.md"),
+        ),
+      );
+      expect(await fs.readFile(path.join(durable, "spec.md"), "utf8")).toBe(
+        "old spec, edited by hand\n",
+      );
+      expect(await fs.readFile(path.join(durable, "decisions.md"), "utf8")).not.toBe(
+        "old decisions\n",
+      );
       for (const removed of result.removed) expect(await pathExists(removed)).toBe(false);
       expect(await listFiles(working)).toEqual(
         absolute(root, workingWrites(".grill-room/a")).sort(),
@@ -1669,6 +1700,7 @@ describe("export by lifetime", () => {
         files: [
           { path: "spec.md", sha256: hashExportContent("old spec\n") },
           { path: "intent.md" },
+          { path: "decisions.md" },
         ],
       });
       expect(await manifestOf(working)).toMatchObject({
@@ -1680,7 +1712,7 @@ describe("export by lifetime", () => {
 
     it("a durable folder holding a v3 manifest whose root is working counts as no previous manifest", async () => {
       const content = "spec as some export wrote it\n";
-      const { session, durable } = await aSessionToExport({
+      const { session, root, durable } = await aSessionToExport({
         files: {
           "docs/specs/a/spec.md": content,
           "docs/specs/a/HANDOFF.md": "a handoff that manifest lists\n",
@@ -1709,6 +1741,13 @@ describe("export by lifetime", () => {
 
       const result = await exportSession.run({ sessionId: session.id, slug: SLUG });
       expect(result.removed).toEqual([]);
+      expect(result.kept).toEqual([path.join(durable, "spec.md")]);
+      expect(result.written).toEqual(
+        absolute(root, [...durableWrites(), ...workingWrites()]).filter(
+          (file) => file !== path.join(durable, "spec.md"),
+        ),
+      );
+      expect(await fs.readFile(path.join(durable, "spec.md"), "utf8")).toBe(content);
       expect(await pathExists(path.join(durable, "HANDOFF.md"))).toBe(true);
       expect(await manifestOf(durable)).toMatchObject({ revision: 1, root: "durable" });
     });
