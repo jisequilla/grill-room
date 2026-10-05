@@ -550,6 +550,32 @@ describe("break-into-tickets in a repository with no commits yet", () => {
       expect(request.trackedFiles?.omitted).toBe(0);
     });
 
+    it("leaves both of the session's last export folders out of the tracked files", async () => {
+      const sessionId = await aSessionInProject({
+        commit: true,
+        files: {
+          "src/ingest/metrics.ts": "export const a = 1;\n",
+          "docs/specs/grill-room/spec.md": "# Spec\n",
+          "docs/specs/grill-room/decisions.md": "# Decisions\n",
+          ".scratch/grill-room/HANDOFF.md": "# Handoff\n",
+          ".scratch/grill-room/issues/01-a.md": "# 01 A\n",
+        },
+      });
+      await getDb()
+        .update(schema.sessions)
+        .set({
+          lastDurableExportFolder: "docs/specs/grill-room",
+          lastWorkingExportFolder: ".scratch/grill-room",
+        })
+        .where(eq(schema.sessions.id, sessionId));
+      const interviewer = scriptInterviewer([oneGoodTicket]);
+
+      await breakIntoTickets.run({ sessionId });
+
+      const request = interviewer.requests[0] as BreakIntoTicketsRequest;
+      expect(request.trackedFiles?.files).toEqual(["README.md", "src/ingest/metrics.ts"]);
+    });
+
     it("sends no tracked files for a session without a project", async () => {
       const sessionId = await aConfirmedSessionWithSpec();
       const interviewer = scriptInterviewer([oneGoodTicket]);

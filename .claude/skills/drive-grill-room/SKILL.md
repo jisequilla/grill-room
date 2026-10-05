@@ -58,7 +58,7 @@ The plain action routes above are what this skill is written and tested against.
 | 10 | `generate-handoff {sessionId}` | | `overwriteEdits: true` only when the owner agrees to lose hand edits |
 | 11 | `ground-briefs {sessionId}` | | The slow one: 10 to 40 minutes. It reads the repo at its current commit |
 | 12 | `preview-export` (GET, `sessionId`, optional `slug`) | | Check `exportBlocked`, `groundingState`, `ungroundedBriefs` and `plannedWrites`. Grounding never blocks the export: an ungrounded brief goes out with empty slots |
-| 13 | `export-session {sessionId, slug}` | | `overridePaths` only for edited files the owner agreed to overwrite |
+| 13 | `export-session {sessionId, slug}` | | `overridePaths` only for edited files the owner agreed to overwrite, each repo-root-relative: the `rootRelativePath` from `plannedWrites` (`docs/specs/<folder>/spec.md`), never the bare `spec.md`, which is refused |
 
 Save every response to a file in the scratchpad (`round1.json`, `submit1.json`, `spec.json`, …) so a later step, or a later session, can read it instead of calling again.
 
@@ -90,6 +90,7 @@ Steps 3, 4, 5, 6, 8, 9, 10 and 11 each wait for the interviewer. Run them with t
 ## After the export
 
 - The project's `verifyCommand` is copied into HANDOFF.md and the briefs as given; nothing runs it. Check that it works in the target repo.
+- The bundle spans two folders sharing one name: `spec.md`, `intent.md` and `decisions.md` in the durable folder (`durableBundleDir`, by default under `docs/specs/`), and `HANDOFF.md`, `issues/` and `briefs/` in the working folder (`bundleDir`), each with its own manifest.
 - Read the bundle before reporting it done: `spec.md`, `decisions.md`, `HANDOFF.md` and at least one brief.
 - Check it against the readiness items in `docs/reviews/pipe-export-review.md`. That file lists the known export defects; say which ones this bundle shows.
 - Turning the tickets into beads and building them follows `CLAUDE.md` ("Build Flow") and `.claude/rules/worktrees.md`.

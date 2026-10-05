@@ -856,6 +856,7 @@ describe("scout-project", () => {
           "docs/adr/0003-queue.md": lines(9),
           "CLAUDE.md": "# Agent instructions\n",
           ".scratch/ingest-lag-alerts/decisions.md": "# Decisions\n",
+          "docs/specs/ingest-lag-alerts/decisions.md": "# Decisions\n",
           "docs/decisions.md": "# Project decisions\n",
         },
       });
@@ -873,7 +874,10 @@ describe("scout-project", () => {
       });
       await getDb()
         .update(schema.sessions)
-        .set({ lastExportFolder: ".scratch/ingest-lag-alerts" })
+        .set({
+          lastDurableExportFolder: "docs/specs/ingest-lag-alerts",
+          lastWorkingExportFolder: ".scratch/ingest-lag-alerts",
+        })
         .where(eq(schema.sessions.id, exportedSession.id));
 
       const otherSession = await createSession.run({
@@ -898,6 +902,7 @@ describe("scout-project", () => {
       expect(otherRequest!.facts.decisionFiles).toEqual([
         ".scratch/ingest-lag-alerts/decisions.md",
         "docs/decisions.md",
+        "docs/specs/ingest-lag-alerts/decisions.md",
       ]);
     });
   });

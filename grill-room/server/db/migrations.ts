@@ -616,4 +616,11 @@ CREATE TABLE IF NOT EXISTS gr_rule_waivers (
 );
 CREATE INDEX IF NOT EXISTS gr_idx_rule_waivers_session ON gr_rule_waivers(session_id)`,
   },
+  {
+    version: 78,
+    name: "sessions-last-export-folders",
+    sql: `ALTER TABLE gr_sessions RENAME COLUMN last_export_folder TO last_working_export_folder;
+ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS last_durable_export_folder TEXT;
+UPDATE gr_sessions SET last_durable_export_folder = last_working_export_folder WHERE last_working_export_folder IS NOT NULL`,
+  },
 ];

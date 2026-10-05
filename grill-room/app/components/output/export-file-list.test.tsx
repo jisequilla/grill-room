@@ -17,12 +17,20 @@ import {
 function files(
   specs: { relativePath: string; edited?: boolean }[],
 ): PlannedFile[] {
-  return specs.map(({ relativePath, edited = false }) => ({
-    path: `/repo/.scratch/feature/${relativePath}`,
-    relativePath,
-    edited,
-  }));
+  return specs.map(({ relativePath, edited = false }) => {
+    const root = DURABLE.has(relativePath) ? "durable" : "working";
+    const folder = root === "durable" ? "docs/specs/feature" : ".scratch/feature";
+    return {
+      path: `/repo/${folder}/${relativePath}`,
+      root,
+      relativePath,
+      rootRelativePath: `${folder}/${relativePath}`,
+      edited,
+    };
+  });
 }
+
+const DURABLE = new Set(["spec.md", "intent.md", "decisions.md"]);
 
 /**
  * The markup from a `<li>` opening tag carrying `data-testid="<testId>-item"`
@@ -74,11 +82,51 @@ describe("ExportFileList", () => {
   it("ticks the checkbox for a path already in the override set", () => {
     const html = render(
       files([{ relativePath: "spec.md", edited: true }]),
-      new Set(["spec.md"]),
+      new Set(["docs/specs/feature/spec.md"]),
     );
     const row = item(html, "spec.md");
 
     expect(row).toContain('data-state="checked"');
+  });
+
+  it("marks each item with its root and shows its root's bundle folder", () => {
+    const html = render(
+      files([{ relativePath: "spec.md" }, { relativePath: "HANDOFF.md" }]),
+    );
+
+    const durableRow = item(html, "/repo/docs/specs/feature/spec.md");
+    expect(durableRow).toContain('data-root="durable"');
+    expect(durableRow).toMatch(
+      /data-testid="export-preview-files-folder"[^>]*>docs\/specs\/feature</,
+    );
+    const workingRow = item(html, "/repo/.scratch/feature/HANDOFF.md");
+    expect(workingRow).toContain('data-root="working"');
+    expect(workingRow).toMatch(
+      /data-testid="export-preview-files-folder"[^>]*>\.scratch\/feature</,
+    );
+  });
+
+  it("toggles an override by the project-root-relative path, not the bundle-relative one", () => {
+    const planned = files([
+      { relativePath: "spec.md", edited: true },
+      { relativePath: "HANDOFF.md", edited: true },
+    ]);
+
+    const byBundlePath = render(planned, new Set(["spec.md", "HANDOFF.md"]));
+    expect(item(byBundlePath, "/repo/docs/specs/feature/spec.md")).not.toContain(
+      'data-state="checked"',
+    );
+    expect(item(byBundlePath, "/repo/.scratch/feature/HANDOFF.md")).not.toContain(
+      'data-state="checked"',
+    );
+
+    const byRootPath = render(planned, new Set([".scratch/feature/HANDOFF.md"]));
+    expect(item(byRootPath, "/repo/docs/specs/feature/spec.md")).not.toContain(
+      'data-state="checked"',
+    );
+    expect(item(byRootPath, "/repo/.scratch/feature/HANDOFF.md")).toContain(
+      'data-state="checked"',
+    );
   });
 
   it("leaves an unedited file's checkbox off the override set unticked", () => {

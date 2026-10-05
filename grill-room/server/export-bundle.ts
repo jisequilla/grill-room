@@ -167,14 +167,18 @@ import { pendingForProject, type PendingDelegationProposal } from "./delegation-
 import {
   applySlugPattern,
   buildExportManifest,
+  DECISIONS_FILE,
   findSequencedFolder,
   EXPORT_MANIFEST_FILE,
+  type ExportRootKind,
   formatLocalDate,
   hashExportContent,
+  INTENT_FILE,
   nextSequence,
   parseExportManifest,
   type ParsedExportManifest,
   planExport,
+  type PlannedExportFile,
   proposeSlug,
   renderExportManifest,
   sanitizeSlug,
@@ -230,8 +234,12 @@ export interface UngroundedBrief {
 }
 
 export interface BundleFile {
-  /** Relative to the bundle directory, forward slashes: `spec.md`, `issues/01-slug.md`. */
+  /** The root whose bundle folder holds it. */
+  root: ExportRootKind;
+  /** Relative to its root's bundle directory, forward slashes: `spec.md`, `issues/01-slug.md`. */
   relativePath: string;
+  /** Relative to the project root, forward slashes: `docs/specs/a/spec.md`. What `overridePaths` names. */
+  rootRelativePath: string;
   absolutePath: string;
   content: string;
   /** The file exists on disk and the guard classifies it as edited. Always false for the manifest. */
@@ -242,8 +250,12 @@ export interface BundleFile {
 
 /** A file the previous manifest lists that the new plan drops. */
 export interface BundleRemoval {
-  /** Relative to the bundle directory, forward slashes. */
+  /** The root whose bundle folder holds it. */
+  root: ExportRootKind;
+  /** Relative to its root's bundle directory, forward slashes. */
   relativePath: string;
+  /** Relative to the project root, forward slashes. What `overridePaths` names. */
+  rootRelativePath: string;
   absolutePath: string;
   /** The guard classifies it as edited. */
   edited: boolean;
@@ -258,14 +270,15 @@ export interface ExportBundlePlan {
     name: string;
     rootPath: string;
     workingExportFolder: string;
+    durableExportFolder: string;
     slugPattern: string;
     /** The stored flag, as registration seeded it or the owner set it; export never writes it. */
     visibility: ProjectVisibility;
   };
   /**
    * What this export used for its bundle paths and wording: a fresh `git
-   * check-ignore` of the bundle folder itself, or the stored flag when git
-   * gave no answer.
+   * check-ignore` of the working bundle folder itself, or the stored flag
+   * when git gave no answer.
    */
   effectiveVisibility: ProjectVisibility;
   /** Whether the repository had no commits at export, so HANDOFF.md and the briefs say it is greenfield. */
@@ -274,18 +287,35 @@ export interface ExportBundlePlan {
   proposedSlug: string;
   /** The slug actually used: the given one sanitized, or the proposal. */
   slug: string;
+  /** The bundle folder's name, shared by both roots. */
   folderName: string;
-  /** Absolute path of the bundle directory. */
+  /** Absolute path of the working bundle directory. */
   bundleDir: string;
-  /** The bundle directory relative to the project root, forward slashes: what a successful export stores on the session. */
+  /** The working bundle directory relative to the project root, forward slashes: what a successful export stores on the session. */
   bundleFolder: string;
   /** The exact string this plan substitutes for `{{BUNDLE}}` in HANDOFF.md and the briefs. */
   bundlePath: string;
-  /** Whether the bundle directory already exists, i.e. this export replaces an earlier one. */
+  /** Whether the working bundle directory already exists, i.e. this export replaces an earlier one. */
   bundleExists: boolean;
-  /** Every planned file, kept ones included: spec, issues in number order, then the manifest. */
+  /** Absolute path of the durable bundle directory. */
+  durableBundleDir: string;
+  /** The durable bundle directory relative to the project root, forward slashes. */
+  durableBundleFolder: string;
+  /**
+   * The durable bundle directory as HANDOFF.md and the briefs would name it:
+   * repo-relative when git says the durable bundle folder is not ignored,
+   * absolute when it is, and following the stored flag when git cannot tell.
+   */
+  durableBundlePath: string;
+  /** Whether the durable bundle directory already exists. */
+  durableBundleExists: boolean;
+  /**
+   * Every planned file, kept ones included, durable root first: spec, intent,
+   * decisions, the durable manifest; then HANDOFF.md, issues in number order,
+   * briefs, the working manifest.
+   */
   files: BundleFile[];
-  /** Every file the previous manifest lists that the plan drops and that still exists, kept ones included. */
+  /** Every file a root's previous manifest lists that the plan drops from that root and that still exists, kept ones included, durable root first. */
   removals: BundleRemoval[];
   /** The project's declared-tracker diagnostic, shown as a preview line when present. */
   trackerDiagnostic: string | null;
@@ -381,7 +411,7 @@ export interface PlanExportBundleInput {
   slug?: string;
   /** Clock for `{date}`; defaults to now. */
   now?: Date;
-  /** Bundle-relative paths of edited files to overwrite or remove anyway. */
+  /** Project-root-relative paths of edited files to overwrite or remove anyway. */
   overridePaths?: readonly string[];
 }
 
@@ -475,11 +505,17 @@ function resolveInsideBundle(bundleDir: string, entry: string): string | null {
 }
 
 /**
- * The bundle's previous manifest with every usable entry keyed by its
- * normalised bundle-relative path, or null when there is none or it is
- * malformed. Unusable entries (absolute, escaping the bundle) are dropped.
+ * One root's previous manifest, read from that root's bundle folder, with
+ * every usable entry keyed by its normalised bundle-relative path, or null
+ * when there is none, it is malformed, or it is a version-3 manifest that
+ * describes the other root. Unusable entries (absolute, escaping the bundle)
+ * are dropped. A version-1 or version-2 manifest governs whichever root's
+ * folder it sits in.
  */
-async function readPreviousManifest(bundleDir: string): Promise<ParsedExportManifest | null> {
+async function readPreviousManifest(
+  bundleDir: string,
+  root: ExportRootKind,
+): Promise<ParsedExportManifest | null> {
   let content: string;
   try {
     content = await fs.readFile(path.join(bundleDir, EXPORT_MANIFEST_FILE), "utf8");
@@ -488,6 +524,7 @@ async function readPreviousManifest(bundleDir: string): Promise<ParsedExportMani
   }
   const parsed = parseExportManifest(content);
   if (!parsed) return null;
+  if (parsed.version === 3 && parsed.root !== root) return null;
 
   const files: ParsedExportManifest["files"] = [];
   const seen = new Set<string>();
@@ -551,7 +588,7 @@ async function isEdited(
 }
 
 function refuseOverride(override: string): never {
-  fail(`Refusing to export: the override ${override} resolves outside the bundle directory.`, {
+  fail(`Refusing to export: the override ${override} resolves outside both bundle directories.`, {
     errorCode: "override-outside-bundle",
     statusCode: 400,
     details: { path: override },
@@ -559,21 +596,28 @@ function refuseOverride(override: string): never {
 }
 
 /**
- * The overrides as normalised bundle-relative paths. Each must resolve inside
- * the bundle directory both lexically and through the filesystem.
+ * The overrides as normalised project-root-relative paths. Each is read
+ * relative to the project root and must resolve inside one of the bundle
+ * directories both lexically and through the filesystem.
  */
 async function resolveOverrides(
-  bundleDir: string,
+  rootPath: string,
+  bundleDirs: readonly string[],
   overrides: readonly string[],
 ): Promise<Set<string>> {
   const resolved = new Set<string>();
   if (overrides.length === 0) return resolved;
-  const realBundle = await realLocation(bundleDir);
+  const realBundles = await Promise.all(bundleDirs.map((bundleDir) => realLocation(bundleDir)));
   for (const override of overrides) {
-    const absolute = resolveInsideBundle(bundleDir, override);
+    const absolute = resolveInsideBundle(rootPath, override);
     if (absolute === null) refuseOverride(override);
-    if (!isStrictlyInside(await realLocation(absolute), realBundle)) refuseOverride(override);
-    resolved.add(bundleRelative(bundleDir, absolute));
+    const real = await realLocation(absolute);
+    const inside = bundleDirs.some(
+      (bundleDir, index) =>
+        isStrictlyInside(absolute, bundleDir) && isStrictlyInside(real, realBundles[index]!),
+    );
+    if (!inside) refuseOverride(override);
+    resolved.add(bundleRelative(rootPath, absolute));
   }
   return resolved;
 }
@@ -600,6 +644,106 @@ function checkFolderName(folderName: string): void {
       statusCode: 400,
     });
   }
+}
+
+/** The files that explain the built system: written to the durable root. Everything else is working. */
+const DURABLE_FILES: ReadonlySet<string> = new Set(["spec.md", INTENT_FILE, DECISIONS_FILE]);
+
+/**
+ * Each planned file of one root, then its manifest, as absolute paths inside
+ * `bundleDir`; refused with `path-escape` when one would land outside it.
+ */
+function plannedPathsIn(bundleDir: string, content: readonly PlannedExportFile[]): string[] {
+  return [...content.map((file) => file.relativePath), EXPORT_MANIFEST_FILE].map((relativePath) => {
+    const absolutePath = path.resolve(bundleDir, relativePath);
+    if (!isStrictlyInside(absolutePath, bundleDir)) {
+      fail(
+        `Refusing to export: a planned file would land outside the bundle directory: ${relativePath}`,
+        { errorCode: "path-escape", statusCode: 500 },
+      );
+    }
+    return absolutePath;
+  });
+}
+
+/**
+ * One root's half of the plan: its files classified by the guard against its
+ * own previous manifest, then its manifest, and its removals.
+ */
+async function planRoot(input: {
+  root: ExportRootKind;
+  bundleDir: string;
+  otherRootFolder: string;
+  sessionId: string;
+  scoutCommit: string | null;
+  headCommit: string | null;
+  previous: ParsedExportManifest | null;
+  content: readonly PlannedExportFile[];
+  plannedPaths: readonly string[];
+  removalPaths: readonly string[];
+  overrides: ReadonlySet<string>;
+  rootRelative: (absolutePath: string) => string;
+}): Promise<{ files: BundleFile[]; removals: BundleRemoval[] }> {
+  const { root, bundleDir, previous, overrides, rootRelative } = input;
+
+  const contentFiles: BundleFile[] = [];
+  for (const [index, file] of input.content.entries()) {
+    const absolutePath = input.plannedPaths[index]!;
+    const rootRelativePath = rootRelative(absolutePath);
+    const edited = await isEdited(absolutePath, file.relativePath, previous);
+    contentFiles.push({
+      root,
+      relativePath: file.relativePath,
+      rootRelativePath,
+      absolutePath,
+      content: file.content,
+      edited,
+      kept: edited && !overrides.has(rootRelativePath),
+    });
+  }
+
+  const removals: BundleRemoval[] = [];
+  for (const absolutePath of input.removalPaths) {
+    const relativePath = bundleRelative(bundleDir, absolutePath);
+    const rootRelativePath = rootRelative(absolutePath);
+    const edited = await isEdited(absolutePath, relativePath, previous);
+    removals.push({
+      root,
+      relativePath,
+      rootRelativePath,
+      absolutePath,
+      edited,
+      kept: edited && !overrides.has(rootRelativePath),
+    });
+  }
+
+  const manifest = buildExportManifest({
+    sessionId: input.sessionId,
+    root,
+    otherRootFolder: input.otherRootFolder,
+    previous,
+    scoutCommit: input.scoutCommit,
+    headCommit: input.headCommit,
+    planned: contentFiles,
+    keptRemovals: removals.filter((removal) => removal.kept).map((removal) => removal.relativePath),
+  });
+  const manifestPath = input.plannedPaths[input.plannedPaths.length - 1]!;
+
+  return {
+    files: [
+      ...contentFiles,
+      {
+        root,
+        relativePath: EXPORT_MANIFEST_FILE,
+        rootRelativePath: rootRelative(manifestPath),
+        absolutePath: manifestPath,
+        content: renderExportManifest(manifest),
+        edited: false,
+        kept: false,
+      },
+    ],
+    removals,
+  };
 }
 
 /**
@@ -672,16 +816,25 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     });
   }
 
-  const exportDir = path.resolve(project.rootPath, project.workingExportFolder);
-  const existingNames = await directoryNames(exportDir);
+  // One folder name for both roots, so `{seq}` and the reuse of an earlier
+  // sequenced folder read the folder names of both.
+  const durableExportDir = path.resolve(project.rootPath, project.durableExportFolder);
+  const workingExportDir = path.resolve(project.rootPath, project.workingExportFolder);
+  const existingNames = [
+    ...(await directoryNames(durableExportDir)),
+    ...(await directoryNames(workingExportDir)),
+  ];
   const date = formatLocalDate(input.now ?? new Date());
   const folderName =
     findSequencedFolder(project.slugPattern, { slug, date }, existingNames) ??
     applySlugPattern(project.slugPattern, { slug, date, seq: nextSequence(existingNames) });
   checkFolderName(folderName);
 
-  const bundleDir = path.join(exportDir, folderName);
-  const bundleFolder = path.relative(project.rootPath, bundleDir).split(path.sep).join("/");
+  const bundleDir = path.join(workingExportDir, folderName);
+  const bundleFolder = bundleRelative(project.rootPath, bundleDir);
+  const durableBundleDir = path.join(durableExportDir, folderName);
+  const durableBundleFolder = bundleRelative(project.rootPath, durableBundleDir);
+  const rootRelative = (absolutePath: string) => bundleRelative(project.rootPath, absolutePath);
 
   // Measured fresh for this export only: the stored flag goes stale when an
   // ignore rule changes after registration, and nothing else looks at
@@ -700,8 +853,13 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   // disk hash against the previous manifest and on `overridePaths`, never on
   // the content this plan renders for it, so reading these this early is
   // safe: nothing below changes what they report.
-  const previous = await readPreviousManifest(bundleDir);
-  const overrides = await resolveOverrides(bundleDir, input.overridePaths ?? []);
+  const durablePrevious = await readPreviousManifest(durableBundleDir, "durable");
+  const workingPrevious = await readPreviousManifest(bundleDir, "working");
+  const overrides = await resolveOverrides(
+    project.rootPath,
+    [durableBundleDir, bundleDir],
+    input.overridePaths ?? [],
+  );
 
   const ticketRows = await db
     .select()
@@ -755,6 +913,9 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   // Hoisted above the `if (handoff)` block so `preview-export` can report
   // what `{{BUNDLE}}` becomes for this plan even before a handoff exists.
   const bundlePath = bundlePathFor(exportFacts.visibility, project.rootPath, bundleDir);
+  const durableVisibility =
+    (await measuredVisibility(project.rootPath, durableBundleFolder)) ?? project.visibility;
+  const durableBundlePath = bundlePathFor(durableVisibility, project.rootPath, durableBundleDir);
 
   const handoffFiles: { relativePath: string; content: string }[] = [];
   // Populated inside `if (handoff)` below, before HANDOFF.md's own content is
@@ -851,8 +1012,8 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
         ungroundedBriefs.push({ ticket: brief.ticketNumber, reason: "not-covered" });
       } else {
         const briefAbsolutePath = path.resolve(bundleDir, brief.relativePath);
-        const briefEditedOnDisk = await isEdited(briefAbsolutePath, brief.relativePath, previous);
-        const briefKept = briefEditedOnDisk && !overrides.has(brief.relativePath);
+        const briefEditedOnDisk = await isEdited(briefAbsolutePath, brief.relativePath, workingPrevious);
+        const briefKept = briefEditedOnDisk && !overrides.has(rootRelative(briefAbsolutePath));
         if (briefKept) {
           ungroundedBriefs.push({ ticket: brief.ticketNumber, reason: "kept" });
         } else {
@@ -887,72 +1048,65 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     handoffFiles.push(...briefFiles);
   }
 
-  const contentFiles = handoff
-    ? [handoffFiles[0]!, ...plan.files, ...handoffFiles.slice(1)]
-    : plan.files;
+  const durableContent = plan.files.filter((file) => DURABLE_FILES.has(file.relativePath));
+  const workingContent = [
+    ...handoffFiles.slice(0, 1),
+    ...plan.files.filter((file) => !DURABLE_FILES.has(file.relativePath)),
+    ...handoffFiles.slice(1),
+  ];
 
-  const plannedPaths = [
-    ...contentFiles.map((file) => file.relativePath),
-    EXPORT_MANIFEST_FILE,
-  ].map((relativePath) => {
-    const absolutePath = path.resolve(bundleDir, relativePath);
-    if (!isStrictlyInside(absolutePath, bundleDir)) {
-      fail(
-        `Refusing to export: a planned file would land outside the bundle directory: ${relativePath}`,
-        { errorCode: "path-escape", statusCode: 500 },
-      );
-    }
-    return absolutePath;
-  });
+  const durablePlannedPaths = plannedPathsIn(durableBundleDir, durableContent);
+  const workingPlannedPaths = plannedPathsIn(bundleDir, workingContent);
+  const durableRemovalPaths = await removalCandidates(
+    durableBundleDir,
+    durablePrevious,
+    new Set(durablePlannedPaths),
+  );
+  const workingRemovalPaths = await removalCandidates(
+    bundleDir,
+    workingPrevious,
+    new Set(workingPlannedPaths),
+  );
 
-  const removalPaths = await removalCandidates(bundleDir, previous, new Set(plannedPaths));
+  await assertContained(
+    [
+      durableBundleDir,
+      bundleDir,
+      ...durablePlannedPaths,
+      ...workingPlannedPaths,
+      ...durableRemovalPaths,
+      ...workingRemovalPaths,
+    ],
+    realRoot,
+  );
 
-  await assertContained([bundleDir, ...plannedPaths, ...removalPaths], realRoot);
-
-  const contentBundleFiles: BundleFile[] = [];
-  for (const [index, file] of contentFiles.entries()) {
-    const absolutePath = plannedPaths[index]!;
-    const edited = await isEdited(absolutePath, file.relativePath, previous);
-    contentBundleFiles.push({
-      relativePath: file.relativePath,
-      absolutePath,
-      content: file.content,
-      edited,
-      kept: edited && !overrides.has(file.relativePath),
-    });
-  }
-
-  const removals: BundleRemoval[] = [];
-  for (const absolutePath of removalPaths) {
-    const relativePath = bundleRelative(bundleDir, absolutePath);
-    const edited = await isEdited(absolutePath, relativePath, previous);
-    removals.push({
-      relativePath,
-      absolutePath,
-      edited,
-      kept: edited && !overrides.has(relativePath),
-    });
-  }
-
-  const manifest = buildExportManifest({
+  const manifestBase = {
     sessionId: session.id,
-    previous,
     scoutCommit: scoutReport?.commitRead ?? null,
     headCommit: head,
-    planned: contentBundleFiles,
-    keptRemovals: removals.filter((removal) => removal.kept).map((removal) => removal.relativePath),
+    rootRelative,
+    overrides,
+  };
+  const durable = await planRoot({
+    ...manifestBase,
+    root: "durable",
+    bundleDir: durableBundleDir,
+    otherRootFolder: bundleFolder,
+    previous: durablePrevious,
+    content: durableContent,
+    plannedPaths: durablePlannedPaths,
+    removalPaths: durableRemovalPaths,
   });
-
-  const files: BundleFile[] = [
-    ...contentBundleFiles,
-    {
-      relativePath: EXPORT_MANIFEST_FILE,
-      absolutePath: plannedPaths[plannedPaths.length - 1]!,
-      content: renderExportManifest(manifest),
-      edited: false,
-      kept: false,
-    },
-  ];
+  const working = await planRoot({
+    ...manifestBase,
+    root: "working",
+    bundleDir,
+    otherRootFolder: durableBundleFolder,
+    previous: workingPrevious,
+    content: workingContent,
+    plannedPaths: workingPlannedPaths,
+    removalPaths: workingRemovalPaths,
+  });
 
   return {
     sessionId: session.id,
@@ -961,6 +1115,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
       name: project.name,
       rootPath: project.rootPath,
       workingExportFolder: project.workingExportFolder,
+      durableExportFolder: project.durableExportFolder,
       slugPattern: project.slugPattern,
       visibility: project.visibility,
     },
@@ -973,8 +1128,12 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     bundleFolder,
     bundlePath,
     bundleExists: await exists(bundleDir),
-    files,
-    removals,
+    durableBundleDir,
+    durableBundleFolder,
+    durableBundlePath,
+    durableBundleExists: await exists(durableBundleDir),
+    files: [...durable.files, ...working.files],
+    removals: [...durable.removals, ...working.removals],
     trackerDiagnostic: project.trackerDiagnostic,
     ticketsExported: exportTickets.length > 0,
     ticketsSkippedReason,

@@ -46,7 +46,7 @@ export interface ProjectServerFacts {
   /**
    * Project-relative paths of every `decisions.md` git tracks anywhere in the
    * project, sorted and uncapped. An untracked `decisions.md` is excluded, and
-   * so is one under the folder passed as `excludeFolder`. The scout prompt
+   * so is one under any folder passed in `excludeFolders`. The scout prompt
    * lists these as recorded decision sources.
    */
   decisionFiles: string[];
@@ -140,12 +140,12 @@ export function isUnderFolder(filePath: string, folder: string): boolean {
  * `headBranch` come back null and `recentCommitSubjects` comes back empty,
  * since `git rev-parse HEAD` and `git log` both fail until the first commit.
  *
- * `excludeFolder`, when given, is a project-relative folder whose
- * `decisions.md` files are left out of `decisionFiles`.
+ * `excludeFolders` are project-relative folders whose `decisions.md` files
+ * are left out of `decisionFiles`.
  */
 export async function collectProjectFacts(
   root: string,
-  excludeFolder?: string,
+  excludeFolders: readonly string[] = [],
 ): Promise<{ facts: ProjectServerFacts } | Refused> {
   const insideWorkTree = await runGit(root, ["rev-parse", "--is-inside-work-tree"]);
   if (insideWorkTree.exitCode !== 0 || insideWorkTree.stdout.trim() !== "true") {
@@ -180,7 +180,7 @@ export async function collectProjectFacts(
   const trackedDecisionFiles =
     lsFilesResult.exitCode === 0 ? parseTrackedPaths(lsFilesResult.stdout) : [];
   const decisionFiles = trackedDecisionFiles
-    .filter((filePath) => excludeFolder === undefined || !isUnderFolder(filePath, excludeFolder))
+    .filter((filePath) => !excludeFolders.some((folder) => isUnderFolder(filePath, folder)))
     .sort();
 
   return {
@@ -196,4 +196,18 @@ export async function collectProjectFacts(
       decisionFiles,
     },
   };
+}
+
+/**
+ * The bundle folders a session's last successful export wrote, durable first:
+ * what every reader of the project leaves out, so the session never reads its
+ * own export back. Empty before the first export.
+ */
+export function lastExportFolders(session: {
+  lastDurableExportFolder: string | null;
+  lastWorkingExportFolder: string | null;
+}): string[] {
+  return [session.lastDurableExportFolder, session.lastWorkingExportFolder].filter(
+    (folder): folder is string => folder !== null,
+  );
 }

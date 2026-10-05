@@ -101,7 +101,7 @@ describe("get-export-visibility", () => {
     ).rejects.toMatchObject({ errorCode: "no-project" });
   });
 
-  it("classifies without writing anything to disk", async () => {
+  it("classifies the planned files of both roots, durable first, without writing anything to disk", async () => {
     const { root, project } = await aProject();
     const session = await aSession("Grill Room", project.id);
     await insertSpec(session.id);
@@ -110,13 +110,18 @@ describe("get-export-visibility", () => {
 
     expect(report.files).toEqual([
       {
-        path: path.join(root, ".scratch", "grill-room", "spec.md"),
-        relativePath: ".scratch/grill-room/spec.md",
+        path: path.join(root, "docs", "specs", "grill-room", "spec.md"),
+        relativePath: "docs/specs/grill-room/spec.md",
         visibility: "untracked",
       },
       {
-        path: path.join(root, ".scratch", "grill-room", "intent.md"),
-        relativePath: ".scratch/grill-room/intent.md",
+        path: path.join(root, "docs", "specs", "grill-room", "intent.md"),
+        relativePath: "docs/specs/grill-room/intent.md",
+        visibility: "untracked",
+      },
+      {
+        path: path.join(root, "docs", "specs", "grill-room", ".grill-room-export.json"),
+        relativePath: "docs/specs/grill-room/.grill-room-export.json",
         visibility: "untracked",
       },
       {
@@ -126,7 +131,31 @@ describe("get-export-visibility", () => {
       },
     ]);
     expect(report.hasUntracked).toBe(true);
+    expect(report.untrackedRemedy).toContain(
+      `git -C ${root} add docs/specs/grill-room .scratch/grill-room\n`,
+    );
     expect(await pathExists(path.join(root, ".scratch"))).toBe(false);
+    expect(await pathExists(path.join(root, "docs"))).toBe(false);
+  });
+
+  it("classifies each root on its own: an ignored working folder beside an untracked durable one", async () => {
+    const { root, project } = await aProject({ files: { ".gitignore": ".scratch/\n" } });
+    const session = await aSession("Grill Room", project.id);
+    await insertSpec(session.id);
+
+    const report = await getExportVisibility.run({ sessionId: session.id, slug: "grill-room" });
+
+    expect(
+      report.files.map((file) => [file.relativePath, file.visibility]),
+    ).toEqual([
+      ["docs/specs/grill-room/spec.md", "untracked"],
+      ["docs/specs/grill-room/intent.md", "untracked"],
+      ["docs/specs/grill-room/.grill-room-export.json", "untracked"],
+      [".scratch/grill-room/.grill-room-export.json", "ignored"],
+    ]);
+    expect(report.untrackedRemedy).toContain(`git -C ${root} add docs/specs/grill-room\n`);
+    // Registration seeded the flag "ignored" from the working folder, which is what it judges.
+    expect(report.mismatchWarning).toBeNull();
   });
 
   it("re-checks the same files export-session wrote, agreeing with its own report", async () => {
@@ -145,8 +174,12 @@ describe("get-export-visibility", () => {
   it("reflects a bundle already committed as tracked, once re-checked", async () => {
     const { project } = await aProject({
       files: {
-        ".scratch/grill-room/spec.md": "already committed",
-        ".scratch/grill-room/intent.md": "already committed",
+        "docs/specs/grill-room/spec.md": "already committed",
+        "docs/specs/grill-room/intent.md": "already committed",
+        "docs/specs/grill-room/.grill-room-export.json": JSON.stringify({
+          version: 1,
+          files: [],
+        }),
         ".scratch/grill-room/.grill-room-export.json": JSON.stringify({
           version: 1,
           files: [],

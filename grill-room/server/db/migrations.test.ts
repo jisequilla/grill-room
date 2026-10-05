@@ -653,3 +653,35 @@ describe("handoff-repo-rules-storage migration", () => {
     expect(dropped.rows).toEqual([]);
   });
 });
+
+describe("sessions-last-export-folders migration", () => {
+  beforeEach(dropSchema);
+
+  it("names a session's pre-split export folder in both columns, and leaves a never-exported session null in both, on a database at the previous version", async () => {
+    const migration = appMigrations.find((entry) => entry.name === "sessions-last-export-folders")!;
+    const before = appMigrations.filter((entry) => entry.version < migration.version);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const exported = randomUUID();
+    const never = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, last_export_folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [exported, "Exported", "An idea.", ".scratch/x", now, now],
+    });
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [never, "Never exported", "An idea.", now, now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const select = `SELECT last_working_export_folder, last_durable_export_folder FROM gr_sessions WHERE id = ?`;
+    expect((await getDbExec().execute({ sql: select, args: [exported] })).rows).toEqual([
+      { last_working_export_folder: ".scratch/x", last_durable_export_folder: ".scratch/x" },
+    ]);
+    expect((await getDbExec().execute({ sql: select, args: [never] })).rows).toEqual([
+      { last_working_export_folder: null, last_durable_export_folder: null },
+    ]);
+  });
+});

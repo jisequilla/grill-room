@@ -85,7 +85,7 @@ function existsInWorkingTree(root: string, relative: string): boolean {
 
 async function collectTrackedFiles(
   root: string,
-  excludeFolder: string | undefined,
+  excludeFolders: readonly string[],
 ): Promise<Pick<HandoffFactPack, "trackedFiles" | "trackedFilesOmitted">> {
   const result = await runGit(root, ["ls-files", "-z"]);
   if (result.exitCode !== 0) {
@@ -96,7 +96,7 @@ async function collectTrackedFiles(
   const listable = result.stdout
     .split("\0")
     .filter((entry) => entry.length > 0)
-    .filter((entry) => excludeFolder === undefined || !isUnderFolder(entry, excludeFolder))
+    .filter((entry) => !excludeFolders.some((folder) => isUnderFolder(entry, folder)))
     .filter((entry) => !isSecretFileName(path.posix.basename(entry)))
     .filter((entry) => existsInWorkingTree(root, entry))
     .sort();
@@ -183,9 +183,9 @@ function chooseVerifyCommand(
  */
 export async function collectHandoffFactPack(
   root: string,
-  options: { excludeFolder?: string; verifyCommand?: string | null } = {},
+  options: { excludeFolders?: readonly string[]; verifyCommand?: string | null } = {},
 ): Promise<HandoffFactPack> {
-  const tracked = await collectTrackedFiles(root, options.excludeFolder);
+  const tracked = await collectTrackedFiles(root, options.excludeFolders ?? []);
   return {
     ...tracked,
     namedDocs: collectNamedDocs(root),

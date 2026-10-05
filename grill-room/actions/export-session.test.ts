@@ -9,7 +9,12 @@ import { describe, expect, it } from "vitest";
 
 import { storeBriefGrounding } from "../server/brief-grounding.js";
 import { planExportBundle } from "../server/export-bundle.js";
-import { EXPORT_MANIFEST_FILE, formatLocalDate, hashExportContent } from "../server/export.js";
+import {
+  EXPORT_MANIFEST_FILE,
+  formatLocalDate,
+  hashExportContent,
+  parseExportManifest,
+} from "../server/export.js";
 import {
   bundlePathFor,
   fillBundlePath,
@@ -281,6 +286,7 @@ describe("preview-export and export-session", () => {
 
     const preview = await previewExport.run({ sessionId: session.id });
     const bundleDir = path.join(root, "docs", "features", "grill-room");
+    const durableBundleDir = path.join(root, "docs", "specs", "grill-room");
 
     expect(preview).toMatchObject({
       projectRoot: root,
@@ -298,9 +304,10 @@ describe("preview-export and export-session", () => {
       bundlePath: "docs/features/grill-room",
     });
     expect(preview.files).toEqual([
+      path.join(durableBundleDir, "spec.md"),
+      path.join(durableBundleDir, "intent.md"),
+      path.join(durableBundleDir, EXPORT_MANIFEST_FILE),
       path.join(bundleDir, "HANDOFF.md"),
-      path.join(bundleDir, "spec.md"),
-      path.join(bundleDir, "intent.md"),
       path.join(bundleDir, "issues", "01-build-the-workspace.md"),
       path.join(bundleDir, "issues", "02-store-on-disk.md"),
       path.join(bundleDir, "briefs", "01-build-the-workspace.md"),
@@ -313,7 +320,9 @@ describe("preview-export and export-session", () => {
 
     expect(result.written).toEqual(preview.files);
     expect(result.bundleDir).toBe(bundleDir);
-    expect(await listFiles(bundleDir)).toEqual([...preview.files].sort());
+    expect(
+      [...(await listFiles(durableBundleDir)), ...(await listFiles(bundleDir))].sort(),
+    ).toEqual([...preview.files].sort());
   });
 
   it("creates missing folders and lays the bundle out as spec.md plus issues/NN-slug.md", async () => {
@@ -323,7 +332,8 @@ describe("preview-export and export-session", () => {
     await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
     const bundleDir = path.join(root, "a", "b", "c", "grill-room");
-    expect(await fs.readFile(path.join(bundleDir, "spec.md"), "utf8")).toBe(
+    const durableBundleDir = path.join(root, "docs", "specs", "grill-room");
+    expect(await fs.readFile(path.join(durableBundleDir, "spec.md"), "utf8")).toBe(
       `# Grill Room\n\nStatus: ready-for-agent\n\n${spec.markdown}`,
     );
     expect(
@@ -334,7 +344,7 @@ describe("preview-export and export-session", () => {
     expect(
       await fs.readFile(path.join(bundleDir, "issues", "02-store-on-disk.md"), "utf8"),
     ).toBe("# 02 Ticket 2\n\nStatus: ready-for-agent\nBlocked by: 01\n\nDo the work of ticket 2.");
-    expect(await fs.readFile(path.join(bundleDir, "intent.md"), "utf8")).toBe(
+    expect(await fs.readFile(path.join(durableBundleDir, "intent.md"), "utf8")).toBe(
       [
         "# Intent: Grill Room",
         "",
@@ -362,10 +372,9 @@ describe("preview-export and export-session", () => {
     expect(exportedHandoff.slice(0, handoffOpening.length)).toBe(handoffOpening);
     const stored = await getHandoff.run({ sessionId: session.id });
     expect(stored.handoff!.markdown.startsWith(handoffOpening)).toBe(true);
+    expect(await manifestPaths(durableBundleDir)).toEqual(["spec.md", "intent.md"]);
     expect(await manifestPaths(bundleDir)).toEqual([
       "HANDOFF.md",
-      "spec.md",
-      "intent.md",
       "issues/01-build-the-workspace.md",
       "issues/02-store-on-disk.md",
       "briefs/01-build-the-workspace.md",
@@ -478,7 +487,8 @@ describe("preview-export and export-session", () => {
       path.join(bundleDir, "extra.md"),
     ];
     for (const file of handWritten) await fs.writeFile(file, "written by hand");
-    await fs.writeFile(path.join(bundleDir, "spec.md"), "stale content");
+    const durableSpec = path.join(root, "docs", "specs", "grill-room", "spec.md");
+    await fs.writeFile(durableSpec, "stale content");
 
     await getDb()
       .delete(schema.tickets)
@@ -498,21 +508,19 @@ describe("preview-export and export-session", () => {
     const result = await exportSession.run({
       sessionId: session.id,
       slug: "grill-room",
-      overridePaths: ["spec.md"],
+      overridePaths: ["docs/specs/grill-room/spec.md"],
     });
 
     expect(result.written).toEqual(preview.files);
     expect(result.removed).toEqual(preview.removals);
     expect(await pathExists(dropped)).toBe(false);
     expect(await pathExists(droppedBrief)).toBe(false);
-    expect(await fs.readFile(path.join(bundleDir, "spec.md"), "utf8")).not.toBe("stale content");
+    expect(await fs.readFile(durableSpec, "utf8")).not.toBe("stale content");
     for (const file of handWritten) {
       expect(await fs.readFile(file, "utf8")).toBe("written by hand");
     }
     expect(await manifestPaths(bundleDir)).toEqual([
       "HANDOFF.md",
-      "spec.md",
-      "intent.md",
       "issues/01-build-the-workspace.md",
       "briefs/01-build-the-workspace.md",
     ]);
@@ -618,9 +626,10 @@ describe("preview-export and export-session", () => {
     expect(second.ticketsExported).toBe(false);
     expect(second.ticketsSkippedReason).toMatch(/out of date/i);
     expect(second.written).toEqual([
+      path.join(root, "docs", "specs", "stale", "spec.md"),
+      path.join(root, "docs", "specs", "stale", "intent.md"),
+      path.join(root, "docs", "specs", "stale", EXPORT_MANIFEST_FILE),
       path.join(root, ".scratch", "stale", "HANDOFF.md"),
-      path.join(root, ".scratch", "stale", "spec.md"),
-      path.join(root, ".scratch", "stale", "intent.md"),
       path.join(root, ".scratch", "stale", "briefs", "01-stale-ticket.md"),
       path.join(root, ".scratch", "stale", EXPORT_MANIFEST_FILE),
     ]);
@@ -648,9 +657,14 @@ describe("preview-export and export-session", () => {
     const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
     const bundleDir = path.join(root, ".scratch", "grill-room");
+    const durableBundleDir = path.join(root, "docs", "specs", "grill-room");
     expect(result.written).toContain(path.join(bundleDir, "issues", "01-evil.md"));
     expect(result.written).toContain(path.join(bundleDir, "briefs", "01-evil.md"));
-    for (const file of result.written) expect(file.startsWith(bundleDir + path.sep)).toBe(true);
+    for (const file of result.written) {
+      expect(
+        file.startsWith(bundleDir + path.sep) || file.startsWith(durableBundleDir + path.sep),
+      ).toBe(true);
+    }
     expect(await pathExists(path.join(root, "evil.md"))).toBe(false);
     expect(await pathExists(path.join(root, ".scratch", "evil.md"))).toBe(false);
   });
@@ -705,7 +719,9 @@ describe("preview-export and export-session", () => {
 
     await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
-    expect(await pathExists(path.join(root, "real-exports", "grill-room", "spec.md"))).toBe(true);
+    expect(await pathExists(path.join(root, "real-exports", "grill-room", "HANDOFF.md"))).toBe(
+      true,
+    );
   });
 
   it("pads ticket numbers to three digits once there are 100 or more tickets", async () => {
@@ -760,14 +776,16 @@ describe("preview-export and export-session", () => {
       expect(result.visibility.hasIgnored).toBe(false);
       expect(result.visibility.warning).toMatch(/will not see/);
       expect(result.visibility.untrackedRemedy).toContain(
-        `git -C ${root} add .scratch/grill-room`,
+        `git -C ${root} add docs/specs/grill-room .scratch/grill-room\n`,
       );
       // The seeded flag ("tracked", since .scratch/ isn't gitignored here) matches: nothing is ignored.
       expect(result.visibility.mismatchWarning).toBeNull();
     });
 
     it("reports files under a gitignored export folder as ignored, with the check-ignore remedy", async () => {
-      const { root, session } = await aReadySession({ files: { ".gitignore": ".scratch/\n" } });
+      const { root, session } = await aReadySession({
+        files: { ".gitignore": ".scratch/\ndocs/specs/\n" },
+      });
       await generateHandoff.run({ sessionId: session.id });
 
       const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
@@ -776,7 +794,10 @@ describe("preview-export and export-session", () => {
       expect(result.visibility.files.every((file) => file.visibility === "ignored")).toBe(true);
       expect(result.visibility.ignoredRemedy).toMatch(/cannot be committed/i);
       expect(result.visibility.ignoredRemedy).toContain(
-        `git -C ${root} check-ignore -v .scratch/grill-room/spec.md`,
+        `git -C ${root} check-ignore -v docs/specs/grill-room/spec.md`,
+      );
+      expect(result.visibility.ignoredRemedy).toContain(
+        `git -C ${root} check-ignore -v .scratch/grill-room/HANDOFF.md`,
       );
       // The flag was seeded from check-ignore at registration, so it already says "ignored".
       expect(result.visibility.mismatchWarning).toBeNull();
@@ -805,9 +826,13 @@ describe("preview-export and export-session", () => {
     it("reports no mismatch and no ignored/untracked files once the bundle is already tracked", async () => {
       const { root, session } = await aReadySession({
         files: {
+          "docs/specs/grill-room/spec.md": "old committed content",
+          "docs/specs/grill-room/intent.md": "old intent",
+          [`docs/specs/grill-room/${EXPORT_MANIFEST_FILE}`]: JSON.stringify({
+            version: 1,
+            files: ["spec.md", "intent.md"],
+          }),
           ".scratch/grill-room/HANDOFF.md": "old handoff",
-          ".scratch/grill-room/spec.md": "old committed content",
-          ".scratch/grill-room/intent.md": "old intent",
           ".scratch/grill-room/issues/01-build-the-workspace.md": "old",
           ".scratch/grill-room/issues/02-store-on-disk.md": "old",
           ".scratch/grill-room/briefs/01-build-the-workspace.md": "old brief",
@@ -816,8 +841,6 @@ describe("preview-export and export-session", () => {
             version: 1,
             files: [
               "HANDOFF.md",
-              "spec.md",
-              "intent.md",
               "issues/01-build-the-workspace.md",
               "issues/02-store-on-disk.md",
               "briefs/01-build-the-workspace.md",
@@ -861,12 +884,14 @@ describe("preview-export and export-session", () => {
       return row!;
     }
 
-    async function storedFolder(sessionId: string): Promise<string | null> {
+    async function storedFolders(
+      sessionId: string,
+    ): Promise<{ durable: string | null; working: string | null }> {
       const [row] = await getDb()
         .select()
         .from(schema.sessions)
         .where(eq(schema.sessions.id, sessionId));
-      return row!.lastExportFolder;
+      return { durable: row!.lastDurableExportFolder, working: row!.lastWorkingExportFolder };
     }
 
     it("is previewed beside the spec, written, and listed in the manifest", async () => {
@@ -874,14 +899,14 @@ describe("preview-export and export-session", () => {
       await insertDecision(session.id, { key: "storage" });
       await generateHandoff.run({ sessionId: session.id });
 
-      const bundleDir = path.join(root, ".scratch", "grill-room");
+      const bundleDir = path.join(root, "docs", "specs", "grill-room");
       const decisionsPath = path.join(bundleDir, "decisions.md");
       const preview = await previewExport.run({ sessionId: session.id });
       expect(preview.files.slice(0, 4)).toEqual([
-        path.join(bundleDir, "HANDOFF.md"),
         path.join(bundleDir, "spec.md"),
         path.join(bundleDir, "intent.md"),
         decisionsPath,
+        path.join(bundleDir, EXPORT_MANIFEST_FILE),
       ]);
 
       const result = await exportSession.run({ sessionId: session.id, slug: preview.slug });
@@ -912,7 +937,7 @@ describe("preview-export and export-session", () => {
       await generateHandoff.run({ sessionId: session.id });
       const first = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
-      const bundleDir = path.join(root, ".scratch", "grill-room");
+      const bundleDir = path.join(root, "docs", "specs", "grill-room");
       const decisionsPath = path.join(bundleDir, "decisions.md");
       expect(await pathExists(decisionsPath)).toBe(true);
 
@@ -939,17 +964,20 @@ describe("preview-export and export-session", () => {
       for (const file of result.written) expect(await pathExists(file)).toBe(true);
     });
 
-    it("stores the bundle folder on the session after a successful export, relative to the root", async () => {
+    it("stores both bundle folders on the session after a successful export, relative to the root", async () => {
       const { session } = await aReadySession({ workingExportFolder: "docs/features" });
-      expect(await storedFolder(session.id)).toBeNull();
+      expect(await storedFolders(session.id)).toEqual({ durable: null, working: null });
       await generateHandoff.run({ sessionId: session.id });
 
       await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
-      expect(await storedFolder(session.id)).toBe("docs/features/grill-room");
+      expect(await storedFolders(session.id)).toEqual({
+        durable: "docs/specs/grill-room",
+        working: "docs/features/grill-room",
+      });
     });
 
-    it("leaves the stored folder unchanged when an export fails", async () => {
+    it("leaves both stored folders unchanged when an export fails", async () => {
       const { session } = await aReadySession();
       await generateHandoff.run({ sessionId: session.id });
       await exportSession.run({ sessionId: session.id, slug: "grill-room" });
@@ -962,7 +990,10 @@ describe("preview-export and export-session", () => {
         exportSession.run({ sessionId: session.id, slug: "renamed" }),
       ).rejects.toMatchObject({ errorCode: "handoff-stale" });
 
-      expect(await storedFolder(session.id)).toBe(".scratch/grill-room");
+      expect(await storedFolders(session.id)).toEqual({
+        durable: "docs/specs/grill-room",
+        working: ".scratch/grill-room",
+      });
     });
   });
 
@@ -975,7 +1006,8 @@ describe("preview-export and export-session", () => {
       await generateHandoff.run({ sessionId: ready.session.id });
       const first = await exportSession.run({ sessionId: ready.session.id, slug: "grill-room" });
       const bundleDir = path.join(ready.root, ".scratch", "grill-room");
-      return { ...ready, first, bundleDir };
+      const durableBundleDir = path.join(ready.root, "docs", "specs", "grill-room");
+      return { ...ready, first, bundleDir, durableBundleDir };
     }
 
     async function manifestHash(bundleDir: string, relativePath: string) {
@@ -988,36 +1020,47 @@ describe("preview-export and export-session", () => {
     }
 
     it("records the session, revision 1, the HEAD commit and a hash of every file written", async () => {
-      const { root, session, first, bundleDir } = await anExportedSession();
+      const { root, session, first, bundleDir, durableBundleDir } = await anExportedSession();
 
       const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
-      const manifest = await readManifest(bundleDir);
-      expect(manifest).toMatchObject({
-        version: 2,
-        sessionId: session.id,
-        revision: 1,
-        scoutCommit: null,
-        headCommit: head,
-      });
-      expect(Object.keys(manifest).sort()).toEqual(
-        ["files", "headCommit", "revision", "scoutCommit", "sessionId", "version"],
-      );
+      for (const dir of [durableBundleDir, bundleDir]) {
+        const manifest = await readManifest(dir);
+        expect(manifest).toMatchObject({
+          version: 3,
+          sessionId: session.id,
+          revision: 1,
+          scoutCommit: null,
+          headCommit: head,
+        });
+        expect(Object.keys(manifest).sort()).toEqual([
+          "files",
+          "headCommit",
+          "otherRootFolder",
+          "revision",
+          "root",
+          "scoutCommit",
+          "sessionId",
+          "version",
+        ]);
+      }
       for (const written of first.written) {
         if (written.endsWith(EXPORT_MANIFEST_FILE)) continue;
-        const relativePath = path.relative(bundleDir, written).split(path.sep).join("/");
-        expect(await manifestHash(bundleDir, relativePath)).toBe(
+        const dir = written.startsWith(durableBundleDir + path.sep) ? durableBundleDir : bundleDir;
+        const relativePath = path.relative(dir, written).split(path.sep).join("/");
+        expect(await manifestHash(dir, relativePath)).toBe(
           hashExportContent(await fs.readFile(written, "utf8")),
         );
       }
 
       await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+      expect((await readManifest(durableBundleDir)).revision).toBe(2);
       expect((await readManifest(bundleDir)).revision).toBe(2);
     });
 
     it("keeps a file edited on disk, lists it as kept, and keeps its old hash in the manifest", async () => {
-      const { session, bundleDir } = await anExportedSession();
-      const specPath = path.join(bundleDir, "spec.md");
-      const oldHash = await manifestHash(bundleDir, "spec.md");
+      const { session, durableBundleDir } = await anExportedSession();
+      const specPath = path.join(durableBundleDir, "spec.md");
+      const oldHash = await manifestHash(durableBundleDir, "spec.md");
       await fs.writeFile(specPath, EDITED);
 
       const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
@@ -1028,9 +1071,9 @@ describe("preview-export and export-session", () => {
       const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
       expect(result.kept).toEqual([specPath]);
       expect(result.written).not.toContain(specPath);
-      expect(result.written).toContain(path.join(bundleDir, "intent.md"));
+      expect(result.written).toContain(path.join(durableBundleDir, "intent.md"));
       expect(await fs.readFile(specPath, "utf8")).toBe(EDITED);
-      expect(await manifestHash(bundleDir, "spec.md")).toBe(oldHash);
+      expect(await manifestHash(durableBundleDir, "spec.md")).toBe(oldHash);
       expect(oldHash).not.toBe(hashExportContent(EDITED));
 
       // Still flagged by the next preview, since the manifest kept the old hash.
@@ -1039,29 +1082,29 @@ describe("preview-export and export-session", () => {
     });
 
     it("overwrites an edited file whose path is in the override list, and records its new hash", async () => {
-      const { session, spec, bundleDir } = await anExportedSession();
-      const specPath = path.join(bundleDir, "spec.md");
+      const { session, spec, durableBundleDir } = await anExportedSession();
+      const specPath = path.join(durableBundleDir, "spec.md");
       await fs.writeFile(specPath, EDITED);
 
       const result = await exportSession.run({
         sessionId: session.id,
         slug: "grill-room",
-        overridePaths: ["spec.md"],
+        overridePaths: ["docs/specs/grill-room/spec.md"],
       });
 
       const expected = `# Grill Room\n\nStatus: ready-for-agent\n\n${spec.markdown}`;
       expect(result.kept).toEqual([]);
       expect(result.written).toContain(specPath);
       expect(await fs.readFile(specPath, "utf8")).toBe(expected);
-      expect(await manifestHash(bundleDir, "spec.md")).toBe(hashExportContent(expected));
+      expect(await manifestHash(durableBundleDir, "spec.md")).toBe(hashExportContent(expected));
 
       const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
       expect(editedFlags(preview.plannedWrites)["spec.md"]).toBe(false);
     });
 
     it("does not count a CRLF-only difference as an edit", async () => {
-      const { session, bundleDir } = await anExportedSession();
-      const specPath = path.join(bundleDir, "spec.md");
+      const { session, durableBundleDir } = await anExportedSession();
+      const specPath = path.join(durableBundleDir, "spec.md");
       const content = await fs.readFile(specPath, "utf8");
       await fs.writeFile(specPath, content.replace(/\n/g, "\r\n"));
 
@@ -1073,10 +1116,10 @@ describe("preview-export and export-session", () => {
 
     it("keeps an unlisted file already at a planned path, and does not add it to the manifest", async () => {
       const { root, session } = await aReadySession({
-        files: { ".scratch/grill-room/spec.md": EDITED },
+        files: { "docs/specs/grill-room/spec.md": EDITED },
       });
       await generateHandoff.run({ sessionId: session.id });
-      const bundleDir = path.join(root, ".scratch", "grill-room");
+      const bundleDir = path.join(root, "docs", "specs", "grill-room");
       const specPath = path.join(bundleDir, "spec.md");
 
       const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
@@ -1095,23 +1138,29 @@ describe("preview-export and export-session", () => {
     it("trusts a version-1 manifest's files once: overwritten and removed, then guarded", async () => {
       const { root, session } = await aReadySession({
         files: {
-          [`.scratch/grill-room/${EXPORT_MANIFEST_FILE}`]: JSON.stringify({
+          [`docs/specs/grill-room/${EXPORT_MANIFEST_FILE}`]: JSON.stringify({
             version: 1,
             files: ["spec.md", "issues/03-old.md"],
           }),
-          ".scratch/grill-room/spec.md": "written by an older export, then edited",
-          ".scratch/grill-room/issues/03-old.md": "a ticket since dropped, then edited",
+          "docs/specs/grill-room/spec.md": "written by an older export, then edited",
+          "docs/specs/grill-room/issues/03-old.md": "a ticket since dropped, then edited",
         },
       });
       await generateHandoff.run({ sessionId: session.id });
-      const bundleDir = path.join(root, ".scratch", "grill-room");
+      const bundleDir = path.join(root, "docs", "specs", "grill-room");
       const specPath = path.join(bundleDir, "spec.md");
       const oldTicket = path.join(bundleDir, "issues", "03-old.md");
 
       const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
       expect(editedFlags(preview.plannedWrites)["spec.md"]).toBe(false);
       expect(preview.plannedRemovals).toEqual([
-        { path: oldTicket, relativePath: "issues/03-old.md", edited: false },
+        {
+          path: oldTicket,
+          root: "durable",
+          relativePath: "issues/03-old.md",
+          rootRelativePath: "docs/specs/grill-room/issues/03-old.md",
+          edited: false,
+        },
       ]);
 
       const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
@@ -1119,9 +1168,9 @@ describe("preview-export and export-session", () => {
       expect(result.written).toContain(specPath);
       expect(result.removed).toEqual([oldTicket]);
       expect(await fs.readFile(specPath, "utf8")).not.toBe("written by an older export, then edited");
-      expect(await readManifest(bundleDir)).toMatchObject({ version: 2, revision: 1 });
+      expect(await readManifest(bundleDir)).toMatchObject({ version: 3, revision: 1 });
 
-      // Once: the next edit is caught against the version-2 hash.
+      // Once: the next edit is caught against the version-3 hash.
       await fs.writeFile(specPath, EDITED);
       const next = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
       expect(next.kept).toEqual([specPath]);
@@ -1140,8 +1189,20 @@ describe("preview-export and export-session", () => {
 
       const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
       expect(preview.plannedRemovals).toEqual([
-        { path: droppedBrief, relativePath: "briefs/02-store-on-disk.md", edited: false },
-        { path: droppedIssue, relativePath: "issues/02-store-on-disk.md", edited: true },
+        {
+          path: droppedBrief,
+          root: "working",
+          relativePath: "briefs/02-store-on-disk.md",
+          rootRelativePath: ".scratch/grill-room/briefs/02-store-on-disk.md",
+          edited: false,
+        },
+        {
+          path: droppedIssue,
+          root: "working",
+          relativePath: "issues/02-store-on-disk.md",
+          rootRelativePath: ".scratch/grill-room/issues/02-store-on-disk.md",
+          edited: true,
+        },
       ]);
 
       const kept = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
@@ -1154,7 +1215,7 @@ describe("preview-export and export-session", () => {
       const removed = await exportSession.run({
         sessionId: session.id,
         slug: "grill-room",
-        overridePaths: ["issues/02-store-on-disk.md"],
+        overridePaths: [".scratch/grill-room/issues/02-store-on-disk.md"],
       });
       expect(removed.removed).toEqual([droppedIssue]);
       expect(removed.kept).toEqual([]);
@@ -1163,8 +1224,8 @@ describe("preview-export and export-session", () => {
     });
 
     it("keeps a file edited between the preview and the export", async () => {
-      const { session, bundleDir } = await anExportedSession();
-      const specPath = path.join(bundleDir, "spec.md");
+      const { session, durableBundleDir } = await anExportedSession();
+      const specPath = path.join(durableBundleDir, "spec.md");
 
       const preview = await previewExport.run({ sessionId: session.id, slug: "grill-room" });
       expect(preview.plannedWrites.every((write) => !write.edited)).toBe(true);
@@ -1191,24 +1252,495 @@ describe("preview-export and export-session", () => {
     });
 
     it("refuses an override that leaves the bundle through a symlink, writing nothing", async () => {
-      const { root, session, bundleDir } = await anExportedSession();
+      const { root, session, bundleDir, durableBundleDir } = await anExportedSession();
       const elsewhere = path.join(root, "elsewhere");
       await fs.mkdir(elsewhere);
       await fs.writeFile(path.join(elsewhere, "spec.md"), "not the bundle's");
       await fs.symlink(elsewhere, path.join(bundleDir, "escape"));
-      const specPath = path.join(bundleDir, "spec.md");
+      const specPath = path.join(durableBundleDir, "spec.md");
       await fs.writeFile(specPath, EDITED);
 
       await expect(
         exportSession.run({
           sessionId: session.id,
           slug: "grill-room",
-          overridePaths: ["spec.md", "escape/spec.md"],
+          overridePaths: ["docs/specs/grill-room/spec.md", ".scratch/grill-room/escape/spec.md"],
         }),
       ).rejects.toMatchObject({ errorCode: "override-outside-bundle" });
       expect(await fs.readFile(specPath, "utf8")).toBe(EDITED);
       expect(await fs.readFile(path.join(elsewhere, "spec.md"), "utf8")).toBe("not the bundle's");
     });
+  });
+});
+
+describe("export by lifetime", () => {
+  useTestDatabase();
+
+  const SLUG = "a";
+  const MANIFEST = EXPORT_MANIFEST_FILE;
+
+  interface Entry {
+    root: "durable" | "working";
+    rootRelativePath: string;
+    edited: boolean;
+    kept: boolean;
+  }
+
+  function entry(
+    root: Entry["root"],
+    rootRelativePath: string,
+    flags: { edited?: boolean; kept?: boolean } = {},
+  ): Entry {
+    return { root, rootRelativePath, edited: flags.edited ?? false, kept: flags.kept ?? false };
+  }
+
+  /** The durable root's planned files, durable folder `docs/specs/a`, in plan order. */
+  function durableWrites(
+    flags: Record<string, { edited?: boolean; kept?: boolean }> = {},
+  ): Entry[] {
+    return ["spec.md", "intent.md", MANIFEST].map((file) =>
+      entry("durable", `docs/specs/a/${file}`, flags[file]),
+    );
+  }
+
+  /** The working root's planned files under `folder`, in plan order. */
+  function workingWrites(folder = ".scratch/a"): Entry[] {
+    return [
+      "HANDOFF.md",
+      "issues/01-build-the-workspace.md",
+      "issues/02-store-on-disk.md",
+      "briefs/01-build-the-workspace.md",
+      "briefs/02-store-on-disk.md",
+      MANIFEST,
+    ].map((file) => entry("working", `${folder}/${file}`));
+  }
+
+  /**
+   * The plan's files and removals as `{ root, rootRelativePath, edited, kept }`,
+   * after checking that `preview-export` reports the same entries (it carries
+   * no `kept`).
+   */
+  async function planned(sessionId: string, overridePaths?: string[]) {
+    const preview = await previewExport.run({ sessionId, slug: SLUG });
+    const plan = await planExportBundle({ sessionId, slug: SLUG, overridePaths });
+    const shape = (item: { root: string; rootRelativePath: string; edited: boolean }) => ({
+      root: item.root,
+      rootRelativePath: item.rootRelativePath,
+      edited: item.edited,
+    });
+    expect(preview.plannedWrites.map(shape)).toEqual(plan.files.map(shape));
+    expect(preview.plannedRemovals.map(shape)).toEqual(plan.removals.map(shape));
+    const withKept = (item: Entry) => ({ ...shape(item), kept: item.kept }) as Entry;
+    return { files: plan.files.map(withKept), removals: plan.removals.map(withKept) };
+  }
+
+  async function manifestOf(bundleDir: string) {
+    return parseExportManifest(await fs.readFile(path.join(bundleDir, MANIFEST), "utf8"));
+  }
+
+  /** A pre-split (version-2) manifest over `files`, as one bundle folder held them, hashing what is on disk. */
+  function aV2Manifest(files: Record<string, string>, revision = 2): string {
+    return `${JSON.stringify(
+      {
+        version: 2,
+        sessionId: "an-earlier-export",
+        revision,
+        scoutCommit: null,
+        headCommit: null,
+        files: Object.entries(files).map(([file, content]) => ({
+          path: file,
+          sha256: hashExportContent(content),
+        })),
+      },
+      null,
+      2,
+    )}\n`;
+  }
+
+  /** What a pre-split export left in one folder: every file, with a version-2 manifest listing them. */
+  function aPreSplitBundle(folder: string): Record<string, string> {
+    const contents: Record<string, string> = {
+      "spec.md": "old spec\n",
+      "intent.md": "old intent\n",
+      "decisions.md": "old decisions\n",
+      "HANDOFF.md": "old handoff\n",
+      "issues/01-build-the-workspace.md": "old issue 1\n",
+      "issues/02-store-on-disk.md": "old issue 2\n",
+      "briefs/01-build-the-workspace.md": "old brief 1\n",
+      "briefs/02-store-on-disk.md": "old brief 2\n",
+    };
+    return {
+      ...Object.fromEntries(
+        Object.entries(contents).map(([file, content]) => [`${folder}/${file}`, content]),
+      ),
+      [`${folder}/${MANIFEST}`]: aV2Manifest(contents, 4),
+    };
+  }
+
+  async function aSessionToExport(options: Parameters<typeof aReadySession>[0] = {}) {
+    const ready = await aReadySession(options);
+    await generateHandoff.run({ sessionId: ready.session.id });
+    return {
+      ...ready,
+      durable: path.join(ready.root, "docs", "specs", SLUG),
+      working: path.join(ready.root, options.workingExportFolder ?? ".scratch", SLUG),
+    };
+  }
+
+  const absolute = (root: string, entries: readonly Entry[]) =>
+    entries.map((item) => path.join(root, item.rootRelativePath));
+
+  describe("routes files by lifetime", () => {
+    it("writes spec, intent and decisions to the durable root, HANDOFF, issues and briefs to the working root, a v3 manifest in each, durable first", async () => {
+      const { root, session } = await aReadySession();
+      const now = new Date().toISOString();
+      await getDb().insert(schema.decisions).values({
+        id: randomUUID(),
+        sessionId: session.id,
+        key: "storage",
+        questionTitle: "Title of storage",
+        currentAnswer: "Answer of storage",
+        answerKind: "own-answer",
+        settledAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await generateHandoff.run({ sessionId: session.id });
+      const durable = path.join(root, "docs", "specs", SLUG);
+      const working = path.join(root, ".scratch", SLUG);
+
+      const expected = [
+        entry("durable", "docs/specs/a/spec.md"),
+        entry("durable", "docs/specs/a/intent.md"),
+        entry("durable", "docs/specs/a/decisions.md"),
+        entry("durable", `docs/specs/a/${MANIFEST}`),
+        ...workingWrites(),
+      ];
+      const plan = await planned(session.id);
+      expect(plan.files).toEqual(expected);
+      expect(plan.removals).toEqual([]);
+
+      const preview = await previewExport.run({ sessionId: session.id, slug: SLUG });
+      expect(preview.files).toEqual(absolute(root, expected));
+      expect(preview.plannedWrites.map((write) => write.relativePath)).toEqual([
+        "spec.md",
+        "intent.md",
+        "decisions.md",
+        MANIFEST,
+        "HANDOFF.md",
+        "issues/01-build-the-workspace.md",
+        "issues/02-store-on-disk.md",
+        "briefs/01-build-the-workspace.md",
+        "briefs/02-store-on-disk.md",
+        MANIFEST,
+      ]);
+
+      const result = await exportSession.run({ sessionId: session.id, slug: SLUG });
+      expect(result.written).toEqual(preview.files);
+      expect(result.bundleDir).toBe(working);
+      expect(result.durableBundleDir).toBe(durable);
+
+      expect(await listFiles(durable)).toEqual(
+        ["spec.md", "intent.md", "decisions.md", MANIFEST].map((file) => path.join(durable, file)).sort(),
+      );
+      expect(await listFiles(working)).toEqual(
+        absolute(root, workingWrites()).sort(),
+      );
+
+      expect(await manifestOf(durable)).toMatchObject({
+        version: 3,
+        sessionId: session.id,
+        revision: 1,
+        root: "durable",
+        otherRootFolder: ".scratch/a",
+        files: [{ path: "spec.md" }, { path: "intent.md" }, { path: "decisions.md" }],
+      });
+      expect(await manifestOf(working)).toMatchObject({
+        version: 3,
+        sessionId: session.id,
+        revision: 1,
+        root: "working",
+        otherRootFolder: "docs/specs/a",
+        files: [
+          { path: "HANDOFF.md" },
+          { path: "issues/01-build-the-workspace.md" },
+          { path: "issues/02-store-on-disk.md" },
+          { path: "briefs/01-build-the-workspace.md" },
+          { path: "briefs/02-store-on-disk.md" },
+        ],
+      });
+    });
+  });
+
+  describe("{seq} counts folders in both roots", () => {
+    it("durable root holds 07-x, working root 05-y: slug a gives 08-a", async () => {
+      const { root, session } = await aReadySession({
+        slugPattern: "{seq}-{slug}",
+        files: { "docs/specs/07-x/spec.md": "x", ".scratch/05-y/HANDOFF.md": "y" },
+      });
+
+      const preview = await previewExport.run({ sessionId: session.id, slug: SLUG });
+      expect(preview.folderName).toBe("08-a");
+      expect(preview.bundleDir).toBe(path.join(root, ".scratch", "08-a"));
+      expect(preview.durableBundleDir).toBe(path.join(root, "docs", "specs", "08-a"));
+    });
+
+    it("durable root holds 02-a, working root nothing: slug a reuses 02-a", async () => {
+      const { root, session } = await aReadySession({
+        slugPattern: "{seq}-{slug}",
+        files: { "docs/specs/02-a/spec.md": "an earlier export" },
+      });
+
+      const preview = await previewExport.run({ sessionId: session.id, slug: SLUG });
+      expect(preview.folderName).toBe("02-a");
+      expect(preview.bundleDir).toBe(path.join(root, ".scratch", "02-a"));
+    });
+
+    it("durable root holds 04-a, working root 01-a: slug a reuses the highest, 04-a, and leaves 01-a as it is", async () => {
+      const { root, session } = await aReadySession({
+        slugPattern: "{seq}-{slug}",
+        files: { "docs/specs/04-a/spec.md": "newer", ".scratch/01-a/HANDOFF.md": "older" },
+      });
+      await generateHandoff.run({ sessionId: session.id });
+
+      const result = await exportSession.run({ sessionId: session.id, slug: SLUG });
+      expect(result.folderName).toBe("04-a");
+      expect(result.bundleDir).toBe(path.join(root, ".scratch", "04-a"));
+      expect(await fs.readFile(path.join(root, ".scratch", "01-a", "HANDOFF.md"), "utf8")).toBe(
+        "older",
+      );
+      expect(await listFiles(path.join(root, ".scratch", "01-a"))).toEqual([
+        path.join(root, ".scratch", "01-a", "HANDOFF.md"),
+      ]);
+    });
+  });
+
+  describe("a manifest per root", () => {
+    it("a fresh export: each root gets its own files and a v3 manifest naming the other root's folder", async () => {
+      const { session, root, durable, working } = await aSessionToExport();
+
+      const plan = await planned(session.id);
+      expect(plan.files).toEqual([...durableWrites(), ...workingWrites()]);
+      expect(plan.removals).toEqual([]);
+
+      const result = await exportSession.run({ sessionId: session.id, slug: SLUG });
+      expect(result.written).toEqual(absolute(root, [...durableWrites(), ...workingWrites()]));
+      expect(result.removed).toEqual([]);
+      expect(result.kept).toEqual([]);
+      expect(await manifestOf(durable)).toMatchObject({
+        version: 3,
+        revision: 1,
+        root: "durable",
+        otherRootFolder: ".scratch/a",
+      });
+      expect(await manifestOf(working)).toMatchObject({
+        version: 3,
+        revision: 1,
+        root: "working",
+        otherRootFolder: "docs/specs/a",
+      });
+    });
+
+    it("a re-export with nothing edited: both roots rewritten, each manifest one revision on", async () => {
+      const { session, root, durable, working } = await aSessionToExport();
+      await exportSession.run({ sessionId: session.id, slug: SLUG });
+
+      const plan = await planned(session.id);
+      expect(plan.files).toEqual([...durableWrites(), ...workingWrites()]);
+      expect(plan.removals).toEqual([]);
+
+      const result = await exportSession.run({ sessionId: session.id, slug: SLUG });
+      expect(result.written).toEqual(absolute(root, [...durableWrites(), ...workingWrites()]));
+      expect(result.removed).toEqual([]);
+      expect(result.kept).toEqual([]);
+      expect((await manifestOf(durable))!.revision).toBe(2);
+      expect((await manifestOf(working))!.revision).toBe(2);
+    });
+
+    it("docs/specs/a/spec.md hand-edited: edited and kept; overriding docs/specs/a/spec.md writes it", async () => {
+      const { session, root, durable } = await aSessionToExport();
+      await exportSession.run({ sessionId: session.id, slug: SLUG });
+      const specPath = path.join(durable, "spec.md");
+      await fs.writeFile(specPath, "Edited by hand.\n");
+
+      const plan = await planned(session.id);
+      expect(plan.files).toEqual([
+        ...durableWrites({ "spec.md": { edited: true, kept: true } }),
+        ...workingWrites(),
+      ]);
+      expect(plan.removals).toEqual([]);
+
+      const kept = await exportSession.run({ sessionId: session.id, slug: SLUG });
+      expect(kept.kept).toEqual([specPath]);
+      expect(kept.written).toEqual(
+        absolute(root, [...durableWrites(), ...workingWrites()]).filter((file) => file !== specPath),
+      );
+      expect(await fs.readFile(specPath, "utf8")).toBe("Edited by hand.\n");
+
+      const overridden = await planned(session.id, ["docs/specs/a/spec.md"]);
+      expect(overridden.files[0]).toEqual(
+        entry("durable", "docs/specs/a/spec.md", { edited: true, kept: false }),
+      );
+      const written = await exportSession.run({
+        sessionId: session.id,
+        slug: SLUG,
+        overridePaths: ["docs/specs/a/spec.md"],
+      });
+      expect(written.kept).toEqual([]);
+      expect(written.written).toContain(specPath);
+      expect(await fs.readFile(specPath, "utf8")).not.toBe("Edited by hand.\n");
+    });
+
+    it("first re-export of a project whose export folder was not under docs/: the working root removes spec, intent and decisions; an unlisted durable spec.md is kept", async () => {
+      const { session, root, durable, working } = await aSessionToExport({
+        files: {
+          ...aPreSplitBundle(".scratch/a"),
+          "docs/specs/a/spec.md": "Already here, listed by no manifest.\n",
+        },
+      });
+
+      const plan = await planned(session.id);
+      expect(plan.files).toEqual([
+        ...durableWrites({ "spec.md": { edited: true, kept: true } }),
+        ...workingWrites(),
+      ]);
+      expect(plan.removals).toEqual([
+        entry("working", ".scratch/a/decisions.md"),
+        entry("working", ".scratch/a/intent.md"),
+        entry("working", ".scratch/a/spec.md"),
+      ]);
+
+      const result = await exportSession.run({ sessionId: session.id, slug: SLUG });
+      expect(result.removed).toEqual(
+        ["decisions.md", "intent.md", "spec.md"].map((file) => path.join(working, file)),
+      );
+      expect(result.kept).toEqual([path.join(durable, "spec.md")]);
+      expect(result.written).toEqual(
+        absolute(root, [...durableWrites(), ...workingWrites()]).filter(
+          (file) => file !== path.join(durable, "spec.md"),
+        ),
+      );
+      expect(await fs.readFile(path.join(durable, "spec.md"), "utf8")).toBe(
+        "Already here, listed by no manifest.\n",
+      );
+      expect(await manifestOf(durable)).toMatchObject({
+        revision: 1,
+        root: "durable",
+        files: [{ path: "intent.md" }],
+      });
+      expect(await manifestOf(working)).toMatchObject({ revision: 5, root: "working" });
+    });
+
+    it("first re-export of a v66 project (working .grill-room, a pre-split bundle in the durable folder): the durable root removes HANDOFF, issues and briefs, judging spec and intent against the old manifest; the working root is written fresh", async () => {
+      const preSplit = aPreSplitBundle("docs/specs/a");
+      delete preSplit["docs/specs/a/decisions.md"];
+      const { session, root, durable, working } = await aSessionToExport({
+        workingExportFolder: ".grill-room",
+        files: preSplit,
+      });
+      // Hand-edited since that export: judged against the old manifest's hash.
+      await fs.writeFile(path.join(durable, "spec.md"), "old spec, edited by hand\n");
+
+      const plan = await planned(session.id);
+      expect(plan.files).toEqual([
+        ...durableWrites({ "spec.md": { edited: true, kept: true } }),
+        ...workingWrites(".grill-room/a"),
+      ]);
+      expect(plan.removals).toEqual([
+        entry("durable", "docs/specs/a/HANDOFF.md"),
+        entry("durable", "docs/specs/a/briefs/01-build-the-workspace.md"),
+        entry("durable", "docs/specs/a/briefs/02-store-on-disk.md"),
+        entry("durable", "docs/specs/a/issues/01-build-the-workspace.md"),
+        entry("durable", "docs/specs/a/issues/02-store-on-disk.md"),
+      ]);
+
+      const result = await exportSession.run({ sessionId: session.id, slug: SLUG });
+      expect(result.removed).toEqual(absolute(root, plan.removals));
+      expect(result.kept).toEqual([path.join(durable, "spec.md")]);
+      for (const removed of result.removed) expect(await pathExists(removed)).toBe(false);
+      expect(await listFiles(working)).toEqual(
+        absolute(root, workingWrites(".grill-room/a")).sort(),
+      );
+      expect(await manifestOf(durable)).toMatchObject({
+        version: 3,
+        revision: 5,
+        root: "durable",
+        otherRootFolder: ".grill-room/a",
+        files: [
+          { path: "spec.md", sha256: hashExportContent("old spec\n") },
+          { path: "intent.md" },
+        ],
+      });
+      expect(await manifestOf(working)).toMatchObject({
+        revision: 1,
+        root: "working",
+        otherRootFolder: "docs/specs/a",
+      });
+    });
+
+    it("a durable folder holding a v3 manifest whose root is working counts as no previous manifest", async () => {
+      const content = "spec as some export wrote it\n";
+      const { session, durable } = await aSessionToExport({
+        files: {
+          "docs/specs/a/spec.md": content,
+          "docs/specs/a/HANDOFF.md": "a handoff that manifest lists\n",
+          [`docs/specs/a/${MANIFEST}`]: JSON.stringify({
+            version: 3,
+            sessionId: "s",
+            revision: 7,
+            root: "working",
+            otherRootFolder: "docs/specs/a",
+            scoutCommit: null,
+            headCommit: null,
+            files: [
+              { path: "spec.md", sha256: hashExportContent(content) },
+              { path: "HANDOFF.md", sha256: hashExportContent("a handoff that manifest lists\n") },
+            ],
+          }),
+        },
+      });
+
+      const plan = await planned(session.id);
+      expect(plan.files).toEqual([
+        ...durableWrites({ "spec.md": { edited: true, kept: true } }),
+        ...workingWrites(),
+      ]);
+      expect(plan.removals).toEqual([]);
+
+      const result = await exportSession.run({ sessionId: session.id, slug: SLUG });
+      expect(result.removed).toEqual([]);
+      expect(await pathExists(path.join(durable, "HANDOFF.md"))).toBe(true);
+      expect(await manifestOf(durable)).toMatchObject({ revision: 1, root: "durable" });
+    });
+
+    it("overridePaths [\"spec.md\"]: refused override-outside-bundle, nothing written", async () => {
+      const { session, durable } = await aSessionToExport();
+      await exportSession.run({ sessionId: session.id, slug: SLUG });
+      const specPath = path.join(durable, "spec.md");
+      await fs.writeFile(specPath, "Edited by hand.\n");
+
+      await expect(
+        exportSession.run({ sessionId: session.id, slug: SLUG, overridePaths: ["spec.md"] }),
+      ).rejects.toMatchObject({ errorCode: "override-outside-bundle" });
+      expect(await fs.readFile(specPath, "utf8")).toBe("Edited by hand.\n");
+    });
+  });
+
+  it("a durable folder that is a symlink pointing outside the root is refused, writing nothing in either root", async () => {
+    const outside = repos.plainFolder();
+    const { root, session } = await aSessionToExport();
+    await fs.mkdir(path.join(root, "docs"));
+    await fs.symlink(outside, path.join(root, "docs", "specs"));
+
+    await expect(previewExport.run({ sessionId: session.id, slug: SLUG })).rejects.toMatchObject({
+      errorCode: "export-outside-root",
+    });
+    await expect(
+      exportSession.run({ sessionId: session.id, slug: SLUG }),
+    ).rejects.toMatchObject({ errorCode: "export-outside-root" });
+
+    expect(await fs.readdir(outside)).toEqual([]);
+    expect(await pathExists(path.join(root, ".scratch"))).toBe(false);
   });
 });
 
@@ -1414,7 +1946,7 @@ describe("export writes grounded briefs", () => {
     const result = await exportSession.run({
       sessionId: session.id,
       slug: "grill-room",
-      overridePaths: ["HANDOFF.md", "briefs/01-build-the-workspace.md"],
+      overridePaths: [".scratch/grill-room/HANDOFF.md", ".scratch/grill-room/briefs/01-build-the-workspace.md"],
     });
     expect(result.ungroundedBriefs).toContainEqual({ ticket: 1, reason: "edited" });
     expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(edited);
@@ -1443,7 +1975,7 @@ describe("export writes grounded briefs", () => {
     const result = await exportSession.run({
       sessionId: session.id,
       slug: "grill-room",
-      overridePaths: ["HANDOFF.md", "briefs/01-build-the-workspace.md"],
+      overridePaths: [".scratch/grill-room/HANDOFF.md", ".scratch/grill-room/briefs/01-build-the-workspace.md"],
     });
     expect(result.ungroundedBriefs).toContainEqual({ ticket: 1, reason: "edited" });
     expect(await readBrief(bundleDir, "01-build-the-workspace.md")).toBe(edited);

@@ -77,10 +77,26 @@ describe("collectHandoffFactPack: tracked files", () => {
       files[`f/${String(index).padStart(5, "0")}.txt`] = "x";
     }
     const root = repos.create({ files });
-    const pack = await collectHandoffFactPack(root, { excludeFolder: ".grill-room/out" });
+    const pack = await collectHandoffFactPack(root, { excludeFolders: [".grill-room/out"] });
     expect(pack.trackedFiles).toHaveLength(MAX_FACT_PACK_FILES);
     expect(pack.trackedFiles.some((file) => file.startsWith(".grill-room/out/"))).toBe(false);
     expect(pack.trackedFilesOmitted).toBe(4);
+  });
+
+  it("leaves out every tracked file under either excluded folder, decisions.md included, and keeps one outside both", async () => {
+    const root = repos.create({
+      files: {
+        "docs/specs/a/decisions.md": "# durable\n",
+        "docs/specs/a/spec.md": "# spec\n",
+        ".grill-room/a/decisions.md": "# working\n",
+        ".grill-room/a/HANDOFF.md": "# handoff\n",
+        "docs/specs/ab/decisions.md": "# another\n",
+      },
+    });
+    const pack = await collectHandoffFactPack(root, {
+      excludeFolders: ["docs/specs/a", ".grill-room/a"],
+    });
+    expect(pack.trackedFiles).toEqual(["README.md", "docs/specs/ab/decisions.md"]);
   });
 
   it("lists nothing for a repository with no commits and nothing staged", async () => {

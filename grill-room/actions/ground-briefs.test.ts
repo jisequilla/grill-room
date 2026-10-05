@@ -404,15 +404,17 @@ describe("ground-briefs", () => {
         "src/ingest/queue.ts": lines(10),
         "docs/adr/0003-queue.md": lines(9),
         "CLAUDE.md": "# Agent instructions\n",
-        ".scratch/out/spec.md": "spec\n",
         ".scratch/out/HANDOFF.md": "handoff\n",
+        ".scratch/out/decisions.md": "# Decisions\n",
+        "docs/specs/out/spec.md": "spec\n",
+        "docs/specs/out/decisions.md": "# Decisions\n",
       },
       gitignore: "dist/\n",
     });
     const { session } = await aSessionWithHandoff({ root });
     await getDb()
       .update(schema.sessions)
-      .set({ lastExportFolder: ".scratch/out" })
+      .set({ lastDurableExportFolder: "docs/specs/out", lastWorkingExportFolder: ".scratch/out" })
       .where(eq(schema.sessions.id, session.id));
     const interviewer = scriptInterviewer([
       { kind: "handoff-scout", result: aHandoffScoutResult() },
@@ -425,6 +427,10 @@ describe("ground-briefs", () => {
     expect(request!.factPack.trackedFiles.some((file) => file.startsWith(".scratch/out/"))).toBe(
       false,
     );
+    expect(
+      request!.factPack.trackedFiles.some((file) => file.startsWith("docs/specs/out/")),
+    ).toBe(false);
+    expect(request!.facts.decisionFiles).toEqual([]);
   });
 
   it("replaces the earlier grounding on a re-run", async () => {
