@@ -95,7 +95,9 @@
  * `"handoff-missing"` when the session has no handoff at all, or
  * `"handoff-stale"` when one exists but no longer matches today's inputs
  * (the same fingerprint check `describeHandoff`'s `stale` makes); `null` once
- * the handoff is current. This module only reports it — `preview-export`
+ * the handoff is current. When the handoff gate is clear, it is
+ * `"durable-folder-ignored"` if git confirms the durable bundle folder is
+ * ignored; `durableFolderIgnored` reports that whatever the handoff says. This module only reports it — `preview-export`
  * surfaces it for the UI, and `export-session` is the one that refuses to
  * write when it is non-null.
  *
@@ -333,6 +335,8 @@ export interface ExportBundlePlan {
   exportBlocked: boolean;
   /** Why export is blocked, or null once a current handoff exists. See "Export gate" above. */
   exportBlockedReason: ExportGateReason | null;
+  /** Whether git confirms the durable bundle folder is ignored; reported whatever the handoff gate says. */
+  durableFolderIgnored: boolean;
   /** Whether the session's handoff briefs are grounded and current. See "Brief grounding state" above. */
   briefGroundingState: BriefGroundingState;
   /** Why the grounding is stale, or null while current or absent. */
@@ -843,8 +847,9 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   // The durable folder's own visibility, so `{{DOCS}}` and the wording around
   // it follow it. A durable folder git cannot classify follows the stored flag
   // silently: `visibilityUnchecked` describes the working folder only.
-  const durableVisibility =
-    (await measuredVisibility(project.rootPath, durableBundleFolder)) ?? project.visibility;
+  const durableMeasured = await measuredVisibility(project.rootPath, durableBundleFolder);
+  const durableVisibility = durableMeasured ?? project.visibility;
+  const durableFolderIgnored = durableMeasured === "ignored";
   const rootRelative = (absolutePath: string) => bundleRelative(project.rootPath, absolutePath);
 
   // Measured fresh for this export only: the stored flag goes stale when an
@@ -912,6 +917,8 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
 
   const handoff = (await getHandoffRow(session.id)) ?? null;
   const gate = await getExportGate(session.id);
+  const exportBlockedReason: ExportGateReason | null =
+    gate.reason ?? (durableFolderIgnored ? "durable-folder-ignored" : null);
   const grounding = await currentBriefGrounding(session.id);
   const briefGroundingState: BriefGroundingState = !grounding
     ? "absent"
@@ -1152,8 +1159,9 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     ticketsExported: exportTickets.length > 0,
     ticketsSkippedReason,
     handoff,
-    exportBlocked: gate.blocked,
-    exportBlockedReason: gate.reason,
+    exportBlocked: exportBlockedReason !== null,
+    exportBlockedReason,
+    durableFolderIgnored,
     briefGroundingState,
     briefGroundingStaleReason,
     groundedBriefs,

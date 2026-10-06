@@ -43,6 +43,10 @@ const messages = {
     durableExportFolderLabel: "Durable folder",
     durableExportFolderHint:
       "Specs, decisions and intent, kept after the build. Relative to the repository root.",
+    durableFolderIgnoredWarning:
+      "Git ignores this folder in this repository, so exports are refused: the spec would never reach a worktree. Choose another folder, or stop ignoring it in .gitignore.",
+    workingFolderIgnoredNote:
+      "Git ignores this folder in this repository: worktree agents will read tickets and briefs by absolute path into this checkout.",
     workingExportFolderLabel: "Working folder",
     workingExportFolderPlaceholder: ".grill-room",
     workingExportFolderHint:
@@ -851,6 +855,8 @@ const messages = {
       "The export folder resolves outside the repository, through a symlink. Nothing was written.",
     exportNeedsHandoff: "Generate a handoff before exporting.",
     exportHandoffStale: "The handoff is stale. Regenerate it before exporting.",
+    exportDurableFolderIgnored:
+      "The durable folder is ignored by git in this repository, so the spec, intent and decisions would never reach a worktree. Choose another durable folder in the project's settings, or stop ignoring it in .gitignore.",
     exportSuccessHeading: "Exported",
     exportedFilesHeading: "Files written",
     exportRemovedFilesHeading: "Files removed",

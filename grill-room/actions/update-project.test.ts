@@ -74,7 +74,11 @@ describe("update-project", () => {
     );
     expect(refused!.errorCode).toBeUndefined();
     expect(refused!.statusCode).toBeUndefined();
-    expect(await getProject.run({ id: project.id })).toEqual({ ...project, hasRemote: false });
+    expect(await getProject.run({ id: project.id })).toEqual({
+      ...project,
+      hasRemote: false,
+      folderVisibility: { durable: "tracked", working: "tracked" },
+    });
   });
 
   it("changes tickets in flight, and get-project reports it", async () => {

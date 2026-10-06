@@ -534,3 +534,93 @@ describe("preview-export: two roots", () => {
     },
   );
 });
+
+describe("preview-export: durable folder ignored", () => {
+  useTestDatabase();
+
+  async function aSessionIn(options: {
+    gitignore?: string;
+    handoff?: boolean;
+    slugFiles?: boolean;
+    prepare?: (root: string) => Promise<void>;
+  }) {
+    const root = repos.create({ gitignore: options.gitignore });
+    await options.prepare?.(root);
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+    });
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A local app that grills me about an idea until it is decided.",
+      projectId: project.id,
+    });
+    await insertTicket(session.id, { number: 1, slug: "build-the-workspace" });
+    await insertSpec(session.id);
+    if (options.handoff !== false) await generateHandoff.run({ sessionId: session.id });
+    return { root, session };
+  }
+
+  it("reports the gate when git confirms the durable folder is ignored", async () => {
+    const { session } = await aSessionIn({ gitignore: "docs/specs/\n" });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.exportBlocked).toBe(true);
+    expect(preview.exportBlockedReason).toBe("durable-folder-ignored");
+    expect(preview.durableFolderIgnored).toBe(true);
+  });
+
+  it("does not report it when the durable folder is not ignored, even with the working folder ignored", async () => {
+    const { session } = await aSessionIn({ gitignore: ".scratch/\n" });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.exportBlocked).toBe(false);
+    expect(preview.exportBlockedReason).toBeNull();
+    expect(preview.durableFolderIgnored).toBe(false);
+  });
+
+  it("does not report it when git cannot tell: a symlinked durable folder", async () => {
+    const { session } = await aSessionIn({
+      prepare: async (root) => {
+        await fs.mkdir(path.join(root, "real-specs"));
+        await fs.mkdir(path.join(root, "docs"));
+        await fs.symlink(path.join(root, "real-specs"), path.join(root, "docs", "specs"));
+      },
+    });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.exportBlocked).toBe(false);
+    expect(preview.exportBlockedReason).toBeNull();
+    expect(preview.durableFolderIgnored).toBe(false);
+  });
+
+  it("names the handoff reason first and still reports durableFolderIgnored: true", async () => {
+    const { session } = await aSessionIn({ gitignore: "docs/specs/\n", handoff: false });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.exportBlocked).toBe(true);
+    expect(preview.exportBlockedReason).toBe("handoff-missing");
+    expect(preview.durableFolderIgnored).toBe(true);
+  });
+
+  it("measures the durable bundle folder: a rule for docs/specs/a/ refuses slug a and lets slug b through", async () => {
+    const { session } = await aSessionIn({ gitignore: "docs/specs/a/\n" });
+
+    const refused = await previewExport.run({ sessionId: session.id, slug: "a" });
+    expect(refused.exportBlockedReason).toBe("durable-folder-ignored");
+    await expect(exportSession.run({ sessionId: session.id, slug: "a" })).rejects.toMatchObject({
+      errorCode: "durable-folder-ignored",
+    });
+
+    const allowed = await previewExport.run({ sessionId: session.id, slug: "b" });
+    expect(allowed.exportBlockedReason).toBeNull();
+    expect(allowed.durableFolderIgnored).toBe(false);
+    const result = await exportSession.run({ sessionId: session.id, slug: "b" });
+    expect(result.written.length).toBeGreaterThan(0);
+  });
+});
