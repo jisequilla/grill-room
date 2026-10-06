@@ -2848,6 +2848,7 @@ describe("durable folder ignored", () => {
       exportSession.run({ sessionId: session.id, slug: "grill-room" }),
     ).rejects.toMatchObject({ errorCode: "handoff-missing", statusCode: 409 });
     expect(await pathExists(path.join(root, "docs", "specs", "grill-room"))).toBe(false);
+    expect(await pathExists(path.join(root, ".scratch", "grill-room"))).toBe(false);
   });
 
   it("handoff stale, durable folder ignored: refused handoff-stale, as today", async () => {
@@ -2859,6 +2860,7 @@ describe("durable folder ignored", () => {
       exportSession.run({ sessionId: session.id, slug: "grill-room" }),
     ).rejects.toMatchObject({ errorCode: "handoff-stale", statusCode: 409 });
     expect(await pathExists(path.join(root, "docs", "specs", "grill-room"))).toBe(false);
+    expect(await pathExists(path.join(root, ".scratch", "grill-room"))).toBe(false);
   });
 
   it("current handoff, nothing ignored: exports, as today", async () => {
