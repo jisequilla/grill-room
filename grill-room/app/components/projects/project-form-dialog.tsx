@@ -62,6 +62,38 @@ interface ProjectFormDialogProps {
 
 type FieldErrors = Partial<Record<ProjectField, string>>;
 
+/**
+ * The measured visibility of a saved export folder, under that folder's hint.
+ * `measured` and `savedFolder` come from the `get-project` query, so both are
+ * undefined while registering or loading and nothing renders. The
+ * measurement describes the saved folder, so a field edited away from it
+ * shows nothing.
+ */
+export function FolderVisibilityLine({
+  kind,
+  measured,
+  savedFolder,
+  field,
+}: {
+  kind: "durable" | "working";
+  measured: ProjectVisibility | null | undefined;
+  savedFolder: string | undefined;
+  field: string;
+}) {
+  const t = useT();
+  if (measured !== "ignored" || savedFolder === undefined) return null;
+  if (field.trim() !== savedFolder) return null;
+  return kind === "durable" ? (
+    <p data-testid="project-durable-ignored-warning" className="text-xs text-owed">
+      {t("projects.durableFolderIgnoredWarning")}
+    </p>
+  ) : (
+    <p data-testid="project-working-ignored-note" className="text-xs text-owed">
+      {t("projects.workingFolderIgnoredNote")}
+    </p>
+  );
+}
+
 export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDialogProps) {
   const t = useT();
   const [root, setRoot] = useState("");
@@ -361,6 +393,12 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                 t("projects.durableExportFolderHint"),
                 "project-durable-hint",
               )}
+              <FolderVisibilityLine
+                kind="durable"
+                measured={projectDetail.data?.folderVisibility?.durable}
+                savedFolder={projectDetail.data?.durableExportFolder}
+                field={durableExportFolder}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="project-export">{t("projects.workingExportFolderLabel")}</Label>
@@ -387,6 +425,12 @@ export function ProjectFormDialog({ open, onOpenChange, project }: ProjectFormDi
                   : t("projects.workingExportFolderHint"),
                 "project-export-hint",
               )}
+              <FolderVisibilityLine
+                kind="working"
+                measured={projectDetail.data?.folderVisibility?.working}
+                savedFolder={projectDetail.data?.workingExportFolder}
+                field={workingExportFolder}
+              />
             </div>
           </div>
 

@@ -32,12 +32,14 @@ const EXPORT_ERROR_KEY: Record<string, string> = {
   "export-outside-root": "output.exportOutsideRoot",
   "handoff-missing": "output.exportNeedsHandoff",
   "handoff-stale": "output.exportHandoffStale",
+  "durable-folder-ignored": "output.exportDurableFolderIgnored",
 };
 
 /** The export gate's reason, from `preview-export`'s `exportBlockedReason`, mapped to its message. */
 const EXPORT_GATE_KEY: Record<string, string> = {
   "handoff-missing": "output.exportNeedsHandoff",
   "handoff-stale": "output.exportHandoffStale",
+  "durable-folder-ignored": "output.exportDurableFolderIgnored",
 };
 
 /** `preview-export`'s `groundingState`, mapped to its message. */
@@ -449,7 +451,11 @@ export function ExportSection({
       setExportError(
         key ? t(key) : (actionErrorMessage(error) ?? t("output.exportFailed")),
       );
-      if (code === "handoff-missing" || code === "handoff-stale") {
+      if (
+        code === "handoff-missing" ||
+        code === "handoff-stale" ||
+        code === "durable-folder-ignored"
+      ) {
         // A stale tab: the button read as enabled from data fetched before the
         // handoff changed elsewhere. Refresh so the gate here catches up.
         void queryClient.invalidateQueries({ queryKey: ["action"] });

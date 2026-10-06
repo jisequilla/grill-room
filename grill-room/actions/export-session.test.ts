@@ -784,18 +784,19 @@ describe("preview-export and export-session", () => {
 
     it("reports files under a gitignored export folder as ignored, with the check-ignore remedy", async () => {
       const { root, session } = await aReadySession({
-        files: { ".gitignore": ".scratch/\ndocs/specs/\n" },
+        files: { ".gitignore": ".scratch/\n" },
       });
       await generateHandoff.run({ sessionId: session.id });
 
       const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
 
-      expect(result.visibility.hasIgnored).toBe(true);
-      expect(result.visibility.files.every((file) => file.visibility === "ignored")).toBe(true);
-      expect(result.visibility.ignoredRemedy).toMatch(/cannot be committed/i);
-      expect(result.visibility.ignoredRemedy).toContain(
-        `git -C ${root} check-ignore -v docs/specs/grill-room/spec.md`,
+      const workingFiles = result.visibility.files.filter((file) =>
+        file.relativePath.startsWith(".scratch/"),
       );
+      expect(workingFiles.length).toBeGreaterThan(0);
+      expect(workingFiles.every((file) => file.visibility === "ignored")).toBe(true);
+      expect(result.visibility.hasIgnored).toBe(true);
+      expect(result.visibility.ignoredRemedy).toMatch(/cannot be committed/i);
       expect(result.visibility.ignoredRemedy).toContain(
         `git -C ${root} check-ignore -v .scratch/grill-room/HANDOFF.md`,
       );
@@ -2785,6 +2786,90 @@ describe("export after a regeneration that kept an edited brief", () => {
         fillBundlePath(renderBrief(loaded.source, ticket), bundlePath, "docs/specs/grill-room"),
       );
     }
+  });
+});
+
+describe("durable folder ignored", () => {
+  useTestDatabase();
+
+  const REFUSAL = /The durable folder docs\/specs\/grill-room is ignored by git/;
+
+  async function aSessionIgnoring(gitignore: string) {
+    const ready = await aReadySession({ gitignore });
+    return ready;
+  }
+
+  it("current handoff, durable folder ignored: refused 409 with nothing written in either root", async () => {
+    const { root, session } = await aSessionIgnoring("docs/specs/\n");
+    await generateHandoff.run({ sessionId: session.id });
+
+    await expect(
+      exportSession.run({ sessionId: session.id, slug: "grill-room" }),
+    ).rejects.toMatchObject({
+      errorCode: "durable-folder-ignored",
+      statusCode: 409,
+      message: expect.stringMatching(REFUSAL),
+    });
+    expect(await pathExists(path.join(root, "docs", "specs", "grill-room"))).toBe(false);
+    expect(await pathExists(path.join(root, ".scratch", "grill-room"))).toBe(false);
+  });
+
+  it("current handoff, durable folder not ignored, working folder ignored: exports and warns about the working files", async () => {
+    const { root, session } = await aSessionIgnoring(".scratch/\n");
+    await generateHandoff.run({ sessionId: session.id });
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    expect(result.written.length).toBeGreaterThan(0);
+    expect(await pathExists(path.join(root, "docs", "specs", "grill-room", "spec.md"))).toBe(true);
+    expect(result.visibility.hasIgnored).toBe(true);
+  });
+
+  it("current handoff, git cannot tell (symlinked durable folder): exports with the unchecked warning", async () => {
+    const { root, session } = await aSessionIgnoring(".scratch/\n");
+    await generateHandoff.run({ sessionId: session.id });
+    await fs.mkdir(path.join(root, "real-specs"));
+    await fs.mkdir(path.join(root, "docs"));
+    await fs.symlink(path.join(root, "real-specs"), path.join(root, "docs", "specs"));
+
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.durableFolderIgnored).toBe(false);
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    expect(result.written.length).toBeGreaterThan(0);
+    expect(result.visibility.files.some((file) => file.visibility === "unchecked")).toBe(true);
+  });
+
+  it("handoff missing, durable folder ignored: refused handoff-missing, as today", async () => {
+    const { root, session } = await aSessionIgnoring("docs/specs/\n");
+
+    await expect(
+      exportSession.run({ sessionId: session.id, slug: "grill-room" }),
+    ).rejects.toMatchObject({ errorCode: "handoff-missing", statusCode: 409 });
+    expect(await pathExists(path.join(root, "docs", "specs", "grill-room"))).toBe(false);
+    expect(await pathExists(path.join(root, ".scratch", "grill-room"))).toBe(false);
+  });
+
+  it("handoff stale, durable folder ignored: refused handoff-stale, as today", async () => {
+    const { root, session } = await aSessionIgnoring("docs/specs/\n");
+    await generateHandoff.run({ sessionId: session.id });
+    await setTicketBlockedBy.run({ ticketId: await ticketIdFor(session.id, 2), blockedBy: [] });
+
+    await expect(
+      exportSession.run({ sessionId: session.id, slug: "grill-room" }),
+    ).rejects.toMatchObject({ errorCode: "handoff-stale", statusCode: 409 });
+    expect(await pathExists(path.join(root, "docs", "specs", "grill-room"))).toBe(false);
+    expect(await pathExists(path.join(root, ".scratch", "grill-room"))).toBe(false);
+  });
+
+  it("current handoff, nothing ignored: exports, as today", async () => {
+    const { session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+
+    const result = await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    expect(result.written.length).toBeGreaterThan(0);
   });
 });
 

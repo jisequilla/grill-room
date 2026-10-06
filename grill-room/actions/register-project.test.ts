@@ -56,7 +56,11 @@ describe("project actions", () => {
 
     expect(project.rootPath).toBe(root);
     expect(await listProjects.run({})).toEqual([project]);
-    expect(await getProject.run({ id: project.id })).toEqual({ ...project, hasRemote: false });
+    expect(await getProject.run({ id: project.id })).toEqual({
+      ...project,
+      hasRemote: false,
+      folderVisibility: { durable: "tracked", working: "tracked" },
+    });
     await expect(getProject.run({ id: "missing" })).rejects.toMatchObject({
       errorCode: "project-not-found",
     });
