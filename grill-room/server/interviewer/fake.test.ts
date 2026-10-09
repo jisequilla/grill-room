@@ -317,7 +317,7 @@ describe("the scripted fake interviewer", () => {
       schemaInvalidTurn("scout-project", {
         ...aScoutProjectResult(),
         proposedDecisions: [
-          { ...aScoutProjectResult().proposedDecisions[0], citation: "/etc/passwd:1" },
+          { ...aScoutProjectResult().proposedDecisions[0], citation: "//etc/passwd:1" },
         ],
       }),
     ]);
