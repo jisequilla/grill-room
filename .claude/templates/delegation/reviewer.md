@@ -15,7 +15,7 @@ Read `gh pr diff {{pr}}`. You get no report from the builder, only the ticket an
 - **Scope.** Any file outside the ticket's Files must be named and justified in the PR body. An unnamed one blocks.
 - **PR body.** Flag claims the diff does not support.
 
-To run tests, check out branch `{{branch}}` in a scratch worktree of your own. Other lenses may review the same PR at the same time, so give your scratch work a folder that names the PR, the round and your lens, for example `rv{{pr}}-r2-tests/`. Put the worktree and every scratch file in it, mutation copies and scripts included, never in the shared scratchpad. Never reuse a folder that already exists, and remove yours when you are done. Run the verify commands from the ticket, in the foreground.
+To run tests, check out branch `{{branch}}` in a scratch worktree of your own. Other lenses may review the same PR at the same time, so give your scratch work a folder that names the PR, the round and your lens, for example `rv{{pr}}-r2-tests/`. Put the worktree and every scratch file in it, mutation copies and scripts included, never loose in the shared scratchpad. Never reuse a folder that already exists, and remove yours when you are done. Run the verify commands from the ticket, in the foreground.
 
 ## Verdict
 
