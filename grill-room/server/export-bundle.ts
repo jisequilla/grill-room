@@ -97,7 +97,9 @@
  * (the same fingerprint check `describeHandoff`'s `stale` makes); `null` once
  * the handoff is current. When the handoff gate is clear, it is
  * `"durable-folder-ignored"` if git confirms the durable bundle folder is
- * ignored; `durableFolderIgnored` reports that whatever the handoff says. This module only reports it — `preview-export`
+ * ignored; after both, `"export-retired"` when the session's last export is
+ * retired ({@link exportRetirement}) and `reexportRetired` is not true.
+ * `durableFolderIgnored` reports the ignore check whatever the handoff says. This module only reports it — `preview-export`
  * surfaces it for the UI, and `export-session` is the one that refuses to
  * write when it is non-null.
  *
@@ -337,6 +339,10 @@ export interface ExportBundlePlan {
   exportBlockedReason: ExportGateReason | null;
   /** Whether git confirms the durable bundle folder is ignored; reported whatever the handoff gate says. */
   durableFolderIgnored: boolean;
+  /** Whether the session's last export is retired: its working folder was deleted. See {@link exportRetirement}. */
+  exportRetired: boolean;
+  /** The deleted working folder (relative to the project root) when retired, otherwise null. */
+  retiredWorkingFolder: string | null;
   /** Whether the session's handoff briefs are grounded and current. See "Brief grounding state" above. */
   briefGroundingState: BriefGroundingState;
   /** Why the grounding is stale, or null while current or absent. */
@@ -423,6 +429,8 @@ export interface PlanExportBundleInput {
   now?: Date;
   /** Project-root-relative paths of edited files to overwrite or remove anyway. */
   overridePaths?: readonly string[];
+  /** Export even though the session's last export is retired. Ignored when it is not. */
+  reexportRetired?: boolean;
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -478,6 +486,80 @@ async function assertContained(targets: readonly string[], realRoot: string): Pr
   for (const target of targets) {
     if (!isStrictlyInside(await realLocation(target), realRoot)) refuseOutsideRoot(target);
   }
+}
+
+/**
+ * Where `target` really lands, or null when that cannot be told or the
+ * target is refused (a dangling symlink on the way, a permission error).
+ */
+async function realLocationOrNull(target: string): Promise<string | null> {
+  try {
+    return await realLocation(target);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the session's last export is retired: its working folder, as its
+ * durable manifest names it, no longer exists. Derived on every read, never
+ * stored. Anything unclear (no export, another session's manifest, a
+ * pre-split manifest, a folder that escapes the root, an error other than
+ * `ENOENT`) reads as not retired, so the export stays allowed.
+ */
+export async function exportRetirement(
+  sessionId: string,
+): Promise<{ retired: boolean; workingFolder: string | null }> {
+  const notRetired = { retired: false, workingFolder: null };
+
+  const [session] = await getDb()
+    .select()
+    .from(schema.sessions)
+    .where(eq(schema.sessions.id, sessionId))
+    .limit(1);
+  if (!session?.projectId || session.lastDurableExportFolder === null) return notRetired;
+  const project = await getProject(session.projectId);
+  if (!project) return notRetired;
+
+  let manifest: ParsedExportManifest | null;
+  try {
+    manifest = parseExportManifest(
+      await fs.readFile(
+        path.join(project.rootPath, session.lastDurableExportFolder, EXPORT_MANIFEST_FILE),
+        "utf8",
+      ),
+    );
+  } catch {
+    return notRetired;
+  }
+  if (
+    !manifest ||
+    manifest.version !== 3 ||
+    manifest.root !== "durable" ||
+    manifest.sessionId !== session.id ||
+    manifest.otherRootFolder === undefined
+  ) {
+    return notRetired;
+  }
+
+  const workingFolder = manifest.otherRootFolder;
+  if (path.isAbsolute(workingFolder) || workingFolder.includes("\0")) return notRetired;
+  let realRoot: string;
+  try {
+    realRoot = await fs.realpath(project.rootPath);
+  } catch {
+    return notRetired;
+  }
+  const workingDir = path.resolve(project.rootPath, workingFolder);
+  const real = await realLocationOrNull(workingDir);
+  if (real === null || !isStrictlyInside(real, realRoot)) return notRetired;
+
+  try {
+    await fs.lstat(workingDir);
+  } catch (error) {
+    return errorCode(error) === "ENOENT" ? { retired: true, workingFolder } : { retired: false, workingFolder };
+  }
+  return { retired: false, workingFolder };
 }
 
 async function directoryNames(folder: string): Promise<string[]> {
@@ -917,8 +999,11 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
 
   const handoff = (await getHandoffRow(session.id)) ?? null;
   const gate = await getExportGate(session.id);
+  const retirement = await exportRetirement(session.id);
   const exportBlockedReason: ExportGateReason | null =
-    gate.reason ?? (durableFolderIgnored ? "durable-folder-ignored" : null);
+    gate.reason ??
+    (durableFolderIgnored ? "durable-folder-ignored" : null) ??
+    (retirement.retired && input.reexportRetired !== true ? "export-retired" : null);
   const grounding = await currentBriefGrounding(session.id);
   const briefGroundingState: BriefGroundingState = !grounding
     ? "absent"
@@ -1162,6 +1247,8 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     exportBlocked: exportBlockedReason !== null,
     exportBlockedReason,
     durableFolderIgnored,
+    exportRetired: retirement.retired,
+    retiredWorkingFolder: retirement.retired ? retirement.workingFolder : null,
     briefGroundingState,
     briefGroundingStaleReason,
     groundedBriefs,

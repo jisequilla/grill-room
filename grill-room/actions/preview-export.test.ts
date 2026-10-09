@@ -624,3 +624,56 @@ describe("preview-export: durable folder ignored", () => {
     expect(result.written.length).toBeGreaterThan(0);
   });
 });
+
+describe("preview-export: retired export", () => {
+  useTestDatabase();
+
+  async function aRetiredSession() {
+    const { root, session } = await aSessionWithHandoff();
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+    await fs.rm(path.join(root, ".scratch", "grill-room"), { recursive: true });
+    return { root, session };
+  }
+
+  it("not retired after an export: exportRetired false, no folder, not blocked", async () => {
+    const { session } = await aSessionWithHandoff();
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.exportRetired).toBe(false);
+    expect(preview.retiredWorkingFolder).toBeNull();
+    expect(preview.exportBlockedReason).toBeNull();
+  });
+
+  it("retired without the override: names the folder and is blocked export-retired", async () => {
+    const { session } = await aRetiredSession();
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.exportRetired).toBe(true);
+    expect(preview.retiredWorkingFolder).toBe(".scratch/grill-room");
+    expect(preview.exportBlocked).toBe(true);
+    expect(preview.exportBlockedReason).toBe("export-retired");
+  });
+
+  it("retired with reexportRetired true: still reported retired, but not blocked", async () => {
+    const { session } = await aRetiredSession();
+
+    const preview = await previewExport.run({ sessionId: session.id, reexportRetired: true });
+
+    expect(preview.exportRetired).toBe(true);
+    expect(preview.retiredWorkingFolder).toBe(".scratch/grill-room");
+    expect(preview.exportBlocked).toBe(false);
+    expect(preview.exportBlockedReason).toBeNull();
+  });
+
+  it("retired, a different slug: still blocked export-retired", async () => {
+    const { session } = await aRetiredSession();
+
+    const preview = await previewExport.run({ sessionId: session.id, slug: "another" });
+
+    expect(preview.exportRetired).toBe(true);
+    expect(preview.exportBlockedReason).toBe("export-retired");
+  });
+});

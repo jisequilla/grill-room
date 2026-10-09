@@ -857,6 +857,11 @@ const messages = {
     exportHandoffStale: "The handoff is stale. Regenerate it before exporting.",
     exportDurableFolderIgnored:
       "The durable folder is ignored by git in this repository, so the spec, intent and decisions would never reach a worktree. Choose another durable folder in the project's settings, or stop ignoring it in .gitignore.",
+    exportRetiredNotice:
+      "This session's working folder, {{folder}}, has been deleted, so its build is done. Re-exporting puts its tickets and handoff back.",
+    exportRetiredOverride: "Re-export anyway",
+    exportRetiredGate:
+      "Re-export is off for a retired session. Check Re-export anyway to put its working files back.",
     exportSuccessHeading: "Exported",
     exportedFilesHeading: "Files written",
     exportRemovedFilesHeading: "Files removed",
