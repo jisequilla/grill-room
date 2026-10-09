@@ -59,8 +59,16 @@ export function staysInsideRepo(path: string): boolean {
  * `path:start-end`. The path may not be absolute or step outside the repo, and
  * a range must not run backwards. Whether the file and lines exist at the
  * commit read is the app's check, not the schema's.
+ *
+ * One leading `/` is removed before the checks, so `/src/a.ts:1` is read as
+ * `src/a.ts:1` rather than refusing the whole report, and the parsed value is
+ * the repaired one. `z.preprocess` keeps the command line's JSON Schema the
+ * plain pattern: with `io: "output"` only the inner string schema shows.
  */
-export const citation = z
+export const citation = z.preprocess(
+  (value) =>
+    typeof value === "string" && value.startsWith("/") ? value.slice(1) : value,
+  z
   .string()
   .regex(CITATION_PATTERN, "A citation is `path:line` or `path:start-end`.")
   .refine(
@@ -73,7 +81,8 @@ export const citation = z
       .split("-")
       .map(Number);
     return end === undefined || start <= end;
-  }, "A citation's line range runs from its first line to its last.");
+  }, "A citation's line range runs from its first line to its last."),
+);
 
 /**
  * One option on offer, and the case for it. The rationale is what makes the

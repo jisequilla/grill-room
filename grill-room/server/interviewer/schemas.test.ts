@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   breakIntoTicketsResultSchema,
+  CITATION_PATTERN,
   citation,
   handoffScoutContractSchema,
   handoffScoutResultSchema,
@@ -46,7 +47,6 @@ describe("a scout report's citations", () => {
     ["an open range", "src/server.ts:4-"],
     ["a backwards range", "src/server.ts:12-5"],
     ["no path", ":12"],
-    ["an absolute path", "/etc/passwd:1"],
     ["a home path", "~/.ssh/config:1"],
     ["a drive path", "C:\\repo\\a.ts:1"],
     ["a path out of the repo", "../other/a.ts:1"],
@@ -55,6 +55,40 @@ describe("a scout report's citations", () => {
     ["two citations in one", "src/a.ts:1, src/b.ts:2"],
   ])("rejects %s", (_label, value) => {
     expect(citation.safeParse(value).success).toBe(false);
+  });
+});
+
+describe("a citation with one leading slash", () => {
+  it.each([
+    ["/.claude/rules/worktrees.md:86", true, ".claude/rules/worktrees.md:86"],
+    ["/src/server.ts:4-9", true, "src/server.ts:4-9"],
+    ["/etc/passwd:1", true, "etc/passwd:1"],
+    ["src/server.ts:42", true, "src/server.ts:42"],
+    ["//etc/passwd:1", false, undefined],
+    ["/../other/a.ts:1", false, undefined],
+    ["/~/.ssh/config:1", false, undefined],
+    ["/:12", false, undefined],
+    [" /src/a.ts:1", false, undefined],
+    ["/src/a.ts", false, undefined],
+  ])("reads %s as success %s with data %s", (value, success, data) => {
+    const result = citation.safeParse(value);
+
+    expect(result.success).toBe(success);
+    if (result.success) expect(result.data).toBe(data);
+  });
+
+  it("keeps the citation pattern in the command line's schema", () => {
+    const plain = { type: "string", pattern: CITATION_PATTERN.source };
+    const schema = jsonSchemaFor("scout-project") as {
+      properties: {
+        currentState: { items: { properties: { citations: { items: unknown } } } };
+        proposedDecisions: { items: { properties: { citation: unknown } } };
+      };
+    };
+
+    expect(schema.properties.currentState.items.properties.citations.items).toEqual(plain);
+    expect(schema.properties.proposedDecisions.items.properties.citation).toEqual(plain);
+    expect(() => jsonSchemaFor("assess-readiness")).not.toThrow();
   });
 });
 
@@ -125,10 +159,25 @@ describe("the scout report schema", () => {
 
   it("rejects a malformed citation on a proposed decision", () => {
     const report = aScoutProjectResult({
-      proposedDecisions: [{ ...aProposal, citation: "/abs/adr.md:3" }],
+      proposedDecisions: [{ ...aProposal, citation: "//abs/adr.md:3" }],
     });
 
     expect(scoutProjectResultSchema.safeParse(report).success).toBe(false);
+  });
+
+  it("reads a proposed decision's leading-slash citation as repo-relative", () => {
+    const report = aScoutProjectResult({
+      currentState: [{ ...aStateItem, citations: ["/src/a.ts:1"] }],
+      proposedDecisions: [{ ...aProposal, citation: "/abs/adr.md:3" }],
+    });
+
+    const parsed = scoutProjectResultSchema.safeParse(report);
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.proposedDecisions[0]!.citation).toBe("abs/adr.md:3");
+      expect(parsed.data.currentState[0]!.citations).toEqual(["src/a.ts:1"]);
+    }
   });
 
   it("rejects a status, source or change outside its set", () => {
