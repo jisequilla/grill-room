@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,6 +34,7 @@ const EXPORT_ERROR_KEY: Record<string, string> = {
   "handoff-missing": "output.exportNeedsHandoff",
   "handoff-stale": "output.exportHandoffStale",
   "durable-folder-ignored": "output.exportDurableFolderIgnored",
+  "export-retired": "output.exportRetiredGate",
 };
 
 /** The export gate's reason, from `preview-export`'s `exportBlockedReason`, mapped to its message. */
@@ -40,6 +42,7 @@ const EXPORT_GATE_KEY: Record<string, string> = {
   "handoff-missing": "output.exportNeedsHandoff",
   "handoff-stale": "output.exportHandoffStale",
   "durable-folder-ignored": "output.exportDurableFolderIgnored",
+  "export-retired": "output.exportRetiredGate",
 };
 
 /** `preview-export`'s `groundingState`, mapped to its message. */
@@ -412,6 +415,8 @@ export function ExportSection({
   const [overridePaths, setOverridePaths] = useState<ReadonlySet<string>>(
     new Set(),
   );
+  /** Whether "Re-export anyway" is checked on a retired session; resets after a successful export. */
+  const [reexportRetired, setReexportRetired] = useState(false);
   /** A fresher visibility report from "Recheck visibility"; cleared whenever a new export lands. */
   const [visibilityOverride, setVisibilityOverride] =
     useState<VisibilityResult | null>(null);
@@ -425,9 +430,13 @@ export function ExportSection({
 
   const preview = useActionQuery<PreviewResult>(
     "preview-export",
-    debouncedSlug === null || debouncedSlug.trim().length === 0
-      ? { sessionId }
-      : { sessionId, slug: debouncedSlug },
+    {
+      sessionId,
+      ...(debouncedSlug === null || debouncedSlug.trim().length === 0
+        ? {}
+        : { slug: debouncedSlug }),
+      ...(reexportRetired ? { reexportRetired: true } : {}),
+    },
     {
       enabled: projectId !== null && !slugBlank,
       retry: false,
@@ -442,6 +451,8 @@ export function ExportSection({
       setVisibilityOverride(null);
       setExportError(null);
       setOverridePaths(new Set());
+      setReexportRetired(false);
+      void queryClient.invalidateQueries({ queryKey: ["action"] });
     },
     onError: (error: unknown) => {
       setLastResult(null);
@@ -454,7 +465,8 @@ export function ExportSection({
       if (
         code === "handoff-missing" ||
         code === "handoff-stale" ||
-        code === "durable-folder-ignored"
+        code === "durable-folder-ignored" ||
+        code === "export-retired"
       ) {
         // A stale tab: the button read as enabled from data fetched before the
         // handoff changed elsewhere. Refresh so the gate here catches up.
@@ -580,6 +592,7 @@ export function ExportSection({
       sessionId,
       slug: plan.slug,
       overridePaths: [...overridePaths],
+      ...(reexportRetired ? { reexportRetired: true } : {}),
     });
   }
 
@@ -757,6 +770,24 @@ export function ExportSection({
                 t={t}
               />
             ) : null}
+          </div>
+        ) : null}
+
+        {plan?.exportRetired ? (
+          <div className="space-y-2" data-testid="export-retired-notice">
+            <p className="text-xs text-owed">
+              {t("output.exportRetiredNotice", {
+                folder: plan.retiredWorkingFolder ?? "",
+              })}
+            </p>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Checkbox
+                checked={reexportRetired}
+                onCheckedChange={(checked) => setReexportRetired(checked === true)}
+                data-testid="export-retired-override"
+              />
+              {t("output.exportRetiredOverride")}
+            </label>
           </div>
         ) : null}
 

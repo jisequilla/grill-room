@@ -2416,7 +2416,11 @@ export function describeHandoff(row: HandoffRow, source: HandoffSource | null): 
 }
 
 /** Why `export-session` refuses to write, from the current handoff's gate. */
-export type ExportGateReason = "handoff-missing" | "handoff-stale" | "durable-folder-ignored";
+export type ExportGateReason =
+  | "handoff-missing"
+  | "handoff-stale"
+  | "durable-folder-ignored"
+  | "export-retired";
 
 export interface ExportGate {
   blocked: boolean;

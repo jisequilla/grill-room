@@ -91,6 +91,7 @@ Steps 3, 4, 5, 6, 8, 9, 10 and 11 each wait for the interviewer. Run them with t
 
 - The project's `verifyCommand` is copied into HANDOFF.md and the briefs as given; nothing runs it. Check that it works in the target repo.
 - The bundle spans two folders sharing one name: `spec.md`, `intent.md` and `decisions.md` in the durable folder (`durableBundleDir`, by default under `docs/specs/`), and `HANDOFF.md`, `issues/` and `briefs/` in the working folder (`bundleDir`), each with its own manifest.
+- Deleting the working folder (`bundleDir`) by hand retires the session's export (`get-session` and `preview-export` report `exportRetired`); a later `export-session` is then refused with `export-retired` unless it passes `reexportRetired: true`.
 - Read the bundle before reporting it done: `spec.md`, `decisions.md`, `HANDOFF.md` and at least one brief.
 - Check it against the readiness items in `docs/reviews/pipe-export-review.md`. That file lists the known export defects; say which ones this bundle shows.
 - Turning the tickets into beads and building them follows `CLAUDE.md` ("Build Flow") and `.claude/rules/worktrees.md`.

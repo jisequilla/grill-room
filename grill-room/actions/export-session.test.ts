@@ -8,7 +8,7 @@ import { eq } from "@agent-native/core/db/schema";
 import { describe, expect, it } from "vitest";
 
 import { storeBriefGrounding } from "../server/brief-grounding.js";
-import { planExportBundle } from "../server/export-bundle.js";
+import { exportRetirement, planExportBundle } from "../server/export-bundle.js";
 import {
   EXPORT_MANIFEST_FILE,
   formatLocalDate,
@@ -2984,5 +2984,233 @@ describe("gates", () => {
     expect(handoff).not.toMatch(/Ticket 02 waits for|waits for ticket 02/);
     const wave1 = handoff.slice(handoff.indexOf("### Wave 1"), handoff.indexOf("### Wave 2"));
     expect(wave1).toContain("**02 Payment account is live** (gate)");
+  });
+});
+
+describe("exportRetirement", () => {
+  useTestDatabase();
+
+  const WORKING = ".scratch/grill-room";
+  const DURABLE = "docs/specs/grill-room";
+
+  async function anExportedSession() {
+    const ready = await aReadySession();
+    await generateHandoff.run({ sessionId: ready.session.id });
+    await exportSession.run({ sessionId: ready.session.id, slug: "grill-room" });
+    return {
+      ...ready,
+      workingDir: path.join(ready.root, WORKING),
+      durableDir: path.join(ready.root, DURABLE),
+    };
+  }
+
+  async function rewriteDurableManifest(durableDir: string, patch: Record<string, unknown>) {
+    const manifest = await readManifest(durableDir);
+    await fs.writeFile(
+      path.join(durableDir, EXPORT_MANIFEST_FILE),
+      JSON.stringify({ ...manifest, ...patch }, null, 2),
+      "utf8",
+    );
+  }
+
+  it("v3 durable manifest of this session, working folder deleted: retired, naming the folder", async () => {
+    const { session, workingDir } = await anExportedSession();
+    await fs.rm(workingDir, { recursive: true });
+
+    expect(await exportRetirement(session.id)).toEqual({ retired: true, workingFolder: WORKING });
+  });
+
+  it("v3 durable manifest of this session, working folder present: not retired, naming the folder", async () => {
+    const { session } = await anExportedSession();
+
+    expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: WORKING });
+  });
+
+  it("another session's id in the manifest, working folder deleted: not retired", async () => {
+    const { session, workingDir, durableDir } = await anExportedSession();
+    await rewriteDurableManifest(durableDir, { sessionId: "someone-else" });
+    await fs.rm(workingDir, { recursive: true });
+
+    expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: null });
+  });
+
+  it("a v2 (pre-split) manifest: not retired", async () => {
+    const { session, workingDir, durableDir } = await anExportedSession();
+    const manifest = await readManifest(durableDir);
+    await fs.writeFile(
+      path.join(durableDir, EXPORT_MANIFEST_FILE),
+      JSON.stringify({
+        version: 2,
+        sessionId: manifest.sessionId,
+        revision: manifest.revision,
+        scoutCommit: manifest.scoutCommit,
+        headCommit: manifest.headCommit,
+        files: manifest.files,
+      }),
+      "utf8",
+    );
+    await fs.rm(workingDir, { recursive: true });
+
+    expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: null });
+  });
+
+  it("a session that never exported: not retired", async () => {
+    const { session } = await aReadySession();
+
+    expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: null });
+  });
+
+  it("a session id that does not exist: not retired", async () => {
+    expect(await exportRetirement("missing")).toEqual({ retired: false, workingFolder: null });
+  });
+
+  it("the durable folder itself deleted: not retired", async () => {
+    const { session, workingDir, durableDir } = await anExportedSession();
+    await fs.rm(durableDir, { recursive: true });
+    await fs.rm(workingDir, { recursive: true });
+
+    expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: null });
+  });
+
+  for (const [label, otherRootFolder] of [
+    ["../x", "../x"],
+    ["an absolute path", path.join(os.tmpdir(), "grill-room-retirement-elsewhere")],
+    ["an empty string", ""],
+    [".", "."],
+  ] as const) {
+    it(`otherRootFolder escapes the root (${label}): not retired`, async () => {
+      const { session, durableDir } = await anExportedSession();
+      await rewriteDurableManifest(durableDir, { otherRootFolder });
+
+      expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: null });
+    });
+  }
+
+  it("otherRootFolder through a symlink to a folder outside the root: not retired", async () => {
+    const { session, root, durableDir } = await anExportedSession();
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), "grill-room-outside-"));
+    try {
+      await fs.symlink(outside, path.join(root, "link"));
+      await rewriteDurableManifest(durableDir, { otherRootFolder: "link/x" });
+
+      expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: null });
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("the working folder's parent is a regular file (ENOTDIR): not retired, naming the folder", async () => {
+    const { session, root } = await anExportedSession();
+    await fs.rm(path.join(root, ".scratch"), { recursive: true });
+    await fs.writeFile(path.join(root, ".scratch"), "not a folder", "utf8");
+
+    expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: WORKING });
+  });
+
+  it("a file where the working folder should be counts as existing: not retired", async () => {
+    const { session, workingDir } = await anExportedSession();
+    await fs.rm(workingDir, { recursive: true });
+    await fs.writeFile(workingDir, "a file", "utf8");
+
+    expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: WORKING });
+  });
+});
+
+describe("re-export after retirement", () => {
+  useTestDatabase();
+
+  const WORKING = ".scratch/grill-room";
+  const REFUSAL =
+    "The working folder .scratch/grill-room from this session's last export has been deleted, so its build is done. Re-exporting puts its tickets and handoff back. Pass reexportRetired: true to export anyway.";
+
+  async function aRetiredSession() {
+    const ready = await aReadySession();
+    await generateHandoff.run({ sessionId: ready.session.id });
+    await exportSession.run({ sessionId: ready.session.id, slug: "grill-room" });
+    const workingDir = path.join(ready.root, WORKING);
+    await fs.rm(workingDir, { recursive: true });
+    return { ...ready, workingDir, durableDir: path.join(ready.root, "docs", "specs", "grill-room") };
+  }
+
+  async function durableSnapshot(durableDir: string) {
+    return Promise.all(
+      (await listFiles(durableDir)).map(async (file) => [file, await fs.readFile(file, "utf8")]),
+    );
+  }
+
+  it("retired, no override, everything else clear: refused export-retired with nothing written in either root", async () => {
+    const { session, root, workingDir, durableDir } = await aRetiredSession();
+    const durableBefore = await durableSnapshot(durableDir);
+
+    expect((await previewExport.run({ sessionId: session.id })).exportBlockedReason).toBe("export-retired");
+    await expect(exportSession.run({ sessionId: session.id, slug: "grill-room" })).rejects.toMatchObject({
+      errorCode: "export-retired",
+      statusCode: 409,
+      message: REFUSAL,
+    });
+    await expect(
+      exportSession.run({ sessionId: session.id, slug: "grill-room", reexportRetired: false }),
+    ).rejects.toMatchObject({ errorCode: "export-retired" });
+
+    expect(await pathExists(workingDir)).toBe(false);
+    expect(await pathExists(path.join(root, ".scratch"))).toBe(true);
+    expect(await durableSnapshot(durableDir)).toEqual(durableBefore);
+  });
+
+  it("retired, reexportRetired true, everything else clear: exports the working folder fresh, removes nothing, and is no longer retired", async () => {
+    const { session, workingDir } = await aRetiredSession();
+
+    const preview = await previewExport.run({ sessionId: session.id, reexportRetired: true });
+    expect(preview.exportBlockedReason).toBeNull();
+    const result = await exportSession.run({
+      sessionId: session.id,
+      slug: "grill-room",
+      reexportRetired: true,
+    });
+
+    expect(result.removed).toEqual([]);
+    expect(result.written).toContain(path.join(workingDir, "HANDOFF.md"));
+    expect(result.written).toContain(path.join(workingDir, EXPORT_MANIFEST_FILE));
+    expect((await readManifest(workingDir)).revision).toBe(1);
+    expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: WORKING });
+  });
+
+  it("retired, no override, handoff stale: refused handoff-stale, as today", async () => {
+    const { session } = await aRetiredSession();
+    await setTicketBlockedBy.run({ ticketId: await ticketIdFor(session.id, 2), blockedBy: [] });
+
+    expect((await previewExport.run({ sessionId: session.id })).exportBlockedReason).toBe("handoff-stale");
+    await expect(
+      exportSession.run({ sessionId: session.id, slug: "grill-room" }),
+    ).rejects.toMatchObject({ errorCode: "handoff-stale", statusCode: 409 });
+  });
+
+  it("not retired, reexportRetired true: exports as today, the override ignored", async () => {
+    const ready = await aReadySession();
+    await generateHandoff.run({ sessionId: ready.session.id });
+    await exportSession.run({ sessionId: ready.session.id, slug: "grill-room" });
+
+    const result = await exportSession.run({
+      sessionId: ready.session.id,
+      slug: "grill-room",
+      reexportRetired: true,
+    });
+
+    expect(result.written.length).toBeGreaterThan(0);
+    expect((await readManifest(path.join(ready.root, WORKING))).revision).toBe(2);
+  });
+
+  it("retired, a different slug: still refused export-retired, writing nothing", async () => {
+    const { session, root } = await aRetiredSession();
+
+    expect((await previewExport.run({ sessionId: session.id, slug: "another" })).exportBlockedReason).toBe(
+      "export-retired",
+    );
+    await expect(exportSession.run({ sessionId: session.id, slug: "another" })).rejects.toMatchObject({
+      errorCode: "export-retired",
+      statusCode: 409,
+    });
+    expect(await pathExists(path.join(root, "docs", "specs", "another"))).toBe(false);
+    expect(await pathExists(path.join(root, ".scratch", "another"))).toBe(false);
   });
 });
