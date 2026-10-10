@@ -399,6 +399,15 @@ describe("detectAdrConvention", () => {
     });
   });
 
+  it("takes the width of the highest file, not the widest number", async () => {
+    const root = await withAdrFolder({ "001-a.md": "## A\n", "12-b.md": "## B\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 2, nextNumber: "13", example: "12-b.md" },
+      template: { source: "docs/adr/12-b.md", headings: ["B"] },
+    });
+  });
+
   it("carries a number across a digit boundary", async () => {
     const root = await withAdrFolder({ "0009-a.md": "## A\n", "0010-b.md": "## B\n" });
     const convention = detectAdrConvention(root, FOLDER);
@@ -432,6 +441,18 @@ describe("detectAdrConvention", () => {
       folder: FOLDER,
       numbering: { prefix: "", width: 4, nextNumber: "0002", example: "0001-a.md" },
       template: { source: "docs/adr/0000-template.md", headings: ["Status"] },
+    });
+  });
+
+  it("does not number a template file that outranks the real files", async () => {
+    const root = await withAdrFolder({
+      "0002-template.md": "## Status\n",
+      "0001-a.md": "## Other\n",
+    });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0002", example: "0001-a.md" },
+      template: { source: "docs/adr/0002-template.md", headings: ["Status"] },
     });
   });
 
@@ -527,6 +548,20 @@ describe("detectAdrConvention", () => {
     await fs.writeFile(path.join(outside, "target.md"), "## Linked\n");
     await fs.symlink(path.join(outside, "target.md"), path.join(folder, "0001-a.md"));
     await fs.mkdir(path.join(folder, "0009-sub.md"));
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0003", example: "0002-b.md" },
+      template: { source: "docs/adr/0002-b.md", headings: ["B"] },
+    });
+  });
+
+  it("does not follow a symlinked file that would change the result", async () => {
+    const root = await withAdrFolder({ "0002-b.md": "## B\n" });
+    const folder = path.join(root, "docs", "adr");
+    const outside = await aRoot();
+    await fs.writeFile(path.join(outside, "target.md"), "## Linked\n");
+    await fs.symlink(path.join(outside, "target.md"), path.join(folder, "0003-a.md"));
+    await fs.symlink(path.join(outside, "target.md"), path.join(folder, "template.md"));
     expect(detectAdrConvention(root, FOLDER)).toEqual({
       folder: FOLDER,
       numbering: { prefix: "", width: 4, nextNumber: "0003", example: "0002-b.md" },
