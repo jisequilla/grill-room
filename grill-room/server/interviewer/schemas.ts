@@ -121,6 +121,10 @@ const proposedDecision = z.strictObject({
   dependsOn: z.array(decisionKey),
   /** True to ask it in this round, false to add it to the tree as blocked. */
   ask: z.boolean(),
+  /** True for an architecturally significant decision that is costly to reverse: the export suggests an ADR for it. */
+  adrWorthy: z.boolean().default(false),
+  /** One to three sentences: what the decision commits the system to, and what it rules out or makes harder. Null when adrWorthy is false. */
+  consequences: z.string().nullable().default(null),
 });
 
 /** One offered choice, as every layer of the app passes it around. */

@@ -454,6 +454,8 @@ export default defineAction({
                   return id ? [id] : [];
                 }),
               ),
+              adrWorthy: decision.adrWorthy,
+              consequences: storedConsequences(decision),
               introducedBy: "interviewer" as const,
               pendingAsk: decision.ask,
               createdAt,
@@ -501,6 +503,8 @@ export default defineAction({
           .set({
             recommendedAnswer: placement.recommendedAnswer,
             recommendedChoice: placement.recommendedChoice,
+            adrWorthy: placement.adrWorthy,
+            consequences: storedConsequences(placement),
             offeredChoicesJson: JSON.stringify(
               placement.choices.map((choice) => choice.label),
             ),
@@ -549,3 +553,11 @@ export default defineAction({
     }
   },
 });
+
+/** Consequences are kept only for a flagged decision, trimmed. */
+function storedConsequences(decision: {
+  adrWorthy: boolean;
+  consequences: string | null;
+}): string | null {
+  return decision.adrWorthy ? (decision.consequences?.trim() ?? null) : null;
+}

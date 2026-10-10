@@ -15,6 +15,7 @@ import {
   treeRuleViolation,
   withResumeFallback,
 } from "../server/interviewer/index.js";
+import { buildPrompt } from "../server/interviewer/prompt.js";
 import {
   aScoutProjectResult,
   anAssessReadinessResult,
@@ -75,6 +76,8 @@ function proposed(
     recommendedAnswer: string;
     dependsOn: string[];
     ask: boolean;
+    adrWorthy: boolean;
+    consequences: string | null;
   }> = {},
 ) {
   const { choices, ...rest } = overrides;
@@ -857,6 +860,206 @@ describe("request-next-round", () => {
       expect(result.round?.decisions.map((card) => card.key)).toEqual([
         "shape-2",
       ]);
+    });
+  });
+
+  describe("the ADR-worthy flag on a proposal", () => {
+    const refusal = (key: string) =>
+      `Decision "${key}" is marked \`adrWorthy\` but has no \`consequences\`. Write one to three sentences on what it commits the system to and what it rules out, or set \`adrWorthy\` to false.`;
+
+    async function storedAfter(first: ReturnType<typeof proposed>) {
+      const session = await aSession();
+      scriptInterviewer([round(first)]);
+      await requestNextRound.run({ sessionId: session.id });
+      const tree = await getTree.run({ sessionId: session.id });
+      return tree.decisions[0];
+    }
+
+    async function refusedThenAccepted(bad: ReturnType<typeof proposed>) {
+      const session = await aSession();
+      const interviewer = scriptInterviewer([
+        round(bad),
+        round(proposed({ key: "good", title: "A good one?" })),
+      ]);
+      await requestNextRound.run({ sessionId: session.id });
+      const tree = await getTree.run({ sessionId: session.id });
+      return { interviewer, tree };
+    }
+
+    it("accepts a flagged decision with Consequences", async () => {
+      const stored = await storedAfter(
+        proposed({ adrWorthy: true, consequences: "Commits us to X; rules out Y." }),
+      );
+      expect(stored).toMatchObject({
+        adrWorthy: true,
+        consequences: "Commits us to X; rules out Y.",
+      });
+    });
+
+    it("trims the Consequences", async () => {
+      const stored = await storedAfter(
+        proposed({ adrWorthy: true, consequences: "  Costs X.  " }),
+      );
+      expect(stored).toMatchObject({ adrWorthy: true, consequences: "Costs X." });
+    });
+
+    it("refuses a flagged decision with null Consequences", async () => {
+      const { interviewer, tree } = await refusedThenAccepted(
+        proposed({ key: "bad", adrWorthy: true, consequences: null }),
+      );
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining(refusal("bad")),
+      });
+      expect(tree.decisions.map((decision) => decision.key)).toEqual(["good"]);
+    });
+
+    it("refuses a flagged decision with blank Consequences", async () => {
+      const { interviewer, tree } = await refusedThenAccepted(
+        proposed({ key: "bad", adrWorthy: true, consequences: "   " }),
+      );
+      expect(interviewer.requests[1]).toMatchObject({
+        rejectionReason: expect.stringContaining(refusal("bad")),
+      });
+      expect(tree.decisions.map((decision) => decision.key)).toEqual(["good"]);
+    });
+
+    it("accepts an unflagged decision with null Consequences", async () => {
+      const stored = await storedAfter(
+        proposed({ adrWorthy: false, consequences: null }),
+      );
+      expect(stored).toMatchObject({ adrWorthy: false, consequences: null });
+    });
+
+    it("drops Consequences sent with an unflagged decision", async () => {
+      const stored = await storedAfter(
+        proposed({ adrWorthy: false, consequences: "Costs X." }),
+      );
+      expect(stored).toMatchObject({ adrWorthy: false, consequences: null });
+    });
+
+    it("stores a reply with neither field as unflagged", async () => {
+      const { adrWorthy: _a, consequences: _c, ...bare } = proposed();
+      const stored = await storedAfter(bare as ReturnType<typeof proposed>);
+      expect(stored).toMatchObject({ adrWorthy: false, consequences: null });
+    });
+
+    it("gives one reason per bad entry", async () => {
+      const session = await aSession();
+      const interviewer = scriptInterviewer([
+        round(
+          proposed({ key: "one", title: "One?", adrWorthy: true }),
+          proposed({ key: "two", title: "Two?", adrWorthy: true }),
+        ),
+        round(proposed({ key: "good", title: "Good?" })),
+      ]);
+      await requestNextRound.run({ sessionId: session.id });
+      const reason = (interviewer.requests[1] as { rejectionReason: string }).rejectionReason;
+      expect(reason).toContain(refusal("one"));
+      expect(reason).toContain(refusal("two"));
+    });
+  });
+
+  describe("ADR-worthy placements", () => {
+    function placementRound(placement: ReturnType<typeof proposed>) {
+      return {
+        kind: "propose-round" as const,
+        result: {
+          proposedDecisions: [],
+          pushBackResponses: [],
+          userDecisionPlacements: [placement],
+          done: null,
+        },
+      };
+    }
+
+    it("a placement stores the proposed ADR-worthy flag on the user-added decision", async () => {
+      const session = await aSession();
+      const added = await addDecision.run({
+        sessionId: session.id,
+        title: "Should we support offline mode?",
+        body: "",
+      });
+      scriptInterviewer([
+        round(),
+        placementRound(
+          proposed({ key: added.key as string, adrWorthy: true, consequences: "Costs X." }),
+        ),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      const tree = await getTree.run({ sessionId: session.id });
+      expect(tree.decisions[0]).toMatchObject({ adrWorthy: true, consequences: "Costs X." });
+    });
+
+    it("refuses a flagged placement without Consequences", async () => {
+      const session = await aSession();
+      const added = await addDecision.run({
+        sessionId: session.id,
+        title: "Should we support offline mode?",
+        body: "",
+      });
+      const key = added.key as string;
+      const interviewer = scriptInterviewer([
+        round(),
+        placementRound(proposed({ key, adrWorthy: true, consequences: null })),
+        placementRound(proposed({ key, adrWorthy: true, consequences: "Costs X." })),
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests[2]).toMatchObject({
+        rejectionReason: expect.stringContaining(
+          `Decision "${key}" is marked \`adrWorthy\` but has no \`consequences\`.`,
+        ),
+      });
+      const tree = await getTree.run({ sessionId: session.id });
+      expect(tree.decisions[0]).toMatchObject({ adrWorthy: true, consequences: "Costs X." });
+    });
+  });
+
+  describe("the round prompt and the check agree", () => {
+    it("every ADR-worthy shape the round prompt describes is accepted", async () => {
+      const session = await aSession();
+      const added = await addDecision.run({
+        sessionId: session.id,
+        title: "Should we support offline mode?",
+        body: "",
+      });
+      const addedKey = added.key as string;
+      const interviewer = scriptInterviewer([
+        {
+          kind: "propose-round",
+          result: {
+            proposedDecisions: [
+              proposed({ key: "flagged", title: "Flagged?", adrWorthy: true, consequences: "Commits us to X." }),
+              proposed({ key: "plain", title: "Plain?", adrWorthy: false, consequences: null }),
+            ],
+            pushBackResponses: [],
+            userDecisionPlacements: [
+              proposed({ key: addedKey, adrWorthy: true, consequences: "Rules out Y." }),
+            ],
+            done: null,
+          },
+        },
+      ]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(interviewer.requests).toHaveLength(1);
+      for (const primed of [false, true]) {
+        const prompt = buildPrompt(interviewer.requests[0]!, { primed });
+        expect(prompt).toContain("adrWorthy");
+        expect(prompt).toContain("consequences");
+      }
+      const tree = await getTree.run({ sessionId: session.id });
+      expect(tree.decisions.map((d) => [d.key, d.adrWorthy, d.consequences])).toEqual(
+        expect.arrayContaining([
+          ["flagged", true, "Commits us to X."],
+          ["plain", false, null],
+          [addedKey, true, "Rules out Y."],
+        ]),
+      );
     });
   });
 

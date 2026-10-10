@@ -17,6 +17,7 @@ import {
   MAX_HANDOFF_SCOUT_TICKETS,
   MAX_SCOUT_CURRENT_STATE,
   MAX_SCOUT_PROPOSED_DECISIONS,
+  proposeRoundResultSchema,
   scoutProjectResultSchema,
   staysInsideRepo,
 } from "./schemas.js";
@@ -676,5 +677,45 @@ describe("the handoff scout schema: rules, two-lens flag and delegation proposal
     // @ts-expect-error a number is not a prune slot
     const bad: HandoffScoutResult["delegationProposals"]["pruneCommand"] = 42;
     expect([inFlight, prune, rule, bad]).toBeDefined();
+  });
+});
+
+describe("the round contract: ADR-worthy flag and Consequences", () => {
+  const entry = {
+    key: "storage",
+    title: "Where is data stored?",
+    body: "",
+    choices: [],
+    recommendedChoice: null,
+    recommendedAnswer: "",
+    dependsOn: [],
+    ask: true,
+  };
+
+  it("a round reply without adrWorthy or consequences parses as unflagged", () => {
+    const parsed = proposeRoundResultSchema.parse({
+      proposedDecisions: [entry],
+      pushBackResponses: [],
+      userDecisionPlacements: [{ ...entry, key: "added" }],
+      done: null,
+    });
+
+    for (const decision of [...parsed.proposedDecisions, ...parsed.userDecisionPlacements]) {
+      expect(decision).toMatchObject({ adrWorthy: false, consequences: null });
+    }
+  });
+
+  it("the round contract requires adrWorthy and consequences", () => {
+    const schema = jsonSchemaFor("propose-round") as {
+      properties: Record<
+        "proposedDecisions" | "userDecisionPlacements",
+        { items: { required: string[]; properties: { consequences: { type: unknown } } } }
+      >;
+    };
+
+    for (const list of [schema.properties.proposedDecisions, schema.properties.userDecisionPlacements]) {
+      expect(list.items.required).toEqual(expect.arrayContaining(["adrWorthy", "consequences"]));
+      expect(list.items.properties.consequences.type).toEqual(["string", "null"]);
+    }
   });
 });
