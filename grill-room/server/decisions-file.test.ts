@@ -147,3 +147,25 @@ describe("supersededEntries", () => {
     expect(supersededEntries(text)).toEqual([]);
   });
 });
+
+describe("supersededEntries with ADR fields", () => {
+  const base = [
+    "- **Decision:** Flat body",
+    "- **Origin:** repo (recorded) · reopened",
+    "- **Source:** docs/adr/003-x.md:19",
+    '- **Supersedes:** "We will use RFC 7807."',
+  ];
+
+  it("a file with ADR fields gives the same superseded entries", () => {
+    const flagged = `${HEADER}${entry("rfc", "RFC", [
+      ...base,
+      "- **ADR-worthy:** yes",
+      "- **Amends:** docs/adr/003-x.md",
+      "- **Consequences:** Commits us.",
+      "  - **Source:** x",
+    ])}\n`;
+    const plain = `${HEADER}${entry("rfc", "RFC", base)}\n`;
+    expect(supersededEntries(flagged)).toEqual(supersededEntries(plain));
+    expect(supersededEntries(flagged)).toHaveLength(1);
+  });
+});
