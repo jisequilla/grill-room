@@ -62,27 +62,29 @@ export function staysInsideRepo(path: string): boolean {
  *
  * One leading `/` is removed before the checks, so `/src/a.ts:1` is read as
  * `src/a.ts:1` rather than refusing the whole report, and the parsed value is
- * the repaired one. `z.preprocess` keeps the command line's JSON Schema the
- * plain pattern: with `io: "output"` only the inner string schema shows.
+ * the repaired one. Typing the input as a string keeps a number or null out of
+ * a scripted result at compile time, and with `io: "output"` only the piped-to
+ * schema shows, so the command line's JSON Schema stays the plain pattern.
  */
-export const citation = z.preprocess(
-  (value) =>
-    typeof value === "string" && value.startsWith("/") ? value.slice(1) : value,
-  z
+export const citation = z
   .string()
-  .regex(CITATION_PATTERN, "A citation is `path:line` or `path:start-end`.")
-  .refine(
-    (value) => staysInsideRepo(value.slice(0, value.lastIndexOf(":"))),
-    "A citation's path is relative to the repository root and stays inside it.",
-  )
-  .refine((value) => {
-    const [start, end] = value
-      .slice(value.lastIndexOf(":") + 1)
-      .split("-")
-      .map(Number);
-    return end === undefined || start <= end;
-  }, "A citation's line range runs from its first line to its last."),
-);
+  .transform((value) => (value.startsWith("/") ? value.slice(1) : value))
+  .pipe(
+    z
+      .string()
+      .regex(CITATION_PATTERN, "A citation is `path:line` or `path:start-end`.")
+      .refine(
+        (value) => staysInsideRepo(value.slice(0, value.lastIndexOf(":"))),
+        "A citation's path is relative to the repository root and stays inside it.",
+      )
+      .refine((value) => {
+        const [start, end] = value
+          .slice(value.lastIndexOf(":") + 1)
+          .split("-")
+          .map(Number);
+        return end === undefined || start <= end;
+      }, "A citation's line range runs from its first line to its last."),
+  );
 
 /**
  * One option on offer, and the case for it. The rationale is what makes the

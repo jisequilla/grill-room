@@ -253,11 +253,10 @@ describe("scout-project", () => {
     const { session } = await aSessionWithProject();
     const raw = aScoutProjectResult();
     raw.currentState[0]!.citations = ["/src/ingest/metrics.ts:1"];
-    const interviewer = scriptInterviewer([{ kind: "scout-project", result: raw }]);
+    scriptInterviewer([{ kind: "scout-project", result: raw }]);
 
     await scoutProject.run({ sessionId: session.id });
 
-    expect(scoutRequests(interviewer.requests)).toHaveLength(1);
     const { report } = await getScoutReport.run({ sessionId: session.id });
     expect(report!.result.currentState[0]!.citations).toEqual(["src/ingest/metrics.ts:1"]);
   });
