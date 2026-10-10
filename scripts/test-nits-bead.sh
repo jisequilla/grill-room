@@ -22,7 +22,7 @@ entry_row() {
   n=$((n + 1))
   local f="$tmp/entry-$n.json" out err code want
   printf '{"bead":"gr-t.1","pr":1,"nonBlocking":[%s]}' "$2" >"$f"
-  out="$(bash "$nits" "$f" 2>"$tmp/err")"; code=$?
+  out="$("$nits" "$f" 2>"$tmp/err")"; code=$?
   err="$(cat "$tmp/err")"
   want="$(printf 'PR #1 nits: gr-t.1\n\n%s' "$3")"
   [ "$out" = "$want" ] && [ -z "$err" ] && [ "$code" -eq 0 ]
@@ -33,9 +33,9 @@ entry_row() {
 call_row() {
   local out err code
   if [ -z "$2" ]; then
-    out="$(bash "$nits" 2>"$tmp/err")"; code=$?
+    out="$("$nits" 2>"$tmp/err")"; code=$?
   else
-    out="$(bash "$nits" "$2" 2>"$tmp/err")"; code=$?
+    out="$("$nits" "$2" 2>"$tmp/err")"; code=$?
   fi
   err="$(cat "$tmp/err")"
   [ "$out" = "$3" ] && [ "$err" = "$4" ] && [ "$code" -eq "$5" ]
