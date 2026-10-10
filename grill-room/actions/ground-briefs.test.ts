@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
@@ -31,12 +32,14 @@ import breakIntoTickets from "./break-into-tickets.js";
 import createSession from "./create-session.js";
 import generateHandoff from "./generate-handoff.js";
 import getBriefGrounding from "./get-brief-grounding.js";
+import getHandoff from "./get-handoff.js";
 import getProject from "./get-project.js";
 import getSession from "./get-session.js";
 import getTurn from "./get-turn.js";
 import groundBriefs from "./ground-briefs.js";
 import listTickets from "./list-tickets.js";
 import registerProject from "./register-project.js";
+import setAdrWorthy from "./set-adr-worthy.js";
 import setTicketBlockedBy from "./set-ticket-blocked-by.js";
 import synthesizeSpec from "./synthesize-spec.js";
 
@@ -188,6 +191,29 @@ async function aSessionWithHandoff(
 async function ticketId(sessionId: string, number: number): Promise<string> {
   const { tickets } = await listTickets.run({ sessionId });
   return tickets.find((ticket) => ticket.number === number)!.id;
+}
+
+/** Flags a new settled decision of the session ADR-worthy, which gives the session an ADR ticket. */
+async function flagADecision(sessionId: string): Promise<string> {
+  const now = new Date().toISOString();
+  const decisionId = randomUUID();
+  await getDb().insert(schema.decisions).values({
+    id: decisionId,
+    sessionId,
+    key: "queue-engine",
+    questionTitle: "Title of queue-engine",
+    currentAnswer: "A table",
+    answerKind: "own-answer",
+    settledAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await setAdrWorthy.run({ decisionId, adrWorthy: true, consequences: "Commits us to a table." });
+  return decisionId;
+}
+
+async function getHandoffStale(sessionId: string) {
+  return (await getHandoff.run({ sessionId })).handoff!;
 }
 
 function scoutRequests(requests: readonly { kind: string }[]): HandoffScoutRequest[] {
@@ -1200,6 +1226,55 @@ describe("ground-briefs", () => {
       expect((await getBriefGrounding.run({ sessionId: session.id })).grounding).toMatchObject({
         current: false,
         staleReason: "handoff-changed",
+      });
+    });
+  });
+
+  describe("the ADR ticket", () => {
+    it("flagging a decision leaves the grounding current", async () => {
+      const { session } = await aSessionWithHandoff();
+      scriptInterviewer([{ kind: "handoff-scout", result: aHandoffScoutResult() }]);
+      await groundBriefs.run({ sessionId: session.id });
+      const stateOf = async () => (await getBriefGrounding.run({ sessionId: session.id })).grounding;
+      expect(await stateOf()).toMatchObject({ current: true, staleReason: null });
+
+      const decisionId = await flagADecision(session.id);
+      expect(await stateOf()).toMatchObject({ current: true, staleReason: null });
+      expect((await getHandoffStale(session.id)).stale).toBe(true);
+
+      await generateHandoff.run({ sessionId: session.id });
+      expect(await stateOf()).toMatchObject({ current: true, staleReason: null });
+
+      await setAdrWorthy.run({ decisionId, adrWorthy: false });
+      expect(await stateOf()).toMatchObject({ current: true, staleReason: null });
+
+      await setTicketBlockedBy.run({ ticketId: await ticketId(session.id, 2), blockedBy: [] });
+      expect(await stateOf()).toMatchObject({ current: false, staleReason: "handoff-changed" });
+    });
+
+    it("is not grounded", async () => {
+      const { session } = await aSessionWithHandoff();
+      await flagADecision(session.id);
+      await generateHandoff.run({ sessionId: session.id });
+      const interviewer = scriptInterviewer([{ kind: "handoff-scout", result: aHandoffScoutResult() }]);
+
+      await groundBriefs.run({ sessionId: session.id });
+
+      const [request] = scoutRequests(interviewer.requests);
+      expect(request!.tickets.map((ticket) => ticket.number)).toEqual([1, 2]);
+    });
+
+    it("records the grounding fingerprint, so grounding after flagging is current", async () => {
+      const { session } = await aSessionWithHandoff();
+      await flagADecision(session.id);
+      await generateHandoff.run({ sessionId: session.id });
+      scriptInterviewer([{ kind: "handoff-scout", result: aHandoffScoutResult() }]);
+
+      await groundBriefs.run({ sessionId: session.id });
+
+      expect((await getBriefGrounding.run({ sessionId: session.id })).grounding).toMatchObject({
+        current: true,
+        staleReason: null,
       });
     });
   });

@@ -26,7 +26,7 @@ import { IDENTIFIER_PATTERN, runGit } from "./git.js";
 import {
   blockerThatCreates,
   getHandoffRow,
-  handoffFingerprint,
+  groundingFingerprint,
   loadHandoffSource,
   transitiveBlockers,
 } from "./handoff.js";
@@ -151,9 +151,11 @@ async function currentHead(root: string): Promise<string | null | undefined> {
 /**
  * Why a grounding no longer describes the session, or null while it does.
  *
- * `handoff-changed` when the handoff was regenerated or removed, or today's
- * inputs no longer hash to the fingerprint the grounding was made for — a
- * ticket edit, a regeneration, a project edit. `head-moved` when the
+ * `handoff-changed` when the handoff was removed, or today's inputs no longer
+ * hash to the grounding fingerprint the grounding was made for — a ticket
+ * edit, a project edit. Regenerating the handoff alone does not stale it, and
+ * neither does flagging a decision: the grounding fingerprint leaves out the
+ * generated ADR ticket the handoff scout never sees. `head-moved` when the
  * project's HEAD is no longer the commit it read, or the project is no longer
  * a repository. The handoff is checked first: a handoff that changed makes
  * the grounding describe the wrong tickets, whatever the commit.
@@ -164,12 +166,8 @@ export async function briefGroundingStaleReason(
   const row = await getHandoffRow(grounding.sessionId);
   const loaded = await loadHandoffSource(grounding.sessionId);
   const fingerprint =
-    "source" in loaded ? handoffFingerprint(loaded.source) : null;
-  if (
-    !row ||
-    row.fingerprint !== grounding.handoffFingerprint ||
-    fingerprint !== grounding.handoffFingerprint
-  ) {
+    "source" in loaded ? groundingFingerprint(loaded.source) : null;
+  if (!row || fingerprint !== grounding.handoffFingerprint) {
     return "handoff-changed";
   }
 

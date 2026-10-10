@@ -7,6 +7,7 @@ import {
   serializeDelegationValues,
 } from "./delegation-values.js";
 import {
+  adrTicketFor,
   BUNDLE_TOKEN,
   bundlePathFor,
   CODEBASE_FACTS_SLOT,
@@ -15,6 +16,7 @@ import {
   type ExportFacts,
   FILE_BOUNDARIES_SLOT,
   fillBundlePath,
+  groundingFingerprint,
   handoffFingerprint,
   type HandoffCard,
   type HandoffGrounding,
@@ -22,6 +24,7 @@ import {
   type HandoffSource,
   parseBriefs,
   partitionRuleConflicts,
+  renderAdrTicketBody,
   renderBrief,
   renderHandoff,
   renderHandoffMarkdown,
@@ -29,6 +32,7 @@ import {
   withDocsToken,
 } from "./handoff.js";
 import { hashExportContent } from "./export.js";
+import type { AdrConvention } from "./project-facts.js";
 import { withBundleToken } from "../shared/bundle-tokens.js";
 import { consistencyFindingsResult } from "./interviewer/fake.js";
 
@@ -3965,5 +3969,306 @@ describe("rule conflicts", () => {
       expect(one).toBe(none);
       expect(two).toBe(none);
     });
+  });
+});
+
+const NMON_NUMBERING = { prefix: "NMON-", width: 3, nextNumber: "NMON-020", example: "NMON-019-labels.md" };
+const NMON_CONVENTION: AdrConvention = {
+  folder: "docs/adr",
+  numbering: NMON_NUMBERING,
+  template: { source: "docs/adr/NMON-019-labels.md", headings: ["Context", "Decision", "Consequences"] },
+};
+const TEMPLATE_ONLY_CONVENTION: AdrConvention = {
+  folder: "docs/adr",
+  numbering: null,
+  template: { source: "docs/adr/template.md", headings: ["Status", "Context"] },
+};
+const NUMBERING_ONLY_CONVENTION: AdrConvention = { folder: "docs/adr", numbering: NMON_NUMBERING, template: null };
+const NO_CONVENTION_PARAGRAPH =
+  "No ADR convention was detected in this repository. Ask the owner where ADRs go, and how they are numbered, before writing them.";
+const SUGGESTIONS = [
+  { key: "storage-engine", title: "Storage engine" },
+  { key: "wire-format", title: "Wire format" },
+];
+
+function withAdrTicket(
+  source: HandoffSource,
+  convention: AdrConvention | null = null,
+  suggestions = SUGGESTIONS,
+): HandoffSource {
+  return { ...source, adrTicket: adrTicketFor(source.tickets, suggestions, convention) };
+}
+
+describe("adrTicketFor", () => {
+  it("gives null with no suggestion", () => {
+    expect(adrTicketFor(aSource().tickets, [], NMON_CONVENTION)).toBeNull();
+  });
+
+  it("gives null with suggestions but no tickets", () => {
+    expect(adrTicketFor([], SUGGESTIONS, null)).toBeNull();
+  });
+
+  it("numbers it after the highest stored ticket and blocks it by every one, gates included, ascending", () => {
+    const tickets = [{ number: 3 }, { number: 1 }, { number: 2, kind: "gate" }];
+    expect(adrTicketFor(tickets, SUGGESTIONS, null)).toEqual({
+      number: 4,
+      slug: "record-adrs-from-suggestions",
+      title: "Record ADRs from suggestions",
+      blockedBy: [1, 2, 3],
+      suggestions: SUGGESTIONS,
+      convention: null,
+    });
+  });
+});
+
+describe("renderAdrTicketBody", () => {
+  const head = [
+    "Record the repo's ADRs from the suggestions Grill Room wrote for this build.",
+    "",
+    "The suggestions are in `{{BUNDLE}}/adr-suggestions/`, one per decision:",
+    "- `storage-engine.md`: Storage engine",
+    "- `wire-format.md`: Wire format",
+    "",
+    "If that folder is not in your worktree, read it from the main checkout at the same path. Never write to it.",
+    "",
+    "For each suggestion, write an ADR in the repo's own ADR folder, in its own convention and numbering, from the suggestion's sections. Where a suggestion has an Amends section, the new ADR amends that existing ADR: link them the way the repo does, and never delete or rewrite the old one. Set each ADR's status the way the repo marks an accepted decision once the tickets that build it have landed.",
+    "",
+  ];
+  const tail = [
+    "",
+    "Done when every suggestion listed above has a committed ADR in the repo. Close this ticket before the working folder is deleted: the suggestions are deleted with it.",
+  ];
+  const bodyFor = (convention: AdrConvention | null) =>
+    renderAdrTicketBody(adrTicketFor(aSource().tickets, SUGGESTIONS, convention)!);
+
+  it("says no convention was detected for null", () => {
+    expect(bodyFor(null)).toBe([...head, NO_CONVENTION_PARAGRAPH, ...tail].join("\n"));
+  });
+
+  it("says no convention was detected when numbering and template are both null", () => {
+    expect(bodyFor({ folder: "docs/adr", numbering: null, template: null })).toBe(
+      [...head, NO_CONVENTION_PARAGRAPH, ...tail].join("\n"),
+    );
+  });
+
+  it("names the newest ADR as the template when the template is the numbering's example", () => {
+    expect(bodyFor(NMON_CONVENTION)).toBe(
+      [
+        ...head,
+        "Detected convention, a hint to check against the folder: ADRs live in `docs/adr/`, named like `NMON-019-labels.md`; the next free number looks like `NMON-020`. The newest ADR's sections are Context, Decision, Consequences (from `docs/adr/NMON-019-labels.md`).",
+        ...tail,
+      ].join("\n"),
+    );
+  });
+
+  it("names the template when there is no numbering", () => {
+    expect(bodyFor(TEMPLATE_ONLY_CONVENTION)).toBe(
+      [
+        ...head,
+        "Detected convention, a hint to check against the folder: ADRs live in `docs/adr/`; no numbering could be read. The template's sections are Status, Context (from `docs/adr/template.md`).",
+        ...tail,
+      ].join("\n"),
+    );
+  });
+
+  it("says no template could be read", () => {
+    expect(bodyFor(NUMBERING_ONLY_CONVENTION)).toBe(
+      [
+        ...head,
+        "Detected convention, a hint to check against the folder: ADRs live in `docs/adr/`, named like `NMON-019-labels.md`; the next free number looks like `NMON-020`. No template could be read.",
+        ...tail,
+      ].join("\n"),
+    );
+  });
+});
+
+describe("HANDOFF with an ADR ticket", () => {
+  const plain = { visibility: "tracked" as const, greenfield: false };
+  const atExport = (waves: number[][]) => ({ ...plain, waves, implicitEdges: [] });
+  const without = (source: HandoffSource): HandoffSource => ({ ...source, adrTicket: null });
+
+  const ADR_WAVE_LINES = [
+    "- **04 Record ADRs from suggestions** (blocked by 01, 02, 03; self-contained: delegate it from its ticket file; it has no brief)",
+    "  - Ticket: `{{BUNDLE}}/issues/04-record-adrs-from-suggestions.md`",
+  ];
+
+  it("lists it alone in one more wave, stored", () => {
+    const source = withAdrTicket(aSource());
+    const waves = section(renderHandoffMarkdown(source), "## Waves");
+    expect(waves).toContain(["### Wave 3", "", ...ADR_WAVE_LINES, "  - Status: ready-for-agent"].join("\n"));
+    expect(waves).not.toContain("### Wave 4");
+    expect(waves).not.toContain("04-record-adrs-from-suggestions.md`\n  - Brief");
+    expect(section(renderHandoffMarkdown(without(source)), "## Waves")).not.toContain("### Wave 3");
+  });
+
+  it("lists it alone in one more wave at export, and leaves out the Status line for a beads tracker", () => {
+    const source = withAdrTicket(aSource());
+    const facts = atExport([[1], [2], [3]]);
+    const waves = section(renderHandoffMarkdown(source, false, facts), "## Waves");
+    expect(waves).toContain(["### Wave 4", "", ...ADR_WAVE_LINES, "  - Status: ready-for-agent"].join("\n"));
+    expect(section(renderHandoffMarkdown(without(source), false, facts), "## Waves")).not.toContain("### Wave 4");
+    const beads = withAdrTicket(aSource({ trackerKind: "beads" }));
+    expect(section(renderHandoffMarkdown(beads), "## Waves")).toMatch(
+      new RegExp(`${ADR_WAVE_LINES[1]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+    );
+  });
+
+  it("extends the execution plan's chain and widths", () => {
+    const linear: HandoffSource = {
+      ...aSource(),
+      tickets: [
+        { id: "t1", number: 1, slug: "a", title: "A", body: "a", blockedBy: [] },
+        { id: "t2", number: 2, slug: "b", title: "B", body: "b", blockedBy: [1] },
+        { id: "t3", number: 3, slug: "c", title: "C", body: "c", blockedBy: [2] },
+      ],
+      waves: [[1], [2], [3]],
+    };
+    const withAdr = withAdrTicket(linear);
+    const plan = section(renderHandoffMarkdown(withAdr), "## Execution plan");
+    expect(plan).toContain("- Longest chain: 4 build tickets, built one after another: 01 → 02 → 03 → 04.");
+    expect(plan).toContain("- Wave widths, in build tickets: 1, 1, 1, 1 (wave 1 first).");
+    const today = section(renderHandoffMarkdown(without(withAdr)), "## Execution plan");
+    expect(today).toContain("- Longest chain: 3 build tickets, built one after another: 01 → 02 → 03.");
+    expect(today).toContain("- Wave widths, in build tickets: 1, 1, 1 (wave 1 first).");
+    const facts = atExport([[1], [2], [3]]);
+    const exported = section(renderHandoffMarkdown(withAdr, false, facts), "## Execution plan");
+    expect(exported).toContain("- Longest chain: 4 build tickets, built one after another: 01 → 02 → 03 → 04.");
+    expect(exported).toContain("- Wave widths, in build tickets: 1, 1, 1, 1 (wave 1 first).");
+  });
+
+  it("renders only the ADR label when every stored ticket is a gate", () => {
+    const gates: HandoffSource = {
+      ...aSource(),
+      tickets: [
+        { id: "t1", number: 1, slug: "a", title: "A", body: "a", blockedBy: [], kind: "gate", waitsFor: "Something." },
+      ],
+      waves: [[1]],
+    };
+    const withAdr = withAdrTicket(gates);
+    const plan = section(renderHandoffMarkdown(withAdr), "## Execution plan");
+    expect(plan).toContain("- Longest chain: 1 build ticket: 02.");
+    expect(plan).toContain("- Wave widths, in build tickets: gate only, 1 (wave 1 first).");
+    expect(section(renderHandoffMarkdown(without(withAdr)), "## Execution plan")).toContain(
+      "- Longest chain: no build tickets.",
+    );
+    const exported = section(renderHandoffMarkdown(withAdr, false, atExport([[1]])), "## Execution plan");
+    expect(exported).toContain("- Longest chain: 1 build ticket: 02.");
+    expect(exported).toContain("- Wave widths, in build tickets: gate only, 1 (wave 1 first).");
+  });
+
+  it("leaves the ADR ticket out of the briefs line", () => {
+    expect(renderHandoffMarkdown(withAdrTicket(aSource()))).toContain(
+      "- Briefs: `{{BUNDLE}}/briefs/`, one per ticket except the ADR ticket, each ready",
+    );
+    expect(renderHandoffMarkdown(withAdrTicket(aSourceWithGate()))).toContain(
+      "- Briefs: `{{BUNDLE}}/briefs/`, one per ticket except gates and the ADR ticket, each ready",
+    );
+    expect(renderHandoffMarkdown(without(withAdrTicket(aSource())))).toContain(
+      "- Briefs: `{{BUNDLE}}/briefs/`, one per ticket, each ready",
+    );
+    expect(renderHandoffMarkdown(withAdrTicket(aSource()), false, atExport([[1], [2], [3]]))).toContain(
+      "- Briefs: `{{BUNDLE}}/briefs/`, one per ticket except the ADR ticket, each ready",
+    );
+    expect(renderHandoffMarkdown(withAdrTicket(aSourceWithGate()), false, atExport([[1], [2], [3]]))).toContain(
+      "- Briefs: `{{BUNDLE}}/briefs/`, one per ticket except gates and the ADR ticket, each ready",
+    );
+  });
+
+  it("adds the Recording the repo's ADRs section right after the Waves", () => {
+    const markdown = renderHandoffMarkdown(withAdrTicket(aSource(), NMON_CONVENTION));
+    expect(section(markdown, "## Recording the repo's ADRs")).toBe(
+      [
+        "## Recording the repo's ADRs",
+        "",
+        "Grill Room wrote one suggestion per ADR-worthy decision in `{{BUNDLE}}/adr-suggestions/`. Ticket 04 records them as the repo's own ADRs, last, once every other ticket has merged.",
+        "",
+        "Detected convention, a hint to check against the folder: ADRs live in `docs/adr/`, named like `NMON-019-labels.md`; the next free number looks like `NMON-020`. The newest ADR's sections are Context, Decision, Consequences (from `docs/adr/NMON-019-labels.md`).",
+        "",
+        "Close ticket 04 before the working folder is deleted: the suggestions are deleted with it.",
+      ].join("\n"),
+    );
+    expect(markdown.indexOf("## Recording the repo's ADRs")).toBeGreaterThan(markdown.indexOf("## Waves"));
+    const noConvention = renderHandoffMarkdown(withAdrTicket(aSource()));
+    expect(section(noConvention, "## Recording the repo's ADRs")).toContain(NO_CONVENTION_PARAGRAPH);
+    const exported = renderHandoffMarkdown(withAdrTicket(aSource(), NMON_CONVENTION), false, atExport([[1], [2], [3]]));
+    expect(section(exported, "## Recording the repo's ADRs")).toBe(section(markdown, "## Recording the repo's ADRs"));
+    expect(exported.indexOf("## Recording the repo's ADRs")).toBeGreaterThan(exported.indexOf("## Waves"));
+    expect(renderHandoffMarkdown(without(withAdrTicket(aSource())))).not.toContain("Recording the repo's ADRs");
+  });
+
+  it("gives it a bead like every other ticket", () => {
+    const beads = withAdrTicket(aSource({ trackerKind: "beads" }));
+    expect(renderHandoffMarkdown(beads)).toContain(
+      "never from memory. Ticket 04, Record ADRs from suggestions, gets a bead like every other ticket.\n",
+    );
+    expect(renderHandoffMarkdown(without(beads))).not.toContain("Record ADRs from suggestions, gets a bead");
+    expect(renderHandoffMarkdown(beads, false, atExport([[1], [2], [3]]))).toContain(
+      "never from memory. Ticket 04, Record ADRs from suggestions, gets a bead like every other ticket.\n",
+    );
+  });
+
+  it("says the ADR ticket gets no build record", () => {
+    const sentence =
+      "Ticket 04 records the repo's ADRs and gets no build record: it is not stored in Grill Room, so `set-build-record` refuses its number.";
+    const logging = { buildRecordLogging: true };
+    const adrOnly = renderHandoffMarkdown(withAdrTicket(aSource(logging)));
+    expect(section(adrOnly, "## Build records")).toBe(`${buildRecordTemplate("session-123")}\n\n${sentence}`);
+    const gateSentence = "Ticket 02 is a gate and gets no build record: `set-build-record` refuses its number.";
+    const gated = renderHandoffMarkdown(withAdrTicket(aSourceWithGate(logging)));
+    expect(section(gated, "## Build records")).toBe(
+      `${buildRecordTemplate("session-123")}\n\n${gateSentence}\n\n${sentence}`,
+    );
+    expect(section(renderHandoffMarkdown(without(withAdrTicket(aSource(logging)))), "## Build records")).toBe(
+      buildRecordTemplate("session-123"),
+    );
+    const facts = atExport([[1], [2], [3]]);
+    expect(section(renderHandoffMarkdown(withAdrTicket(aSource(logging)), false, facts), "## Build records")).toBe(
+      `${buildRecordTemplate("session-123")}\n\n${sentence}`,
+    );
+    expect(
+      section(renderHandoffMarkdown(withAdrTicket(aSourceWithGate(logging)), false, facts), "## Build records"),
+    ).toBe(`${buildRecordTemplate("session-123")}\n\n${gateSentence}\n\n${sentence}`);
+  });
+
+  it("pads its label by the stored ticket count", () => {
+    const tickets = Array.from({ length: 99 }, (_, index) => ({
+      id: `t${index + 1}`,
+      number: index + 1,
+      slug: `t-${index + 1}`,
+      title: `T ${index + 1}`,
+      body: "b",
+      blockedBy: [] as number[],
+    }));
+    const source = withAdrTicket({ ...aSource(), tickets, waves: [tickets.map((ticket) => ticket.number)] });
+    const markdown = renderHandoffMarkdown(source);
+    expect(markdown).toContain("- **100 Record ADRs from suggestions** (blocked by 01, 02,");
+    expect(markdown).toContain("`{{BUNDLE}}/issues/100-record-adrs-from-suggestions.md`");
+  });
+});
+
+describe("the fingerprint holds the ADR ticket only when it exists", () => {
+  const PINNED = "7cb3834b6357f33c1d8fd7a276ceb2266946f3cf08139ebab86bf924b1125261";
+
+  it("hashes a session with no suggestion as before", () => {
+    expect(handoffFingerprint(aSource())).toBe(PINNED);
+    expect(handoffFingerprint({ ...aSource(), adrTicket: null })).toBe(PINNED);
+  });
+
+  it("changes with a suggestion", () => {
+    expect(handoffFingerprint(withAdrTicket(aSource()))).not.toBe(PINNED);
+    expect(handoffFingerprint(withAdrTicket(aSource(), null, SUGGESTIONS.slice(0, 1)))).not.toBe(
+      handoffFingerprint(withAdrTicket(aSource())),
+    );
+  });
+
+  it("changes with the convention", () => {
+    expect(handoffFingerprint(withAdrTicket(aSource(), NMON_CONVENTION))).not.toBe(
+      handoffFingerprint(withAdrTicket(aSource())),
+    );
+  });
+
+  it("leaves the grounding fingerprint as the handoff fingerprint without an ADR ticket", () => {
+    expect(groundingFingerprint(withAdrTicket(aSource(), NMON_CONVENTION))).toBe(PINNED);
+    expect(groundingFingerprint(aSource())).toBe(PINNED);
   });
 });

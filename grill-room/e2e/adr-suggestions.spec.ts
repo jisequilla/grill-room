@@ -125,6 +125,10 @@ test("names a flagged decision no ticket builds, then exports its suggestion", a
   await expect(notice).toContainText(settled.questionTitle);
   await expect(notice).toContainText(key);
 
+  // ---- Flagging gave the session an ADR ticket, so the handoff is stale until regenerated ----
+  await expect(exportSection.getByTestId("export-action")).toBeDisabled();
+  await handoffSection.getByTestId("regenerate-handoff").click();
+
   // ---- Export: the warning never blocks, and the suggestion lands on disk ----
   const exportButton = exportSection.getByTestId("export-action");
   await expect(exportButton).toBeEnabled({ timeout: 30_000 });

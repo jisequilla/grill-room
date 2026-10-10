@@ -282,6 +282,12 @@ export interface PlanExportInput {
   scoutReport: ScoutReportWithStaleness | null;
   /** Each suggested decision's earlier answers as the tree shows them, keyed by decision id, oldest first. */
   history: Readonly<Record<string, readonly PreviousAnswerView[]>>;
+  /**
+   * The generated ADR ticket, derived by the caller (it lives in `handoff.ts`,
+   * which imports this file) and rendered last among the issues; null or absent
+   * for none. It is never one of {@link PlanExportInput.tickets}.
+   */
+  adrTicket?: { number: number; slug: string; title: string; blockedBy: number[]; body: string } | null;
 }
 
 /** Lowercase; anything not a letter or digit collapses to one hyphen; leading/trailing hyphens trimmed. */
@@ -665,6 +671,15 @@ export function adrWorthyDecisions(decisions: readonly DecisionView[]): Decision
     ...entries.filter((decision) => decision.adrWorthy && !decision.replacedBy),
     ...decisions.filter((decision) => isBuiltUnder(decision) && decision.adrWorthy),
   ].sort(byKey);
+}
+
+function suggestionOf(decision: DecisionView): { key: string; title: string } {
+  return { key: decisionKey(decision), title: oneLine(decision.questionTitle) };
+}
+
+/** The ADR suggestions as the generated ADR ticket lists them: key order, one per ADR-worthy decision. */
+export function adrSuggestionList(decisions: readonly DecisionView[]): { key: string; title: string }[] {
+  return adrWorthyDecisions(decisions).map(suggestionOf);
 }
 
 function renderEntry(
@@ -1072,6 +1087,23 @@ export function planExport(input: PlanExportInput): ExportPlan {
     });
   }
 
+  if (input.adrTicket) {
+    const adrTicket = input.adrTicket;
+    const label = padTicketNumber(adrTicket.number, totalTickets);
+    files.push({
+      relativePath: `issues/${label}-${sanitizeTicketSlug(adrTicket.slug, adrTicket.number)}.md`,
+      content: renderTicketFile({
+        label,
+        title: adrTicket.title,
+        body: adrTicket.body,
+        blockedByLabels: [...adrTicket.blockedBy]
+          .sort((a, b) => a - b)
+          .map((number) => padTicketNumber(number, totalTickets)),
+        implementsDecisions: null,
+      }),
+    });
+  }
+
   const adrConvention = input.scoutReport?.facts.adrConvention ?? null;
   const repoDecisions = topologicalOrder(input.decisions).filter(
     (decision) => decision.introducedBy === "repo" && decision.repo,
@@ -1088,7 +1120,7 @@ export function planExport(input: PlanExportInput): ExportPlan {
         return `- [${label} ${oneLine(ticket.title)}](../issues/${label}-${slug}.md)`;
       });
     if (ticketLinks.length === 0) {
-      adrSuggestionsWithoutTickets.push({ key, title: oneLine(decision.questionTitle) });
+      adrSuggestionsWithoutTickets.push(suggestionOf(decision));
     }
     files.push({
       relativePath: `adr-suggestions/${key}.md`,

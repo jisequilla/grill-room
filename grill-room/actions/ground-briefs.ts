@@ -13,6 +13,7 @@ import {
 import { getDb, schema } from "../server/db/index.js";
 import {
   getHandoffRow,
+  groundingFingerprint,
   handoffFingerprint,
   loadHandoffSource,
 } from "../server/handoff.js";
@@ -222,7 +223,7 @@ export default defineAction({
           sessionId,
           result: measured,
           commitRead: facts.headCommit,
-          handoffFingerprint: handoff.fingerprint,
+          handoffFingerprint: groundingFingerprint(loaded.source),
           model: SCOUT_MODEL,
           turnId: recorder?.turnId ?? null,
           ranAt: new Date().toISOString(),

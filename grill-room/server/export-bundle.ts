@@ -186,6 +186,8 @@ import {
   nextSequence,
   parseExportManifest,
   type ParsedExportManifest,
+  adrSuggestionList,
+  padTicketNumber,
   planExport,
   type PlannedExportFile,
   proposeSlug,
@@ -198,8 +200,10 @@ import {
   fillBundlePath,
   withDocsToken,
   getExportGate,
+  adrTicketFor,
   getHandoffRow,
   HANDOFF_FILE,
+  renderAdrTicketBody,
   loadHandoffSource,
   renderBrief,
   renderHandoffMarkdown,
@@ -1003,6 +1007,15 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   const history: Record<string, ReturnType<typeof describeHistoryEntry>[]> = {};
   for (const row of historyRows) (history[row.decisionId] ??= []).push(describeHistoryEntry(row));
 
+  const adrTicket =
+    exportTickets.length > 0
+      ? adrTicketFor(
+          exportTickets,
+          adrSuggestionList(decisions),
+          scoutReport?.facts.adrConvention ?? null,
+        )
+      : null;
+
   const plan = planExport({
     sessionTitle: session.title,
     idea: session.idea,
@@ -1012,6 +1025,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     readiness,
     scoutReport,
     history,
+    adrTicket: adrTicket ? { ...adrTicket, body: renderAdrTicketBody(adrTicket) } : null,
   });
 
   const handoff = (await getHandoffRow(session.id)) ?? null;
@@ -1036,6 +1050,14 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
   // handoff exists.
   const bundlePath = bundlePathFor(exportFacts.visibility, project.rootPath, bundleDir);
   const durableBundlePath = bundlePathFor(durableVisibility, project.rootPath, durableBundleDir);
+
+  if (adrTicket) {
+    const issuePrefix = `issues/${padTicketNumber(adrTicket.number, exportTickets.length)}-`;
+    const adrFile = plan.files.find(
+      (file) => file.relativePath.startsWith(issuePrefix) && file.relativePath.includes(adrTicket.slug),
+    );
+    if (adrFile) adrFile.content = fillBundlePath(adrFile.content, bundlePath, durableBundlePath);
+  }
 
   const handoffFiles: { relativePath: string; content: string }[] = [];
   // Populated inside `if (handoff)` below, before HANDOFF.md's own content is
