@@ -249,6 +249,18 @@ describe("mutation step", () => {
     expect(labels).toEqual(["build:gr-x", "mutate:gr-x:r1", R1, "fix:gr-x:r1", "mutate:gr-x:r2", R2]);
   });
 
+  it("round 2 reviewers get the round 2 mutation text", async () => {
+    const { call } = await run({
+      reviewers: ["M:{{mutation}}"],
+      canned: {
+        [R1]: verdict("changes-requested", [finding("blocker", "a.ts", { line: 2, claim: "A", evidence: "ea" })]),
+        "fix:gr-x:r1": FIX_OK,
+        [R2]: verdict("approved"),
+      },
+    });
+    expect(call(R2).prompt).toBe(`M:${OK_MUTATION_TEXT(2)}`);
+  });
+
   it("start at round 2 calls mutate first", async () => {
     const { labels } = await run({
       start: { pr: 7, branch: "worktree-x", stage: "review", round: 2, findings: ["1. old"] },
@@ -284,10 +296,13 @@ describe("routing", () => {
           finding("should-fix", "a.ts", { line: 1, claim: "A", evidence: "ea" }),
           finding("nit", "b.ts", { claim: "B" }),
         ]),
-        verdict("changes-requested", [finding("blocker", "c.ts", { line: 3, claim: "C", evidence: "ec" })]),
+        verdict("changes-requested", [
+          finding("should-fix", "g.ts", { line: 7, claim: "G", evidence: "eg" }),
+          finding("blocker", "c.ts", { line: 3, claim: "C", evidence: "ec" }),
+        ]),
       ],
       verdict: "changes-requested",
-      fix: "1. [blocker] c.ts:3: C (evidence: ec)\n2. [should-fix] a.ts:1: A (evidence: ea)",
+      fix: "1. [blocker] c.ts:3: C (evidence: ec)\n2. [should-fix] a.ts:1: A (evidence: ea)\n3. [should-fix] g.ts:7: G (evidence: eg)",
     },
     {
       name: "blocker, should-fix, blocker in one lens",
@@ -369,6 +384,21 @@ describe("evidence re-ask", () => {
     );
   });
 
+  it("re-asks lens 2 on its own", async () => {
+    const { call, labels } = await run({
+      reviewers: ["M", "N"],
+      canned: {
+        [R1]: verdict("approved"),
+        "review:gr-x:r1:lens2": verdict("changes-requested", [finding("blocker", "b.ts", { line: 4, evidence: null })]),
+        "review:gr-x:r1:lens2:again": verdict("approved"),
+      },
+    });
+    expect(labels.filter((l) => l.endsWith(":again"))).toEqual(["review:gr-x:r1:lens2:again"]);
+    expect(call("review:gr-x:r1:lens2:again").prompt).toBe(
+      `N${ONE_OF_SEVERAL}\n\nThese findings need evidence, the command that shows them: b.ts:4. Return all your findings again with evidence filled in.`,
+    );
+  });
+
   it("should-fix without evidence", async () => {
     const { labels } = await run({
       reviewers: ["M"],
@@ -432,13 +462,14 @@ describe("nonBlocking", () => {
   const SF2 = finding("should-fix", "s2.ts", { claim: "S2" });
   const NIT2 = finding("nit", "n2.ts", { claim: "N2" });
   const BL2 = finding("blocker", "b2.ts", { claim: "B2" });
+  const SF3 = finding("should-fix", "s3.ts", { claim: "S3" });
   const withLens = (f: object, lens: number) => ({ ...f, lens });
 
   const twoRound = {
     reviewers: ["M", "N"],
     canned: {
       [R1]: verdict("changes-requested", [SF1, NIT1]),
-      "review:gr-x:r1:lens2": verdict("changes-requested", [BL1]),
+      "review:gr-x:r1:lens2": verdict("changes-requested", [BL1, SF3]),
       "fix:gr-x:r1": FIX_OK,
       [R2]: verdict("changes-requested", [SF2]),
       "review:gr-x:r2:lens2": verdict("changes-requested", [BL2, NIT2]),
@@ -451,6 +482,7 @@ describe("nonBlocking", () => {
     expect(result.nonBlocking).toEqual([
       { ...SF1, lens: 1, round: 1, sentToFix: 1 },
       { ...NIT1, lens: 1, round: 1, sentToFix: null },
+      { ...SF3, lens: 2, round: 1, sentToFix: 1 },
       { ...SF2, lens: 1, round: 2, sentToFix: null },
       { ...NIT2, lens: 2, round: 2, sentToFix: null },
     ]);
@@ -465,7 +497,7 @@ describe("nonBlocking", () => {
         review: {
           verdict: "changes-requested",
           verdicts: [twoRound.canned[R1], twoRound.canned["review:gr-x:r1:lens2"]],
-          findings: [withLens(SF1, 1), withLens(NIT1, 1), withLens(BL1, 2)],
+          findings: [withLens(SF1, 1), withLens(NIT1, 1), withLens(BL1, 2), withLens(SF3, 2)],
         },
       },
       { round: 1, fix: FIX_OK },
