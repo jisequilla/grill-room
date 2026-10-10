@@ -18,6 +18,7 @@ import {
   MAX_SCOUT_CURRENT_STATE,
   MAX_SCOUT_PROPOSED_DECISIONS,
   proposeRoundResultSchema,
+  type ResultInputFor,
   scoutProjectResultSchema,
   staysInsideRepo,
 } from "./schemas.js";
@@ -89,7 +90,25 @@ describe("a citation with one leading slash", () => {
 
     expect(schema.properties.currentState.items.properties.citations.items).toEqual(plain);
     expect(schema.properties.proposedDecisions.items.properties.citation).toEqual(plain);
-    expect(() => jsonSchemaFor("assess-readiness")).not.toThrow();
+
+    const readiness = jsonSchemaFor("assess-readiness") as {
+      properties: { evidence: { items: { properties: { citation: unknown } } } };
+    };
+    expect(readiness.properties.evidence.items.properties.citation).toEqual({
+      anyOf: [plain, { type: "null" }],
+    });
+  });
+
+  it("types a scripted citation as a string, so a number or null is a compile error", () => {
+    const scripted = aScoutProjectResult() as ResultInputFor<"scout-project">;
+    // @ts-expect-error a number is not a citation
+    scripted.currentState[0]!.citations = [5];
+    // @ts-expect-error null is not a citation
+    scripted.proposedDecisions[0]!.citation = null;
+
+    expect(citation.safeParse(5).success).toBe(false);
+    const repaired = citation.safeParse("/a.ts:1");
+    expect(repaired.success && repaired.data).toBe("a.ts:1");
   });
 });
 

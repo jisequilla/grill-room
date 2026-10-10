@@ -647,6 +647,36 @@ describe("reasonsToRefuseHandoffGrounding's buildsOn citation syntax check", () 
     );
   });
 
+  it("refuses a leading-slash buildsOnFiles citation", async () => {
+    const root = repos.create({ files: { "src/a.ts": "export const a = 1;\n" } });
+    const ticket = aTicket(1, {}, null, [], "true");
+    ticket.buildsOnFiles = ["/src/a.ts:1"];
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [ticket] },
+      { projectRoot: root, tickets: [{ number: 1, blockedBy: [] }] },
+    );
+
+    expect(reasons).toEqual([
+      'Citation "/src/a.ts:1" points outside the project; cite a path relative to the project root.',
+    ]);
+  });
+
+  it("refuses a leading-slash facts citation", async () => {
+    const root = repos.create({ files: { "src/a.ts": "export const a = 1;\n" } });
+    const ticket = aTicket(1, {}, null, [], "true");
+    ticket.facts = [{ statement: "A fact.", citation: "/src/a.ts:1" }];
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [ticket] },
+      { projectRoot: root, tickets: [{ number: 1, blockedBy: [] }] },
+    );
+
+    expect(reasons).toEqual([
+      'Citation "/src/a.ts:1" points outside the project; cite a path relative to the project root.',
+    ]);
+  });
+
   it("refuses a buildsOn citation whose line range runs backwards", async () => {
     const root = repos.create({ files: { "README.md": "# Marathon\nSecond line\n" } });
 
