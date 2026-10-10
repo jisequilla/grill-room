@@ -273,15 +273,42 @@ describe("set-adr-worthy", () => {
   });
 
   it("flagging changes nothing but the flag and consequences", async () => {
-    const session = await aSettled("accepted-recommendation");
+    const session = await aSession();
+    await insertDecision(session.id, {
+      id: "d-0",
+      key: "k-0",
+      answerKind: "own-answer",
+      currentAnswer: "Parent answer",
+      settledAt: new Date().toISOString(),
+    });
+    await insertDecision(session.id, {
+      id: "d-1",
+      key: "k-1",
+      answerKind: "accepted-recommendation",
+      currentAnswer: "An answer",
+      settledAt: new Date().toISOString(),
+      dependsOnJson: JSON.stringify(["k-0"]),
+      settledById: "d-0",
+      supersededById: "d-0",
+      supersessionAnswer: "Use the parent's answer",
+      supersessionReason: "Same question",
+      deferralReason: "Waits on X",
+      restatementText: "A cleaner answer",
+      restatementNotes: "Dropped a note",
+      restatementReason: "Fixed typos",
+    });
     const strip = ({ adrWorthy, consequences, ...rest }: Record<string, unknown>) => rest;
-    const before = (await getTree.run({ sessionId: session.id })).decisions.find((d) => d.id === "d-1")!;
+    const stripRow = ({ adrWorthy, consequences, updatedAt, ...rest }: Record<string, unknown>) => rest;
+    const view = async () =>
+      (await getTree.run({ sessionId: session.id })).decisions.find((d) => d.id === "d-1")!;
+    const before = await view();
+    const rowBefore = await stored();
     const historyBefore = await getDb().select().from(schema.decisionHistory);
 
     await setAdrWorthy.run({ decisionId: "d-1", adrWorthy: true, consequences: "Costs X." });
 
-    const after = (await getTree.run({ sessionId: session.id })).decisions.find((d) => d.id === "d-1")!;
-    expect(strip(after)).toEqual(strip(before));
+    expect(strip(await view())).toEqual(strip(before));
+    expect(stripRow(await stored())).toEqual(stripRow(rowBefore));
     expect(await getDb().select().from(schema.decisionHistory)).toEqual(historyBefore);
   });
 });
