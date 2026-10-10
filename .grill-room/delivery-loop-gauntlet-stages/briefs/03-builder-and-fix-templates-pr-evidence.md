@@ -20,6 +20,8 @@ Judged by: templates read end to end with no contradiction to `.claude/rules/wor
 
 ## File boundaries
 
+_Grounded at commit `e3dd26f`; the repository has moved since._
+
 Files to edit:
 
 - `.claude/templates/delegation/builder.md`

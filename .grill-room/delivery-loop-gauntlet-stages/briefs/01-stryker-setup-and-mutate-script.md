@@ -26,6 +26,8 @@ The consistency check found that this ticket leaves these questions to the owner
 
 ## File boundaries
 
+_Grounded at commit `e3dd26f`; the repository has moved since._
+
 Files to create:
 
 - `grill-room/stryker.config.mjs`

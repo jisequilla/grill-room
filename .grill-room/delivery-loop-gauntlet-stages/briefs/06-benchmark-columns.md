@@ -20,6 +20,8 @@ Judged by: the table renders and the criterion is stated once, unambiguously.
 
 ## File boundaries
 
+_Grounded at commit `e3dd26f`; the repository has moved since._
+
 Files to edit:
 
 - `docs/benchmarks/hand-loop-vs-workflow.md`

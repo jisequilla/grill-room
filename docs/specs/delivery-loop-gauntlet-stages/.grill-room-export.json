@@ -1,11 +1,11 @@
 {
   "version": 3,
   "sessionId": "bb45d68a-ae9e-4134-8578-f98e8dc3fd50",
-  "revision": 1,
+  "revision": 2,
   "root": "durable",
   "otherRootFolder": ".grill-room/delivery-loop-gauntlet-stages",
   "scoutCommit": "daa1670f7f813e39d00bc37b1a5bc9bab639d79c",
-  "headCommit": "e3dd26f86d5d8aa15553e85788ffb6a23474772c",
+  "headCommit": "42519e5c91f21ab62a98a90459248985d09d43ab",
   "files": [
     {
       "path": "spec.md",
