@@ -7,7 +7,15 @@
  * See `.grill-room/project-scout/spec.md` ("Server facts") and
  * `.grill-room/project-scout/issues/01-server-facts.md`.
  */
-import { statSync } from "node:fs";
+import {
+  closeSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 
 import { runGit } from "./git.js";
@@ -50,6 +58,22 @@ export interface ProjectServerFacts {
    * lists these as recorded decision sources.
    */
   decisionFiles: string[];
+  /** The ADR convention found in `decisionsFolder`; null when there is no such folder. */
+  adrConvention: AdrConvention | null;
+}
+
+export interface AdrConvention {
+  /** Repo-relative, the same value as `decisionsFolder`. */
+  folder: string;
+  /** null when no numbering can be read with confidence. */
+  numbering: {
+    prefix: string;
+    width: number;
+    nextNumber: string;
+    example: string;
+  } | null;
+  /** null when no file gives a template. */
+  template: { source: string; headings: string[] } | null;
 }
 
 type Refused = { refusal: ProjectFactsRefusal };
@@ -81,6 +105,97 @@ function findDecisionsFolder(root: string): string | null {
     if (directoryExists(path.join(root, candidate))) return candidate;
   }
   return null;
+}
+
+const NUMBERED_ADR_NAME = /^([A-Za-z][A-Za-z0-9]*-)?(\d{1,9})(?:[-_].*)?\.md$/i;
+const DATED_NAME = /^\d{4}-\d{2}-\d{2}/;
+const HEADING_READ_BYTES = 64 * 1024;
+
+function isInside(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function readHeadings(file: string): string[] {
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(file, "r");
+    const buffer = Buffer.alloc(HEADING_READ_BYTES);
+    const read = readSync(descriptor, buffer, 0, HEADING_READ_BYTES, 0);
+    return buffer
+      .subarray(0, read)
+      .toString("utf8")
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("## "))
+      .map((line) => line.slice(3).trim())
+      .filter((heading) => heading.length > 0);
+  } catch {
+    return [];
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+/**
+ * The numbering and template the repo's own ADRs follow, read from the top
+ * level of its decisions folder. Deterministic and never throws: a folder that
+ * is a symlink out of the repository, or cannot be listed, gives neither.
+ */
+export function detectAdrConvention(
+  root: string,
+  decisionsFolder: string | null,
+): AdrConvention | null {
+  if (decisionsFolder === null) return null;
+  const folder = path.join(root, decisionsFolder);
+  const nothing: AdrConvention = { folder: decisionsFolder, numbering: null, template: null };
+
+  let names: string[];
+  try {
+    if (!isInside(realpathSync(root), realpathSync(folder))) return nothing;
+    names = readdirSync(folder).filter((name) => /\.md$/i.test(name));
+  } catch {
+    return nothing;
+  }
+  names = names.filter((name) => {
+    try {
+      return lstatSync(path.join(folder, name)).isFile();
+    } catch {
+      return false;
+    }
+  });
+  names.sort();
+
+  const numbered = names
+    .filter((name) => !/template/i.test(name) && !DATED_NAME.test(name))
+    .flatMap((name) => {
+      const match = NUMBERED_ADR_NAME.exec(name);
+      return match
+        ? [{ name, prefix: match[1] ?? "", value: Number(match[2]), digits: match[2].length }]
+        : [];
+    });
+
+  let numbering: AdrConvention["numbering"] = null;
+  let highest: (typeof numbered)[number] | undefined;
+  if (numbered.length > 0 && numbered.every((file) => file.prefix === numbered[0].prefix)) {
+    highest = numbered.reduce((best, file) => (file.value > best.value ? file : best));
+    numbering = {
+      prefix: highest.prefix,
+      width: highest.digits,
+      nextNumber: highest.prefix + String(highest.value + 1).padStart(highest.digits, "0"),
+      example: highest.name,
+    };
+  }
+
+  const sourceName =
+    names.find((name) => /template/i.test(name)) ?? (numbering ? highest?.name : undefined);
+  let template: AdrConvention["template"] = null;
+  if (sourceName !== undefined) {
+    const headings = readHeadings(path.join(folder, sourceName));
+    if (headings.length > 0) {
+      template = { source: `${decisionsFolder}/${sourceName}`, headings };
+    }
+  }
+  return { folder: decisionsFolder, numbering, template };
 }
 
 const REMOTE_LINE = /^(\S+)\t(\S+)\s+\((fetch|push)\)$/;
@@ -194,6 +309,7 @@ export async function collectProjectFacts(
       decisionsFolder,
       hasRulesFolder,
       decisionFiles,
+      adrConvention: detectAdrConvention(root, decisionsFolder),
     },
   };
 }

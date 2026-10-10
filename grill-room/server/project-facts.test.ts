@@ -1,11 +1,12 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { useTempGitRepos } from "../test/git-repos.js";
-import { collectProjectFacts } from "./project-facts.js";
+import { collectProjectFacts, detectAdrConvention } from "./project-facts.js";
 
 const repos = useTempGitRepos();
 
@@ -203,6 +204,20 @@ describe("collectProjectFacts", () => {
     });
   });
 
+  it("reports the ADR convention of the decisions folder", async () => {
+    const withFolder = repos.create({ files: { "docs/adr/0001-a.md": "## Context\n" } });
+    const withoutFolder = repos.create({ files: { "a.txt": "1\n" } });
+
+    const result = facts(await collectProjectFacts(withFolder));
+    expect(result.adrConvention).toEqual(detectAdrConvention(withFolder, "docs/adr"));
+    expect(result.adrConvention).toEqual({
+      folder: "docs/adr",
+      numbering: { prefix: "", width: 4, nextNumber: "0002", example: "0001-a.md" },
+      template: { source: "docs/adr/0001-a.md", headings: ["Context"] },
+    });
+    expect(facts(await collectProjectFacts(withoutFolder)).adrConvention).toBeNull();
+  });
+
   describe("decisionFiles", () => {
     it("lists tracked decisions.md files at several depths, sorted by path", async () => {
       const root = repos.create({
@@ -284,5 +299,289 @@ describe("collectProjectFacts", () => {
 
       expect(result.decisionFiles).toEqual([]);
     });
+  });
+});
+
+describe("detectAdrConvention", () => {
+  const roots: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  });
+
+  async function aRoot(): Promise<string> {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "grill-room-adr-"));
+    roots.push(root);
+    return root;
+  }
+
+  /** A root whose `docs/adr` holds the given files (name to content). */
+  async function withAdrFolder(files: Record<string, string>): Promise<string> {
+    const root = await aRoot();
+    const folder = path.join(root, "docs", "adr");
+    await fs.mkdir(folder, { recursive: true });
+    for (const [name, content] of Object.entries(files)) {
+      await fs.writeFile(path.join(folder, name), content);
+    }
+    return root;
+  }
+
+  const FOLDER = "docs/adr";
+  const NOTHING = { folder: FOLDER, numbering: null, template: null };
+
+  it("is null when there is no decisions folder", async () => {
+    expect(detectAdrConvention(await aRoot(), null)).toBeNull();
+  });
+
+  it("reads nothing from a folder with no markdown files", async () => {
+    const root = await withAdrFolder({ "notes.txt": "## Context\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual(NOTHING);
+  });
+
+  it("reads nothing from a folder that is a symlink out of the repository", async () => {
+    const root = await aRoot();
+    const outside = await aRoot();
+    await fs.writeFile(path.join(outside, "0001-a.md"), "## Context\n");
+    await fs.mkdir(path.join(root, "docs"));
+    await fs.symlink(outside, path.join(root, "docs", "adr"));
+    expect(detectAdrConvention(root, FOLDER)).toEqual(NOTHING);
+  });
+
+  it("reads nothing from a folder that cannot be listed", async () => {
+    const root = await aRoot();
+    expect(detectAdrConvention(root, FOLDER)).toEqual(NOTHING);
+  });
+
+  it("reads plain four-digit numbering and the highest file's headings", async () => {
+    const root = await withAdrFolder({
+      "0001-use-x.md": "# One\n",
+      "0002-y.md": "## Context\n## Decision\n",
+    });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0003", example: "0002-y.md" },
+      template: { source: "docs/adr/0002-y.md", headings: ["Context", "Decision"] },
+    });
+  });
+
+  it("reads a prefix with a three-digit number", async () => {
+    const root = await withAdrFolder({
+      "NMON-012-read-model.md": "## A\n",
+      "NMON-019-labels.md": "## B\n",
+    });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: {
+        prefix: "NMON-",
+        width: 3,
+        nextNumber: "NMON-020",
+        example: "NMON-019-labels.md",
+      },
+      template: { source: "docs/adr/NMON-019-labels.md", headings: ["B"] },
+    });
+  });
+
+  it("reads a lowercase prefix on a name that is only the number", async () => {
+    const root = await withAdrFolder({ "adr-001.md": "## A\n", "adr-002.md": "## B\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "adr-", width: 3, nextNumber: "adr-003", example: "adr-002.md" },
+      template: { source: "docs/adr/adr-002.md", headings: ["B"] },
+    });
+  });
+
+  it("takes the width of the highest file when widths differ", async () => {
+    const root = await withAdrFolder({ "1-a.md": "## A\n", "12-b.md": "## B\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 2, nextNumber: "13", example: "12-b.md" },
+      template: { source: "docs/adr/12-b.md", headings: ["B"] },
+    });
+  });
+
+  it("takes the width of the highest file, not the widest number", async () => {
+    const root = await withAdrFolder({ "001-a.md": "## A\n", "12-b.md": "## B\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 2, nextNumber: "13", example: "12-b.md" },
+      template: { source: "docs/adr/12-b.md", headings: ["B"] },
+    });
+  });
+
+  it("carries a number across a digit boundary", async () => {
+    const root = await withAdrFolder({ "0009-a.md": "## A\n", "0010-b.md": "## B\n" });
+    const convention = detectAdrConvention(root, FOLDER);
+    expect(convention?.numbering).toMatchObject({ width: 4, nextNumber: "0011" });
+    expect(convention?.template?.source).toBe("docs/adr/0010-b.md");
+  });
+
+  it("detects no numbering when the prefixes differ", async () => {
+    const root = await withAdrFolder({ "0001-a.md": "## A\n", "NMON-002-b.md": "## B\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual(NOTHING);
+  });
+
+  it("takes the template from a template file", async () => {
+    const root = await withAdrFolder({
+      "0001-a.md": "## Other\n",
+      "template.md": "## Status\n## Context\n",
+    });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0002", example: "0001-a.md" },
+      template: { source: "docs/adr/template.md", headings: ["Status", "Context"] },
+    });
+  });
+
+  it("does not number a template file", async () => {
+    const root = await withAdrFolder({
+      "0000-template.md": "## Status\n",
+      "0001-a.md": "## Other\n",
+    });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0002", example: "0001-a.md" },
+      template: { source: "docs/adr/0000-template.md", headings: ["Status"] },
+    });
+  });
+
+  it("does not number a template file that outranks the real files", async () => {
+    const root = await withAdrFolder({
+      "0002-template.md": "## Status\n",
+      "0001-a.md": "## Other\n",
+    });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0002", example: "0001-a.md" },
+      template: { source: "docs/adr/0002-template.md", headings: ["Status"] },
+    });
+  });
+
+  it("detects nothing from README and index files", async () => {
+    const root = await withAdrFolder({ "README.md": "## A\n", "index.md": "## B\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual(NOTHING);
+  });
+
+  it("breaks a tie by name order", async () => {
+    const root = await withAdrFolder({ "0003-a.md": "## A\n", "0003-b.md": "## B\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0004", example: "0003-a.md" },
+      template: { source: "docs/adr/0003-a.md", headings: ["A"] },
+    });
+  });
+
+  it("breaks a tie between differently padded numbers by name order", async () => {
+    const root = await withAdrFolder({ "01-a.md": "## A\n", "001-b.md": "## B\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 3, nextNumber: "002", example: "001-b.md" },
+      template: { source: "docs/adr/001-b.md", headings: ["B"] },
+    });
+  });
+
+  it("does not fall back past a template file with no headings", async () => {
+    const root = await withAdrFolder({
+      "0001-a.md": "## Context\n",
+      "template.md": "no headings\n",
+    });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0002", example: "0001-a.md" },
+      template: null,
+    });
+  });
+
+  it("gives a template without numbering when the prefixes are mixed", async () => {
+    const root = await withAdrFolder({
+      "0001-a.md": "## A\n",
+      "NMON-002-b.md": "## B\n",
+      "template.md": "## Status\n",
+    });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: null,
+      template: { source: "docs/adr/template.md", headings: ["Status"] },
+    });
+  });
+
+  it("picks the first template file in code-unit name order", async () => {
+    const root = await withAdrFolder({ "Template.md": "## A\n", "a-template.md": "## B\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: null,
+      template: { source: "docs/adr/Template.md", headings: ["A"] },
+    });
+  });
+
+  it("does not number date-named files", async () => {
+    const root = await withAdrFolder({
+      "2024-01-15-foo.md": "## A\n",
+      "2024-02-01-bar.md": "## B\n",
+    });
+    expect(detectAdrConvention(root, FOLDER)).toEqual(NOTHING);
+  });
+
+  it("keeps only well-formed level-two headings, read literally", async () => {
+    const root = await withAdrFolder({
+      "0002-a.md": "## Context\n## \n##Bad\n  ## Indented\n```\n## Fenced\n```\n",
+    });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0003", example: "0002-a.md" },
+      template: { source: "docs/adr/0002-a.md", headings: ["Context", "Fenced"] },
+    });
+  });
+
+  it("ignores a number of more than nine digits", async () => {
+    const root = await withAdrFolder({ "1234567890-a.md": "## A\n", "0001-b.md": "## B\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0002", example: "0001-b.md" },
+      template: { source: "docs/adr/0001-b.md", headings: ["B"] },
+    });
+  });
+
+  it("skips a symlinked file and a subfolder", async () => {
+    const root = await withAdrFolder({ "0002-b.md": "## B\n" });
+    const folder = path.join(root, "docs", "adr");
+    const outside = await aRoot();
+    await fs.writeFile(path.join(outside, "target.md"), "## Linked\n");
+    await fs.symlink(path.join(outside, "target.md"), path.join(folder, "0001-a.md"));
+    await fs.mkdir(path.join(folder, "0009-sub.md"));
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0003", example: "0002-b.md" },
+      template: { source: "docs/adr/0002-b.md", headings: ["B"] },
+    });
+  });
+
+  it("does not follow a symlinked file that would change the result", async () => {
+    const root = await withAdrFolder({ "0002-b.md": "## B\n" });
+    const folder = path.join(root, "docs", "adr");
+    const outside = await aRoot();
+    await fs.writeFile(path.join(outside, "target.md"), "## Linked\n");
+    await fs.symlink(path.join(outside, "target.md"), path.join(folder, "0003-a.md"));
+    await fs.symlink(path.join(outside, "target.md"), path.join(folder, "template.md"));
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0003", example: "0002-b.md" },
+      template: { source: "docs/adr/0002-b.md", headings: ["B"] },
+    });
+  });
+
+  it("gives no template when the highest file has no level-two heading", async () => {
+    const root = await withAdrFolder({ "0001-a.md": "## A\n", "0002-b.md": "# Only a title\n" });
+    expect(detectAdrConvention(root, FOLDER)).toEqual({
+      folder: FOLDER,
+      numbering: { prefix: "", width: 4, nextNumber: "0003", example: "0002-b.md" },
+      template: null,
+    });
+  });
+
+  it("reads headings from the first 64 KiB only", async () => {
+    const root = await withAdrFolder({
+      "0001-a.md": `## Early\n${"x".repeat(70 * 1024)}\n## Late\n`,
+    });
+    expect(detectAdrConvention(root, FOLDER)?.template?.headings).toEqual(["Early"]);
   });
 });

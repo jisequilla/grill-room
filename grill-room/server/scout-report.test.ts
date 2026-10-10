@@ -3,12 +3,15 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import createSession from "../actions/create-session.js";
+import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
-import { aScoutProjectResult } from "./interviewer/test-fixtures.js";
+import { aScoutProjectResult, someProjectServerFacts } from "./interviewer/test-fixtures.js";
 import {
   checkCitation,
   clampCitation,
   clampScoutReportCitations,
+  latestScoutReport,
   reasonsToRefuseScoutReport,
 } from "./scout-report.js";
 
@@ -342,5 +345,44 @@ describe("clampScoutReportCitations on a frozen report", () => {
     ]);
     expect(clamped.proposedDecisions[0]?.citation).toBe("docs/adr/0003-queue.md:5-9");
     expect(report.proposedDecisions[0]?.citation).toBe("docs/adr/0003-queue.md:5-10");
+  });
+});
+
+describe("a scout report stored before adrConvention", () => {
+  useTestDatabase();
+
+  it("reads a report stored before adrConvention as null", async () => {
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A local app that grills me about an idea until it is decided.",
+    });
+    const { adrConvention: _omitted, ...oldFacts } = someProjectServerFacts({
+      adrConvention: {
+        folder: "docs/adr",
+        numbering: null,
+        template: null,
+      },
+    });
+    expect("adrConvention" in oldFacts).toBe(false);
+    await getDb()
+      .insert(schema.scoutReports)
+      .values({
+        id: "report-old",
+        sessionId: session.id,
+        projectId: null,
+        factsJson: JSON.stringify(oldFacts),
+        resultJson: JSON.stringify(aScoutProjectResult()),
+        commitRead: null,
+        ideaRead: "An idea",
+        model: "sonnet",
+        ranAt: "2026-01-01T00:00:00.000Z",
+        turnId: null,
+        dispositionsJson: "{}",
+      });
+
+    const report = await latestScoutReport(session.id);
+
+    expect(report).not.toBeNull();
+    expect(report?.facts.adrConvention).toBeNull();
   });
 });

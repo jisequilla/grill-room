@@ -222,6 +222,7 @@ export function someProjectServerFacts(
     decisionsFolder: "docs/adr",
     hasRulesFolder: false,
     decisionFiles: [],
+    adrConvention: null,
     ...overrides,
   };
 }
