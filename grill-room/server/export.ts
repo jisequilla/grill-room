@@ -1073,7 +1073,9 @@ export function planExport(input: PlanExportInput): ExportPlan {
   }
 
   const adrConvention = input.scoutReport?.facts.adrConvention ?? null;
-  const repoDecisions = input.decisions.filter((decision) => decision.introducedBy === "repo" && decision.repo);
+  const repoDecisions = topologicalOrder(input.decisions).filter(
+    (decision) => decision.introducedBy === "repo" && decision.repo,
+  );
   const entryIds = new Set(input.decisions.filter(isEntry).map((decision) => decision.id));
   const adrSuggestionsWithoutTickets: { key: string; title: string }[] = [];
   for (const decision of adrWorthyDecisions(input.decisions)) {

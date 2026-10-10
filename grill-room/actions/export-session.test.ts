@@ -3285,6 +3285,41 @@ describe("ADR suggestions", () => {
     expect(await manifestPaths(durable)).not.toContain("adr-suggestions/storage-engine.md");
   });
 
+  it("lists earlier answers from the decision's history, oldest first, without a restatement's original or the current answer", async () => {
+    const { session, decisionId, working } = await aSessionWithDecision();
+    const entry = (
+      id: string,
+      recordedAt: string,
+      answer: string,
+      operatorNotes: string | null = null,
+    ) => ({
+      id,
+      decisionId,
+      questionTitle: "Title of storage-engine",
+      questionBody: "",
+      answer,
+      answerKind: "own-answer" as const,
+      operatorNotes,
+      recordedAt,
+    });
+    await getDb()
+      .insert(schema.decisionHistory)
+      .values([
+        entry("h-d", "2026-09-04T00:00:00.000Z", "SQLite"),
+        entry("h-a", "2026-09-03T00:00:00.000Z", "MySQL"),
+        entry("h-c", "2026-09-02T00:00:00.000Z", "Mongo", "Asked the AI to pick."),
+        entry("h-b", "2026-09-01T00:00:00.000Z", "Postgres"),
+      ]);
+
+    await exportSession.run({ sessionId: session.id, slug: SLUG });
+
+    const content = await fs.readFile(path.join(working, "adr-suggestions", "storage-engine.md"), "utf8");
+    expect(content).toContain(
+      "## Alternatives\n\n- Previously answered: Postgres\n- Previously answered: MySQL\n\n## Consequences",
+    );
+    expect(content).not.toContain("Mongo");
+  });
+
   it("removes the file on a re-export after the decision is unflagged", async () => {
     const { session, decisionId, working } = await aSessionWithDecision();
     await exportSession.run({ sessionId: session.id, slug: SLUG });
