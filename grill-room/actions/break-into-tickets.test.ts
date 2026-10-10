@@ -2118,9 +2118,9 @@ describe("a ticket's implemented decisions", () => {
 
   it("drops duplicate keys and keeps the first order", async () => {
     const sessionId = await aSessionWithDecisions();
-    scriptInterviewer([buildWith(["api-shape", "storage-engine", "api-shape"])]);
+    scriptInterviewer([buildWith(["storage-engine", "api-shape", "storage-engine"])]);
     await breakIntoTickets.run({ sessionId });
-    expect(await storedKeys(sessionId)).toEqual([["api-shape", "storage-engine"]]);
+    expect(await storedKeys(sessionId)).toEqual([["storage-engine", "api-shape"]]);
   });
 
   it("refuses a key the session does not have", async () => {
@@ -2172,7 +2172,8 @@ describe("a ticket's implemented decisions", () => {
   });
 
   it("gives a bad pair of keys one reason each, in the ticket's order", async () => {
-    await refusedThenStored(buildWith(["no-such-key", "open-question-key"]), GOOD_BUILD, [
+    await refusedThenStored(buildWith(["old-key", "no-such-key", "open-question-key"]), GOOD_BUILD, [
+      REPLACED(1, "old-key"),
       MISSING(1, "no-such-key"),
       UNSETTLED(1, "open-question-key"),
     ], GOOD_BUILD_STORED);
