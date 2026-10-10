@@ -22,7 +22,7 @@ export const meta = {
 // `start`, not with resumeFromRunId: finished builders and reviewers are never paid for twice.
 
 const fill = (text, values) =>
-  Object.entries(values).reduce((out, [key, value]) => out.replaceAll(`{{${key}}}`, () => String(value)), text)
+  text.replace(/\{\{(\w+)\}\}/g, (match, key) => (Object.hasOwn(values, key) ? String(values[key]) : match))
 
 // A result written while a verify command still runs in the background is not a result.
 const PENDING = /\b(IN[_ ]PROGRESS|still running|waiting on)\b/i

@@ -350,6 +350,23 @@ describe("routing", () => {
   });
 });
 
+describe("fill", () => {
+  it("does not re-scan inserted text for placeholders", async () => {
+    const { call } = await run({
+      canned: {
+        [R1]: verdict("changes-requested", [
+          finding("blocker", "a.ts", { line: 2, claim: "quotes {{mutation}} and {{prior_round}}", evidence: "ea" }),
+        ]),
+        "fix:gr-x:r1": FIX_OK,
+        [R2]: verdict("approved"),
+      },
+    });
+    expect(call(R2).prompt).toBe(
+      `M:${OK_MUTATION_TEXT(2)}|This is review round 2. Round 1 requested:\n1. [blocker] a.ts:2: quotes {{mutation}} and {{prior_round}} (evidence: ea)\nCheck that each is fixed, and look again for new defects.`,
+    );
+  });
+});
+
 describe("evidence re-ask", () => {
   const blockerNoEvidence = finding("blocker", "a.ts", { line: null, evidence: "  " });
   it("re-asks a lens once for a blocker without evidence", async () => {
