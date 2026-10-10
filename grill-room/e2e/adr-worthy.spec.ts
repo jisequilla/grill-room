@@ -54,6 +54,7 @@ test("the owner flags and unflags a settled decision as ADR-worthy", async ({
     "Every later decision builds on this shape.",
   );
   await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   // ---- An open decision cannot change ---------------------------------------
   cards = page.getByTestId("round-card");
@@ -65,6 +66,7 @@ test("the owner flags and unflags a settled decision as ADR-worthy", async ({
   await expect(openSheet.getByTestId("adr-locked-reason")).toBeVisible();
   await expect(openSheet.getByTestId("adr-worthy-toggle")).toHaveCount(0);
   await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   // ---- Unflag with edited Consequences ---------------------------------------
   await treeRows.filter({ hasText: "What shape should this take?" }).click();
