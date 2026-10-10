@@ -46,7 +46,7 @@ fi
 
 Put the Evidence entry's test command on the marker line and run the whole block as one Bash call: shell state, `P` included, does not survive between separate tool calls. A failing test does not stop the block, so the source is always re-applied. Run the block from the worktree root: the paths it reads are relative to the current directory, so from `grill-room/` it would revert nothing. Put any `cd grill-room` in a subshell on the marker line, as `(cd grill-room && <test command>)`.
 
-- If `git apply -R` fails, stop the re-run: remove the scratch worktree, create a fresh one in a new folder, detached at `origin/{{branch}}`, and run the block once more. If it fails again, record a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command. Never rebuild the change by hand.
+- If `git apply -R` fails, stop the re-run: remove the scratch worktree with `git worktree remove --force <folder>` (the failed apply leaves it modified, so a plain remove exits 128), create a fresh one in a new folder, detached at `origin/{{branch}}`, and run the block once more. If it fails again, record a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command. Never rebuild the change by hand.
 - If `git apply` fails, do the same: a fresh worktree, one more try, then a `blocker` whose `claim` quotes the error.
 - Never use `git stash` to save or restore local changes: the stash stack is shared by every worktree and session.
 
