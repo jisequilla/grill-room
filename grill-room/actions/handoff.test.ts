@@ -972,13 +972,17 @@ describe("saving an old brief unchanged keeps its baseline", () => {
   afterEach(resetInterviewer);
 
   /** Rewrites a brief and its baseline as `generate-handoff` stored them before {{DOCS}}: the spec under {{BUNDLE}}. */
-  async function storeInOldTokenForm(sessionId: string, ticketNumber: number): Promise<string> {
+  async function storeInOldTokenForm(
+    sessionId: string,
+    ticketNumber: number,
+    baseline?: string,
+  ): Promise<string> {
     const row = await storedHandoff(sessionId);
     let oldText = "";
     const briefs = row.briefs.map((brief) => {
       if (brief.ticketNumber !== ticketNumber) return brief;
       oldText = brief.markdown.split(`${DOCS_TOKEN}/spec.md`).join(`${BUNDLE_TOKEN}/spec.md`);
-      return { ...brief, markdown: oldText, generatedSha256: hashExportContent(oldText) };
+      return { ...brief, markdown: oldText, generatedSha256: baseline ?? hashExportContent(oldText) };
     });
     expect(oldText).toContain(`${BUNDLE_TOKEN}/spec.md`);
     await getDb()
@@ -1001,6 +1005,21 @@ describe("saving an old brief unchanged keeps its baseline", () => {
 
     expect(saved).toMatchObject({ editedBriefs: [], outdatedBriefs: [] });
     expect((await storedHandoff(session.id)).briefs[1]!.generatedSha256).toBe(hashExportContent(oldText));
+  });
+
+  it("an old-token brief whose text does not match its baseline is an edit, baselined on today's render", async () => {
+    const { session } = await aReadySession();
+    await generateHandoff.run({ sessionId: session.id });
+    const thirdValue = hashExportContent("# some older render\n");
+    const oldText = await storeInOldTokenForm(session.id, 2, thirdValue);
+
+    const saved = await editBrief(session.id, 2, oldText);
+
+    const { source } = await renderedToday(session.id);
+    expect((await storedHandoff(session.id)).briefs[1]!.generatedSha256).toBe(
+      hashExportContent(renderBrief(source, source.tickets[1]!)),
+    );
+    expect(saved).toMatchObject({ editedBriefs: [2], outdatedBriefs: [] });
   });
 
   it("a kept brief saved back to its old generated text is still a reviewed edit, baselined on today's render", async () => {
