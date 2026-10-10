@@ -44,7 +44,11 @@ else
 fi
 ```
 
-Run the block from the worktree root: the paths it reads are relative to the current directory, so from `grill-room/` it would revert nothing. Put any `cd grill-room` in a subshell on the marker line.
+Put the Evidence entry's test command on the marker line and run the whole block as one Bash call: shell state, `P` included, does not survive between separate tool calls. A failing test does not stop the block, so the source is always re-applied. Run the block from the worktree root: the paths it reads are relative to the current directory, so from `grill-room/` it would revert nothing. Put any `cd grill-room` in a subshell on the marker line, as `(cd grill-room && <test command>)`.
+
+- If `git apply -R` fails, stop the re-run: remove the scratch worktree with `git worktree remove --force <folder>` (the failed apply leaves it modified, so a plain remove exits 128), create a fresh one in a new folder, detached at `origin/{{branch}}`, and run the block once more. If it fails again, record a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command. Never rebuild the change by hand.
+- If `git apply` fails, do the same: a fresh worktree, one more try, then a `blocker` whose `claim` quotes the error.
+- Never use `git stash` to save or restore local changes: the stash stack is shared by every worktree and session.
 
 ## Re-running Evidence
 
@@ -91,6 +95,7 @@ A line is covered when it falls inside any Evidence range on the same path, from
 | A covered survivor that no test can kill | It stays a `nit` only with `equivalentMutant` set to the quoted mutant and why no test can kill it. Without that, it is a `blocker` |
 | A fixer proposed a mutant as equivalent, in the PR body or a PR comment | You decide and record the call in `equivalentMutant`. A fixer's claim alone changes nothing |
 | The section says the gate is skipped (overrun, runner-failed, blocked, or the agent died) | No survivor findings. The verdict comment says the gate was skipped and why |
+| `Mutation run (round R): no-scope, nothing to mutate.` | No survivor findings: nothing was mutated. The gate was not skipped, so the verdict comment says nothing was mutated. On a test-only PR it adds that nothing judged its tests' strength this round |
 | A test-only PR whose gate is skipped | The verdict comment says nothing judged its tests' strength this round. No finding |
 | A `Dropped over the cap:` range overlaps an Evidence range | The verdict comment names the dropped range as unjudged. No finding |
 
@@ -99,6 +104,7 @@ When the Mutation section has no line starting `Mutation run (round`, the main s
 1. `(cd grill-room && pnpm install --frozen-lockfile --prefer-offline)`.
 2. `(cd grill-room && pnpm test:mutate --base origin/main)`, with the Bash tool's `run_in_background`, waiting for its completion notice. The run can take longer than a foreground call allows.
 3. Read `grill-room/.scratch/mutation/summary.json`. A `status` of `overrun` or `runner-failed` means the gate was skipped. A non-empty `dropped` array is the dropped-range case.
+   A `status` of `no-scope` means nothing was mutated.
 
 ## Findings
 
