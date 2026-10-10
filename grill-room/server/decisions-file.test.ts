@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { supersededEntries } from "./decisions-file.js";
+import { planExport } from "./export.js";
+import type { DecisionView } from "./tree.js";
 
 const HEADER = [
   "# Decisions: Simpler API error responses",
@@ -149,23 +151,62 @@ describe("supersededEntries", () => {
 });
 
 describe("supersededEntries with ADR fields", () => {
-  const base = [
-    "- **Decision:** Flat body",
-    "- **Origin:** repo (recorded) · reopened",
-    "- **Source:** docs/adr/003-x.md:19",
-    '- **Supersedes:** "We will use RFC 7807."',
-  ];
+  function rendered(adrWorthy: boolean): string {
+    const reopened: DecisionView = {
+      id: "id-rfc",
+      key: "rfc",
+      questionTitle: "RFC",
+      questionBody: "",
+      choices: [],
+      recommendedChoice: null,
+      recommendedChoiceLabel: null,
+      recommendedAnswer: "Flat body",
+      dependsOn: [],
+      state: "settled",
+      supersession: null,
+      deferralReason: null,
+      restatementText: null,
+      restatementNotes: null,
+      restatementReason: null,
+      replacedBy: null,
+      settledBy: null,
+      dispositionTarget: null,
+      settledAt: "2026-09-01T00:00:00.000Z",
+      reopenedAt: null,
+      withdrawnAt: null,
+      awaitingPlacementSince: null,
+      createdAt: "2026-09-01T00:00:00.000Z",
+      ...{
+        introducedBy: "repo",
+        repo: {
+          source: "recorded",
+          citation: "docs/adr/003-x.md:19",
+          statement: "We will use RFC 7807.",
+          scoutReportId: "report-1",
+        },
+        answer: { text: "Flat body", kind: "own-answer" },
+        adrWorthy,
+        consequences: "Commits us.\n- **Source:** x",
+      },
+    };
+    const plan = planExport({
+      sessionTitle: "Simpler API error responses",
+      idea: "An idea.",
+      specMarkdown: "## Problem\n\nA spec.",
+      tickets: [],
+      decisions: [reopened],
+      readiness: null,
+      scoutReport: null,
+    });
+    return plan.files.find((file) => file.relativePath === "decisions.md")!.content;
+  }
 
   it("a file with ADR fields gives the same superseded entries", () => {
-    const flagged = `${HEADER}${entry("rfc", "RFC", [
-      ...base,
-      "- **ADR-worthy:** yes",
-      "- **Amends:** docs/adr/003-x.md",
-      "- **Consequences:** Commits us.",
-      "  - **Source:** x",
-    ])}\n`;
-    const plain = `${HEADER}${entry("rfc", "RFC", base)}\n`;
-    expect(supersededEntries(flagged)).toEqual(supersededEntries(plain));
+    const flagged = rendered(true);
+    expect(flagged).toContain("- **ADR-worthy:** yes");
+    expect(flagged).toContain("  - **Source:** x");
+    expect(rendered(false)).not.toContain("ADR-worthy");
+    expect(supersededEntries(flagged)).toEqual(supersededEntries(rendered(false)));
     expect(supersededEntries(flagged)).toHaveLength(1);
   });
 });

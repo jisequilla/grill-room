@@ -1451,8 +1451,19 @@ describe("planExport: decisions.md ADR marks", () => {
 
     it("a flagged reopened repo decision amends its own citation", () => {
       const own = reopened("e", "docs/adr/NMON-003-x.md:2", { adrWorthy: true, consequences: "Commits us." });
-      expect(entryOf(render([own], NMON), "e")).toContain(
-        "- **Amends:** NMON-003 (docs/adr/NMON-003-x.md)\n- **Consequences:** Commits us.",
+      expect(entryOf(render([own], NMON), "e")).toBe(
+        [
+          '<a id="e"></a>',
+          "### Title of e",
+          "",
+          "- **Decision:** Answer of e",
+          "- **Origin:** repo (recorded) · reopened",
+          "- **Source:** docs/adr/NMON-003-x.md:2",
+          '- **Supersedes:** "Statement of e"',
+          "- **ADR-worthy:** yes",
+          "- **Amends:** NMON-003 (docs/adr/NMON-003-x.md)",
+          "- **Consequences:** Commits us.",
+        ].join("\n"),
       );
     });
 
@@ -1463,8 +1474,18 @@ describe("planExport: decisions.md ADR marks", () => {
         ...replacedByE(),
       });
       const content = render([r, flaggedE()], NMON);
-      expect(entryOf(content, "r1")).not.toContain("ADR-worthy");
-      expect(entryOf(content, "r1")).not.toContain("Old.");
+      expect(entryOf(content, "r1")).toBe(
+        [
+          '<a id="r1"></a>',
+          "### Title of r1",
+          "",
+          "- **Decision:** Answer of r1",
+          "- **Origin:** repo (recorded) · reopened",
+          "- **Superseded by:** [Title of e](#e): r",
+          "- **Source:** docs/adr/NMON-003-x.md:2",
+          '- **Supersedes:** "Statement of r1"',
+        ].join("\n"),
+      );
       expect(entryOf(content, "e")).toBe(
         eText("- **ADR-worthy:** yes", "- **Amends:** NMON-003 (docs/adr/NMON-003-x.md)", CONS),
       );
