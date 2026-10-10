@@ -3054,6 +3054,14 @@ describe("exportRetirement", () => {
     expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: null });
   });
 
+  it("a durable-folder manifest whose root is working: not retired", async () => {
+    const { session, workingDir, durableDir } = await anExportedSession();
+    await rewriteDurableManifest(durableDir, { root: "working" });
+    await fs.rm(workingDir, { recursive: true });
+
+    expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: null });
+  });
+
   it("a session that never exported: not retired", async () => {
     const { session } = await aReadySession();
 
@@ -3173,6 +3181,24 @@ describe("re-export after retirement", () => {
     expect(result.written).toContain(path.join(workingDir, EXPORT_MANIFEST_FILE));
     expect((await readManifest(workingDir)).revision).toBe(1);
     expect(await exportRetirement(session.id)).toEqual({ retired: false, workingFolder: WORKING });
+  });
+
+  it("retired and durable folder ignored: refused durable-folder-ignored, nothing written", async () => {
+    const { session, root, workingDir, durableDir } = await aRetiredSession();
+    await fs.writeFile(path.join(root, ".gitignore"), "docs/specs/\n", "utf8");
+    const durableBefore = await durableSnapshot(durableDir);
+
+    expect((await previewExport.run({ sessionId: session.id })).exportBlockedReason).toBe(
+      "durable-folder-ignored",
+    );
+    await expect(exportSession.run({ sessionId: session.id, slug: "grill-room" })).rejects.toMatchObject({
+      errorCode: "durable-folder-ignored",
+      statusCode: 409,
+    });
+
+    expect(await pathExists(workingDir)).toBe(false);
+    expect(await pathExists(path.join(root, ".scratch"))).toBe(true);
+    expect(await durableSnapshot(durableDir)).toEqual(durableBefore);
   });
 
   it("retired, no override, handoff stale: refused handoff-stale, as today", async () => {
