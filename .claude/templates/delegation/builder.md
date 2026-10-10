@@ -6,7 +6,7 @@ You are implementing bead {{bead}} in the Grill Room app (`grill-room/` in this 
 
 - **Check what you build on.** Before anything else, confirm that every file and symbol under "Builds on" exists. If one does not, stop and report.
 - **Follow the ticket.** The Behaviour table is the spec, and "Pattern to copy" shows how the code should look.
-- **Prove each acceptance line.** For every numbered line, write the test it names. Then revert only the change that line covers with the Revert block below, confirm the test fails, and confirm it passes again once the change is re-applied. Report the result per line.
+- **Prove each acceptance line.** For every numbered line, write the test it names. Then run that line's test with the PR's source reverted by the Revert block below (the block reverts every non-test file the PR changes), confirm the test fails, and confirm it passes again once the source is re-applied. Report the result per line.
 - **Keep the ticket's rules in the tests.** A test that encodes a ticket rule may not be changed to match the code. If the rule seems wrong, stop and report.
 - **Stay in scope.** Keep the change inside the ticket's Files. A minimal edit elsewhere is allowed only if the PR body names the file and says why.
 - **Screenshot UI changes.** When the ticket changes what the user sees, add before and after screenshots.
@@ -32,7 +32,7 @@ else
 fi
 ```
 
-The block reads commits, not the working tree, so commit the change on the worktree branch before running it. Substitute your own test command for the marker line and run the whole block as one command: shell state, `P` included, does not survive between separate tool calls. A failing test does not stop the block, so the source is always re-applied. The red run is that command's output between `git apply -R` and `git apply`; the green run is the same command after `git apply`.
+The block reads commits, not the working tree, so commit the change on the worktree branch before running it. Substitute your own test command for the marker line and run the whole block as one command: shell state, `P` included, does not survive between separate tool calls. A failing test does not stop the block, so the source is always re-applied. Run the block from the worktree root: `git diff --name-only` prints paths from the repo root, but `xargs git diff -- <paths>` reads them relative to the current directory, so from `grill-room/` the block would revert nothing and print the test-only line. If the test command needs `grill-room/`, put the `cd grill-room` in a subshell on the marker line, as `(cd grill-room && <test command>)`. The red run is that command's output between `git apply -R` and `git apply`; the green run is the same command after `git apply`.
 
 - Test files, snapshots and anything under an `e2e/` or `test/` folder stay in place while the source is reverted, so the new test runs against the old source.
 - If the test still passes with the source reverted, the line is not proved. Fix the test, never the rule it encodes.
