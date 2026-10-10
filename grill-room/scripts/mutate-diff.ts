@@ -232,7 +232,9 @@ export function summarize(report: StrykerReport | null, run: RunRecord): Summary
   if (run.outcome === "nothing-kept") {
     return { status: "truncated", ...shared, mutants: 0, score: null, survivors: [] };
   }
-  if (run.outcome === "overrun") return { status: "overrun", ...shared, ...unknown };
+  if (run.outcome === "overrun") {
+    return { status: "overrun", ...shared, stderrTail: null, ...unknown };
+  }
   if (run.outcome === "runner-failed" || report === null) {
     return { status: "runner-failed", ...shared, ...unknown };
   }
@@ -286,7 +288,7 @@ const silentLogger = {
   fatal: () => {},
 } as unknown as ConstructorParameters<typeof Instrumenter>[0];
 
-async function countMutantLines(ranges: string[], cwd: string): Promise<LineCount[]> {
+export async function countMutantLines(ranges: string[], cwd: string): Promise<LineCount[]> {
   const parsed = ranges.map(parseRange);
   const perFile = new Map<string, typeof parsed>();
   for (const range of parsed) perFile.set(range.file, [...(perFile.get(range.file) ?? []), range]);
@@ -317,10 +319,9 @@ async function countMutantLines(ranges: string[], cwd: string): Promise<LineCoun
   for (const { file, start, end } of parsed) {
     for (let line = start; line <= end; line++) {
       const key = `${file}\0${line}`;
-      const count = perLine.get(key);
-      if (count && !seen.has(key)) {
+      if (!seen.has(key)) {
         seen.add(key);
-        counted.push({ file, line, count });
+        counted.push({ file, line, count: perLine.get(key) ?? 0 });
       }
     }
   }
@@ -450,7 +451,7 @@ async function main(): Promise<void> {
   }
 
   const counted = ranges.length > 0 ? await countMutantLines(ranges, cwd) : [];
-  if (counted.length === 0) {
+  if (!counted.some((entry) => entry.count > 0)) {
     emit(summarize(null, { ...empty, scope: ranges }), cwd);
     return;
   }

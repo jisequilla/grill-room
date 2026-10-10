@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { useTempGitRepos } from "../test/git-repos";
 import {
+  countMutantLines,
   isEntryPoint,
   rangesFromCoverage,
   rangesFromDiff,
@@ -209,6 +211,33 @@ describe("trimToCap", () => {
   });
 });
 
+describe("countMutantLines", () => {
+  it("countMutantLines: zero-count lines stay in the list so one range survives", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "mutate-count-"));
+    try {
+      writeFileSync(
+        path.join(cwd, "f.ts"),
+        [
+          "export function f(a: number) {",
+          "  if (a > 1) {",
+          "    return a + 1;",
+          "  }",
+          "",
+          "  return a - 1;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      const counted = await countMutantLines(["f.ts:1-7"], cwd);
+      expect(counted.map(({ line }) => line)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+      expect(counted.find(({ line }) => line === 5)?.count).toBe(0);
+      expect(trimToCap(counted, 100)).toEqual({ kept: ["f.ts:1-7"], dropped: [] });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("summarize", () => {
   const mutant = (line: number, status: string) => ({
     mutatorName: "ConditionalExpression",
@@ -301,7 +330,13 @@ describe("summarize", () => {
       stderrTail: null,
     });
     expect(
-      summarize(null, { ...run, outcome: "overrun", dropped: ["x.ts:1-1"], exitCode: null }),
+      summarize(null, {
+        ...run,
+        outcome: "overrun",
+        dropped: ["x.ts:1-1"],
+        exitCode: null,
+        stderrTail: "partial output",
+      }),
     ).toEqual({
       status: "overrun",
       base: "origin/main",
