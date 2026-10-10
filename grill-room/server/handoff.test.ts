@@ -4009,7 +4009,7 @@ describe("adrTicketFor", () => {
   });
 
   it("numbers it after the highest stored ticket and blocks it by every one, gates included, ascending", () => {
-    const tickets = [{ number: 3 }, { number: 1 }, { number: 2 }];
+    const tickets = [{ number: 3 }, { number: 1 }, { number: 2, kind: "gate" }];
     expect(adrTicketFor(tickets, SUGGESTIONS, null)).toEqual({
       number: 4,
       slug: "record-adrs-from-suggestions",
@@ -4130,6 +4130,10 @@ describe("HANDOFF with an ADR ticket", () => {
     const today = section(renderHandoffMarkdown(without(withAdr)), "## Execution plan");
     expect(today).toContain("- Longest chain: 3 build tickets, built one after another: 01 → 02 → 03.");
     expect(today).toContain("- Wave widths, in build tickets: 1, 1, 1 (wave 1 first).");
+    const facts = atExport([[1], [2], [3]]);
+    const exported = section(renderHandoffMarkdown(withAdr, false, facts), "## Execution plan");
+    expect(exported).toContain("- Longest chain: 4 build tickets, built one after another: 01 → 02 → 03 → 04.");
+    expect(exported).toContain("- Wave widths, in build tickets: 1, 1, 1, 1 (wave 1 first).");
   });
 
   it("renders only the ADR label when every stored ticket is a gate", () => {
@@ -4147,6 +4151,9 @@ describe("HANDOFF with an ADR ticket", () => {
     expect(section(renderHandoffMarkdown(without(withAdr)), "## Execution plan")).toContain(
       "- Longest chain: no build tickets.",
     );
+    const exported = section(renderHandoffMarkdown(withAdr, false, atExport([[1]])), "## Execution plan");
+    expect(exported).toContain("- Longest chain: 1 build ticket: 02.");
+    expect(exported).toContain("- Wave widths, in build tickets: gate only, 1 (wave 1 first).");
   });
 
   it("leaves the ADR ticket out of the briefs line", () => {
@@ -4158,6 +4165,12 @@ describe("HANDOFF with an ADR ticket", () => {
     );
     expect(renderHandoffMarkdown(without(withAdrTicket(aSource())))).toContain(
       "- Briefs: `{{BUNDLE}}/briefs/`, one per ticket, each ready",
+    );
+    expect(renderHandoffMarkdown(withAdrTicket(aSource()), false, atExport([[1], [2], [3]]))).toContain(
+      "- Briefs: `{{BUNDLE}}/briefs/`, one per ticket except the ADR ticket, each ready",
+    );
+    expect(renderHandoffMarkdown(withAdrTicket(aSourceWithGate()), false, atExport([[1], [2], [3]]))).toContain(
+      "- Briefs: `{{BUNDLE}}/briefs/`, one per ticket except gates and the ADR ticket, each ready",
     );
   });
 
@@ -4177,6 +4190,9 @@ describe("HANDOFF with an ADR ticket", () => {
     expect(markdown.indexOf("## Recording the repo's ADRs")).toBeGreaterThan(markdown.indexOf("## Waves"));
     const noConvention = renderHandoffMarkdown(withAdrTicket(aSource()));
     expect(section(noConvention, "## Recording the repo's ADRs")).toContain(NO_CONVENTION_PARAGRAPH);
+    const exported = renderHandoffMarkdown(withAdrTicket(aSource(), NMON_CONVENTION), false, atExport([[1], [2], [3]]));
+    expect(section(exported, "## Recording the repo's ADRs")).toBe(section(markdown, "## Recording the repo's ADRs"));
+    expect(exported.indexOf("## Recording the repo's ADRs")).toBeGreaterThan(exported.indexOf("## Waves"));
     expect(renderHandoffMarkdown(without(withAdrTicket(aSource())))).not.toContain("Recording the repo's ADRs");
   });
 
@@ -4186,6 +4202,9 @@ describe("HANDOFF with an ADR ticket", () => {
       "never from memory. Ticket 04, Record ADRs from suggestions, gets a bead like every other ticket.\n",
     );
     expect(renderHandoffMarkdown(without(beads))).not.toContain("Record ADRs from suggestions, gets a bead");
+    expect(renderHandoffMarkdown(beads, false, atExport([[1], [2], [3]]))).toContain(
+      "never from memory. Ticket 04, Record ADRs from suggestions, gets a bead like every other ticket.\n",
+    );
   });
 
   it("says the ADR ticket gets no build record", () => {
@@ -4202,6 +4221,13 @@ describe("HANDOFF with an ADR ticket", () => {
     expect(section(renderHandoffMarkdown(without(withAdrTicket(aSource(logging)))), "## Build records")).toBe(
       buildRecordTemplate("session-123"),
     );
+    const facts = atExport([[1], [2], [3]]);
+    expect(section(renderHandoffMarkdown(withAdrTicket(aSource(logging)), false, facts), "## Build records")).toBe(
+      `${buildRecordTemplate("session-123")}\n\n${sentence}`,
+    );
+    expect(
+      section(renderHandoffMarkdown(withAdrTicket(aSourceWithGate(logging)), false, facts), "## Build records"),
+    ).toBe(`${buildRecordTemplate("session-123")}\n\n${gateSentence}\n\n${sentence}`);
   });
 
   it("pads its label by the stored ticket count", () => {

@@ -1263,6 +1263,20 @@ describe("ground-briefs", () => {
       const [request] = scoutRequests(interviewer.requests);
       expect(request!.tickets.map((ticket) => ticket.number)).toEqual([1, 2]);
     });
+
+    it("records the grounding fingerprint, so grounding after flagging is current", async () => {
+      const { session } = await aSessionWithHandoff();
+      await flagADecision(session.id);
+      await generateHandoff.run({ sessionId: session.id });
+      scriptInterviewer([{ kind: "handoff-scout", result: aHandoffScoutResult() }]);
+
+      await groundBriefs.run({ sessionId: session.id });
+
+      expect((await getBriefGrounding.run({ sessionId: session.id })).grounding).toMatchObject({
+        current: true,
+        staleReason: null,
+      });
+    });
   });
 
   describe("refusals, before any turn", () => {
