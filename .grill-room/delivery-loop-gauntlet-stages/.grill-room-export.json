@@ -1,0 +1,79 @@
+{
+  "version": 3,
+  "sessionId": "bb45d68a-ae9e-4134-8578-f98e8dc3fd50",
+  "revision": 1,
+  "root": "working",
+  "otherRootFolder": "docs/specs/delivery-loop-gauntlet-stages",
+  "scoutCommit": "daa1670f7f813e39d00bc37b1a5bc9bab639d79c",
+  "headCommit": "e3dd26f86d5d8aa15553e85788ffb6a23474772c",
+  "files": [
+    {
+      "path": "HANDOFF.md",
+      "sha256": "723a6534b6950471b2946e57e03ba087d1b3ef107b572f61b4d9b7488caf5988"
+    },
+    {
+      "path": "issues/01-stryker-setup-and-mutate-script.md",
+      "sha256": "9766bc34a31d2d7db936b28ad34e3fbd29bc34bdd797358c994f6606b7d7472c"
+    },
+    {
+      "path": "issues/02-workflow-mutation-step-and-review-schema.md",
+      "sha256": "6a14759226dc341a81bfa72b7130ea0710f6aa82cb282f94f1f8893cb9d35f73"
+    },
+    {
+      "path": "issues/03-builder-and-fix-templates-pr-evidence.md",
+      "sha256": "5d640c0e17f642308affd42272788c956acd5cd95ee139521209930ac57f6419"
+    },
+    {
+      "path": "issues/04-reviewer-template-evidence-rerun-and-survivors.md",
+      "sha256": "f5e83ab8adeb3ff3595890507e6b76a64f3fb2c0f1ece0334fa6badde87ba33e"
+    },
+    {
+      "path": "issues/05-worktrees-rules-nit-beads-and-merge-danger.md",
+      "sha256": "20cb972c45a704cd602160c25b34908c97c7dd0ac4d532d11e6770ab3545152a"
+    },
+    {
+      "path": "issues/06-benchmark-columns.md",
+      "sha256": "0e6b15b5d1e76df3142eea51f4e1a36fff29f3b7c526cad20686c50252a6de7f"
+    },
+    {
+      "path": "issues/07-pilot-three-tickets.md",
+      "sha256": "a1d57498efc50c5c314ae7448b640efb37cb20aac435f3fa3241277a0246a055"
+    },
+    {
+      "path": "adr-suggestions/mutation-role.md",
+      "sha256": "48113c48f85dddcdfc45ba9262c32af29aa75dc14523f3e77c174665b5e4e3e4"
+    },
+    {
+      "path": "adr-suggestions/mutation-runner.md",
+      "sha256": "fe374e480c2d716cce718ba5d4c0d5e6a5b1cb3c5139dd689f6658ea6468d967"
+    },
+    {
+      "path": "briefs/01-stryker-setup-and-mutate-script.md",
+      "sha256": "760bc7997c71a0d790313091318508e82f574c8c0bec604ced764d7bcc2e4e10"
+    },
+    {
+      "path": "briefs/02-workflow-mutation-step-and-review-schema.md",
+      "sha256": "dd9b718582f785dcba5d255ba0635b73def4fa4dee81b40673f19023b4f5f15d"
+    },
+    {
+      "path": "briefs/03-builder-and-fix-templates-pr-evidence.md",
+      "sha256": "30bb744a925f3ade2929b917469cbda2904558a534aba9cbf64d85d403ea0433"
+    },
+    {
+      "path": "briefs/04-reviewer-template-evidence-rerun-and-survivors.md",
+      "sha256": "59d8fa3fda18540421b4cc5396b2099c8bbd3f57a2e89fef7985e8ead7a263c9"
+    },
+    {
+      "path": "briefs/05-worktrees-rules-nit-beads-and-merge-danger.md",
+      "sha256": "694826388a4ef14bf2088419d75a13ddf1b89c59189b78a5166077a921979133"
+    },
+    {
+      "path": "briefs/06-benchmark-columns.md",
+      "sha256": "c198e7a69295d754a954a3e6cdfdc1343eb7f9ebb3292413e0b8d242fef3698b"
+    },
+    {
+      "path": "briefs/07-pilot-three-tickets.md",
+      "sha256": "14d314bca83c5e7908336aa00df4d50cf85c9b87cd5210f0ebdfe54539172bb6"
+    }
+  ]
+}

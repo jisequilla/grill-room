@@ -1,0 +1,23 @@
+{
+  "version": 3,
+  "sessionId": "bb45d68a-ae9e-4134-8578-f98e8dc3fd50",
+  "revision": 1,
+  "root": "durable",
+  "otherRootFolder": ".grill-room/delivery-loop-gauntlet-stages",
+  "scoutCommit": "daa1670f7f813e39d00bc37b1a5bc9bab639d79c",
+  "headCommit": "e3dd26f86d5d8aa15553e85788ffb6a23474772c",
+  "files": [
+    {
+      "path": "spec.md",
+      "sha256": "dc63c58acd978ce2b7478c79d19c217d90d6a02be9eeea35ce614bc74262a400"
+    },
+    {
+      "path": "intent.md",
+      "sha256": "ee86ab1f1d8d502f58f7cae6d0157ef72d57b1f92430bd451e4d172e71eaf199"
+    },
+    {
+      "path": "decisions.md",
+      "sha256": "58218956abb00887218bccaf7465955125a62a0d1210d574cb2f18b621ea5c2c"
+    }
+  ]
+}
