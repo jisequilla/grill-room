@@ -484,6 +484,15 @@ describe("ground-briefs", () => {
     expect((await getBriefGrounding.run({ sessionId: session.id })).grounding!.result.rulesRead).toBe(true);
   });
 
+  it("overwrites a scripted rulesRead of false with true", async () => {
+    const { session } = await aSessionWithHandoff();
+    scriptInterviewer([{ kind: "handoff-scout", result: { ...aHandoffScoutResult(), rulesRead: false } }]);
+    const grounded = await groundBriefs.run({ sessionId: session.id });
+
+    expect(grounded.grounding!.result.rulesRead).toBe(true);
+    expect((await getBriefGrounding.run({ sessionId: session.id })).grounding!.result.rulesRead).toBe(true);
+  });
+
   it("accepts a ticket that changes no files, and so lists no proving test", async () => {
     const { session } = await aSessionWithHandoff();
     const spike = withTicket(1, (ticket) => {

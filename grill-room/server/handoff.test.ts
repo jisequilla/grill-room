@@ -2891,6 +2891,65 @@ describe("the repository's delegation values in HANDOFF", () => {
     }
   });
 
+  it("a confirmed cap of one ticket names its citation", () => {
+    for (const deliveryRecipe of RECIPES) {
+      const common = { deliveryRecipe, maxTicketsInFlight: 1 };
+      const base = render(common);
+      const confirmed = render({ ...common, ...stored({ maxTicketsInFlight: { citation: "CLAUDE.md:12" } }) });
+      expect(confirmed, deliveryRecipe).toBe(
+        withNote(
+          swap(base, "at a time. Every", "at a time. The repository sets this cap: `CLAUDE.md:12`. Every"),
+          precedence("CLAUDE.md"),
+        ),
+      );
+    }
+  });
+
+  it("the precedence line sorts files by code point", () => {
+    for (const deliveryRecipe of RECIPES) {
+      const markdown = render(
+        { deliveryRecipe },
+        proposing({
+          maxTicketsInFlight: { value: 2, citation: "docs/a.md:1" },
+          reviewRule: { citation: "Zeta.md:2" },
+        }),
+      );
+      const paragraph = markdown
+        .split("\n\n")
+        .find((part) => part.startsWith("Where this lifecycle differs from the repository's own rules"));
+      expect(paragraph, deliveryRecipe).toBe(precedence("Zeta.md", "docs/a.md"));
+    }
+  });
+
+  it("renderHandoff gives the page the grounding's delegation proposals", () => {
+    const grounding = proposing({ pruneCommand: { command: "just prune", citation: "CLAUDE.md:1" } }, { rulesRead: true });
+    expect(renderHandoff(aSource(), { grounding }).markdown).toBe(
+      renderHandoffMarkdown(aSource(), true, undefined, grounding),
+    );
+  });
+
+  it("a pending prune proposal renders with adversarial review off", () => {
+    for (const deliveryRecipe of RECIPES) {
+      const common = { deliveryRecipe, adversarialReview: false };
+      const base = render(common);
+      const pending = render(
+        common,
+        proposing({ pruneCommand: { command: "just prune", citation: "CLAUDE.md:1" } }),
+      );
+      const sentence =
+        "The repository proposes its own prune command, `just prune` (`CLAUDE.md:1`); it is not confirmed, so the last step uses the default.";
+      expect(pending, deliveryRecipe).toBe(
+        withNote(swap(base, pruneLine(false), `${pruneLine(false)}\n\n${sentence}`), precedence("CLAUDE.md")),
+      );
+    }
+  });
+
+  it("pins the fingerprint for stored delegation values", () => {
+    const values = serializeDelegationValues({ pruneCommand: { command: "just prune", citation: "CLAUDE.md:4" } });
+    expect(handoffFingerprint(aSource({ delegationValuesJson: values }))).toBe("6a94f43a218af15715f99718ba19207284fa1522c53f3d605fa8b35b612b0603");
+    expect(handoffFingerprint(aSource({ delegationProposalsJson: values }))).toBe("e83f9d5f9cb948b35db7ca7873a8ec3287093a6e5451793e02381786393e336d");
+  });
+
   it("a confirmed prune command replaces every default prune step", () => {
     const values = stored({ pruneCommand: { command: "just prune-worktrees", citation: ".claude/rules/worktrees.md:120" } });
     for (const deliveryRecipe of RECIPES) {
