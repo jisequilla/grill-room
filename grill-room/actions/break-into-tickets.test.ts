@@ -1,6 +1,6 @@
 import { rmSync } from "node:fs";
 
-import { eq } from "@agent-native/core/db/schema";
+import { eq, sql } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -16,6 +16,7 @@ import {
   longChainTurns,
   rateLimitedTurn,
 } from "../server/interviewer/fake.js";
+import { renderTicketFile } from "../server/export.js";
 import { buildPrompt } from "../server/interviewer/prompt.js";
 import { type ProposedTicket, validateTicketSet } from "../server/tickets.js";
 import { MAX_TURN_RETRIES } from "../server/turn.js";
@@ -2068,24 +2069,37 @@ describe("a ticket's implemented decisions", () => {
 
   const buildWith = (implementsDecisions: string[]) =>
     ticketsTurn([{ number: 1, slug: "one", implementsDecisions }]);
-  const gateSet = (gateKeys: string[]) =>
+  const gateSet = (gateKeys: string[], buildKeys: string[][] = [[], []]) =>
     ticketsTurn([
-      { number: 1, slug: "one" },
+      { number: 1, slug: "one", implementsDecisions: buildKeys[0] ?? [] },
       { number: 2, slug: "two", kind: "gate", waitsFor: GATE_WAIT, implementsDecisions: gateKeys },
-      { number: 3, slug: "three", blockedBy: [2], implements: [] },
+      { number: 3, slug: "three", blockedBy: [2], implements: [], implementsDecisions: buildKeys[1] ?? [] },
     ]);
+  const GOOD_BUILD = ticketsTurn([
+    { number: 1, slug: "one", implementsDecisions: ["storage-engine"] },
+    { number: 2, slug: "two", blockedBy: [1], implementsDecisions: ["api-shape", "new-key"] },
+  ]);
+  const GOOD_BUILD_STORED = [["storage-engine"], ["api-shape", "new-key"]];
+  const GOOD_GATE = gateSet([], [["storage-engine"], ["api-shape"]]);
+  const GOOD_GATE_STORED = [["storage-engine"], [], ["api-shape"]];
 
   async function storedKeys(sessionId: string): Promise<(string[] | null)[]> {
     const { tickets } = await listTickets.run({ sessionId });
     return tickets.map((ticket) => ticket.implementsDecisions);
   }
 
-  async function refusedThenStored(bad: ScriptedTurn, good: ScriptedTurn, reasons: string[]) {
+  async function refusedThenStored(
+    bad: ScriptedTurn,
+    good: ScriptedTurn,
+    reasons: string[],
+    stored: string[][],
+  ) {
     const sessionId = await aSessionWithDecisions();
     const interviewer = scriptInterviewer([bad, good]);
     await breakIntoTickets.run({ sessionId });
     expect(breakRequests(interviewer)).toHaveLength(2);
     expect(rejectionOf(interviewer.requests[1])).toBe(reasons.join(" "));
+    expect(await storedKeys(sessionId)).toEqual(stored);
   }
 
   it("stores two citable keys in order", async () => {
@@ -2110,13 +2124,13 @@ describe("a ticket's implemented decisions", () => {
   });
 
   it("refuses a key the session does not have", async () => {
-    await refusedThenStored(buildWith(["no-such-key"]), buildWith([]), [MISSING(1, "no-such-key")]);
+    await refusedThenStored(buildWith(["no-such-key"]), GOOD_BUILD, [MISSING(1, "no-such-key")], GOOD_BUILD_STORED);
   });
 
   it("refuses a key whose decision is not settled", async () => {
-    await refusedThenStored(buildWith(["open-question-key"]), buildWith([]), [
+    await refusedThenStored(buildWith(["open-question-key"]), GOOD_BUILD, [
       UNSETTLED(1, "open-question-key"),
-    ]);
+    ], GOOD_BUILD_STORED);
   });
 
   it("refuses a key whose decision is settled but dispositioned or a steering move", async () => {
@@ -2128,20 +2142,21 @@ describe("a ticket's implemented decisions", () => {
     await seedDecision(sessionId, "d-def", "deferred-key", { answerKind: "deferred" });
     const interviewer = scriptInterviewer([
       buildWith(["dispositioned-key", "deferred-key"]),
-      buildWith([]),
+      GOOD_BUILD,
     ]);
     await breakIntoTickets.run({ sessionId });
     expect(rejectionOf(interviewer.requests[1])).toBe(
       [UNSETTLED(1, "dispositioned-key"), UNSETTLED(1, "deferred-key")].join(" "),
     );
+    expect(await storedKeys(sessionId)).toEqual(GOOD_BUILD_STORED);
   });
 
   it("refuses a key whose decision a later one replaced", async () => {
-    await refusedThenStored(buildWith(["old-key"]), buildWith([]), [REPLACED(1, "old-key")]);
+    await refusedThenStored(buildWith(["old-key"]), GOOD_BUILD, [REPLACED(1, "old-key")], GOOD_BUILD_STORED);
   });
 
   it("refuses a gate that lists a key", async () => {
-    await refusedThenStored(gateSet(["api-shape"]), gateSet([]), [GATE_REASON(2)]);
+    await refusedThenStored(gateSet(["api-shape"]), GOOD_GATE, [GATE_REASON(2)], GOOD_GATE_STORED);
   });
 
   it("accepts a gate that lists none", async () => {
@@ -2153,14 +2168,14 @@ describe("a ticket's implemented decisions", () => {
   });
 
   it("gives a gate that lists an unknown key the gate reason only", async () => {
-    await refusedThenStored(gateSet(["no-such-key"]), gateSet([]), [GATE_REASON(2)]);
+    await refusedThenStored(gateSet(["no-such-key"]), GOOD_GATE, [GATE_REASON(2)], GOOD_GATE_STORED);
   });
 
   it("gives a bad pair of keys one reason each, in the ticket's order", async () => {
-    await refusedThenStored(buildWith(["no-such-key", "open-question-key"]), buildWith([]), [
+    await refusedThenStored(buildWith(["no-such-key", "open-question-key"]), GOOD_BUILD, [
       MISSING(1, "no-such-key"),
       UNSETTLED(1, "open-question-key"),
-    ]);
+    ], GOOD_BUILD_STORED);
   });
 
   it("accepts a decision with no key cited by its id", async () => {
@@ -2208,22 +2223,22 @@ describe("a ticket's implemented decisions", () => {
 
   it("a ticket stored before the decision check reads implementsDecisions null", async () => {
     const sessionId = await aSessionWithDecisions();
-    const now = new Date().toISOString();
-    await getDb().insert(schema.tickets).values({
-      id: "t-old",
-      sessionId,
-      number: 1,
-      slug: "old",
-      title: "Old",
-      body: "Made before the decision check.",
-      status: "ready",
-      kind: "build",
-      blockedByJson: "[]",
-      createdAt: now,
-      updatedAt: now,
-    });
+    await getDb().execute(
+      sql`INSERT INTO gr_tickets (id, session_id, number, slug, title, body, status, kind, blocked_by_json, created_at, updated_at)
+          VALUES ('t-old', ${sessionId}, 1, 'old', 'Old', 'Made before the decision check.', 'ready', 'build', '[]', 'now', 'now')`,
+    );
     const { tickets } = await listTickets.run({ sessionId });
     expect(tickets.map((ticket) => ticket.implementsDecisions)).toEqual([null]);
+    const [row] = await getDb().select().from(schema.tickets).where(eq(schema.tickets.id, "t-old"));
+    expect(row!.implementsDecisionsJson).toBeNull();
+    const file = renderTicketFile({
+      label: "01-old",
+      title: tickets[0]!.title,
+      body: tickets[0]!.body,
+      blockedByLabels: [],
+      implementsDecisions: tickets[0]!.implementsDecisions,
+    });
+    expect(file).not.toContain("Implements decisions:");
   });
 
   it("every implemented-decisions shape the breakdown prompt describes is accepted", async () => {
