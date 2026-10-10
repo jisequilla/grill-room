@@ -501,6 +501,8 @@ build and can be deleted after it:
 <root>/<workingExportFolder>/<folderName>/.grill-room-export.json
 ```
 
+`decisions.md` marks each ADR-worthy entry with `ADR-worthy`, `Amends` (when it supersedes a repo decision) and `Consequences`, and carries no path to a suggestion file or to the ADR it suggests.
+
 Everything that lists files across both roots (the plan, `preview-export`'s
 `files`, `plannedWrites` and `plannedRemovals`, `export-session`'s `written`
 and `removed`) lists the durable root first, then the working root, each in

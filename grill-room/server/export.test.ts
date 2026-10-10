@@ -1319,3 +1319,242 @@ describe("planExport: a ticket's Implements line", () => {
     );
   });
 });
+
+describe("planExport: decisions.md ADR marks", () => {
+  type Convention = NonNullable<ScoutReportWithStaleness["facts"]["adrConvention"]>;
+
+  function convention(folder: string, prefix: string): Convention {
+    return {
+      folder,
+      numbering: { prefix, width: 3, nextNumber: `${prefix}013`, example: `${prefix}012-x.md` },
+      template: null,
+    };
+  }
+
+  function render(
+    decisions: readonly DecisionView[],
+    adrConvention: Convention | null,
+    withScoutReport = true,
+  ): string | undefined {
+    const report = scoutReportFixture();
+    const scoutReport = withScoutReport ? { ...report, facts: { ...report.facts, adrConvention } } : null;
+    const plan = planExport({
+      sessionTitle: "Grill Room",
+      idea: "An idea.",
+      specMarkdown: "## Problem\n\nA spec.",
+      tickets: [],
+      decisions,
+      readiness: null,
+      scoutReport,
+    });
+    return plan.files.find((file) => file.relativePath === "decisions.md")?.content;
+  }
+
+  function entryOf(content: string | undefined, key: string): string {
+    const start = content!.indexOf(`<a id="${key}"></a>`);
+    const rest = content!.slice(start);
+    const end = rest.search(/\n\n(?:<a id=|## )/);
+    return end === -1 ? rest.trimEnd() : rest.slice(0, end);
+  }
+
+  function reopened(key: string, citation: string, overrides: Partial<DecisionView> = {}) {
+    return decision(key, {
+      introducedBy: "repo",
+      repo: { source: "recorded", citation, statement: `Statement of ${key}`, scoutReportId: "report-1" },
+      ...overrides,
+    });
+  }
+
+  function replacedByE(): Partial<DecisionView> {
+    return { replacedBy: { id: "id-e", key: "e", title: "Title of e", reason: "r" } };
+  }
+
+  function flaggedE(overrides: Partial<DecisionView> = {}) {
+    return decision("e", { adrWorthy: true, consequences: "Commits us.", ...overrides });
+  }
+
+  function eText(...adrLines: string[]): string {
+    return [
+      '<a id="e"></a>',
+      "### Title of e",
+      "",
+      "- **Decision:** Answer of e",
+      "- **Origin:** interviewer · accepted recommendation",
+      ...adrLines,
+    ].join("\n");
+  }
+
+  const NMON = convention("docs/adr", "NMON-");
+  const BARE = convention("docs/adr", "");
+  const CONS = "- **Consequences:** Commits us.";
+
+  const rows: {
+    name: string;
+    citations: string[];
+    convention: Convention | null;
+    amends: string | null;
+  }[] = [
+    { name: "a numbered ADR", citations: ["docs/adr/NMON-012-read-model.md:4"], convention: NMON, amends: "NMON-012 (docs/adr/NMON-012-read-model.md)" },
+    { name: "a citation without a line", citations: ["CLAUDE.md"], convention: NMON, amends: "CLAUDE.md" },
+    { name: "an empty citation", citations: [""], convention: NMON, amends: null },
+    { name: "a dated name", citations: ["docs/adr/2024-01-05-x.md:1"], convention: BARE, amends: "docs/adr/2024-01-05-x.md" },
+    { name: "a template name", citations: ["docs/adr/0000-template.md:1"], convention: BARE, amends: "docs/adr/0000-template.md" },
+    { name: "a prefix whose case differs", citations: ["docs/adr/nmon-012-x.md:1"], convention: NMON, amends: "docs/adr/nmon-012-x.md" },
+    { name: "a line range", citations: ["docs/adr/0007-queue.md:1-9"], convention: BARE, amends: "0007 (docs/adr/0007-queue.md)" },
+    { name: "no convention", citations: ["docs/adr/NMON-012-read-model.md:4"], convention: null, amends: "docs/adr/NMON-012-read-model.md" },
+    { name: "a path outside the folder", citations: ["CLAUDE.md:12"], convention: NMON, amends: "CLAUDE.md" },
+    { name: "a matching name in another folder", citations: ["docs/adr/old/NMON-012-x.md:4"], convention: NMON, amends: "docs/adr/old/NMON-012-x.md" },
+    { name: "a name that does not match", citations: ["docs/adr/notes.md:3"], convention: NMON, amends: "docs/adr/notes.md" },
+    { name: "a different prefix", citations: ["docs/adr/0007-queue.md:2"], convention: NMON, amends: "docs/adr/0007-queue.md" },
+    {
+      name: "two replaced decisions in tree order",
+      citations: ["docs/adr/NMON-012-a.md:4", ".claude/rules/x.md:3"],
+      convention: NMON,
+      amends: "NMON-012 (docs/adr/NMON-012-a.md), .claude/rules/x.md",
+    },
+    {
+      name: "two replaced decisions citing one file",
+      citations: ["docs/adr/NMON-012-a.md:4", "docs/adr/NMON-012-a.md:30"],
+      convention: NMON,
+      amends: "NMON-012 (docs/adr/NMON-012-a.md)",
+    },
+  ];
+
+  describe("decisions.md: an ADR-worthy entry's Amends line", () => {
+    for (const row of rows) {
+      it(row.name, () => {
+        const replaced = row.citations.map((citation, index) =>
+          reopened(`r${index + 1}`, citation, replacedByE()),
+        );
+        const content = render([...replaced, flaggedE()], row.convention);
+        const expected = eText(
+          "- **ADR-worthy:** yes",
+          ...(row.amends === null ? [] : [`- **Amends:** ${row.amends}`]),
+          CONS,
+        );
+        expect(entryOf(content, "e")).toBe(expected);
+      });
+    }
+
+    it("flagged, replacing nothing: no Amends line", () => {
+      expect(entryOf(render([flaggedE()], NMON), "e")).toBe(eText("- **ADR-worthy:** yes", CONS));
+    });
+
+    it("flagged, replacing a decision that is not a repo decision: no Amends line", () => {
+      const other = decision("o", replacedByE());
+      expect(entryOf(render([other, flaggedE()], NMON), "e")).toBe(eText("- **ADR-worthy:** yes", CONS));
+    });
+
+    it("unflagged, replacing a repo decision: no ADR fields", () => {
+      const r = reopened("r1", "docs/adr/NMON-012-a.md:4", replacedByE());
+      expect(entryOf(render([r, flaggedE({ adrWorthy: false })], NMON), "e")).toBe(eText());
+    });
+
+    it("a flagged reopened repo decision amends its own citation", () => {
+      const own = reopened("e", "docs/adr/NMON-003-x.md:2", { adrWorthy: true, consequences: "Commits us." });
+      expect(entryOf(render([own], NMON), "e")).toBe(
+        [
+          '<a id="e"></a>',
+          "### Title of e",
+          "",
+          "- **Decision:** Answer of e",
+          "- **Origin:** repo (recorded) · reopened",
+          "- **Source:** docs/adr/NMON-003-x.md:2",
+          '- **Supersedes:** "Statement of e"',
+          "- **ADR-worthy:** yes",
+          "- **Amends:** NMON-003 (docs/adr/NMON-003-x.md)",
+          "- **Consequences:** Commits us.",
+        ].join("\n"),
+      );
+    });
+
+    it("a flagged decision later replaced by a flagged one carries no ADR fields, the replacer does", () => {
+      const r = reopened("r1", "docs/adr/NMON-003-x.md:2", {
+        adrWorthy: true,
+        consequences: "Old.",
+        ...replacedByE(),
+      });
+      const content = render([r, flaggedE()], NMON);
+      expect(entryOf(content, "r1")).toBe(
+        [
+          '<a id="r1"></a>',
+          "### Title of r1",
+          "",
+          "- **Decision:** Answer of r1",
+          "- **Origin:** repo (recorded) · reopened",
+          "- **Superseded by:** [Title of e](#e): r",
+          "- **Source:** docs/adr/NMON-003-x.md:2",
+          '- **Supersedes:** "Statement of r1"',
+        ].join("\n"),
+      );
+      expect(entryOf(content, "e")).toBe(
+        eText("- **ADR-worthy:** yes", "- **Amends:** NMON-003 (docs/adr/NMON-003-x.md)", CONS),
+      );
+    });
+  });
+
+  it("decisions.md: an ADR-worthy entry ends with ADR-worthy, Amends and Consequences", () => {
+    const own = reopened("e", "docs/adr/NMON-003-x.md:2", {
+      answer: { text: "Own answer.", kind: "own-answer" },
+      adrWorthy: true,
+      consequences: "  Commits us to X.\n\nRules out Y.  ",
+    });
+    expect(entryOf(render([own], NMON), "e")).toBe(
+      [
+        '<a id="e"></a>',
+        "### Title of e",
+        "",
+        "- **Decision:** Own answer.",
+        "- **Origin:** repo (recorded) · reopened",
+        "- **Source:** docs/adr/NMON-003-x.md:2",
+        '- **Supersedes:** "Statement of e"',
+        "- **ADR-worthy:** yes",
+        "- **Amends:** NMON-003 (docs/adr/NMON-003-x.md)",
+        "- **Consequences:** Commits us to X.",
+        "  ",
+        "  Rules out Y.",
+      ].join("\n"),
+    );
+  });
+
+  it("decisions.md: an unflagged entry renders as before, whatever its consequences hold", () => {
+    const withText = render([decision("e", { adrWorthy: false, consequences: "X." })], NMON);
+    const without = render([decision("e", { adrWorthy: false, consequences: null })], NMON);
+    expect(withText).toBe(without);
+    expect(withText).not.toContain("ADR-worthy");
+  });
+
+  it("decisions.md: a flagged kept repo decision is marked under Built under", () => {
+    const kept = {
+      ...keptRepo("queue-choice", "docs/decisions.md:12"),
+      adrWorthy: true,
+      consequences: "  Commits us to X.\n\nRules out Y.  ",
+    };
+    const content = render([decision("storage"), kept, keptRepo("zplain", "a.md:1")], NMON)!;
+    expect(content.slice(content.indexOf("## Built under"))).toBe(
+      [
+        "## Built under",
+        "",
+        "- `queue-choice`: docs/decisions.md:12 · ADR-worthy",
+        "  Consequences: Commits us to X.",
+        "  ",
+        "  Rules out Y.",
+        "- `zplain`: a.md:1",
+        "",
+      ].join("\n"),
+    );
+    const alone = { ...keptRepo("queue-choice", "docs/decisions.md:12"), adrWorthy: true, consequences: "X." };
+    expect(render([alone], NMON)).toBeUndefined();
+  });
+
+  it("planExport passes the scout report's ADR convention to decisions.md", () => {
+    const r = reopened("r1", "docs/adr/NMON-012-read-model.md:4", replacedByE());
+    const decisions = [r, flaggedE()];
+    expect(entryOf(render(decisions, NMON), "e")).toContain(
+      "- **Amends:** NMON-012 (docs/adr/NMON-012-read-model.md)\n",
+    );
+    expect(entryOf(render(decisions, NMON, false), "e")).toContain(
+      "- **Amends:** docs/adr/NMON-012-read-model.md\n",
+    );
+  });
+});

@@ -10,8 +10,10 @@
  */
 
 import { createHash } from "node:crypto";
+import path from "node:path";
 
 import type { TicketKind } from "../shared/session-constants.js";
+import type { AdrConvention } from "./project-facts.js";
 import type { StoredReadiness } from "./readiness.js";
 import type { ScoutReportWithStaleness } from "./scout-report.js";
 import { numberRanges } from "./tickets.js";
@@ -593,10 +595,51 @@ function linkedReference(
   return `\`${linked ? decisionKey(linked) : (link.key ?? link.id)}\``;
 }
 
+/** A citation's path: `c` without a trailing `:line` or `:start-end`. */
+function citationPath(citation: string): string {
+  return citation.trim().replace(/:\d+(?:-\d+)?$/, "");
+}
+
+/** The ADR number a cited path carries under the project's numbering, or null. */
+function adrNumber(citedPath: string, adrConvention: AdrConvention | null): string | null {
+  const numbering = adrConvention?.numbering;
+  if (!adrConvention || !numbering) return null;
+  if (path.posix.dirname(citedPath) !== adrConvention.folder) return null;
+  const name = path.posix.basename(citedPath);
+  if (/^\d{4}-\d{2}-\d{2}/.test(name) || /template/i.test(name)) return null;
+  const match = new RegExp(`^${escapeRegExp(numbering.prefix)}(\\d{1,9})(?:[-_].*)?\\.[mM][dD]$`).exec(name);
+  return match ? `${numbering.prefix}${match[1]}` : null;
+}
+
+/** What a flagged entry amends: its own repo citation and those of the repo decisions it replaced. */
+function amendsTargets(
+  decision: DecisionView,
+  repoDecisions: readonly DecisionView[],
+  adrConvention: AdrConvention | null,
+): string[] {
+  const citations: string[] = [];
+  if (decision.introducedBy === "repo" && decision.repo) citations.push(decision.repo.citation);
+  for (const replaced of repoDecisions) {
+    if (replaced.replacedBy?.id === decision.id && replaced.repo) citations.push(replaced.repo.citation);
+  }
+  const seen = new Set<string>();
+  const targets: string[] = [];
+  for (const citation of citations) {
+    const citedPath = citationPath(citation);
+    if (citedPath.length === 0 || seen.has(citedPath)) continue;
+    seen.add(citedPath);
+    const number = adrNumber(citedPath, adrConvention);
+    targets.push(number ? `${number} (${citedPath})` : citedPath);
+  }
+  return targets;
+}
+
 function renderEntry(
   decision: DecisionView,
   order: ReadonlyMap<string, number>,
   byId: ReadonlyMap<string, DecisionView>,
+  repoDecisions: readonly DecisionView[],
+  adrConvention: AdrConvention | null,
 ): string {
   const lines = [
     `<a id="${decisionKey(decision)}"></a>`,
@@ -649,6 +692,13 @@ function renderEntry(
     lines.push(field("Supersedes", `"${oneLine(decision.repo.statement)}"`));
   }
 
+  if (decision.adrWorthy && !decision.replacedBy) {
+    lines.push(field("ADR-worthy", "yes"));
+    const targets = amendsTargets(decision, repoDecisions, adrConvention);
+    if (targets.length > 0) lines.push(field("Amends", targets.join(", ")));
+    lines.push(field("Consequences", decision.consequences ?? ""));
+  }
+
   return lines.join("\n");
 }
 
@@ -671,6 +721,7 @@ function renderEntry(
 export function renderDecisionsFile(
   sessionTitle: string,
   decisions: readonly DecisionView[],
+  adrConvention: AdrConvention | null,
 ): string | null {
   const ordered = topologicalOrder(decisions);
   const order = new Map(ordered.map((decision, index) => [decision.id, index]));
@@ -679,6 +730,7 @@ export function renderDecisionsFile(
   const entries = ordered.filter(isEntry);
   const outOfScope = ordered.filter((decision) => isDispositionedTo(decision, "out-of-scope"));
   const builtUnder = ordered.filter(isBuiltUnder);
+  const repoDecisions = ordered.filter((decision) => decision.introducedBy === "repo" && decision.repo);
 
   if (entries.length === 0 && outOfScope.length === 0) return null;
 
@@ -688,7 +740,7 @@ export function renderDecisionsFile(
   ];
 
   if (entries.length > 0) {
-    sections.push("## Decisions", ...entries.map((entry) => renderEntry(entry, order, byId)));
+    sections.push("## Decisions", ...entries.map((entry) => renderEntry(entry, order, byId, repoDecisions, adrConvention)));
   }
 
   if (outOfScope.length > 0) {
@@ -708,7 +760,12 @@ export function renderDecisionsFile(
     sections.push(
       "## Built under",
       builtUnder
-        .map((decision) => `- \`${decisionKey(decision)}\`: ${decision.repo?.citation ?? ""}`)
+        .map((decision) => {
+          const line = `- \`${decisionKey(decision)}\`: ${decision.repo?.citation ?? ""}`;
+          if (!decision.adrWorthy) return line;
+          const consequences = (decision.consequences ?? "").trim().split(/\r?\n/).join("\n  ");
+          return `${line} · ADR-worthy\n  Consequences: ${consequences}`;
+        })
         .join("\n"),
     );
   }
@@ -893,7 +950,11 @@ export function planExport(input: PlanExportInput): ExportPlan {
     },
   ];
 
-  const decisionsFile = renderDecisionsFile(input.sessionTitle, input.decisions);
+  const decisionsFile = renderDecisionsFile(
+    input.sessionTitle,
+    input.decisions,
+    input.scoutReport?.facts.adrConvention ?? null,
+  );
   if (decisionsFile !== null) {
     files.push({ relativePath: DECISIONS_FILE, content: decisionsFile });
   }
