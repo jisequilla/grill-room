@@ -719,3 +719,21 @@ describe("the round contract: ADR-worthy flag and Consequences", () => {
     }
   });
 });
+
+describe("break-into-tickets: implementsDecisions", () => {
+  it("the breakdown contract requires implementsDecisions", () => {
+    const schema = jsonSchemaFor("break-into-tickets") as {
+      properties: { tickets: { items: { required: string[] } } };
+    };
+
+    expect(schema.properties.tickets.items.required).toContain("implementsDecisions");
+  });
+
+  it("defaults implementsDecisions to empty for a reply that predates it", () => {
+    const parsed = breakIntoTicketsResultSchema.parse({
+      tickets: [{ number: 1, slug: "one", title: "One", body: "", blockedBy: [] }],
+    });
+
+    expect(parsed.tickets[0]!.implementsDecisions).toEqual([]);
+  });
+});

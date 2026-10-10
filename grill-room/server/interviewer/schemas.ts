@@ -266,6 +266,8 @@ export const breakIntoTicketsResultSchema = z.strictObject({
       waitsFor: z.string().nullable().default(null),
       /** Numbers of the spec's user stories this ticket builds. */
       implements: z.array(z.number().int().positive()).default([]),
+      /** Keys of the settled decisions this ticket builds, as the decision list shows them. */
+      implementsDecisions: z.array(decisionKey).default([]),
     }),
   ),
 });

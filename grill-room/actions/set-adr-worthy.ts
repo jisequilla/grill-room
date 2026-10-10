@@ -3,9 +3,8 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
+import { citability } from "../server/tickets.js";
 import { describeDecisions } from "../server/tree.js";
-
-const SETTLED_KINDS = ["accepted-recommendation", "own-answer", "repo-established"];
 
 export default defineAction({
   description:
@@ -42,18 +41,14 @@ export default defineAction({
       .orderBy(schema.decisions.createdAt, schema.decisions.id);
 
     const view = describeDecisions(siblings).find((d) => d.id === decisionId);
-    if (
-      !view ||
-      view.state !== "settled" ||
-      !view.answer ||
-      !SETTLED_KINDS.includes(view.answer.kind)
-    ) {
+    const citable = view ? citability(view) : "not-settled";
+    if (citable === "not-settled") {
       fail(
         `"${row.questionTitle}" is not settled with a real answer, so it cannot be flagged ADR-worthy.`,
         { errorCode: "decision-not-settled", statusCode: 409 },
       );
     }
-    if (view.replacedBy) {
+    if (citable === "replaced") {
       fail(
         `"${row.questionTitle}" was replaced by a later decision, so it cannot be flagged ADR-worthy.`,
         { errorCode: "decision-replaced", statusCode: 409 },

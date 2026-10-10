@@ -625,6 +625,11 @@ export const tickets = table(
      * tickets made before the story check existed.
      */
     implementsJson: text("implements_json"),
+    /**
+     * JSON array of the keys of the settled decisions this ticket builds. NULL
+     * for tickets made before the decision check existed.
+     */
+    implementsDecisionsJson: text("implements_decisions_json"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

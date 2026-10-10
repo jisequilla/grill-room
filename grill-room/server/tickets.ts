@@ -10,7 +10,7 @@
  * without an action's setup around them.
  */
 import type { TicketKind, TicketStatus } from "./db/schema.js";
-import { parseStringArray } from "./tree.js";
+import { parseStringArray, type DecisionView } from "./tree.js";
 
 /** A ticket as the interviewer proposes it: `blockedBy` holds ticket numbers. */
 export interface ProposedTicket {
@@ -25,6 +25,8 @@ export interface ProposedTicket {
   waitsFor: string | null;
   /** The numbers of the spec's user stories this ticket builds. */
   implements: readonly number[];
+  /** The keys of the settled decisions this ticket builds. */
+  implementsDecisions?: readonly string[];
 }
 
 export interface TicketSetValidation {
@@ -481,6 +483,8 @@ export interface StoredTicket {
   waitsFor: string | null;
   /** JSON array of user story numbers; null for tickets made before the story check. */
   implementsJson: string | null;
+  /** JSON array of decision keys; null for tickets made before the decision check. */
+  implementsDecisionsJson: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -499,6 +503,8 @@ export interface TicketView {
   waitsFor: string | null;
   /** The user stories it builds; null for tickets made before the story check. */
   implements: number[] | null;
+  /** The keys of the settled decisions it builds; null for tickets made before the decision check. */
+  implementsDecisions: string[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -525,6 +531,7 @@ export function describeTickets(
       kind: row.kind,
       waitsFor: row.waitsFor,
       implements: parseImplements(row.implementsJson),
+      implementsDecisions: parseImplementsDecisions(row.implementsDecisionsJson),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }));
@@ -546,6 +553,107 @@ export function parseImplements(json: string | null): number[] | null {
   return parsed.filter(
     (value): value is number => typeof value === "number" && Number.isInteger(value) && value > 0,
   );
+}
+
+/**
+ * A stored `implementsDecisionsJson` read back: null for a NULL column,
+ * otherwise the array's non-empty strings, and `[]` for text that is not a
+ * JSON array.
+ */
+export function parseImplementsDecisions(json: string | null): string[] | null {
+  if (json === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((value): value is string => typeof value === "string" && value !== "");
+}
+
+/** What a ticket's `implementsDecisions` is stored as: duplicates dropped, first order kept. */
+export function storedImplementsDecisions(keys: readonly string[]): string[] {
+  return [...new Set(keys)];
+}
+
+/**
+ * Whether a ticket may cite a decision: settled with a real answer and not
+ * replaced. The same set `set-adr-worthy` accepts.
+ */
+export function citability(
+  decision: Pick<DecisionView, "state" | "answer" | "replacedBy">,
+): "citable" | "not-settled" | "replaced" {
+  if (
+    decision.state !== "settled" ||
+    !decision.answer ||
+    !["accepted-recommendation", "own-answer", "repo-established"].includes(decision.answer.kind)
+  ) {
+    return "not-settled";
+  }
+  return decision.replacedBy ? "replaced" : "citable";
+}
+
+/**
+ * The key a ticket cites a decision by: the one the breakdown prompt prints,
+ * the decision's key or else its id.
+ */
+function citedKey(decision: Pick<DecisionView, "id" | "key">): string {
+  return decision.key ?? decision.id;
+}
+
+/** The keys of the decisions a ticket may cite, in the decisions' order. */
+export function citableDecisionKeys(
+  decisions: readonly Pick<DecisionView, "id" | "key" | "state" | "answer" | "replacedBy">[],
+): string[] {
+  return decisions.filter((d) => citability(d) === "citable").map(citedKey);
+}
+
+/**
+ * Why a proposed set's decision citations cannot be stored, written for the
+ * interviewer. Per ticket, in number order: a gate that cites any decision, or
+ * else one reason per cited key the session does not have, has not settled, or
+ * has replaced. Empty when the session has no citable decision.
+ */
+export function decisionReasons(
+  tickets: readonly ProposedTicket[],
+  decisions: readonly Pick<DecisionView, "id" | "key" | "state" | "answer" | "replacedBy">[],
+): string[] {
+  if (citableDecisionKeys(decisions).length === 0) return [];
+  const byKey = new Map(decisions.map((decision) => [citedKey(decision), decision]));
+  const reasons: string[] = [];
+
+  for (const ticket of [...tickets].sort((a, b) => a.number - b.number)) {
+    const keys = storedImplementsDecisions(ticket.implementsDecisions ?? []);
+    if (ticket.kind === "gate") {
+      if (keys.length > 0) {
+        reasons.push(
+          `Ticket ${ticket.number} is a gate, so it implements no decision. Leave its \`implementsDecisions\` empty.`,
+        );
+      }
+      continue;
+    }
+    for (const key of keys) {
+      const decision = byKey.get(key);
+      if (!decision) {
+        reasons.push(
+          `Ticket ${ticket.number} implements decision \`${key}\`, which the session does not have. Use a key from the decision list.`,
+        );
+        continue;
+      }
+      const verdict = citability(decision);
+      if (verdict === "not-settled") {
+        reasons.push(
+          `Ticket ${ticket.number} implements decision \`${key}\`, which is not a settled decision. List only settled decisions.`,
+        );
+      } else if (verdict === "replaced") {
+        reasons.push(
+          `Ticket ${ticket.number} implements decision \`${key}\`, which a later decision replaced. List the decision that replaced it.`,
+        );
+      }
+    }
+  }
+  return reasons;
 }
 
 /** What a ticket's `implements` is stored as: deduplicated and ascending. */

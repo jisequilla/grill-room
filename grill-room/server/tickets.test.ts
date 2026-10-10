@@ -4,6 +4,7 @@ import { collisionKey } from "./brief-grounding.js";
 import {
   chainLimit,
   chainReason,
+  citability,
   computeWaves,
   longestChain,
   numberRanges,
@@ -408,5 +409,45 @@ describe("chainLimit and chainReason", () => {
     expect(chainReason(chained(12))).toBeNull();
     expect(chainReason(chained(13))).toContain("is 13 build tickets");
     expect(chainReason(chained(13))).toContain("in a set of 23 build tickets; keep it to 12 or fewer.");
+  });
+});
+
+describe("citability", () => {
+  const settled = (kind: string, overrides: Record<string, unknown> = {}) =>
+    ({
+      state: "settled",
+      answer: { text: "An answer", kind },
+      replacedBy: null,
+      ...overrides,
+    }) as unknown as Parameters<typeof citability>[0];
+
+  it.each(["accepted-recommendation", "own-answer", "repo-established"])(
+    "calls a settled %s answer citable",
+    (kind) => {
+      expect(citability(settled(kind))).toBe("citable");
+    },
+  );
+
+  it.each(["dispositioned", "deferred", "unknown", "pushed-back", "prototype-flagged"])(
+    "calls a settled %s answer not settled",
+    (kind) => {
+      expect(citability(settled(kind))).toBe("not-settled");
+    },
+  );
+
+  it.each(["open", "blocked", "stale", "withdrawn", "unplaced"])("calls a %s decision not settled", (state) => {
+    expect(citability(settled("own-answer", { state }))).toBe("not-settled");
+  });
+
+  it("calls a settled decision with no answer not settled", () => {
+    expect(citability(settled("own-answer", { answer: null }))).toBe("not-settled");
+  });
+
+  it("calls a replaced decision replaced", () => {
+    expect(citability(settled("own-answer", { replacedBy: { id: "d-2" } }))).toBe("replaced");
+  });
+
+  it("calls an unsettled decision that was replaced not settled", () => {
+    expect(citability(settled("deferred", { replacedBy: { id: "d-2" } }))).toBe("not-settled");
   });
 });

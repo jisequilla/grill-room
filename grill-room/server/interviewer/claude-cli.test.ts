@@ -2454,6 +2454,33 @@ describe("what the adapter sends to break a spec into tickets", () => {
     }
   });
 
+  it("the breakdown prompt has no decisions section without citable decisions", async () => {
+    async function promptFor(citableDecisionKeys: string[] | undefined): Promise<string> {
+      const runner = recordingRunner([ok(anEnvelope({ structured_output: { tickets: [] } }))]);
+      await createClaudeCliInterviewer({ runCli: runner.runCli }).breakIntoTickets({
+        kind: "break-into-tickets",
+        context: aContext(),
+        specMarkdown: "## Problem Statement\n\nExport the training log.",
+        greenfield: false,
+        verifyCommand: "pnpm test",
+        userStories: [],
+        ...(citableDecisionKeys === undefined ? {} : { citableDecisionKeys }),
+        rejectionReason: null,
+      });
+      return valueOf(runner.invocations[0]!.args, "-p") as string;
+    }
+
+    const absent = await promptFor(undefined);
+    expect(absent).not.toContain("## Decisions the tickets build");
+    expect(absent).not.toContain("implementsDecisions");
+    expect(await promptFor([])).toBe(absent);
+
+    const withKeys = await promptFor(["storage-engine", "api-shape"]);
+    expect(withKeys.startsWith(absent)).toBe(true);
+    expect(withKeys).toContain("## Decisions the tickets build");
+    expect(withKeys).toContain("`storage-engine`, `api-shape`");
+  });
+
   describe("the tracked files", () => {
     const CHAIN_END = "rather than chaining them one after another through that file.";
     const GREENFIELD_END =

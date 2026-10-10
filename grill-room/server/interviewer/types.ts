@@ -260,6 +260,12 @@ export interface BreakIntoTicketsRequest extends RequestBase {
    * for no citations and the story check is skipped.
    */
   userStories: number[];
+  /**
+   * The keys of the session's citable decisions, which a ticket may list in
+   * `implementsDecisions`. Read as empty when absent: the prompt then asks for
+   * no citations and the decision check is skipped.
+   */
+  citableDecisionKeys?: string[];
 }
 
 /**

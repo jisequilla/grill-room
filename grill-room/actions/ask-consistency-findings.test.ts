@@ -151,6 +151,7 @@ function flatTickets(count: number): Ticket[] {
     body: `Do the work of ticket ${index + 1}.`,
     blockedBy: [],
     implements: [1],
+    implementsDecisions: [],
     kind: "build" as const,
     waitsFor: null,
   }));
