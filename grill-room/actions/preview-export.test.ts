@@ -700,8 +700,15 @@ describe("preview-export: adrSuggestionsWithoutTickets", () => {
     return { exportBlocked, exportBlockedReason };
   }
 
-  /** A settled, unflagged decision, then the gate as it reads, then the same decision flagged. */
-  async function flaggingChangesOnlyTheWarning(sessionId: string) {
+  /** The gate once flagging gave a session with current tickets an ADR ticket: the handoff no longer matches. */
+  const STALE_GATE = { exportBlocked: true, exportBlockedReason: "handoff-stale" };
+
+  /**
+   * A settled, unflagged decision, then the gate as it reads, then the same
+   * decision flagged: the warning changes, and the gate changes only as
+   * `gateAfterFlagging` says (by default not at all).
+   */
+  async function flaggingChangesOnlyTheWarning(sessionId: string, gateAfterFlagging?: typeof STALE_GATE) {
     const now = new Date().toISOString();
     const decisionId = randomUUID();
     await getDb().insert(schema.decisions).values({
@@ -725,7 +732,7 @@ describe("preview-export: adrSuggestionsWithoutTickets", () => {
     expect({
       exportBlocked: flagged.exportBlocked,
       exportBlockedReason: flagged.exportBlockedReason,
-    }).toEqual(gate);
+    }).toEqual(gateAfterFlagging ?? gate);
     return flagged.adrSuggestionsWithoutTickets;
   }
 
@@ -745,13 +752,13 @@ describe("preview-export: adrSuggestionsWithoutTickets", () => {
   it("flagged with a ticket listing it: empty", async () => {
     const { session } = await aSessionWithHandoff();
     await listTicketBy(session.id, 2, ["storage-engine"]);
-    expect(await flaggingChangesOnlyTheWarning(session.id)).toEqual([]);
+    expect(await flaggingChangesOnlyTheWarning(session.id, STALE_GATE)).toEqual([]);
   });
 
   it("flagged with no ticket listing it: warned", async () => {
     const { session } = await aSessionWithHandoff();
     await listTicketBy(session.id, 2, ["something-else"]);
-    expect(await flaggingChangesOnlyTheWarning(session.id)).toEqual(WARNING);
+    expect(await flaggingChangesOnlyTheWarning(session.id, STALE_GATE)).toEqual(WARNING);
   });
 
   it("flagged with tickets not current: warned, and the export is gated as without the flag", async () => {
@@ -772,6 +779,6 @@ describe("preview-export: adrSuggestionsWithoutTickets", () => {
     const { session } = await aSessionWithHandoff();
     await listTicketBy(session.id, 1, null);
     await listTicketBy(session.id, 2, null);
-    expect(await flaggingChangesOnlyTheWarning(session.id)).toEqual(WARNING);
+    expect(await flaggingChangesOnlyTheWarning(session.id, STALE_GATE)).toEqual(WARNING);
   });
 });

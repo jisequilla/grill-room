@@ -496,7 +496,7 @@ build and can be deleted after it:
 <root>/<durableExportFolder>/<folderName>/decisions.md        # when the tree holds decisions or out-of-scope items
 <root>/<durableExportFolder>/<folderName>/.grill-room-export.json
 <root>/<workingExportFolder>/<folderName>/HANDOFF.md
-<root>/<workingExportFolder>/<folderName>/issues/NN-slug.md   # "Blocked by: NN, NN" line, then "Implements: user stories 2-3, 5" when it cites any, then "Implements decisions: `key`, `key`" when it cites any (never on a gate)
+<root>/<workingExportFolder>/<folderName>/issues/NN-slug.md   # last: NN-record-adrs-from-suggestions.md, the generated ADR ticket, when the session has a suggested decision (see "Handoff"); "Blocked by: NN, NN" line, then "Implements: user stories 2-3, 5" when it cites any, then "Implements decisions: `key`, `key`" when it cites any (never on a gate)
 <root>/<workingExportFolder>/<folderName>/briefs/NN-slug.md
 <root>/<workingExportFolder>/<folderName>/adr-suggestions/<key>.md   # one per ADR-worthy decision
 <root>/<workingExportFolder>/<folderName>/.grill-room-export.json
@@ -770,6 +770,30 @@ when the spec numbers no stories, when every story is cited, or when any
 ticket was made before the story check (`implements` null). Briefs do not
 change.
 
+**The ADR ticket.** When the session has a suggested decision (the decisions
+`decisions.md` marks ADR-worthy, which also get an `adr-suggestions/` file)
+and at least one stored ticket, Grill Room derives one more ticket,
+**Record ADRs from suggestions**, at handoff generation and at export. It is
+never stored in `gr_tickets` and never joins `source.tickets`, `source.waves`
+or `exportFacts.waves`: `adrTicketFor` (`server/handoff.ts`) derives it as
+`source.adrTicket`, numbered one after the highest stored ticket and blocked
+by every stored ticket, gates included, so it sits alone in the last wave.
+Its issue file `issues/NN-record-adrs-from-suggestions.md` is written last
+among the issues (only when the tickets are current), self-contained: it
+lists the suggestions, repeats the repository's detected ADR convention as a
+hint the builder can override (or says none was detected, and the owner
+decides where ADRs go), and is done when every suggestion has a committed
+ADR. It has no brief and no build record (`set-build-record` refuses its
+number, since no ticket row exists), and grounding ignores it: the handoff
+scout never sees it. HANDOFF.md lists it in an extra last wave, extends the
+execution plan, adds a "Recording the repo's ADRs" section after the Waves
+(with the same convention hint), a bead for it under beads tracking and a
+sentence in the build records section. The ticket must be closed before the
+working folder is deleted, because the suggestions are deleted with it. The
+fingerprint holds the suggestions and the convention only when it exists, so
+flagging or unflagging a decision makes the handoff stale; the grounding
+fingerprint leaves it out.
+
 **Questions the spec and tickets leave open.** When the session's
 consistency check is current (`cardsCurrent`) and some reopen card is
 open, HANDOFF.md gains a section of that name right after the uncovered
@@ -1009,11 +1033,17 @@ the command line: the citation pattern, and the three `buildsOn` forms as an
 `anyOf`. What the contract cannot say, and the server cannot verify, the
 prompt states: a dependency's check must fail until the blocker lands, a grep check searches only for text the blocker's ticket states, and a grep proof chains one grep per thing the ticket adds.
 
-The grounding is **current** only while the handoff's fingerprint over today's
-inputs is the one it was made for and the project's `HEAD` is the commit it
-read; `get-brief-grounding` reports `handoff-changed` or `head-moved`
-otherwise. Regenerating the handoff does not make an old grounding current
-again: ground the briefs again instead.
+The grounding is **current** only while the grounding fingerprint over
+today's inputs (`groundingFingerprint`: the handoff fingerprint without the
+generated ADR ticket, which the handoff scout never sees) is the one it was
+made for, a handoff exists, and the project's `HEAD` is the commit it read;
+`get-brief-grounding` reports `handoff-changed` or `head-moved` otherwise.
+Regenerating the handoff alone does not make a grounding stale, and neither
+does flagging or unflagging a decision; an edit to a ticket, a project
+setting or any other input the handoff renders from does, and regenerating
+afterwards does not bring it back: ground the briefs again instead.
+`ground-briefs` still refuses `handoff-stale` unless the handoff matches the
+full handoff fingerprint, and records the grounding fingerprint.
 
 **Rendering from grounding.** `server/handoff.ts`'s `renderBrief` and
 `renderHandoff` take the grounding as an optional argument (a plain

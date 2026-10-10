@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -44,6 +45,7 @@ import listConsistencyFindings from "./list-consistency-findings.js";
 import listTickets from "./list-tickets.js";
 import previewExport from "./preview-export.js";
 import registerProject from "./register-project.js";
+import setAdrWorthy from "./set-adr-worthy.js";
 import setSessionProject from "./set-session-project.js";
 import setTicketBlockedBy from "./set-ticket-blocked-by.js";
 import synthesizeSpec from "./synthesize-spec.js";
@@ -1476,5 +1478,59 @@ describe("reopen cards in the handoff", () => {
     expect(handoff?.stale).toBe(false);
     expect(handoff!.markdown).toContain(NOT_JUDGED_LINE);
     expect((await loadedSource(session.id)).consistencyNotCurrent).toBe(true);
+  });
+});
+
+describe("loadHandoffSource sets the ADR ticket", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  async function insertOwnAnswer(sessionId: string, key: string, extra: Record<string, unknown> = {}) {
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    await getDb()
+      .insert(schema.decisions)
+      .values({
+        id,
+        sessionId,
+        key,
+        questionTitle: `Title of ${key}`,
+        currentAnswer: "An answer",
+        answerKind: "own-answer",
+        settledAt: now,
+        createdAt: now,
+        updatedAt: now,
+        ...extra,
+      });
+    return id;
+  }
+
+  it("names a decision flagged through set-adr-worthy, blocked by every stored ticket", async () => {
+    const { session } = await aReadySession();
+    expect((await loadedSource(session.id)).adrTicket).toBeNull();
+
+    const decisionId = await insertOwnAnswer(session.id, "storage-engine");
+    await setAdrWorthy.run({ decisionId, adrWorthy: true, consequences: "Commits us to a file." });
+
+    expect((await loadedSource(session.id)).adrTicket).toEqual({
+      number: 4,
+      slug: "record-adrs-from-suggestions",
+      title: "Record ADRs from suggestions",
+      blockedBy: [1, 2, 3],
+      suggestions: [{ key: "storage-engine", title: "Title of storage-engine" }],
+      convention: null,
+    });
+  });
+
+  it("gives null for a flagged Decisions entry that a later decision replaced", async () => {
+    const { session } = await aReadySession();
+    const replacement = await insertOwnAnswer(session.id, "new-engine");
+    await insertOwnAnswer(session.id, "storage-engine", {
+      adrWorthy: true,
+      consequences: "Commits us to a file.",
+      replacedById: replacement,
+    });
+
+    expect((await loadedSource(session.id)).adrTicket).toBeNull();
   });
 });

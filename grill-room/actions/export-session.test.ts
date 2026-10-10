@@ -3327,6 +3327,7 @@ describe("ADR suggestions", () => {
     expect(await pathExists(file)).toBe(true);
 
     await setAdrWorthy.run({ decisionId, adrWorthy: false });
+    await generateHandoff.run({ sessionId: session.id });
     const result = await exportSession.run({ sessionId: session.id, slug: SLUG });
 
     expect(await pathExists(file)).toBe(false);
@@ -3340,6 +3341,7 @@ describe("ADR suggestions", () => {
     const file = path.join(working, "adr-suggestions", "storage-engine.md");
     await fs.appendFile(file, "\nMy own note.\n", "utf8");
     await setAdrWorthy.run({ decisionId, adrWorthy: false });
+    await generateHandoff.run({ sessionId: session.id });
 
     const kept = await exportSession.run({ sessionId: session.id, slug: SLUG });
     expect(kept.kept).toContain(file);
@@ -3366,5 +3368,75 @@ describe("ADR suggestions", () => {
 
     await exportSession.run({ sessionId: session.id, slug: SLUG, overridePaths: [path.relative(root, file)] });
     expect(await fs.readFile(file, "utf8")).not.toContain("My own note.");
+  });
+
+  it("writes the ADR ticket's issue file", async () => {
+    const { session, working } = await aSessionWithDecision();
+
+    await exportSession.run({ sessionId: session.id, slug: SLUG });
+
+    const issues = (await fs.readdir(path.join(working, "issues"))).sort();
+    expect(issues).toEqual([
+      "01-build-the-workspace.md",
+      "02-store-on-disk.md",
+      "03-record-adrs-from-suggestions.md",
+    ]);
+    expect(await fs.readFile(path.join(working, "issues", "03-record-adrs-from-suggestions.md"), "utf8")).toBe(
+      [
+        "# 03 Record ADRs from suggestions",
+        "",
+        "Status: ready-for-agent",
+        "Blocked by: 01, 02",
+        "",
+        "Record the repo's ADRs from the suggestions Grill Room wrote for this build.",
+        "",
+        "The suggestions are in `.scratch/a/adr-suggestions/`, one per decision:",
+        "- `storage-engine.md`: Title of storage-engine",
+        "",
+        "If that folder is not in your worktree, read it from the main checkout at the same path. Never write to it.",
+        "",
+        "For each suggestion, write an ADR in the repo's own ADR folder, in its own convention and numbering, from the suggestion's sections. Where a suggestion has an Amends section, the new ADR amends that existing ADR: link them the way the repo does, and never delete or rewrite the old one. Set each ADR's status the way the repo marks an accepted decision once the tickets that build it have landed.",
+        "",
+        "No ADR convention was detected in this repository. Ask the owner where ADRs go, and how they are numbered, before writing them.",
+        "",
+        "Done when every suggestion listed above has a committed ADR in the repo. Close this ticket before the working folder is deleted: the suggestions are deleted with it.",
+      ].join("\n"),
+    );
+    expect(await fs.readdir(path.join(working, "briefs"))).toEqual([
+      "01-build-the-workspace.md",
+      "02-store-on-disk.md",
+    ]);
+    expect(await manifestPaths(working)).toContain("issues/03-record-adrs-from-suggestions.md");
+  });
+
+  it("writes no ADR ticket file when the tickets are not current", async () => {
+    const { root, project } = await aProject();
+    const session = await aSession("Stale tickets", project.id);
+    await insertSpec(session.id, {
+      updatedAt: "2030-01-02T00:00:00.000Z",
+      ticketsGeneratedAt: "2030-01-01T00:00:00.000Z",
+    });
+    await insertTicket(session.id, { number: 1, slug: "stale-ticket" });
+    const now = new Date().toISOString();
+    const decisionId = randomUUID();
+    await getDb().insert(schema.decisions).values({
+      id: decisionId,
+      sessionId: session.id,
+      key: "storage-engine",
+      questionTitle: "Title of storage-engine",
+      currentAnswer: "SQLite",
+      answerKind: "own-answer",
+      settledAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await setAdrWorthy.run({ decisionId, adrWorthy: true, consequences: "Commits us to a file." });
+    await generateHandoff.run({ sessionId: session.id });
+
+    await exportSession.run({ sessionId: session.id, slug: "stale" });
+
+    const working = path.join(root, ".scratch", "stale");
+    expect(await pathExists(path.join(working, "issues"))).toBe(false);
+    expect(await pathExists(path.join(working, "briefs", "02-record-adrs-from-suggestions.md"))).toBe(false);
   });
 });

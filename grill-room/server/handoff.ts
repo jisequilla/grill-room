@@ -61,7 +61,16 @@ import {
   type DelegationValues,
 } from "./delegation-values.js";
 import { getDb, schema } from "./db/index.js";
-import { hashExportContent, openingSections, padTicketNumber, sanitizeTicketSlug } from "./export.js";
+import {
+  adrSuggestionList,
+  hashExportContent,
+  openingSections,
+  padTicketNumber,
+  sanitizeTicketSlug,
+} from "./export.js";
+import type { AdrConvention } from "./project-facts.js";
+import { latestScoutReport } from "./scout-report.js";
+import { describeDecisions } from "./tree.js";
 // Type-only: erased at compile time, so this never becomes a runtime import.
 // `server/brief-grounding.ts` already imports this module at runtime, and a
 // runtime import back into it would be a cycle.
@@ -109,6 +118,45 @@ function hasGates(source: HandoffSource): boolean {
   return source.tickets.some(isGate);
 }
 
+/** The slug the generated ADR ticket's issue file carries. */
+export const ADR_TICKET_SLUG = "record-adrs-from-suggestions";
+/** The generated ADR ticket's title. */
+export const ADR_TICKET_TITLE = "Record ADRs from suggestions";
+
+/**
+ * The ticket Grill Room derives when a session has a suggested decision: it
+ * records the suggestions as the repo's own ADRs. Never stored in
+ * `gr_tickets`, and never one of {@link HandoffSource.tickets}.
+ */
+export interface HandoffAdrTicket {
+  /** The highest stored ticket number + 1. */
+  number: number;
+  slug: typeof ADR_TICKET_SLUG;
+  title: typeof ADR_TICKET_TITLE;
+  /** Every stored ticket number, gates included, ascending. */
+  blockedBy: number[];
+  suggestions: { key: string; title: string }[];
+  convention: AdrConvention | null;
+}
+
+/** The ADR ticket for a session, or null with no suggestion or no stored ticket. */
+export function adrTicketFor(
+  tickets: readonly { number: number }[],
+  suggestions: readonly { key: string; title: string }[],
+  convention: AdrConvention | null,
+): HandoffAdrTicket | null {
+  if (suggestions.length === 0 || tickets.length === 0) return null;
+  const numbers = tickets.map((ticket) => ticket.number).sort((a, b) => a - b);
+  return {
+    number: numbers[numbers.length - 1]! + 1,
+    slug: ADR_TICKET_SLUG,
+    title: ADR_TICKET_TITLE,
+    blockedBy: numbers,
+    suggestions: suggestions.map(({ key, title }) => ({ key, title })),
+    convention,
+  };
+}
+
 /** Everything the templates render from, and nothing else. */
 export interface HandoffSource {
   session: { id: string; title: string; idea: string };
@@ -152,6 +200,12 @@ export interface HandoffSource {
    * ticket. They enter the fingerprint only when non-empty.
    */
   openCards?: readonly HandoffCard[];
+  /**
+   * The generated ADR ticket, or null/absent when the session has no
+   * suggested decision. It enters {@link handoffFingerprint} only when
+   * non-null, and never {@link groundingFingerprint}.
+   */
+  adrTicket?: HandoffAdrTicket | null;
   /**
    * True when a consistency check was attempted for this session but does not
    * judge its current tickets: it failed, was skipped above the ticket cap, or
@@ -392,8 +446,76 @@ export function handoffFingerprint(source: HandoffSource): string {
         }
       : {}),
     ...(source.consistencyNotCurrent === true ? { consistencyNotCurrent: true } : {}),
+    ...(source.adrTicket
+      ? {
+          adrTicket: {
+            suggestions: source.adrTicket.suggestions.map(({ key, title }) => ({ key, title })),
+            convention: source.adrTicket.convention,
+          },
+        }
+      : {}),
   };
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+/**
+ * The fingerprint a grounding is made for: {@link handoffFingerprint} without
+ * the ADR ticket, which the handoff scout never sees. Flagging a decision
+ * changes the handoff's fingerprint, never this one.
+ */
+export function groundingFingerprint(source: HandoffSource): string {
+  return handoffFingerprint({ ...source, adrTicket: null });
+}
+
+/** The ADR convention paragraph, shared by the ADR ticket's body and HANDOFF. */
+function adrConventionParagraph(convention: AdrConvention | null): string {
+  if (!convention || (!convention.numbering && !convention.template)) {
+    return "No ADR convention was detected in this repository. Ask the owner where ADRs go, and how they are numbered, before writing them.";
+  }
+  const { folder, numbering, template } = convention;
+  const where = numbering
+    ? `ADRs live in \`${folder}/\`, named like \`${numbering.example}\`; the next free number looks like \`${numbering.nextNumber}\`.`
+    : `ADRs live in \`${folder}/\`; no numbering could be read.`;
+  const sections = template
+    ? `${template.source === `${folder}/${numbering?.example}` ? "The newest ADR's" : "The template's"} sections are ${template.headings.join(", ")} (from \`${template.source}\`).`
+    : "No template could be read.";
+  return `Detected convention, a hint to check against the folder: ${where} ${sections}`;
+}
+
+/** The ADR ticket's issue-file body, self-contained so a builder needs no HANDOFF. */
+export function renderAdrTicketBody(adrTicket: HandoffAdrTicket): string {
+  return [
+    "Record the repo's ADRs from the suggestions Grill Room wrote for this build.",
+    "",
+    `The suggestions are in \`${BUNDLE_TOKEN}/adr-suggestions/\`, one per decision:`,
+    ...adrTicket.suggestions.map((suggestion) => `- \`${suggestion.key}.md\`: ${suggestion.title}`),
+    "",
+    "If that folder is not in your worktree, read it from the main checkout at the same path. Never write to it.",
+    "",
+    "For each suggestion, write an ADR in the repo's own ADR folder, in its own convention and numbering, from the suggestion's sections. Where a suggestion has an Amends section, the new ADR amends that existing ADR: link them the way the repo does, and never delete or rewrite the old one. Set each ADR's status the way the repo marks an accepted decision once the tickets that build it have landed.",
+    "",
+    adrConventionParagraph(adrTicket.convention),
+    "",
+    "Done when every suggestion listed above has a committed ADR in the repo. Close this ticket before the working folder is deleted: the suggestions are deleted with it.",
+  ].join("\n");
+}
+
+/** The ADR ticket's label, padded like every other: by the stored ticket count. */
+function adrLabel(source: HandoffSource): string {
+  return padTicketNumber(source.adrTicket!.number, source.tickets.length);
+}
+
+function recordingAdrsSection(source: HandoffSource): string {
+  const label = adrLabel(source);
+  return [
+    "## Recording the repo's ADRs",
+    "",
+    `Grill Room wrote one suggestion per ADR-worthy decision in \`${BUNDLE_TOKEN}/adr-suggestions/\`. Ticket ${label} records them as the repo's own ADRs, last, once every other ticket has merged.`,
+    "",
+    adrConventionParagraph(source.adrTicket!.convention),
+    "",
+    `Close ticket ${label} before the working folder is deleted: the suggestions are deleted with it.`,
+  ].join("\n");
 }
 
 /** The stored tracker commands as a name → command map; empty when absent or unreadable. */
@@ -813,6 +935,18 @@ function wavesSection(source: HandoffSource, exportFacts?: ExportFacts): string 
       }
     }
   });
+  if (source.adrTicket) {
+    const blockers = source.adrTicket.blockedBy.map((number) => padTicketNumber(number, total));
+    const label = adrLabel(source);
+    lines.push(
+      "",
+      `### Wave ${waves.length + 1}`,
+      "",
+      `- **${label} ${source.adrTicket.title}** (blocked by ${blockers.join(", ")}; self-contained: delegate it from its ticket file; it has no brief)`,
+      `  - Ticket: \`${BUNDLE_TOKEN}/issues/${label}-${source.adrTicket.slug}.md\``,
+    );
+    if (source.project.trackerKind === "markdown") lines.push("  - Status: ready-for-agent");
+  }
   return lines.join("\n");
 }
 
@@ -841,19 +975,20 @@ function executionPlanSection(
     length: 0,
     chain: [],
   };
-  const path = found.chain
-    .map((number) => {
-      const label = padTicketNumber(number, total);
-      const ticket = byNumber.get(number);
-      return ticket && isGate(ticket) ? `gate ${label}` : label;
-    })
-    .join(" → ");
+  const chainLabels = found.chain.map((number) => {
+    const label = padTicketNumber(number, total);
+    const ticket = byNumber.get(number);
+    return ticket && isGate(ticket) ? `gate ${label}` : label;
+  });
+  if (source.adrTicket) chainLabels.push(adrLabel(source));
+  const chainLength = found.length + (source.adrTicket ? 1 : 0);
+  const path = chainLabels.join(" → ");
   const chainText =
-    found.length === 0
+    chainLength === 0
       ? "no build tickets."
-      : found.length === 1
+      : chainLength === 1
         ? `1 build ticket: ${path}.`
-        : `${found.length} build tickets, built one after another: ${path}.`;
+        : `${chainLength} build tickets, built one after another: ${path}.`;
 
   const widths = waves
     .map((wave) => {
@@ -863,6 +998,7 @@ function executionPlanSection(
       }).length;
       return builds === 0 ? "gate only" : `${builds}`;
     })
+    .concat(source.adrTicket ? ["1"] : [])
     .join(", ");
 
   const cap = maxTicketsInFlight(source);
@@ -1163,7 +1299,10 @@ function trackingSection(source: HandoffSource): string {
     const lines = [
       "## Tracking with beads",
       "",
-      "Create one bead per ticket. Claim a bead before delegating its ticket, and close it only after you have verified and merged the change, naming the merge in the close comment. Recover state with `bd ready` and `git log`, never from memory.",
+      "Create one bead per ticket. Claim a bead before delegating its ticket, and close it only after you have verified and merged the change, naming the merge in the close comment. Recover state with `bd ready` and `git log`, never from memory." +
+        (source.adrTicket
+          ? ` Ticket ${adrLabel(source)}, ${source.adrTicket.title}, gets a bead like every other ticket.`
+          : ""),
       "",
     ];
     if (hasGates(source)) {
@@ -1238,6 +1377,12 @@ function buildRecordSection(source: HandoffSource): string | null {
     lines.push(
       "",
       `${ticketWord} ${joinList(numbers)} ${be} ${gateWord} and ${get} no build record: \`set-build-record\` refuses ${possessive} ${number}.`,
+    );
+  }
+  if (source.adrTicket) {
+    lines.push(
+      "",
+      `Ticket ${adrLabel(source)} records the repo's ADRs and gets no build record: it is not stored in Grill Room, so \`set-build-record\` refuses its number.`,
     );
   }
   return lines.join("\n");
@@ -1438,7 +1583,9 @@ export function renderHandoffMarkdown(
   grounding: HandoffGrounding | null = null,
 ): string {
   const facts = factsFor(source, exportFacts);
-  const briefsPerTicket = hasGates(source) ? "one per ticket except gates" : "one per ticket";
+  const exceptions = [...(hasGates(source) ? ["gates"] : []), ...(source.adrTicket ? ["the ADR ticket"] : [])];
+  const briefsPerTicket =
+    exceptions.length > 0 ? `one per ticket except ${exceptions.join(" and ")}` : "one per ticket";
   const sections = [
     `# Handoff: ${source.session.title}`,
     ...openingSections(source.spec.markdown, source.session.idea),
@@ -1467,6 +1614,7 @@ export function renderHandoffMarkdown(
     beforeDelegatingSection(source, facts),
     executionPlanSection(source, grounding, exportFacts),
     wavesSection(source, exportFacts),
+    ...(source.adrTicket ? [recordingAdrsSection(source)] : []),
     ...(source.uncoveredStories && source.uncoveredStories.length > 0
       ? [uncoveredStoriesSection(source.uncoveredStories)]
       : []),
@@ -2039,6 +2187,17 @@ export async function loadHandoffSource(
     : [];
   const consistencyNotCurrent = spec.consistencyAttemptedFor != null && !current;
 
+  const decisionRows = await db
+    .select()
+    .from(schema.decisions)
+    .where(eq(schema.decisions.sessionId, sessionId))
+    .orderBy(schema.decisions.createdAt, schema.decisions.id);
+  const adrTicket = adrTicketFor(
+    tickets,
+    adrSuggestionList(describeDecisions(decisionRows)),
+    (await latestScoutReport(sessionId))?.facts.adrConvention ?? null,
+  );
+
   const numberById = new Map(tickets.map((ticket) => [ticket.id, ticket.number]));
   const ruleWaivers: HandoffRuleWaiver[] = (
     await db
@@ -2097,6 +2256,7 @@ export async function loadHandoffSource(
       },
       uncoveredStories: uncovered,
       openCards,
+      adrTicket,
       consistencyNotCurrent,
       ruleWaivers,
     },
