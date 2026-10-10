@@ -137,3 +137,28 @@ An opus judge compared the two arms' cumulative diffs for 01 + 01b (`f3230e9..a4
 | Where it was right and the other wrong | Per-model never-regress floor; refreshes every active session; deterministic cost ownership | Persisted watermark on arrival time; one TypeScript implementation that is also the writer; a top-level agent parented to its session root |
 
 The judge preferred the workflow arm. Its tokens survive every data path the plugin produces, and the hand arm's writer loses orchestrator usage. Both arms were built on the same false premise and the same underspecified writer, and the owner sent both to a redesign ticket, 01c, whose design is fixed in advance. The comparison says less about the two loops than about the ticket: the arm whose fixtures matched production reasoned correctly about the data, and the other built on a fixture artifact (bead gr-c0t.12).
+
+## Delivery-loop pilot: mutation and evidence
+
+The three tickets run through the loop of `docs/specs/delivery-loop-gauntlet-stages/spec.md`, and this table records what the pilot measured.
+
+| Ticket | PR | Time to ready | Cost | Review rounds | Stryker runs | Mutants | Score | Surviving mutants | Tool-only findings | Nit beads filed | Evidence re-run |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| gr-6uc | | | | | | | | | | | |
+| gr-930 | | | | | | | | | | | |
+| gr-x6w | | | | | | | | | | | |
+
+- **Time to ready:** builder start to the PR marked ready, as in "Time to ready" above. It includes the Stryker runs.
+- **Cost:** dollars only, catalog price of the builder, reviewer and fixer subagents, excluding the orchestrating session, as in "Cost and tool calls" above.
+- **Review rounds:** counted as in the Pilot table above.
+- **Stryker runs:** one entry per run, one run per review round. Each gives its time and its status from the mutate step's summary: `ok`, `truncated`, `overrun`, `runner-failed` or `no-scope`. For example: `r1 4m10s ok; r2 10m00s overrun`.
+- **Mutants:** the mutants each run tested, per run (`r1 84; r2 100`). A run with no number (`overrun`, `runner-failed`) records `-`, and a `no-scope` run records `0`.
+- **Score:** the mutation score per run (`r1 71%; r2 88%`). It is recorded, never gated. A run with no score records `-`.
+- **Surviving mutants:** the survivors per run (`r1 4; r2 1`), with `-` and `0` as for Mutants.
+- **Tool-only findings:** the number of Stryker survivors that became a finding, at any level, whose gap was named by no one before the first survivor list reached a reviewer: not in the pilot bead's own text, and not in the builder's PR body. Stryker runs before round 1, so no review text predates the list. A survivor matching a gap the bead already lists counts 0.
+- **Nit beads filed:** the pr-nits bead id, or `none`.
+- **Evidence re-run:** per review round, `all` when every Evidence pair current in that round re-ran red then green for the reviewer, otherwise the acceptance numbers that did not (`r1 AC2 (green only); r2 all`).
+
+**Keep criterion.** The changes stay only if all three hold: at least one tool-only finding across the three tickets; on every ticket, every Evidence pair current in each review round re-ran red then green in that round; and each ticket's cost is between $3.00 and $17.00 inclusive. Otherwise the changes are not kept, and that result is itself the answer the pilot gives.
+
+**Verdict.** Pending the pilot; gr-g4v.7 writes it here.
