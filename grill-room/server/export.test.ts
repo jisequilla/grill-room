@@ -535,6 +535,7 @@ function scoutReportFixture(
       decisionsFolder: null,
       hasRulesFolder: false,
       decisionFiles: [],
+      adrConvention: null,
     },
     result: {
       currentState: overrides.currentState ?? [

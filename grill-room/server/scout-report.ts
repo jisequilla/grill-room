@@ -55,6 +55,22 @@ const factsSchema = z.object({
   // Defaults to empty for a report stored before this field existed, so an
   // old row still parses; every report collected now carries it.
   decisionFiles: z.array(z.string()).default([]),
+  // Defaults to null for a report stored before this field existed.
+  adrConvention: z
+    .object({
+      folder: z.string(),
+      numbering: z
+        .object({
+          prefix: z.string(),
+          width: z.number(),
+          nextNumber: z.string(),
+          example: z.string(),
+        })
+        .nullable(),
+      template: z.object({ source: z.string(), headings: z.array(z.string()) }).nullable(),
+    })
+    .nullable()
+    .default(null),
 }) satisfies z.ZodType<ProjectServerFacts>;
 
 /** A stored scout report, as every reader sees it. */

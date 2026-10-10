@@ -902,6 +902,29 @@ describe("what the adapter sends for a project scout", () => {
     expect(invocation.args).not.toContain("/Users/someone/notes");
   });
 
+  it("the scout prompt does not carry the ADR convention", async () => {
+    const base = aScoutProjectRequest({ projectRoot: PROJECT_ROOT });
+    const withConvention = await scoutInvocation({
+      ...base,
+      facts: {
+        ...base.facts,
+        adrConvention: {
+          folder: "docs/adr",
+          numbering: { prefix: "", width: 4, nextNumber: "0003", example: "0002-y.md" },
+          template: { source: "docs/adr/0002-y.md", headings: ["Context", "Decision"] },
+        },
+      },
+    });
+    const withoutConvention = await scoutInvocation({
+      ...base,
+      facts: { ...base.facts, adrConvention: null },
+    });
+
+    expect(valueOf(withConvention.invocation.args, "-p")).toBe(
+      valueOf(withoutConvention.invocation.args, "-p"),
+    );
+  });
+
   it("allows exactly the three read tools, and makes them the whole tool set", async () => {
     const { invocation } = await scoutInvocation();
 
