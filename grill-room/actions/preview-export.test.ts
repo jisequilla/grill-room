@@ -668,6 +668,16 @@ describe("preview-export: retired export", () => {
     expect(preview.exportBlockedReason).toBeNull();
   });
 
+  it("retired and durable folder ignored reports durable-folder-ignored", async () => {
+    const { root, session } = await aRetiredSession();
+    await fs.writeFile(path.join(root, ".gitignore"), "docs/specs/\n", "utf8");
+
+    const preview = await previewExport.run({ sessionId: session.id });
+
+    expect(preview.exportRetired).toBe(true);
+    expect(preview.exportBlockedReason).toBe("durable-folder-ignored");
+  });
+
   it("retired, a different slug: still blocked export-retired", async () => {
     const { session } = await aRetiredSession();
 
