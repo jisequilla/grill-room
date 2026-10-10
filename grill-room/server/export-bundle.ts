@@ -10,6 +10,7 @@
  *     <project root>/<export folder>/<folder name>/decisions.md      (when anything is decided or out of scope)
  *     <project root>/<export folder>/<folder name>/issues/NN-slug.md
  *     <project root>/<export folder>/<folder name>/briefs/NN-slug.md (when a handoff exists)
+ *     <project root>/<export folder>/<folder name>/adr-suggestions/<key>.md (one per ADR-worthy decision)
  *     <project root>/<export folder>/<folder name>/.grill-room-export.json
  *
  * {@link planExportBundle} is the single source of truth for what an export
@@ -160,7 +161,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { fail } from "@agent-native/core/action";
-import { eq } from "@agent-native/core/db/schema";
+import { eq, inArray } from "@agent-native/core/db/schema";
 
 import type { ProjectVisibility } from "../shared/session-constants.js";
 import {
@@ -172,6 +173,7 @@ import {
 import { getDb, schema } from "./db/index.js";
 import { pendingForProject, type PendingDelegationProposal } from "./delegation-values.js";
 import {
+  adrWorthyDecisions,
   applySlugPattern,
   buildExportManifest,
   DECISIONS_FILE,
@@ -213,7 +215,7 @@ import { getProject, measuredVisibility } from "./projects.js";
 import { currentReadiness } from "./readiness.js";
 import { currentScoutReport } from "./scout-report.js";
 import { describeTickets, separateOverlaps, ticketsAreCurrent } from "./tickets.js";
-import { describeDecisions } from "./tree.js";
+import { describeDecisions, describeHistoryEntry } from "./tree.js";
 
 const NO_TICKETS_REASON = "This session has no tickets to export.";
 const STALE_TICKETS_REASON =
@@ -369,6 +371,8 @@ export interface ExportBundlePlan {
   ruleConflicts: PreviewRuleConflict[];
   /** The conflicts the owner accepted as is, with the waiver and its reason; same order and rules as `ruleConflicts`. */
   acceptedRuleConflicts: PreviewAcceptedRuleConflict[];
+  /** The ADR-worthy decisions no exported ticket builds, as `planExport` reports them; advisory, never part of the export gate. */
+  adrSuggestionsWithoutTickets: { key: string; title: string }[];
 }
 
 export type PreviewAcceptedRuleConflict = PreviewRuleConflict & { waiverId: string; reason: string };
@@ -987,14 +991,27 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     currentScoutReport(session),
   ]);
 
+  const decisions = describeDecisions(decisionRows);
+  const suggestedIds = adrWorthyDecisions(decisions).map((decision) => decision.id);
+  const historyRows = suggestedIds.length
+    ? await db
+        .select()
+        .from(schema.decisionHistory)
+        .where(inArray(schema.decisionHistory.decisionId, suggestedIds))
+        .orderBy(schema.decisionHistory.recordedAt, schema.decisionHistory.id)
+    : [];
+  const history: Record<string, ReturnType<typeof describeHistoryEntry>[]> = {};
+  for (const row of historyRows) (history[row.decisionId] ??= []).push(describeHistoryEntry(row));
+
   const plan = planExport({
     sessionTitle: session.title,
     idea: session.idea,
     specMarkdown: spec.markdown,
     tickets: exportTickets,
-    decisions: describeDecisions(decisionRows),
+    decisions,
     readiness,
     scoutReport,
+    history,
   });
 
   const handoff = (await getHandoffRow(session.id)) ?? null;
@@ -1255,6 +1272,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     ungroundedBriefs,
     delegationProposals: pendingForProject(project, grounding?.result.delegationProposals),
     ...previewLists,
+    adrSuggestionsWithoutTickets: plan.adrSuggestionsWithoutTickets,
   };
 }
 

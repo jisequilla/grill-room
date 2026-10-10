@@ -741,6 +741,18 @@ export function ExportSection({
                 </ul>
               ) : null}
             </div>
+            {plan.adrSuggestionsWithoutTickets.length > 0 ? (
+              <div className="space-y-1" data-testid="export-adr-without-tickets">
+                <p className="text-xs text-owed">{t("output.exportAdrWithoutTickets")}</p>
+                <ul className="list-disc space-y-1 pl-4 text-xs text-owed">
+                  {plan.adrSuggestionsWithoutTickets.map((entry) => (
+                    <li key={entry.key} data-testid={`export-adr-without-tickets-${entry.key}`}>
+                      {t("output.exportAdrWithoutTicketsItem", { title: entry.title, key: entry.key })}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {plan.ruleConflicts.length > 0 ? (
               <RuleConflictList
                 conflicts={plan.ruleConflicts}

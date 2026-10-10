@@ -190,6 +190,7 @@ describe("supersededEntries with ADR fields", () => {
       },
     };
     const plan = planExport({
+      history: {},
       sessionTitle: "Simpler API error responses",
       idea: "An idea.",
       specMarkdown: "## Problem\n\nA spec.",
