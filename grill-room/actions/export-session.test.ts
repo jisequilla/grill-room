@@ -36,6 +36,7 @@ import getHandoff from "./get-handoff.js";
 import listTickets from "./list-tickets.js";
 import previewExport from "./preview-export.js";
 import registerProject from "./register-project.js";
+import setAdrWorthy from "./set-adr-worthy.js";
 import setTicketBlockedBy from "./set-ticket-blocked-by.js";
 import updateHandoff from "./update-handoff.js";
 import waiveRuleConflict from "./waive-rule-conflict.js";
@@ -3238,5 +3239,132 @@ describe("re-export after retirement", () => {
     });
     expect(await pathExists(path.join(root, "docs", "specs", "another"))).toBe(false);
     expect(await pathExists(path.join(root, ".scratch", "another"))).toBe(false);
+  });
+});
+
+describe("ADR suggestions", () => {
+  useTestDatabase();
+
+  const SLUG = "a";
+
+  async function aSessionWithDecision() {
+    const ready = await aReadySession();
+    const now = new Date().toISOString();
+    const decisionId = randomUUID();
+    await getDb().insert(schema.decisions).values({
+      id: decisionId,
+      sessionId: ready.session.id,
+      key: "storage-engine",
+      questionTitle: "Title of storage-engine",
+      currentAnswer: "SQLite",
+      answerKind: "own-answer",
+      settledAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await setAdrWorthy.run({ decisionId, adrWorthy: true, consequences: "Commits us to a file." });
+    await generateHandoff.run({ sessionId: ready.session.id });
+    return {
+      ...ready,
+      decisionId,
+      durable: path.join(ready.root, "docs", "specs", SLUG),
+      working: path.join(ready.root, ".scratch", SLUG),
+    };
+  }
+
+  it("writes adr-suggestions/<key>.md under the working bundle folder and lists it in its manifest only", async () => {
+    const { session, durable, working } = await aSessionWithDecision();
+
+    await exportSession.run({ sessionId: session.id, slug: SLUG });
+
+    const content = await fs.readFile(path.join(working, "adr-suggestions", "storage-engine.md"), "utf8");
+    expect(content).toContain("# Title of storage-engine");
+    expect(content).toContain("- **Decision key:** `storage-engine`");
+    expect(await manifestPaths(working)).toContain("adr-suggestions/storage-engine.md");
+    expect(await pathExists(path.join(durable, "adr-suggestions"))).toBe(false);
+    expect(await manifestPaths(durable)).not.toContain("adr-suggestions/storage-engine.md");
+  });
+
+  it("lists earlier answers from the decision's history, oldest first, without a restatement's original or the current answer", async () => {
+    const { session, decisionId, working } = await aSessionWithDecision();
+    const entry = (
+      id: string,
+      recordedAt: string,
+      answer: string,
+      operatorNotes: string | null = null,
+    ) => ({
+      id,
+      decisionId,
+      questionTitle: "Title of storage-engine",
+      questionBody: "",
+      answer,
+      answerKind: "own-answer" as const,
+      operatorNotes,
+      recordedAt,
+    });
+    await getDb()
+      .insert(schema.decisionHistory)
+      .values([
+        entry("h-d", "2026-09-04T00:00:00.000Z", "SQLite"),
+        entry("h-a", "2026-09-03T00:00:00.000Z", "MySQL"),
+        entry("h-c", "2026-09-02T00:00:00.000Z", "Mongo", "Asked the AI to pick."),
+        entry("h-b", "2026-09-01T00:00:00.000Z", "Postgres"),
+      ]);
+
+    await exportSession.run({ sessionId: session.id, slug: SLUG });
+
+    const content = await fs.readFile(path.join(working, "adr-suggestions", "storage-engine.md"), "utf8");
+    expect(content).toContain(
+      "## Alternatives\n\n- Previously answered: Postgres\n- Previously answered: MySQL\n\n## Consequences",
+    );
+    expect(content).not.toContain("Mongo");
+  });
+
+  it("removes the file on a re-export after the decision is unflagged", async () => {
+    const { session, decisionId, working } = await aSessionWithDecision();
+    await exportSession.run({ sessionId: session.id, slug: SLUG });
+    const file = path.join(working, "adr-suggestions", "storage-engine.md");
+    expect(await pathExists(file)).toBe(true);
+
+    await setAdrWorthy.run({ decisionId, adrWorthy: false });
+    const result = await exportSession.run({ sessionId: session.id, slug: SLUG });
+
+    expect(await pathExists(file)).toBe(false);
+    expect(result.removed).toContain(file);
+    expect(await manifestPaths(working)).not.toContain("adr-suggestions/storage-engine.md");
+  });
+
+  it("keeps a hand-edited suggestion on removal unless overridden", async () => {
+    const { session, decisionId, root, working } = await aSessionWithDecision();
+    await exportSession.run({ sessionId: session.id, slug: SLUG });
+    const file = path.join(working, "adr-suggestions", "storage-engine.md");
+    await fs.appendFile(file, "\nMy own note.\n", "utf8");
+    await setAdrWorthy.run({ decisionId, adrWorthy: false });
+
+    const kept = await exportSession.run({ sessionId: session.id, slug: SLUG });
+    expect(kept.kept).toContain(file);
+    expect(await fs.readFile(file, "utf8")).toContain("My own note.");
+
+    const overridden = await exportSession.run({
+      sessionId: session.id,
+      slug: SLUG,
+      overridePaths: [path.relative(root, file)],
+    });
+    expect(overridden.removed).toContain(file);
+    expect(await pathExists(file)).toBe(false);
+  });
+
+  it("keeps a hand-edited suggestion on rewrite unless overridden", async () => {
+    const { session, root, working } = await aSessionWithDecision();
+    await exportSession.run({ sessionId: session.id, slug: SLUG });
+    const file = path.join(working, "adr-suggestions", "storage-engine.md");
+    await fs.appendFile(file, "\nMy own note.\n", "utf8");
+
+    const kept = await exportSession.run({ sessionId: session.id, slug: SLUG });
+    expect(kept.kept).toContain(file);
+    expect(await fs.readFile(file, "utf8")).toContain("My own note.");
+
+    await exportSession.run({ sessionId: session.id, slug: SLUG, overridePaths: [path.relative(root, file)] });
+    expect(await fs.readFile(file, "utf8")).not.toContain("My own note.");
   });
 });

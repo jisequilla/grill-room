@@ -17,7 +17,7 @@ import type { AdrConvention } from "./project-facts.js";
 import type { StoredReadiness } from "./readiness.js";
 import type { ScoutReportWithStaleness } from "./scout-report.js";
 import { numberRanges } from "./tickets.js";
-import type { DecisionView } from "./tree.js";
+import type { DecisionView, PreviousAnswerView } from "./tree.js";
 
 const STATUS_LINE = "Status: ready-for-agent";
 const GATE_STATUS_LINE = "Status: ready-for-human";
@@ -54,6 +54,13 @@ export interface PlannedExportFile {
 export interface ExportPlan {
   /** Spec first, then `intent.md`, then `decisions.md` when planned, then issues in ticket-number order — the order `export-session` writes and reports them in. */
   files: PlannedExportFile[];
+  /**
+   * The ADR-worthy decisions whose suggestion lists no ticket, in key order,
+   * `title` being the question title on one line: none implemented by a
+   * current ticket, tickets not current, or tickets made before the decision
+   * check. Advisory; it never blocks an export.
+   */
+  adrSuggestionsWithoutTickets: { key: string; title: string }[];
 }
 
 /**
@@ -273,6 +280,8 @@ export interface PlanExportInput {
   readiness: StoredReadiness | null;
   /** The session's current scout report with staleness, or null when it has never been scouted. */
   scoutReport: ScoutReportWithStaleness | null;
+  /** Each suggested decision's earlier answers as the tree shows them, keyed by decision id, oldest first. */
+  history: Readonly<Record<string, readonly PreviousAnswerView[]>>;
 }
 
 /** Lowercase; anything not a letter or digit collapses to one hyphen; leading/trailing hyphens trimmed. */
@@ -642,12 +651,29 @@ function amendsTargets(
   return targets;
 }
 
+/**
+ * The decisions `decisions.md` marks ADR-worthy, in key order: a Decisions
+ * entry flagged and not replaced, and a flagged kept repo decision under Built
+ * under (flagged on `adrWorthy` alone). None when the file is not written.
+ * The suggestions follow this same list, so the two can never differ.
+ */
+export function adrWorthyDecisions(decisions: readonly DecisionView[]): DecisionView[] {
+  const entries = decisions.filter(isEntry);
+  const hasOutOfScope = decisions.some((decision) => isDispositionedTo(decision, "out-of-scope"));
+  if (entries.length === 0 && !hasOutOfScope) return [];
+  return [
+    ...entries.filter((decision) => decision.adrWorthy && !decision.replacedBy),
+    ...decisions.filter((decision) => isBuiltUnder(decision) && decision.adrWorthy),
+  ].sort(byKey);
+}
+
 function renderEntry(
   decision: DecisionView,
   order: ReadonlyMap<string, number>,
   byId: ReadonlyMap<string, DecisionView>,
   repoDecisions: readonly DecisionView[],
   adrConvention: AdrConvention | null,
+  adrWorthy: boolean,
 ): string {
   const lines = [
     `<a id="${decisionKey(decision)}"></a>`,
@@ -700,7 +726,7 @@ function renderEntry(
     lines.push(field("Supersedes", `"${oneLine(decision.repo.statement)}"`));
   }
 
-  if (decision.adrWorthy && !decision.replacedBy) {
+  if (adrWorthy) {
     lines.push(field("ADR-worthy", "yes"));
     const targets = amendsTargets(decision, repoDecisions, adrConvention);
     if (targets.length > 0) lines.push(field("Amends", targets.join(", ")));
@@ -739,6 +765,7 @@ export function renderDecisionsFile(
   const outOfScope = ordered.filter((decision) => isDispositionedTo(decision, "out-of-scope"));
   const builtUnder = ordered.filter(isBuiltUnder);
   const repoDecisions = ordered.filter((decision) => decision.introducedBy === "repo" && decision.repo);
+  const worthyIds = new Set(adrWorthyDecisions(decisions).map((decision) => decision.id));
 
   if (entries.length === 0 && outOfScope.length === 0) return null;
 
@@ -748,7 +775,9 @@ export function renderDecisionsFile(
   ];
 
   if (entries.length > 0) {
-    sections.push("## Decisions", ...entries.map((entry) => renderEntry(entry, order, byId, repoDecisions, adrConvention)));
+    sections.push("## Decisions", ...entries.map((entry) =>
+        renderEntry(entry, order, byId, repoDecisions, adrConvention, worthyIds.has(entry.id)),
+      ));
   }
 
   if (outOfScope.length > 0) {
@@ -770,7 +799,7 @@ export function renderDecisionsFile(
       builtUnder
         .map((decision) => {
           const line = `- \`${decisionKey(decision)}\`: ${decision.repo?.citation ?? ""}`;
-          if (!decision.adrWorthy) return line;
+          if (!worthyIds.has(decision.id)) return line;
           const consequences = (decision.consequences ?? "").trim().split(/\r?\n/).join("\n  ");
           return `${line} · ADR-worthy\n  Consequences: ${consequences}`;
         })
@@ -778,6 +807,61 @@ export function renderDecisionsFile(
     );
   }
 
+  return `${sections.join("\n\n")}\n`;
+}
+
+/** The text under a suggestion's Decision heading: what decisions.md's Decision field shows. */
+function decisionText(decision: DecisionView): string {
+  if (isBuiltUnder(decision) && decision.repo) {
+    return `${decision.repo.statement.trim()}\nRecorded in the repo at ${decision.repo.citation}.`;
+  }
+  const recommended = recommendedChoiceAccepted(decision);
+  return (recommended ? recommended.label : (decision.answer?.text ?? "")).trim();
+}
+
+function alternativeLines(decision: DecisionView, history: readonly PreviousAnswerView[]): string[] {
+  const picked = recommendedChoiceAccepted(decision) ?? matchingChoice(decision);
+  const lines = decision.choices
+    .filter((choice) => choice !== picked)
+    .map((choice) => {
+      const rationale = oneLine(choice.rationale);
+      return rationale.length > 0 ? `- ${choice.label}: ${rationale}` : `- ${choice.label}:`;
+    });
+  const current = (decision.answer?.text ?? "").trim();
+  const seen = new Set<string>();
+  for (const entry of history) {
+    if (entry.kind !== "accepted-recommendation" && entry.kind !== "own-answer") continue;
+    if (entry.operatorNotes !== null) continue;
+    const text = (entry.text ?? "").trim();
+    if (text.length === 0 || text === current || seen.has(text)) continue;
+    seen.add(text);
+    lines.push(`- Previously answered: ${oneLine(text)}`);
+  }
+  return lines;
+}
+
+function renderSuggestion(params: {
+  decision: DecisionView;
+  sessionTitle: string;
+  history: readonly PreviousAnswerView[];
+  ticketLinks: readonly string[];
+  amends: readonly string[];
+}): string {
+  const { decision, ticketLinks, amends } = params;
+  const context = decision.questionBody.trim();
+  const consequences = (decision.consequences ?? "").trim();
+  const alternatives = alternativeLines(decision, params.history);
+  const sections = [
+    `# ${oneLine(decision.questionTitle)}`,
+    `Suggested by Grill Room from the session "${oneLine(params.sessionTitle)}". Copy it into the repo's own ADR folder, in its own convention and numbering, then set its status there. This file is a working file: it is deleted with the rest of this folder.`,
+    `- **Status:** Proposed\n- **Decision key:** \`${decisionKey(decision)}\``,
+    `## Context\n\n${context.length > 0 ? context : "No context was recorded."}`,
+    `## Decision\n\n${decisionText(decision)}`,
+    `## Alternatives\n\n${alternatives.length > 0 ? alternatives.join("\n") : "None recorded."}`,
+    `## Consequences\n\n${consequences.length > 0 ? consequences : "None recorded."}`,
+    `## Tickets\n\n${ticketLinks.length > 0 ? ticketLinks.join("\n") : "None yet: no ticket lists this decision."}`,
+  ];
+  if (amends.length > 0) sections.push(`## Amends\n\n${amends.join(", ")}`);
   return `${sections.join("\n\n")}\n`;
 }
 
@@ -988,5 +1072,35 @@ export function planExport(input: PlanExportInput): ExportPlan {
     });
   }
 
-  return { files };
+  const adrConvention = input.scoutReport?.facts.adrConvention ?? null;
+  const repoDecisions = topologicalOrder(input.decisions).filter(
+    (decision) => decision.introducedBy === "repo" && decision.repo,
+  );
+  const entryIds = new Set(input.decisions.filter(isEntry).map((decision) => decision.id));
+  const adrSuggestionsWithoutTickets: { key: string; title: string }[] = [];
+  for (const decision of adrWorthyDecisions(input.decisions)) {
+    const key = decisionKey(decision);
+    const ticketLinks = input.tickets
+      .filter((ticket) => ticket.implementsDecisions?.includes(key))
+      .map((ticket) => {
+        const label = padTicketNumber(ticket.number, totalTickets);
+        const slug = sanitizeTicketSlug(ticket.slug, ticket.number);
+        return `- [${label} ${oneLine(ticket.title)}](../issues/${label}-${slug}.md)`;
+      });
+    if (ticketLinks.length === 0) {
+      adrSuggestionsWithoutTickets.push({ key, title: oneLine(decision.questionTitle) });
+    }
+    files.push({
+      relativePath: `adr-suggestions/${key}.md`,
+      content: renderSuggestion({
+        decision,
+        sessionTitle: input.sessionTitle,
+        history: input.history[decision.id] ?? [],
+        ticketLinks,
+        amends: entryIds.has(decision.id) ? amendsTargets(decision, repoDecisions, adrConvention) : [],
+      }),
+    });
+  }
+
+  return { files, adrSuggestionsWithoutTickets };
 }

@@ -16,7 +16,7 @@ import {
 } from "./export.js";
 import type { StoredReadiness } from "./readiness.js";
 import type { ScoutReportWithStaleness } from "./scout-report.js";
-import { describeDecisions, type DecisionView } from "./tree.js";
+import { describeDecisions, type DecisionView, type PreviousAnswerView } from "./tree.js";
 
 let counter = 0;
 
@@ -81,6 +81,7 @@ function openQuestion(key: string) {
 
 function decisionsFile(decisions: readonly DecisionView[], sessionTitle = "Grill Room"): string | undefined {
   const plan = planExport({
+    history: {},
     sessionTitle,
     idea: "An idea.",
     specMarkdown: "## Problem\n\nA spec.",
@@ -454,6 +455,7 @@ describe("planExport: decisions.md", () => {
 
   it("plans decisions.md beside the spec with one entry, or with one out-of-scope item alone", () => {
     const withEntry = planExport({
+      history: {},
       sessionTitle: "Grill Room",
       idea: "An idea.",
       specMarkdown: "A spec.",
@@ -574,6 +576,7 @@ function intentFile(
   } = {},
 ): string {
   const plan = planExport({
+    history: {},
     sessionTitle: "Grill Room",
     idea: input.idea ?? IDEA,
     specMarkdown: input.specMarkdown ?? "## Problem\n\nA spec.",
@@ -1180,6 +1183,7 @@ describe("planExport: an own answer restated", () => {
       .from(schema.decisions)
       .where(eq(schema.decisions.sessionId, sessionId));
     return planExport({
+      history: {},
       sessionTitle: "Grill Room",
       idea: "A marketplace for local services.",
       specMarkdown: "## Problem\n\nA spec.",
@@ -1228,6 +1232,7 @@ describe("planExport: a gate's ticket file", () => {
 
   function ticketFiles() {
     return planExport({
+      history: {},
       sessionTitle: "Grill Room",
       idea: "An idea.",
       specMarkdown: "## Problem\n\nA spec.",
@@ -1284,6 +1289,7 @@ describe("planExport: a ticket's Implements line", () => {
       },
     ];
     return planExport({
+      history: {},
       sessionTitle: "Grill Room",
       idea: "An idea.",
       specMarkdown: "## Problem\n\nA spec.",
@@ -1339,6 +1345,7 @@ describe("planExport: decisions.md ADR marks", () => {
     const report = scoutReportFixture();
     const scoutReport = withScoutReport ? { ...report, facts: { ...report.facts, adrConvention } } : null;
     const plan = planExport({
+      history: {},
       sessionTitle: "Grill Room",
       idea: "An idea.",
       specMarkdown: "## Problem\n\nA spec.",
@@ -1567,6 +1574,7 @@ describe("planExport: a ticket's Implements decisions line", () => {
     implementsDecisions?: readonly string[] | null;
   }): string {
     return planExport({
+      history: {},
       sessionTitle: "Grill Room",
       idea: "An idea.",
       specMarkdown: "## Problem\n\nA spec.",
@@ -1611,5 +1619,471 @@ describe("planExport: a ticket's Implements decisions line", () => {
     expect(fileFor({ kind: "gate", waitsFor: "An account.", implementsDecisions: ["api-shape"] })).toBe(
       "# 01 Build the workspace\n\nStatus: ready-for-human\nBlocked by: none\nWait for: An account.\n\nBuild it.",
     );
+  });
+});
+
+describe("planExport: adr-suggestions", () => {
+  type Convention = NonNullable<ScoutReportWithStaleness["facts"]["adrConvention"]>;
+  type Ticket = Parameters<typeof planExport>[0]["tickets"][number];
+
+  const NMON: Convention = {
+    folder: "docs/adr",
+    numbering: { prefix: "NMON-", width: 3, nextNumber: "NMON-013", example: "NMON-012-x.md" },
+    template: null,
+  };
+
+  const THREE = [
+    { label: "MySQL", rationale: "Familiar." },
+    { label: "Sqlite3", rationale: "One file,\n  no server." },
+    { label: "Postgres", rationale: "" },
+  ];
+
+  function flagged(key: string, overrides: Partial<DecisionView> = {}): DecisionView {
+    return decision(key, { adrWorthy: true, consequences: `Consequences of ${key}.`, ...overrides });
+  }
+
+  function ticket(number: number, implementsDecisions: readonly string[] | null, title = `Ticket ${number}`): Ticket {
+    return { number, slug: `ticket-${number}`, title, body: "Body.", blockedBy: [], implementsDecisions };
+  }
+
+  function history(
+    text: string | null,
+    kind: PreviousAnswerView["kind"],
+    operatorNotes: string | null = null,
+  ): PreviousAnswerView {
+    return {
+      text,
+      kind,
+      interviewerReason: null,
+      operatorNotes,
+      recordedAt: "2026-09-01T00:00:00.000Z",
+      questionTitle: "t",
+      questionBody: "b",
+    };
+  }
+
+  function plan(
+    decisions: readonly DecisionView[],
+    options: {
+      tickets?: Ticket[];
+      history?: Record<string, PreviousAnswerView[]>;
+      convention?: Convention | null;
+    } = {},
+  ) {
+    const report = scoutReportFixture();
+    return planExport({
+      sessionTitle: "My\nsession",
+      idea: "An idea.",
+      specMarkdown: "## Problem\n\nA spec.",
+      tickets: options.tickets ?? [],
+      decisions,
+      readiness: null,
+      scoutReport: options.convention
+        ? { ...report, facts: { ...report.facts, adrConvention: options.convention } }
+        : null,
+      history: options.history ?? {},
+    });
+  }
+
+  function suggestion(result: ReturnType<typeof plan>, key: string): string | undefined {
+    return result.files.find((file) => file.relativePath === `adr-suggestions/${key}.md`)?.content;
+  }
+
+  function suggestionPaths(result: ReturnType<typeof plan>): string[] {
+    return result.files.map((file) => file.relativePath).filter((file) => file.startsWith("adr-suggestions/"));
+  }
+
+  const HEADER =
+    'Suggested by Grill Room from the session "My session". Copy it into the repo\'s own ADR folder, in its own convention and numbering, then set its status there. This file is a working file: it is deleted with the rest of this folder.';
+
+  function expectedFile(parts: {
+    title: string;
+    key: string;
+    context: string;
+    decision: string;
+    alternatives: string;
+    consequences: string;
+    tickets: string;
+    amends?: string;
+  }): string {
+    const sections = [
+      `# ${parts.title}`,
+      HEADER,
+      `- **Status:** Proposed\n- **Decision key:** \`${parts.key}\``,
+      `## Context\n\n${parts.context}`,
+      `## Decision\n\n${parts.decision}`,
+      `## Alternatives\n\n${parts.alternatives}`,
+      `## Consequences\n\n${parts.consequences}`,
+      `## Tickets\n\n${parts.tickets}`,
+    ];
+    if (parts.amends !== undefined) sections.push(`## Amends\n\n${parts.amends}`);
+    return `${sections.join("\n\n")}\n`;
+  }
+
+  it("no flagged decision: no file, no warning", () => {
+    const result = plan([decision("a"), decision("b")]);
+    expect(suggestionPaths(result)).toEqual([]);
+    expect(result.adrSuggestionsWithoutTickets).toEqual([]);
+  });
+
+  it("flagged, settled, tickets 2 and 4 list it: two Tickets links, no warning", () => {
+    const tickets = [
+      ticket(1, null),
+      ticket(2, ["storage-engine"], "Build\nstore"),
+      ticket(3, ["other"]),
+      ticket(4, ["storage-engine", "other"]),
+    ];
+    const result = plan(
+      [flagged("storage-engine", { questionTitle: "Storage\nengine", questionBody: "  Which store?\n\nSecond line.  " })],
+      { tickets },
+    );
+    expect(suggestion(result, "storage-engine")).toBe(
+      [
+        "# Storage engine",
+        "",
+        HEADER,
+        "",
+        "- **Status:** Proposed",
+        "- **Decision key:** `storage-engine`",
+        "",
+        "## Context",
+        "",
+        "Which store?\n\nSecond line.",
+        "",
+        "## Decision",
+        "",
+        "Answer of storage-engine",
+        "",
+        "## Alternatives",
+        "",
+        "None recorded.",
+        "",
+        "## Consequences",
+        "",
+        "Consequences of storage-engine.",
+        "",
+        "## Tickets",
+        "",
+        "- [02 Build store](../issues/02-ticket-2.md)",
+        "- [04 Ticket 4](../issues/04-ticket-4.md)",
+        "",
+      ].join("\n"),
+    );
+    expect(result.adrSuggestionsWithoutTickets).toEqual([]);
+  });
+
+  it("flagged, no ticket lists it: written with the none-yet body, and warned", () => {
+    const result = plan([flagged("storage-engine", { questionBody: "", consequences: "  " })], {
+      tickets: [ticket(1, ["other"])],
+    });
+    expect(suggestion(result, "storage-engine")).toBe(
+      [
+        "# Title of storage-engine",
+        "",
+        HEADER,
+        "",
+        "- **Status:** Proposed",
+        "- **Decision key:** `storage-engine`",
+        "",
+        "## Context",
+        "",
+        "No context was recorded.",
+        "",
+        "## Decision",
+        "",
+        "Answer of storage-engine",
+        "",
+        "## Alternatives",
+        "",
+        "None recorded.",
+        "",
+        "## Consequences",
+        "",
+        "None recorded.",
+        "",
+        "## Tickets",
+        "",
+        "None yet: no ticket lists this decision.",
+        "",
+      ].join("\n"),
+    );
+    expect(result.adrSuggestionsWithoutTickets).toEqual([
+      { key: "storage-engine", title: "Title of storage-engine" },
+    ]);
+  });
+
+  it("flagged but replaced by an unflagged decision: no suggestion for either", () => {
+    const replaced = flagged("storage-engine", {
+      replacedBy: { id: "id-storage-v2", key: "storage-v2", title: "T", reason: "Moved." },
+    });
+    const result = plan([replaced, decision("storage-v2")]);
+    expect(suggestionPaths(result)).toEqual([]);
+    expect(result.adrSuggestionsWithoutTickets).toEqual([]);
+  });
+
+  it("a flagged kept repo decision: statement plus citation, no alternatives, no Amends", () => {
+    const kept = {
+      ...keptRepo("kept", "docs/adr/NMON-003-x.md:2"),
+      adrWorthy: true,
+      consequences: "Binds us.",
+    };
+    const result = plan([decision("entry"), kept], { convention: NMON, tickets: [ticket(1, ["kept"])] });
+    expect(suggestion(result, "kept")).toBe(
+      expectedFile({
+        title: "Title of kept",
+        key: "kept",
+        context: "The question behind kept, which never reaches decisions.md.",
+        decision: "Statement of kept\nRecorded in the repo at docs/adr/NMON-003-x.md:2.",
+        alternatives: "None recorded.",
+        consequences: "Binds us.",
+        tickets: "- [01 Ticket 1](../issues/01-ticket-1.md)",
+      }),
+    );
+    expect(result.adrSuggestionsWithoutTickets).toEqual([]);
+  });
+
+  it("an accepted recommendation picks by index, not by the answer text", () => {
+    const choices = [
+      { label: "Reasoning text", rationale: "A." },
+      { label: "Pick", rationale: "B." },
+      { label: "Other", rationale: "C." },
+    ];
+    const result = plan([
+      flagged("k", {
+        choices,
+        recommendedChoice: 1,
+        recommendedChoiceLabel: "Pick",
+        answer: { text: "Reasoning text", kind: "accepted-recommendation" },
+      }),
+    ]);
+    expect(suggestion(result, "k")).toBe(
+      expectedFile({
+        title: "Title of k",
+        key: "k",
+        context: "The question behind k, which never reaches decisions.md.",
+        decision: "Pick",
+        alternatives: "- Reasoning text: A.\n- Other: C.",
+        consequences: "Consequences of k.",
+        tickets: "None yet: no ticket lists this decision.",
+      }),
+    );
+  });
+
+  it("an own answer matching no choice lists every choice, then each earlier real answer once", () => {
+    const result = plan(
+      [flagged("k", { choices: THREE, answer: { text: "SQLite", kind: "own-answer" } })],
+      {
+        history: {
+          "id-k": [
+            history("Postgres", "own-answer"),
+            history("MySQL", "accepted-recommendation"),
+            history("Postgres", "own-answer"),
+            history("  SQLite ", "own-answer"),
+            history("Redis", "unknown"),
+            history("", "own-answer"),
+          ],
+        },
+      },
+    );
+    expect(suggestion(result, "k")).toBe(
+      expectedFile({
+        title: "Title of k",
+        key: "k",
+        context: "The question behind k, which never reaches decisions.md.",
+        decision: "SQLite",
+        alternatives: "- MySQL: Familiar.\n- Sqlite3: One file, no server.\n- Postgres:\n- Previously answered: Postgres\n- Previously answered: MySQL",
+        consequences: "Consequences of k.",
+        tickets: "None yet: no ticket lists this decision.",
+      }),
+    );
+  });
+
+  it("an earlier answer with operator notes is left out, even when the notes are empty", () => {
+    const result = plan([flagged("k", { answer: { text: "Current", kind: "own-answer" } })], {
+      history: {
+        "id-k": [history("Mongo", "own-answer", ""), history("Postgres", "own-answer", null)],
+      },
+    });
+    expect(suggestion(result, "k")).toBe(
+      expectedFile({
+        title: "Title of k",
+        key: "k",
+        context: "The question behind k, which never reaches decisions.md.",
+        decision: "Current",
+        alternatives: "- Previously answered: Postgres",
+        consequences: "Consequences of k.",
+        tickets: "None yet: no ticket lists this decision.",
+      }),
+    );
+  });
+
+  it("an own answer equal to a choice's label excludes only that choice", () => {
+    const result = plan([flagged("k", { choices: THREE, answer: { text: "Postgres", kind: "own-answer" } })]);
+    expect(suggestion(result, "k")).toBe(
+      expectedFile({
+        title: "Title of k",
+        key: "k",
+        context: "The question behind k, which never reaches decisions.md.",
+        decision: "Postgres",
+        alternatives: "- MySQL: Familiar.\n- Sqlite3: One file, no server.",
+        consequences: "Consequences of k.",
+        tickets: "None yet: no ticket lists this decision.",
+      }),
+    );
+  });
+
+  it("a flagged entry that amends a repo decision gets an Amends section", () => {
+    const repo = decision("old", {
+      introducedBy: "repo",
+      repo: { source: "recorded", citation: "docs/adr/NMON-003-x.md:2", statement: "Old.", scoutReportId: "r" },
+      replacedBy: { id: "id-e", key: "e", title: "T", reason: "Moved." },
+    });
+    const result = plan([repo, flagged("e")], { convention: NMON });
+    expect(suggestion(result, "e")).toBe(
+      expectedFile({
+        title: "Title of e",
+        key: "e",
+        context: "The question behind e, which never reaches decisions.md.",
+        decision: "Answer of e",
+        alternatives: "None recorded.",
+        consequences: "Consequences of e.",
+        tickets: "None yet: no ticket lists this decision.",
+        amends: "NMON-003 (docs/adr/NMON-003-x.md)",
+      }),
+    );
+    expect(result.adrSuggestionsWithoutTickets).toEqual([{ key: "e", title: "Title of e" }]);
+  });
+
+  it("a multi-line question title is one line, a multi-line answer keeps its line breaks", () => {
+    const result = plan([
+      flagged("k", {
+        questionTitle: "Two\n  line title",
+        answer: { text: "  First line\nSecond line  ", kind: "own-answer" },
+      }),
+    ]);
+    expect(suggestion(result, "k")).toBe(
+      expectedFile({
+        title: "Two line title",
+        key: "k",
+        context: "The question behind k, which never reaches decisions.md.",
+        decision: "First line\nSecond line",
+        alternatives: "None recorded.",
+        consequences: "Consequences of k.",
+        tickets: "None yet: no ticket lists this decision.",
+      }),
+    );
+    expect(result.adrSuggestionsWithoutTickets).toEqual([{ key: "k", title: "Two line title" }]);
+  });
+
+  it("Amends targets come in the order decisions.md renders them, not creation order", () => {
+    const repoDecision = (key: string, citation: string) =>
+      decision(key, {
+        introducedBy: "repo",
+        repo: { source: "recorded", citation, statement: "Old.", scoutReportId: "r" },
+        replacedBy: { id: "id-e", key: "e", title: "T", reason: "Moved." },
+      });
+    const result = plan(
+      [repoDecision("zeta", "docs/adr/NMON-001-a.md:1"), repoDecision("alpha", "docs/adr/NMON-002-b.md:1"), flagged("e")],
+      { convention: NMON },
+    );
+    const amends = /^- \*\*Amends:\*\* (.*)$/m.exec(
+      result.files.find((file) => file.relativePath === "decisions.md")!.content,
+    )?.[1];
+    expect(amends).toBe("NMON-002 (docs/adr/NMON-002-b.md), NMON-001 (docs/adr/NMON-001-a.md)");
+    expect(suggestion(result, "e")).toContain(`## Amends\n\n${amends}\n`);
+  });
+
+  it("files come after the issues, in key order, and the warning is in key order", () => {
+    const result = plan([flagged("b"), flagged("a"), decision("c")], { tickets: [ticket(1, null)] });
+    expect(result.files.map((file) => file.relativePath)).toEqual([
+      "spec.md",
+      "intent.md",
+      "decisions.md",
+      "issues/01-ticket-1.md",
+      "adr-suggestions/a.md",
+      "adr-suggestions/b.md",
+    ]);
+    expect(result.adrSuggestionsWithoutTickets.map((entry) => entry.key)).toEqual(["a", "b"]);
+  });
+
+  it("no tickets at all: written with an empty Tickets list, and every one warned", () => {
+    const result = plan([flagged("a"), flagged("b")]);
+    expect(suggestionPaths(result)).toEqual(["adr-suggestions/a.md", "adr-suggestions/b.md"]);
+    expect(result.adrSuggestionsWithoutTickets).toEqual([
+      { key: "a", title: "Title of a" },
+      { key: "b", title: "Title of b" },
+    ]);
+  });
+});
+
+describe("planExport: a decision gets a suggestion exactly when decisions.md marks it ADR-worthy", () => {
+  function keysMarkedInDecisionsFile(content: string): string[] {
+    const keys: string[] = [];
+    let current: string | null = null;
+    for (const line of content.split("\n")) {
+      const anchor = /^<a id="(.+)"><\/a>$/.exec(line);
+      if (anchor) current = anchor[1]!;
+      if (line === "- **ADR-worthy:** yes" && current) keys.push(current);
+      const builtUnder = /^- `([^`]+)`: .* · ADR-worthy$/.exec(line);
+      if (builtUnder) keys.push(builtUnder[1]!);
+    }
+    return keys.sort();
+  }
+
+  function mixedTree(): DecisionView[] {
+    const worthy = { adrWorthy: true, consequences: "C." };
+    return [
+      decision("flagged-entry", worthy),
+      decision("flagged-replaced", {
+        ...worthy,
+        replacedBy: { id: "id-flagged-entry", key: "flagged-entry", title: "T", reason: "Moved." },
+      }),
+      decision("unflagged"),
+      { ...keptRepo("kept-flagged", "docs/adr/x.md:1"), ...worthy },
+      {
+        ...keptRepo("kept-flagged-replaced", "docs/adr/y.md:1"),
+        ...worthy,
+        replacedBy: { id: "id-unflagged", key: "unflagged", title: "T", reason: "Moved." },
+      },
+      keptRepo("kept-unflagged", "docs/adr/z.md:1"),
+      outOfScope("scoped-out", "Not now.", worthy),
+      decision("opened", {
+        ...worthy,
+        answer: { text: "Later.", kind: "dispositioned" },
+        dispositionTarget: "open-question",
+      }),
+    ];
+  }
+
+  function input(decisions: DecisionView[]) {
+    return {
+      sessionTitle: "Grill Room",
+      idea: "An idea.",
+      specMarkdown: "## Problem\n\nA spec.",
+      tickets: [],
+      decisions,
+      readiness: null,
+      scoutReport: null,
+      history: {},
+    };
+  }
+
+  it("the suggestion keys equal the keys decisions.md marks", () => {
+    const plan = planExport(input(mixedTree()));
+    const rendered = plan.files.find((file) => file.relativePath === "decisions.md")!.content;
+    const suggested = plan.files
+      .map((file) => file.relativePath)
+      .filter((file) => file.startsWith("adr-suggestions/"))
+      .map((file) => file.slice("adr-suggestions/".length, -".md".length))
+      .sort();
+    expect(suggested).toEqual(["flagged-entry", "kept-flagged", "kept-flagged-replaced"]);
+    expect(suggested).toEqual(keysMarkedInDecisionsFile(rendered));
+  });
+
+  it("with no decisions.md written, nothing is suggested", () => {
+    const only = [{ ...keptRepo("kept-flagged", "docs/adr/x.md:1"), adrWorthy: true, consequences: "C." }];
+    const plan = planExport(input(only));
+    expect(plan.files.some((file) => file.relativePath === "decisions.md")).toBe(false);
+    expect(plan.files.some((file) => file.relativePath.startsWith("adr-suggestions/"))).toBe(false);
   });
 });

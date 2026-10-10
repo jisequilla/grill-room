@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { and, eq } from "@agent-native/core/db/schema";
 import { describe, expect, it } from "vitest";
 
 import { storeBriefGrounding } from "../server/brief-grounding.js";
@@ -17,6 +18,7 @@ import generateHandoff from "./generate-handoff.js";
 import listTickets from "./list-tickets.js";
 import previewExport from "./preview-export.js";
 import registerProject from "./register-project.js";
+import setAdrWorthy from "./set-adr-worthy.js";
 import setTicketBlockedBy from "./set-ticket-blocked-by.js";
 import updateHandoff from "./update-handoff.js";
 import waiveRuleConflict from "./waive-rule-conflict.js";
@@ -685,5 +687,91 @@ describe("preview-export: retired export", () => {
 
     expect(preview.exportRetired).toBe(true);
     expect(preview.exportBlockedReason).toBe("export-retired");
+  });
+});
+
+describe("preview-export: adrSuggestionsWithoutTickets", () => {
+  useTestDatabase();
+
+  const WARNING = [{ key: "storage-engine", title: "Title of storage-engine" }];
+
+  async function theGate(sessionId: string) {
+    const { exportBlocked, exportBlockedReason } = await previewExport.run({ sessionId });
+    return { exportBlocked, exportBlockedReason };
+  }
+
+  /** A settled, unflagged decision, then the gate as it reads, then the same decision flagged. */
+  async function flaggingChangesOnlyTheWarning(sessionId: string) {
+    const now = new Date().toISOString();
+    const decisionId = randomUUID();
+    await getDb().insert(schema.decisions).values({
+      id: decisionId,
+      sessionId,
+      key: "storage-engine",
+      questionTitle: "Title of storage-engine",
+      currentAnswer: "SQLite",
+      answerKind: "own-answer",
+      settledAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const unflagged = await previewExport.run({ sessionId });
+    expect(unflagged.adrSuggestionsWithoutTickets).toEqual([]);
+    const gate = await theGate(sessionId);
+
+    await setAdrWorthy.run({ decisionId, adrWorthy: true, consequences: "Commits us to a file." });
+
+    const flagged = await previewExport.run({ sessionId });
+    expect({
+      exportBlocked: flagged.exportBlocked,
+      exportBlockedReason: flagged.exportBlockedReason,
+    }).toEqual(gate);
+    return flagged.adrSuggestionsWithoutTickets;
+  }
+
+  async function listTicketBy(sessionId: string, number: number, keys: string[] | null) {
+    await getDb()
+      .update(schema.tickets)
+      .set({ implementsDecisionsJson: keys === null ? null : JSON.stringify(keys) })
+      .where(and(eq(schema.tickets.sessionId, sessionId), eq(schema.tickets.number, number)));
+  }
+
+  it("none flagged: empty", async () => {
+    const { session } = await aSessionWithHandoff();
+    const preview = await previewExport.run({ sessionId: session.id });
+    expect(preview.adrSuggestionsWithoutTickets).toEqual([]);
+  });
+
+  it("flagged with a ticket listing it: empty", async () => {
+    const { session } = await aSessionWithHandoff();
+    await listTicketBy(session.id, 2, ["storage-engine"]);
+    expect(await flaggingChangesOnlyTheWarning(session.id)).toEqual([]);
+  });
+
+  it("flagged with no ticket listing it: warned", async () => {
+    const { session } = await aSessionWithHandoff();
+    await listTicketBy(session.id, 2, ["something-else"]);
+    expect(await flaggingChangesOnlyTheWarning(session.id)).toEqual(WARNING);
+  });
+
+  it("flagged with tickets not current: warned, and the export is gated as without the flag", async () => {
+    const { session } = await aSessionWithHandoff();
+    await listTicketBy(session.id, 2, ["storage-engine"]);
+    const later = new Date(Date.now() + 60_000).toISOString();
+    await getDb().update(schema.specs).set({ updatedAt: later }).where(eq(schema.specs.sessionId, session.id));
+    expect(await flaggingChangesOnlyTheWarning(session.id)).toEqual(WARNING);
+  });
+
+  it("flagged with no tickets at all: warned", async () => {
+    const { session } = await aSessionWithHandoff();
+    await getDb().delete(schema.tickets).where(eq(schema.tickets.sessionId, session.id));
+    expect(await flaggingChangesOnlyTheWarning(session.id)).toEqual(WARNING);
+  });
+
+  it("flagged with every ticket made before the decision check: warned", async () => {
+    const { session } = await aSessionWithHandoff();
+    await listTicketBy(session.id, 1, null);
+    await listTicketBy(session.id, 2, null);
+    expect(await flaggingChangesOnlyTheWarning(session.id)).toEqual(WARNING);
   });
 });

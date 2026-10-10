@@ -906,6 +906,9 @@ const messages = {
     exportDelegationTradeoff:
       "Confirming or dismissing changes the handoff: regenerate it and ground the briefs again before exporting.",
 
+    exportAdrWithoutTickets:
+      "These ADR-worthy decisions have no ticket that builds them. Their suggestions are still written, with no tickets listed:",
+    exportAdrWithoutTicketsItem: "{{title}} ({{key}})",
     exportRuleConflictsHeading: "Rule conflicts",
     exportRuleConflict:
       "Ticket {{ticket}} {{title}}: {{citation}} requires {{files}}, outside its file boundaries.",
