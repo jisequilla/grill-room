@@ -13,6 +13,11 @@ Each rule the change must satisfy, written as input and expected output. Whereve
 | `inlineCode("x`y")` | `` ``x`y`` `` |
 | `inlineCode("`x")` | `` `` `x `` `` (padded on both sides) |
 
+Each row must fail on its own rule alone:
+- **One condition of several.** When a row tests one condition of a rule that has several, every other condition in its input passes, so the row fails only when that one condition is broken.
+- **An order rule.** The row's input is in an order no obvious key would produce, such as not alphabetical, not by number and not grouped. A sorting implementation then fails it.
+- **A filter.** Each filter gets an input that only that filter removes.
+
 ## Pattern to copy
 
 The existing code this change should follow, by file and line (for example "the retry loop in `actions/ground-briefs.ts:139-170`"). Leave out implementation steps the pattern already shows.
@@ -22,6 +27,8 @@ The existing code this change should follow, by file and line (for example "the 
 Numbered. Each line names the test that proves it. That test must fail when the change is reverted.
 
 1. …: proved by `path/to/test.ts` › "test name".
+
+An acceptance line that asks for an exact output compares the whole value (`toBe`, `toEqual`), never a fragment (`toContain`). When the behaviour runs through a loader or wiring layer as well as a pure function, one acceptance line goes through that layer, so emptying what it passes fails a test.
 
 When the ticket changes both a model prompt and the server check that enforces it, one acceptance line is always the seam test: every answer shape the prompt describes passes the check.
 
