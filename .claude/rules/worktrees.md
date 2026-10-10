@@ -14,7 +14,10 @@ Every delegation uses the templates in `.claude/templates/delegation/`:
 
 A hand-run loop fills them in. A Workflow script receives the filled-in text through `args`, because scripts cannot read files. Both loops send the same words, so neither drifts from the other. The saved workflow `.claude/workflows/ticket-build-review-loop.js` is that script:
 - It takes one reviewer template per lens. With more than one lens, the main session marks the PR ready once every lens approves.
-- It asks a fixer once more when the fixer reports no commit or a verification still running.
+- A mutation agent runs `pnpm test:mutate` before every review round, a resumed one included.
+- Findings have three levels, `blocker`, `should-fix` and `nit`, and the script routes them: blockers force a fix round, and should-fix items join it only when a blocker already forces one.
+- The result returns every should-fix item and nit in `nonBlocking`, for the nits bead the main session files after the merge.
+- A fix with no commit but an edited PR body, or a commit with a note, goes to the re-review. The fixer is asked once more only when it reports neither a commit nor a PR-body edit, or its verification is still running.
 - A run that stops half way is continued by passing `start` (the PR, branch, stage and last findings), not by resuming, because a resume re-runs every agent after the first changed call.
 
 A ticket's precision comes from examples, not from length:
@@ -42,6 +45,7 @@ Pre-flight, verification on the branch merged with `main`, and the merge stay in
 - The ticket names the files it builds on. The agent's first step is to confirm they exist. If they do not, it stops and reports rather than recreating them.
 - A sonnet pre-flight agent (`preflight.md`) reads the ticket against the code, and the ticket launches only on `PREFLIGHT: clear`. It looks for wrong premises, ambiguities, contradictions, boundary gaps and owner decisions. The owner's decisions are asked for before building, not discovered in review.
 - Up to three tickets run at a time. The limit is the main session's attention to relays more than the shared subscription pool.
+- `.scratch/` is listed in `.git/info/exclude`, so evidence never shows as untracked. This is a once-per-clone setup step: `grep -qx '.scratch/' .git/info/exclude || echo '.scratch/' >> .git/info/exclude`.
 
 ## The subagent
 
@@ -73,6 +77,7 @@ Every PR is reviewed by a second agent before it can be merged. GitHub refuses a
   - files outside the ticket that the PR body does not name;
   - claims in the PR body the diff does not support.
 - A reviewer is stochastic: the same commit reviewed twice has produced different real findings. A ticket that touches a server check, a schema or a model prompt therefore gets two reviewers with different lenses, one on correctness and one on tests. Every other ticket gets one.
+- Findings carry a level: `blocker`, `should-fix` or `nit`. Blockers force a fix round. Should-fix items go into a fix round only when a blocker already forces one. A reviewer never creates or edits a bead.
 - It posts its verdict as a PR comment (`gh pr comment`): approved, or changes requested with each finding. On approval it runs `gh pr ready <n>`, then reports and stops.
 - Changes requested go back to the builder, on the same branch, and the same reviewer reviews again. After two rejected rounds the operator decides.
 
@@ -82,5 +87,23 @@ Every PR is reviewed by a second agent before it can be merged. GitHub refuses a
 - Reads the PR diff (`gh pr diff <n>`) against the ticket's file boundaries, and the reviewer's verdict.
 - Re-runs the verification itself in the worktree, plus any browser check the ticket calls for. A subagent's report is a claim, not evidence.
 - Sends failures back to the same agent on its branch; the fix lands as a new commit on the same PR.
+- If the PR body's Merge danger says `One-way door`, stops, asks in plain text, and merges only after the owner's typed confirmation, as a launch needs. AskUserQuestion is not enough here. A `Two-way door` merges without asking.
 - Merges only verified work: `gh pr merge <n> --merge --delete-branch`, then `git pull` on local `main` and re-runs the suite on the merged result before closing the bead. The close comment names the PR.
+- Files one nits bead per merged PR, never before the merge. It writes the Workflow tool's returned array to `.scratch/results/<run id>.json`; in a hand loop it writes a JSON array holding one object of the same shape, built from the reviewer's verdict. `scripts/nits-bead.sh` formats the bead, and the steps run as one script (`bash -c`):
+
+  ```bash
+  mkdir -p .scratch/results
+  # 1. the ticket's object (one per bead) from the saved result array
+  jq 'first(.[] | select(.bead == "<bead>"))' .scratch/results/<run id>.json > .scratch/results/<bead>.json
+  # 2. format it; a non-zero exit stops here, with nothing filed or deleted
+  T=$(mktemp)
+  scripts/nits-bead.sh .scratch/results/<bead>.json > "$T" || { echo "nits-bead.sh failed"; exit 1; }
+  # 3. file it only when there is something to file
+  if [ -s "$T" ]; then
+    bd create --type=task --priority=3 --labels=pr-nits --title "$(sed -n 1p "$T")" --description "$(sed -n '3,$p' "$T")"
+  fi
+  rm -f "$T"
+  ```
+
+- Cleans up evidence. When the helper exited 0 with empty stdout, so no bead was filed, it deletes the main checkout's `.scratch/evidence/<bead>/` right after the merge. When the helper exited non-zero, it stops and reports: it files nothing and deletes nothing. Otherwise it deletes the folder when that PR's nits bead closes.
 - Removes merged worktrees with `just prune-worktrees`.
