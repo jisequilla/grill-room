@@ -20,6 +20,8 @@ Judged by: three filled rows, the verdict stated, and any overrun or truncation 
 
 ## File boundaries
 
+_Grounded at commit `e3dd26f`; the repository has moved since._
+
 Files to edit:
 
 - `docs/benchmarks/hand-loop-vs-workflow.md`

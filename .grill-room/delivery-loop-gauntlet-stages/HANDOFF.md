@@ -38,7 +38,7 @@ Paths below are relative to the repository root (`/Users/jeremiasdeisequilla/rep
 
 - Spec: `docs/specs/delivery-loop-gauntlet-stages/spec.md`
 - Tickets: `.grill-room/delivery-loop-gauntlet-stages/issues/`
-- Briefs: `.grill-room/delivery-loop-gauntlet-stages/briefs/`, one per ticket, grounded and ready to paste as a delegation prompt
+- Briefs: `.grill-room/delivery-loop-gauntlet-stages/briefs/`, one per ticket except the ADR ticket, each ready to paste as a delegation prompt once its two slots are filled
 - Grill Room session: `bb45d68a-ae9e-4134-8578-f98e8dc3fd50`
 
 ## Verify command
@@ -63,13 +63,13 @@ Commit and push again whenever the bundle is re-exported.
 
 ## Execution plan
 
-- Longest chain: 4 build tickets, built one after another: 01 → 02 → 04 → 07.
-- Wave widths, in build tickets: 3, 1, 2, 1 (wave 1 first).
-- Run at most 3 tickets at a time, even when a wave is wider. The repository sets this cap: `.claude/rules/worktrees.md:44`. Every ticket in flight draws on the same subscription's rate limit, and a rate-limited failure reads like a failed ticket; each one's reports also need your attention before it can merge.
+- Longest chain: 5 build tickets, built one after another: 01 → 02 → 04 → 07 → 08.
+- Wave widths, in build tickets: 3, 1, 2, 1, 1 (wave 1 first).
+- Run at most 3 tickets at a time, even when a wave is wider. The repository sets this cap: `.claude/rules/worktrees.md:44`. Every ticket in flight draws on the same subscription's rate limit, and a rate-limited failure reads like a failed ticket; each one's reports also need your attention before it can merge. Until the briefs are grounded, run one at a time, as Waves says.
 
 ## Waves
 
-Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most 3 at a time. Start a wave only once every ticket of the previous wave is merged and verified.
+Tickets in one wave have no Blocked-by between them. Whether they change the same files was not checked, because the briefs are not grounded against the current code: run them one at a time, or ground the briefs first. Start a wave only once every ticket of the previous wave is merged and verified.
 
 ### Wave 1
 
@@ -104,6 +104,19 @@ Tickets in one wave do not block each other and may run in parallel, each in its
   - Ticket: `.grill-room/delivery-loop-gauntlet-stages/issues/07-pilot-three-tickets.md`
   - Brief: [`.grill-room/delivery-loop-gauntlet-stages/briefs/07-pilot-three-tickets.md`](briefs/07-pilot-three-tickets.md)
 
+### Wave 5
+
+- **08 Record ADRs from suggestions** (blocked by 01, 02, 03, 04, 05, 06, 07; self-contained: delegate it from its ticket file; it has no brief)
+  - Ticket: `.grill-room/delivery-loop-gauntlet-stages/issues/08-record-adrs-from-suggestions.md`
+
+## Recording the repo's ADRs
+
+Grill Room wrote one suggestion per ADR-worthy decision in `.grill-room/delivery-loop-gauntlet-stages/adr-suggestions/`. Ticket 08 records them as the repo's own ADRs, last, once every other ticket has merged.
+
+No ADR convention was detected in this repository. Ask the owner where ADRs go, and how they are numbered, before writing them.
+
+Close ticket 08 before the working folder is deleted: the suggestions are deleted with it.
+
 ## Questions the spec and tickets leave open
 
 The consistency check found these statements, which leave a builder to decide something the owner never decided. Before delegating a ticket a question quotes, get the owner's answer and put it in the delegation prompt; the question is also in that ticket's brief. Answer the rest before calling the feature done.
@@ -129,7 +142,7 @@ Where this lifecycle differs from the repository's own rules, the repository's r
 ### Before launching a ticket
 
 - Local `main` holds nothing unpushed (`git status`, `git log origin/main..main`). Push it first if it does, so the worktree's base includes it.
-- The briefs are grounded and current: **File boundaries** and **Codebase facts** are already filled in from the code. Check them against the ticket before delegating, rather than filling them by hand. Then paste the whole brief as the delegation prompt.
+- Fill the brief's **File boundaries** slot, naming the files the ticket builds on: the agent's first step is to confirm they exist, and it stops and reports rather than recreating them. Fill the **Codebase facts** slot. Then paste the whole brief as the delegation prompt.
 - Pre-flight the ticket before launching it, following the repository's own procedure at `.claude/rules/worktrees.md:43`. Launch the ticket only when that procedure clears it.
 
 ### The subagent
@@ -193,7 +206,7 @@ An escalation is the most useful data point: it shows where the brief, not the m
 
 ## Tracking with beads
 
-Create one bead per ticket. Claim a bead before delegating its ticket, and close it only after you have verified and merged the change, naming the merge in the close comment. Recover state with `bd ready` and `git log`, never from memory.
+Create one bead per ticket. Claim a bead before delegating its ticket, and close it only after you have verified and merged the change, naming the merge in the close comment. Recover state with `bd ready` and `git log`, never from memory. Ticket 08, Record ADRs from suggestions, gets a bead like every other ticket.
 
 The repository's declared tracker commands:
 
@@ -208,3 +221,5 @@ Log each ticket's outcome in Grill Room once it closes. Run this command from th
 ```bash
 pnpm action set-build-record --sessionId bb45d68a-ae9e-4134-8578-f98e8dc3fd50 --ticketNumber <ticket-number> --model <model> --firstAttemptPassed <true|false> --escalated <true|false> --promptMissing "<what the brief was missing>" --ticketStatus done
 ```
+
+Ticket 08 records the repo's ADRs and gets no build record: it is not stored in Grill Room, so `set-build-record` refuses its number.
