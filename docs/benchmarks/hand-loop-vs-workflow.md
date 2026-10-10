@@ -144,9 +144,9 @@ The three tickets run through the loop of `docs/specs/delivery-loop-gauntlet-sta
 
 | Ticket | PR | Time to ready | Cost | Review rounds | Stryker runs | Mutants | Score | Surviving mutants | Tool-only findings | Nit beads filed | Evidence re-run |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| gr-6uc | | | | | | | | | | | |
-| gr-930 | | | | | | | | | | | |
-| gr-x6w | | | | | | | | | | | |
+| gr-6uc | #192 | 19m21s | $1.16 | 1: approved | r1 8m18s truncated | r1 99 | r1 79.8% | r1 20 | 1 | gr-wp7 | r1 all |
+| gr-930 | #190 | 17m17s | $1.05 | 1: approved | r1 7m09s truncated | r1 95 | r1 78.9% | r1 20 | 1 | gr-em8 | r1 all |
+| gr-x6w | #191 | 23m17s (15m19s to both lenses approving; the rest is the main session's verification) | $1.75 | 1: both lenses approved | r1 2m49s runner-failed | r1 - | r1 - | r1 - | 0 | gr-cbf | r1 all |
 
 - **Time to ready:** builder start to the PR marked ready, as in "Time to ready" above. It includes the Stryker runs.
 - **Cost:** dollars only, catalog price of the builder, reviewer and fixer subagents, excluding the orchestrating session, as in "Cost and tool calls" above.
@@ -161,4 +161,25 @@ The three tickets run through the loop of `docs/specs/delivery-loop-gauntlet-sta
 
 **Keep criterion.** The changes stay only if all three hold: at least one tool-only finding across the three tickets; on every ticket, every Evidence pair current in each review round re-ran red then green in that round; and each ticket's cost is between $3.00 and $17.00 inclusive. Otherwise the changes are not kept, and that result is itself the answer the pilot gives.
 
-**Verdict.** Pending the pilot; gr-g4v.7 writes it here.
+**Measured.** All three tickets ran in one wave (`wf_8d0c2ea0-434`), each approved in round 1 with no blocker, and all three merged after the main session verified them on `main` merged with all three branches: 119 files, 3,250 tests, typecheck 0. Costs are priced from each agent's de-duplicated transcript usage at catalog price; the Sonnet figures match ngine-monitor to the cent, and the monitor has no price for `claude-opus-5-5`, so the reviewers are priced at $4 / $20 per MTok, cache reads $0.40 and writes $5.00. The mutate agent is not in the Cost column, as the column's definition says: it added $0.36 (gr-6uc), $0.45 (gr-930) and $0.50 (gr-x6w).
+
+- **The mutation gate judged none of the three tickets' own code.**
+  - gr-6uc and gr-930 changed tests only, so `test:mutate` took the coverage scope: every line the changed tests cover, kept in path order up to the 100-mutant cap.
+  - The cap filled with unrelated code first: `actions/break-into-tickets.ts` for gr-930, and `server/brief-grounding.ts:201-321` for gr-6uc.
+  - Every Evidence range of both PRs fell in `dropped`, and the reviewers recorded them as unjudged.
+  - gr-x6w's run failed Stryker's dry run ("There were failed tests in the initial test run") although the suite was green on the same branch, so its gate was skipped.
+- **The two tool-only findings are real coverage gaps, but outside the tickets.** Both are nits that name 20 survivors in code no ticket touched. They meet the column's definition, and neither says anything about the change under review.
+- **The hand mutations did the proving.** Every acceptance line in all three tickets named its source mutation. Each reviewer re-applied every one and saw the named test fail, then pass once restored. That is what the Evidence re-run column records.
+- **Pre-flight carried the judgment.** It caught an equivalent mutant before build (gr-930's `citationPath`: neither citation grammar allows `:` in a path) and an owner decision (gr-x6w: keep refusing leading-slash handoff citations).
+
+**Verdict: not met as written; kept in part.**
+
+The keep criterion fails on cost. Every ticket cost less than the $3.00 floor, a range taken from the A/B's larger opus-built tickets. Its tool-only-findings condition passes only on the letter.
+
+The owner's decision:
+- **Kept:** the Evidence re-run, the three finding levels and the post-merge nits bead. They worked on all three tickets.
+- **Kept only once fixed:** the mutation gate. It cost $0.36 to $0.50 per ticket and judged nothing in scope.
+- **The fixes:**
+  - gr-g4v.9: rank the coverage-scope lines so the code the changed tests target comes before the cap.
+  - gr-g4v.10: make Stryker's dry run reproduce the green suite.
+- **Next:** gr-g4v.8 records the split in the ADRs.
