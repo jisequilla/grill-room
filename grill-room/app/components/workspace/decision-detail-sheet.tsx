@@ -1,6 +1,11 @@
+import {
+  actionErrorMessage,
+  useActionMutation,
+} from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { IconArrowBackUp } from "@tabler/icons-react";
-import type { RefObject } from "react";
+import { useState, type RefObject } from "react";
+import { toast } from "sonner";
 
 import { AnswerNow } from "@/components/workspace/answer-now";
 import {
@@ -19,6 +24,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { adrSectionView, storedAdrDraft } from "@/lib/adr-section";
 import {
   ANSWER_KIND_LABEL_KEY,
   isLooseEnd,
@@ -40,6 +46,100 @@ function Section({
       </h4>
       {children}
     </section>
+  );
+}
+
+/**
+ * The ADR flag and Consequences. The draft lives here, so the section mounted
+ * inside the sheet and keyed on the decision starts from the stored values
+ * each time the sheet opens; a poll that changes the stored values leaves the
+ * owner's draft alone.
+ */
+function AdrSection({ decision }: { decision: TreeDecision }) {
+  const t = useT();
+  const [draft, setDraft] = useState(() => storedAdrDraft(decision));
+  const view = adrSectionView(decision, draft);
+
+  const { mutate, isPending } = useActionMutation("set-adr-worthy", {
+    onError: (error: unknown) => {
+      toast.error(actionErrorMessage(error) ?? t("workspace.adrSaveFailed"));
+    },
+  });
+
+  return (
+    <Section title={t("workspace.adrSection")}>
+      <p className="text-sm text-muted-foreground">
+        {t("workspace.adrExplainer")}
+      </p>
+      {view.editable ? (
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              data-testid="adr-worthy-toggle"
+              checked={draft.adrWorthy}
+              onChange={(event) =>
+                setDraft({ ...draft, adrWorthy: event.target.checked })
+              }
+            />
+            {t("workspace.adrWorthy")}
+          </label>
+          <label className="block space-y-1 text-sm">
+            <span className="text-xs font-medium text-muted-foreground">
+              {t("workspace.adrConsequences")}
+            </span>
+            <textarea
+              data-testid="adr-consequences"
+              className="min-h-20 w-full rounded-md border bg-transparent px-3 py-2 text-sm"
+              value={draft.consequences}
+              onChange={(event) =>
+                setDraft({ ...draft, consequences: event.target.value })
+              }
+            />
+          </label>
+          {view.showRequiredHint ? (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="adr-consequences-required"
+            >
+              {t("workspace.adrConsequencesRequired")}
+            </p>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            data-testid="adr-save"
+            disabled={!view.saveEnabled || isPending}
+            onClick={() => mutate(view.saveInput)}
+          >
+            {t(isPending ? "workspace.adrSaving" : "workspace.adrSave")}
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-1" data-testid="adr-readonly">
+          {decision.adrWorthy ? (
+            <>
+              <p className="text-sm font-medium">{t("workspace.adrWorthy")}</p>
+              {decision.consequences ? (
+                <p className="text-sm break-words whitespace-pre-wrap">
+                  {decision.consequences}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="text-sm">{t("workspace.adrNotMarked")}</p>
+          )}
+          {view.lockedReasonKey ? (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="adr-locked-reason"
+            >
+              {t(view.lockedReasonKey)}
+            </p>
+          ) : null}
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -152,6 +252,8 @@ export function DecisionDetailSheet({
               </p>
             )}
           </Section>
+
+          <AdrSection key={decision.id} decision={decision} />
 
           <Separator />
 

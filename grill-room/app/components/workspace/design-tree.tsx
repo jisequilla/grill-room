@@ -46,6 +46,29 @@ function RepoBadge({ repo }: { repo: RepoOrigin }) {
   );
 }
 
+/** Marks an ADR-worthy decision, with its Consequences on hover. */
+function AdrBadge({ consequences }: { consequences: string | null }) {
+  const t = useT();
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="inline-flex shrink-0 items-center rounded-full border border-primary/30 bg-primary/10 px-1.5 py-px text-xs leading-4 font-medium tracking-wide text-primary uppercase"
+          data-testid="adr-marker"
+        >
+          {t("workspace.adrMarker")}
+        </span>
+      </TooltipTrigger>
+      {consequences ? (
+        <TooltipContent className="max-w-xs">
+          <p className="text-xs whitespace-pre-wrap">{consequences}</p>
+        </TooltipContent>
+      ) : null}
+    </Tooltip>
+  );
+}
+
 function DecisionRow({
   decision,
   depth,
@@ -112,6 +135,9 @@ function DecisionRow({
           ) : null}
         </span>
         <span className="mt-px flex shrink-0 items-center gap-1">
+          {decision.adrWorthy ? (
+            <AdrBadge consequences={decision.consequences} />
+          ) : null}
           {decision.repo ? <RepoBadge repo={decision.repo} /> : null}
           {loose ? <LooseEndBadge /> : null}
           <DecisionStateBadge state={decision.state} />

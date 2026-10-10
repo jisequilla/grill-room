@@ -21,6 +21,9 @@ function aDecision(overrides: Partial<TreeDecision> = {}): TreeDecision {
     dependsOn: [],
     introducedBy: "interviewer",
     repo: null,
+    adrWorthy: false,
+    consequences: null,
+    replacedBy: null,
     state: "settled",
     answer: { text: "An answer", kind: "own-answer" },
     supersession: null,
@@ -82,5 +85,19 @@ describe("DesignTree", () => {
     ]);
 
     expect(html).toContain('data-source="inferred"');
+  });
+
+  it("marks an ADR-worthy decision", () => {
+    const flagged = render([
+      aDecision({ adrWorthy: true, consequences: "Costly to undo." }),
+    ]);
+    const unflagged = render([aDecision({ adrWorthy: false })]);
+    const withdrawn = render([
+      aDecision({ adrWorthy: true, state: "withdrawn", consequences: "x" }),
+    ]);
+
+    expect(flagged).toContain('data-testid="adr-marker"');
+    expect(unflagged).not.toContain('data-testid="adr-marker"');
+    expect(withdrawn).toContain('data-testid="adr-marker"');
   });
 });
