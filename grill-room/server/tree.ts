@@ -685,6 +685,16 @@ export interface ProposedDecision {
   choices?: readonly unknown[];
   /** Index into `choices`, which must actually be one of them. */
   recommendedChoice?: number | null;
+  /** Checked against `consequences`: a flagged decision needs them. */
+  adrWorthy?: boolean;
+  consequences?: string | null;
+}
+
+/** Why a flagged decision cannot be stored without Consequences, or null when it can. */
+export function adrWorthyRejection(decision: ProposedDecision): string | null {
+  if (!decision.adrWorthy) return null;
+  if ((decision.consequences ?? "").trim() !== "") return null;
+  return `Decision "${decision.key}" is marked \`adrWorthy\` but has no \`consequences\`. Write one to three sentences on what it commits the system to and what it rules out, or set \`adrWorthy\` to false.`;
 }
 
 /**
@@ -889,6 +899,8 @@ export function validateProposal(
   for (const decision of [...proposed, ...userDecisionPlacements]) {
     const rejection = recommendedChoiceRejection(decision);
     if (rejection) reasons.push(rejection);
+    const adrRejection = adrWorthyRejection(decision);
+    if (adrRejection) reasons.push(adrRejection);
   }
 
   // A pending push back or an awaiting placement is a loose end the proposal

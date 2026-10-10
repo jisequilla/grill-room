@@ -127,6 +127,8 @@ function aProposedDecision(
     recommendedAnswer: "",
     dependsOn: [],
     ask: true,
+    adrWorthy: false,
+    consequences: null,
     ...overrides,
   };
 }

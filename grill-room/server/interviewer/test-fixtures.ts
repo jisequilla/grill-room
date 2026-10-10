@@ -123,6 +123,8 @@ export function aProposeRoundResult(
         recommendedAnswer: "A workspace",
         dependsOn: [],
         ask: true,
+        adrWorthy: false,
+        consequences: null,
       },
     ],
     pushBackResponses: [],
