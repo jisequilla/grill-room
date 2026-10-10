@@ -1403,6 +1403,7 @@ describe("planExport: decisions.md ADR marks", () => {
     { name: "a line range", citations: ["docs/adr/0007-queue.md:1-9"], convention: BARE, amends: "0007 (docs/adr/0007-queue.md)" },
     { name: "no convention", citations: ["docs/adr/NMON-012-read-model.md:4"], convention: null, amends: "docs/adr/NMON-012-read-model.md" },
     { name: "a path outside the folder", citations: ["CLAUDE.md:12"], convention: NMON, amends: "CLAUDE.md" },
+    { name: "a matching name in another folder", citations: ["docs/adr/old/NMON-012-x.md:4"], convention: NMON, amends: "docs/adr/old/NMON-012-x.md" },
     { name: "a name that does not match", citations: ["docs/adr/notes.md:3"], convention: NMON, amends: "docs/adr/notes.md" },
     { name: "a different prefix", citations: ["docs/adr/0007-queue.md:2"], convention: NMON, amends: "docs/adr/0007-queue.md" },
     {
