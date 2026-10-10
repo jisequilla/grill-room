@@ -623,4 +623,10 @@ CREATE INDEX IF NOT EXISTS gr_idx_rule_waivers_session ON gr_rule_waivers(sessio
 ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS last_durable_export_folder TEXT;
 UPDATE gr_sessions SET last_durable_export_folder = last_working_export_folder WHERE last_working_export_folder IS NOT NULL`,
   },
+  {
+    version: 79,
+    name: "decisions-adr-worthy-consequences",
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS adr_worthy BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS consequences TEXT`,
+  },
 ];

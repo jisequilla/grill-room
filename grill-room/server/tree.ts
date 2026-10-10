@@ -478,6 +478,10 @@ export interface DecisionView {
   replacedBy: DecisionReplacedBy | null;
   /** The decision whose answer settled this former loose end. */
   settledBy: DecisionSettledBy | null;
+  /** An architecturally significant decision, costly to reverse, that the export suggests as an ADR. */
+  adrWorthy: boolean;
+  /** What follows from the decision, or null. Always present on a flagged decision. */
+  consequences: string | null;
   dispositionTarget: DecisionRow["dispositionTarget"];
   settledAt: string | null;
   reopenedAt: string | null;
@@ -605,6 +609,8 @@ export function describeDecisions(
           title: settledBy?.questionTitle ?? null,
         }
       : null,
+    adrWorthy: row.adrWorthy,
+    consequences: row.consequences,
     dispositionTarget: row.dispositionTarget,
     settledAt: row.settledAt,
     reopenedAt: row.reopenedAt,

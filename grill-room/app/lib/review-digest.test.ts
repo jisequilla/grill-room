@@ -59,6 +59,8 @@ function decision(overrides: Partial<TreeDecision> = {}): TreeDecision {
     restatementReason: null,
     replacedBy: null,
     settledBy: null,
+    adrWorthy: false,
+    consequences: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     previousAnswers: [],
     ...overrides,

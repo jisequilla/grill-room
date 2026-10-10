@@ -343,6 +343,10 @@ export const decisions = table(
     replacedById: text("replaced_by_id"),
     /** The interviewer's reason for the replacement, kept on acceptance. */
     replacedReason: text("replaced_reason"),
+    /** An architecturally significant decision, costly to reverse, that the export suggests as an ADR. A flagged decision always has Consequences. */
+    adrWorthy: boolean("adr_worthy").notNull().default(false),
+    /** What follows from the decision; required to flag it ADR-worthy, kept when it is unflagged. */
+    consequences: text("consequences"),
     /**
      * For a loose end settled by accepting a supersession, the decision whose
      * answer settled it. Kept when that decision is reopened: it records where
