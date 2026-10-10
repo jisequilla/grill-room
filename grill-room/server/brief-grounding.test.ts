@@ -1076,7 +1076,7 @@ describe("reasonsToRefuseHandoffGrounding on rule claims", () => {
     expect(await refusals(claim)).toEqual([]);
   });
 
-  it("matches only filesToChange, never reach or buildsOnFiles", async () => {
+  it("matches only filesToChange, never buildsOnFiles", async () => {
     const claim = aRuleClaim(["src/a.ts"], (ticket) => {
       ticket.buildsOnFiles = ["web/package.json:1"];
     });
@@ -1215,6 +1215,34 @@ describe("reasonsToRefuseHandoffGrounding on rule claims", () => {
     ]);
   });
 
+  it("does not apply R3 to a twoLensReview citing a glob-matched source", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (ticket) => {
+      ticket.twoLensReview = { citation: `${VERSIONING}:2` };
+    });
+    expect(await refusals(claim)).toEqual([]);
+  });
+
+  it("words R1 for a twoLensReview in a repository with no rule sources", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (ticket) => {
+      ticket.twoLensReview = { citation: "CLAUDE.md:1" };
+    });
+    expect(await refusals(claim, { ruleSources: [] })).toEqual([
+      `Ticket 1's twoLensReview citation "CLAUDE.md:1" is not in one of the repository's rule sources; the repository has no rule sources, so leave rules empty, twoLensReview null and every delegationProposals slot null.`,
+    ]);
+  });
+
+  it("words R1 for a proposal in a repository with no rule sources", async () => {
+    const claim = aRuleClaim(["src/a.ts"], (_ticket, result) => {
+      result.delegationProposals = {
+        ...NO_DELEGATION_PROPOSALS,
+        reviewRule: { citation: "CLAUDE.md:1" },
+      };
+    });
+    expect(await refusals(claim, { ruleSources: [] })).toEqual([
+      `The delegationProposals.reviewRule citation "CLAUDE.md:1" is not in one of the repository's rule sources; the repository has no rule sources, so leave rules empty, twoLensReview null and every delegationProposals slot null.`,
+    ]);
+  });
+
   it("reports each failing claim on its own, even with the same citation", async () => {
     const claim = aRuleClaim(["src/a.ts"], (ticket) => {
       ticket.rules = [rule("docs/rules.md:1"), rule("docs/rules.md:1")];
@@ -1224,7 +1252,7 @@ describe("reasonsToRefuseHandoffGrounding on rule claims", () => {
 
   it("checks rule claims against the rule sources it is given, not the disk", async () => {
     const claim = () =>
-      aRuleClaim(["src/a.ts"], (ticket) => {
+      aRuleClaim(["web/package.json"], (ticket) => {
         ticket.rules = [rule(`${VERSIONING}:3`)];
       });
     const given: RuleSource[] = [{ path: "CLAUDE.md", globs: null, lineCount: 3 }];
@@ -1235,9 +1263,7 @@ describe("reasonsToRefuseHandoffGrounding on rule claims", () => {
     expect(refused).toEqual([
       `Ticket 1's rule citation "${VERSIONING}:3" is not in one of the repository's rule sources; cite a line of \`CLAUDE.md\`.`,
     ]);
-    expect(collected).toEqual([
-      `Ticket 1 cites ${VERSIONING}, whose paths: globs (\`web/**/*\`) match none of its filesToChange; drop that entry, or cite a rule that applies to this ticket.`,
-    ]);
+    expect(collected).toEqual([]);
   });
 
   it("seam: every rules, two-lens and proposal shape the handoff prompt describes passes the rule checks", async () => {
@@ -1514,6 +1540,27 @@ describe("clampHandoffGroundingCitations", () => {
     expect(clamped.delegationProposals.pruneCommand).toBeNull();
     expect(result.tickets[0]!.rules[0]!.citation).toBe(".claude/rules/versioning.md:6-20");
     expect(result.delegationProposals.reviewRule).toEqual({ citation: "CLAUDE.md:2-9" });
+  });
+
+  it("clamps every delegationProposals slot's citation", () => {
+    const root = repos.create({ files: RULE_FIXTURE_FILES });
+    const result = aBareResult();
+    result.delegationProposals = {
+      maxTicketsInFlight: { value: 2, citation: "CLAUDE.md:2-9" },
+      pruneCommand: { command: "just prune", citation: "CLAUDE.md:3-9" },
+      preflight: { citation: ".claude/rules/versioning.md:6-20" },
+      reviewRule: { citation: "CLAUDE.md:1-9" },
+    };
+    deepFreeze(result);
+
+    const clamped = clampHandoffGroundingCitations(result, root);
+
+    expect(clamped.delegationProposals).toEqual({
+      maxTicketsInFlight: { value: 2, citation: "CLAUDE.md:2-3" },
+      pruneCommand: { command: "just prune", citation: "CLAUDE.md:3" },
+      preflight: { citation: ".claude/rules/versioning.md:6-8" },
+      reviewRule: { citation: "CLAUDE.md:1-3" },
+    });
   });
 
   it("clamps a two-lens citation past the file's end", () => {
