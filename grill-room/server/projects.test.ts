@@ -16,7 +16,10 @@ import {
   recipeRemoteWarning,
   guessDeliveryRecipe,
   inspectProjectFolder,
+  exportRootsOverlap,
   listProjects,
+  recheckVisibility,
+  refreshProjectTracker,
   registerProject,
   suggestVerifyCommand,
   updateProject,
@@ -918,5 +921,104 @@ describe("runGit", () => {
 
     await expect(runGit(root, ["commit", "-m", "nope"])).rejects.toThrow(/read-only/);
     await expect(runGit(root, ["add", "."])).rejects.toThrow(/read-only/);
+  });
+});
+
+describe("recheckVisibility", () => {
+  useTestDatabase();
+
+  async function aProject(gitignore?: string) {
+    const root = repos.create({ gitignore });
+    const project = registered(
+      await registerProject({ root, verifyCommand: "pnpm test", workingExportFolder: ".scratch" }),
+    );
+    return project;
+  }
+
+  async function setStored(id: string, values: { visibility: "tracked" | "ignored"; visibilityRecheck: boolean }) {
+    await getDb().update(schema.projects).set(values).where(eq(schema.projects.id, id));
+  }
+
+  async function storedRow(id: string) {
+    const [row] = await getDb().select().from(schema.projects).where(eq(schema.projects.id, id));
+    return row;
+  }
+
+  it("writes the measured value and clears the flag while the flag is still set", async () => {
+    const project = await aProject(".scratch/\n");
+    await setStored(project.id, { visibility: "tracked", visibilityRecheck: true });
+    const row = await storedRow(project.id);
+
+    const result = await recheckVisibility(row);
+
+    expect(result).toMatchObject({ visibility: "ignored", visibilityRecheck: false });
+    const after = await storedRow(project.id);
+    expect(after).toMatchObject({ visibility: "ignored", visibilityRecheck: false });
+  });
+
+  it("does not overwrite an explicit edit that cleared the flag after the row was read", async () => {
+    const project = await aProject("node_modules/\n");
+    await setStored(project.id, { visibility: "tracked", visibilityRecheck: true });
+    const stale = await storedRow(project.id);
+    await setStored(project.id, { visibility: "ignored", visibilityRecheck: false });
+
+    const result = await recheckVisibility(stale);
+
+    expect(result).toMatchObject({ visibility: "ignored", visibilityRecheck: false });
+    expect(await storedRow(project.id)).toMatchObject({ visibility: "ignored", visibilityRecheck: false });
+  });
+
+  it("returns a row whose flag is clear as passed, without measuring or writing", async () => {
+    const project = await aProject(".scratch/\n");
+    await setStored(project.id, { visibility: "tracked", visibilityRecheck: true });
+    const callerRow = { ...(await storedRow(project.id)), visibilityRecheck: false };
+
+    const result = await recheckVisibility(callerRow);
+
+    expect(result).toBe(callerRow);
+    expect(await storedRow(project.id)).toMatchObject({ visibility: "tracked", visibilityRecheck: true });
+  });
+
+  it("returns the row as passed and writes nothing when git cannot answer", async () => {
+    const project = await aProject(".scratch/\n");
+    await setStored(project.id, { visibility: "tracked", visibilityRecheck: true });
+    const notARepo = repos.plainFolder();
+    await getDb().update(schema.projects).set({ rootPath: notARepo }).where(eq(schema.projects.id, project.id));
+    const row = await storedRow(project.id);
+
+    const result = await recheckVisibility(row);
+
+    expect(result).toBe(row);
+    expect(await storedRow(project.id)).toMatchObject({ visibility: "tracked", visibilityRecheck: true });
+  });
+});
+
+describe("refreshProjectTracker", () => {
+  useTestDatabase();
+
+  it("the result carries no visibilityRecheck", async () => {
+    const root = repos.create();
+    const project = registered(
+      await registerProject({ root, verifyCommand: "pnpm test", workingExportFolder: ".scratch" }),
+    );
+
+    const outcome = await refreshProjectTracker(project.id);
+
+    const refreshed = registered(outcome);
+    expect("visibilityRecheck" in refreshed).toBe(false);
+  });
+});
+
+describe("exportRootsOverlap", () => {
+  it.each([
+    ["Docs", "docs/specs", true],
+    ["docs/specs", "DOCS/SPECS", true],
+    [".grill-room", ".Grill-Room/x", true],
+    ["docs", "docs/specs", true],
+    ["docs", "docs-specs", false],
+    ["Docs", "docs-specs", false],
+    ["a/b", "a/c", false],
+  ])("%s vs %s is %s", (a, b, expected) => {
+    expect(exportRootsOverlap(a, b)).toBe(expected);
   });
 });

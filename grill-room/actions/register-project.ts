@@ -31,7 +31,7 @@ export default defineAction({
       .string()
       .optional()
       .describe(
-        "Where the durable files land (spec, decisions, intent; kept after the build), relative to the repository root; defaults to 'docs/specs'. Must not be, contain, or lie inside the working export folder.",
+        "Where the durable files land (spec, decisions, intent; kept after the build), relative to the repository root; defaults to 'docs/specs'. Must not be, contain, or lie inside the working export folder, compared ignoring case.",
       ),
     name: z
       .string()

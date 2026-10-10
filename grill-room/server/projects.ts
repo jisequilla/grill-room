@@ -21,7 +21,7 @@ import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { eq } from "@agent-native/core/db/schema";
+import { and, eq } from "@agent-native/core/db/schema";
 
 import {
   DEFAULT_DURABLE_EXPORT_FOLDER,
@@ -239,12 +239,12 @@ export function normalizeExportFolder(
 
 /**
  * Whether two normalised export folders are the same folder or one lies
- * inside the other. Compared by path segment, so siblings sharing a prefix
+ * inside the other, ignoring case on every OS. Compared by path segment, so siblings sharing a prefix
  * (`docs` and `docs-specs`) do not overlap.
  */
 export function exportRootsOverlap(a: string, b: string): boolean {
-  const left = a.split("/");
-  const right = b.split("/");
+  const left = a.toLowerCase().split("/");
+  const right = b.toLowerCase().split("/");
   const shorter = left.length <= right.length ? left : right;
   const longer = shorter === left ? right : left;
   return shorter.every((segment, index) => segment === longer[index]);
@@ -299,16 +299,18 @@ export async function measuredVisibility(
  * the row is left exactly as stored, flag included, to be tried on a later
  * read.
  */
-async function recheckVisibility(row: ProjectRow): Promise<ProjectRow> {
+export async function recheckVisibility(row: ProjectRow): Promise<ProjectRow> {
   if (!row.visibilityRecheck) return row;
   const visibility = await measuredVisibility(row.rootPath, row.workingExportFolder);
   if (visibility === null) return row;
   const [updated] = await getDb()
     .update(schema.projects)
     .set({ visibility, visibilityRecheck: false })
-    .where(eq(schema.projects.id, row.id))
+    .where(and(eq(schema.projects.id, row.id), eq(schema.projects.visibilityRecheck, true)))
     .returning();
-  return updated ?? row;
+  if (updated) return updated;
+  const [stored] = await getDb().select().from(schema.projects).where(eq(schema.projects.id, row.id));
+  return stored ?? row;
 }
 
 /**
