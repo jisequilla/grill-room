@@ -45,6 +45,23 @@ describe("project actions", () => {
     ).rejects.toMatchObject({ errorCode: "verify-command-required" });
   });
 
+  it("refuses a durable folder that differs from the working folder only by case", async () => {
+    await expect(
+      registerProject.run({
+        root: repos.create(),
+        verifyCommand: "pnpm test",
+        workingExportFolder: "Docs",
+        durableExportFolder: "docs/specs",
+      }),
+    ).rejects.toMatchObject({ errorCode: "export-roots-overlap" });
+  });
+
+  it("the result carries no visibilityRecheck", async () => {
+    const project = await aProject();
+
+    expect("visibilityRecheck" in project).toBe(false);
+  });
+
   it("register-project stores the project and list/get read it back", async () => {
     const root = repos.create({ files: { "app/index.ts": "export {};\n" } });
 
