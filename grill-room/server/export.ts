@@ -41,6 +41,8 @@ export interface ExportTicket {
   waitsFor?: string | null;
   /** The spec's user stories it builds; null or absent for tickets made before the story check. */
   implements?: readonly number[] | null;
+  /** The keys of the settled decisions it builds; null or absent for tickets made before the decision check. */
+  implementsDecisions?: readonly string[] | null;
 }
 
 export interface PlannedExportFile {
@@ -455,6 +457,8 @@ export function renderTicketFile(params: {
   waitsFor?: string;
   /** The user stories the ticket builds; no line when null, absent or empty. */
   implements?: readonly number[] | null;
+  /** The settled decisions the ticket builds, by key; no line when null, absent or empty, and never for a gate. */
+  implementsDecisions?: readonly string[] | null;
 }): string {
   const blockedByLine =
     params.blockedByLabels.length > 0
@@ -464,11 +468,15 @@ export function renderTicketFile(params: {
     params.implements && params.implements.length > 0
       ? `\nImplements: ${new Set(params.implements).size === 1 ? "user story" : "user stories"} ${numberRanges(params.implements)}`
       : "";
+  const decisionsLine =
+    params.waitsFor === undefined && params.implementsDecisions && params.implementsDecisions.length > 0
+      ? `\nImplements decisions: ${params.implementsDecisions.map((key) => `\`${key}\``).join(", ")}`
+      : "";
 
   if (params.waitsFor !== undefined) {
     return `# ${params.label} ${params.title}\n\n${GATE_STATUS_LINE}\n${blockedByLine}\nWait for: ${params.waitsFor}${implementsLine}\n\n${params.body}`;
   }
-  return `# ${params.label} ${params.title}\n\n${STATUS_LINE}\n${blockedByLine}${implementsLine}\n\n${params.body}`;
+  return `# ${params.label} ${params.title}\n\n${STATUS_LINE}\n${blockedByLine}${implementsLine}${decisionsLine}\n\n${params.body}`;
 }
 
 /** A decision's anchor and tie-break: its key, or its id for a row that has none. */
@@ -975,6 +983,7 @@ export function planExport(input: PlanExportInput): ExportPlan {
         blockedByLabels,
         ...(ticket.kind === "gate" ? { waitsFor: ticket.waitsFor ?? "" } : {}),
         implements: ticket.implements ?? null,
+        implementsDecisions: ticket.implementsDecisions ?? null,
       }),
     });
   }

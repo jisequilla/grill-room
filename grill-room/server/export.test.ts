@@ -1558,3 +1558,58 @@ describe("planExport: decisions.md ADR marks", () => {
     );
   });
 });
+
+describe("planExport: a ticket's Implements decisions line", () => {
+  function fileFor(ticket: {
+    kind?: "build" | "gate";
+    waitsFor?: string | null;
+    implements?: readonly number[] | null;
+    implementsDecisions?: readonly string[] | null;
+  }): string {
+    return planExport({
+      sessionTitle: "Grill Room",
+      idea: "An idea.",
+      specMarkdown: "## Problem\n\nA spec.",
+      tickets: [
+        {
+          number: 1,
+          slug: "build-the-workspace",
+          title: "Build the workspace",
+          body: "Build it.",
+          blockedBy: [],
+          ...ticket,
+        },
+      ],
+      decisions: [],
+      readiness: null,
+      scoutReport: null,
+    }).files.find((file) => file.relativePath === "issues/01-build-the-workspace.md")!.content;
+  }
+
+  it("writes keys after the Implements line", () => {
+    expect(fileFor({ implements: [2, 3], implementsDecisions: ["storage-engine", "api-shape"] })).toBe(
+      "# 01 Build the workspace\n\nStatus: ready-for-agent\nBlocked by: none\nImplements: user stories 2-3\nImplements decisions: `storage-engine`, `api-shape`\n\nBuild it.",
+    );
+  });
+
+  it("writes keys after Blocked by when the ticket cites no stories", () => {
+    expect(fileFor({ implementsDecisions: ["storage-engine"] })).toBe(
+      "# 01 Build the workspace\n\nStatus: ready-for-agent\nBlocked by: none\nImplements decisions: `storage-engine`\n\nBuild it.",
+    );
+  });
+
+  it.each([
+    ["empty", []],
+    ["null", null],
+  ] as const)("writes no line when the keys are %s", (_, keys) => {
+    expect(fileFor({ implementsDecisions: keys })).toBe(
+      "# 01 Build the workspace\n\nStatus: ready-for-agent\nBlocked by: none\n\nBuild it.",
+    );
+  });
+
+  it("writes no line for a gate", () => {
+    expect(fileFor({ kind: "gate", waitsFor: "An account.", implementsDecisions: ["api-shape"] })).toBe(
+      "# 01 Build the workspace\n\nStatus: ready-for-human\nBlocked by: none\nWait for: An account.\n\nBuild it.",
+    );
+  });
+});

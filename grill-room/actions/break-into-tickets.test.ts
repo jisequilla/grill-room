@@ -1,6 +1,6 @@
 import { rmSync } from "node:fs";
 
-import { eq } from "@agent-native/core/db/schema";
+import { eq, sql } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -16,6 +16,7 @@ import {
   longChainTurns,
   rateLimitedTurn,
 } from "../server/interviewer/fake.js";
+import { renderTicketFile } from "../server/export.js";
 import { buildPrompt } from "../server/interviewer/prompt.js";
 import { type ProposedTicket, validateTicketSet } from "../server/tickets.js";
 import { MAX_TURN_RETRIES } from "../server/turn.js";
@@ -95,6 +96,7 @@ function ticketsTurn(
     kind?: "build" | "gate";
     waitsFor?: string | null;
     implements?: number[];
+    implementsDecisions?: string[];
   }[],
 ): ScriptedTurn {
   return {
@@ -106,6 +108,7 @@ function ticketsTurn(
         blockedBy: [],
         // GOOD_SPEC_MARKDOWN numbers one story: every build ticket builds it.
         implements: ticket.kind === "gate" ? [] : [1],
+        implementsDecisions: [],
         ...ticket,
       })),
     },
@@ -1999,5 +2002,271 @@ describe("the consistency check after a breakdown", () => {
       expect(spec.consistencyAttemptedFor).toBeNull();
       expect(spec.ticketsGeneratedAt).toBeNull();
     });
+  });
+});
+
+describe("a ticket's implemented decisions", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  const GATE_WAIT = "A live account on the payment platform, with API keys issued.";
+
+  async function seedDecision(
+    sessionId: string,
+    id: string,
+    key: string | null,
+    overrides: Partial<typeof schema.decisions.$inferInsert> = {},
+  ) {
+    const now = new Date().toISOString();
+    await getDb()
+      .insert(schema.decisions)
+      .values({
+        id,
+        sessionId,
+        key,
+        questionTitle: `Title of ${id}`,
+        questionBody: "",
+        offeredChoicesJson: "[]",
+        dependsOnJson: "[]",
+        introducedBy: "interviewer",
+        answerKind: "own-answer",
+        currentAnswer: "An answer",
+        settledAt: now,
+        createdAt: now,
+        updatedAt: now,
+        ...overrides,
+      });
+  }
+
+  /** The breakdown requests only: an accepted set is followed by a consistency check. */
+  const breakRequests = (interviewer: { requests: readonly unknown[] }) =>
+    interviewer.requests.filter(
+      (request) => (request as { kind: string }).kind === "break-into-tickets",
+    );
+
+  const OPEN = { answerKind: null, currentAnswer: null, settledAt: null } as const;
+
+  /** A confirmed session with a current spec and a spread of decisions. */
+  async function aSessionWithDecisions(): Promise<string> {
+    const sessionId = await aConfirmedSessionWithSpec();
+    await seedDecision(sessionId, "d-storage", "storage-engine");
+    await seedDecision(sessionId, "d-api", "api-shape", { answerKind: "accepted-recommendation" });
+    await seedDecision(sessionId, "d-open", "open-question-key", OPEN);
+    await seedDecision(sessionId, "d-old", "old-key", { replacedById: "d-new", replacedReason: "Newer" });
+    await seedDecision(sessionId, "d-new", "new-key");
+    await seedDecision(sessionId, "d-nokey", null);
+    return sessionId;
+  }
+
+  const MISSING = (n: number, key: string) =>
+    `Ticket ${n} implements decision \`${key}\`, which the session does not have. Use a key from the decision list.`;
+  const UNSETTLED = (n: number, key: string) =>
+    `Ticket ${n} implements decision \`${key}\`, which is not a settled decision. List only settled decisions.`;
+  const REPLACED = (n: number, key: string) =>
+    `Ticket ${n} implements decision \`${key}\`, which a later decision replaced. List the decision that replaced it.`;
+  const GATE_REASON = (n: number) =>
+    `Ticket ${n} is a gate, so it implements no decision. Leave its \`implementsDecisions\` empty.`;
+
+  const buildWith = (implementsDecisions: string[]) =>
+    ticketsTurn([{ number: 1, slug: "one", implementsDecisions }]);
+  const gateSet = (gateKeys: string[], buildKeys: string[][] = [[], []]) =>
+    ticketsTurn([
+      { number: 1, slug: "one", implementsDecisions: buildKeys[0] ?? [] },
+      { number: 2, slug: "two", kind: "gate", waitsFor: GATE_WAIT, implementsDecisions: gateKeys },
+      { number: 3, slug: "three", blockedBy: [2], implements: [], implementsDecisions: buildKeys[1] ?? [] },
+    ]);
+  const GOOD_BUILD = ticketsTurn([
+    { number: 1, slug: "one", implementsDecisions: ["storage-engine"] },
+    { number: 2, slug: "two", blockedBy: [1], implementsDecisions: ["api-shape", "new-key"] },
+  ]);
+  const GOOD_BUILD_STORED = [["storage-engine"], ["api-shape", "new-key"]];
+  const GOOD_GATE = gateSet([], [["storage-engine"], ["api-shape"]]);
+  const GOOD_GATE_STORED = [["storage-engine"], [], ["api-shape"]];
+
+  async function storedKeys(sessionId: string): Promise<(string[] | null)[]> {
+    const { tickets } = await listTickets.run({ sessionId });
+    return tickets.map((ticket) => ticket.implementsDecisions);
+  }
+
+  async function refusedThenStored(
+    bad: ScriptedTurn,
+    good: ScriptedTurn,
+    reasons: string[],
+    stored: string[][],
+  ) {
+    const sessionId = await aSessionWithDecisions();
+    const interviewer = scriptInterviewer([bad, good]);
+    await breakIntoTickets.run({ sessionId });
+    expect(breakRequests(interviewer)).toHaveLength(2);
+    expect(rejectionOf(interviewer.requests[1])).toBe(reasons.join(" "));
+    expect(await storedKeys(sessionId)).toEqual(stored);
+  }
+
+  it("stores two citable keys in order", async () => {
+    const sessionId = await aSessionWithDecisions();
+    scriptInterviewer([buildWith(["storage-engine", "api-shape"])]);
+    await breakIntoTickets.run({ sessionId });
+    expect(await storedKeys(sessionId)).toEqual([["storage-engine", "api-shape"]]);
+  });
+
+  it("stores a ticket with no keys as empty", async () => {
+    const sessionId = await aSessionWithDecisions();
+    scriptInterviewer([buildWith([])]);
+    await breakIntoTickets.run({ sessionId });
+    expect(await storedKeys(sessionId)).toEqual([[]]);
+  });
+
+  it("drops duplicate keys and keeps the first order", async () => {
+    const sessionId = await aSessionWithDecisions();
+    scriptInterviewer([buildWith(["storage-engine", "api-shape", "storage-engine"])]);
+    await breakIntoTickets.run({ sessionId });
+    expect(await storedKeys(sessionId)).toEqual([["storage-engine", "api-shape"]]);
+  });
+
+  it("refuses a key the session does not have", async () => {
+    await refusedThenStored(buildWith(["no-such-key"]), GOOD_BUILD, [MISSING(1, "no-such-key")], GOOD_BUILD_STORED);
+  });
+
+  it("refuses a key whose decision is not settled", async () => {
+    await refusedThenStored(buildWith(["open-question-key"]), GOOD_BUILD, [
+      UNSETTLED(1, "open-question-key"),
+    ], GOOD_BUILD_STORED);
+  });
+
+  it("refuses a key whose decision is settled but dispositioned or a steering move", async () => {
+    const sessionId = await aSessionWithDecisions();
+    await seedDecision(sessionId, "d-disp", "dispositioned-key", {
+      answerKind: "dispositioned",
+      dispositionTarget: "out-of-scope",
+    });
+    await seedDecision(sessionId, "d-def", "deferred-key", { answerKind: "deferred" });
+    const interviewer = scriptInterviewer([
+      buildWith(["dispositioned-key", "deferred-key"]),
+      GOOD_BUILD,
+    ]);
+    await breakIntoTickets.run({ sessionId });
+    expect(rejectionOf(interviewer.requests[1])).toBe(
+      [UNSETTLED(1, "dispositioned-key"), UNSETTLED(1, "deferred-key")].join(" "),
+    );
+    expect(await storedKeys(sessionId)).toEqual(GOOD_BUILD_STORED);
+  });
+
+  it("refuses a key whose decision a later one replaced", async () => {
+    await refusedThenStored(buildWith(["old-key"]), GOOD_BUILD, [REPLACED(1, "old-key")], GOOD_BUILD_STORED);
+  });
+
+  it("refuses a gate that lists a key", async () => {
+    await refusedThenStored(gateSet(["api-shape"]), GOOD_GATE, [GATE_REASON(2)], GOOD_GATE_STORED);
+  });
+
+  it("accepts a gate that lists none", async () => {
+    const sessionId = await aSessionWithDecisions();
+    const interviewer = scriptInterviewer([gateSet([])]);
+    await breakIntoTickets.run({ sessionId });
+    expect(breakRequests(interviewer)).toHaveLength(1);
+    expect(await storedKeys(sessionId)).toEqual([[], [], []]);
+  });
+
+  it("gives a gate that lists an unknown key the gate reason only", async () => {
+    await refusedThenStored(gateSet(["no-such-key"]), GOOD_GATE, [GATE_REASON(2)], GOOD_GATE_STORED);
+  });
+
+  it("gives a bad pair of keys one reason each, in the ticket's order", async () => {
+    await refusedThenStored(buildWith(["old-key", "no-such-key", "open-question-key"]), GOOD_BUILD, [
+      REPLACED(1, "old-key"),
+      MISSING(1, "no-such-key"),
+      UNSETTLED(1, "open-question-key"),
+    ], GOOD_BUILD_STORED);
+  });
+
+  it("accepts a decision with no key cited by its id", async () => {
+    const sessionId = await aSessionWithDecisions();
+    scriptInterviewer([buildWith(["d-nokey"])]);
+    await breakIntoTickets.run({ sessionId });
+    expect(await storedKeys(sessionId)).toEqual([["d-nokey"]]);
+  });
+
+  it("refuses on every attempt, the last included", async () => {
+    const sessionId = await aSessionWithDecisions();
+    const interviewer = scriptInterviewer(
+      Array.from({ length: MAX_TURN_RETRIES + 1 }, () => buildWith(["no-such-key"])),
+    );
+    await expect(breakIntoTickets.run({ sessionId })).rejects.toThrow();
+    expect(breakRequests(interviewer)).toHaveLength(MAX_TURN_RETRIES + 1);
+    expect((await listTickets.run({ sessionId })).tickets).toEqual([]);
+  });
+
+  it("skips the check and stores empty when the session has no citable decision", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    await seedDecision(sessionId, "d-open", "open-question-key", OPEN);
+    const interviewer = scriptInterviewer([gateSet(["api-shape", "no-such-key"])]);
+    await breakIntoTickets.run({ sessionId });
+    expect(breakRequests(interviewer)).toHaveLength(1);
+    expect(await storedKeys(sessionId)).toEqual([[], [], []]);
+    const prompt = buildPrompt(interviewer.requests[0] as BreakIntoTicketsRequest);
+    expect(prompt).not.toContain("implementsDecisions");
+  });
+
+  it("accepts a reply without the field and stores empty", async () => {
+    const sessionId = await aSessionWithDecisions();
+    const withoutField = {
+      kind: "break-into-tickets",
+      result: {
+        tickets: [
+          { number: 1, slug: "one", title: "One", body: "Do it.", blockedBy: [], implements: [1] },
+        ],
+      },
+    };
+    scriptInterviewer([withoutField as unknown as ScriptedTurn]);
+    await breakIntoTickets.run({ sessionId });
+    expect(await storedKeys(sessionId)).toEqual([[]]);
+  });
+
+  it("a ticket stored before the decision check reads implementsDecisions null", async () => {
+    const sessionId = await aSessionWithDecisions();
+    await getDb().execute(
+      sql`INSERT INTO gr_tickets (id, session_id, number, slug, title, body, status, kind, blocked_by_json, created_at, updated_at)
+          VALUES ('t-old', ${sessionId}, 1, 'old', 'Old', 'Made before the decision check.', 'ready', 'build', '[]', 'now', 'now')`,
+    );
+    const { tickets } = await listTickets.run({ sessionId });
+    expect(tickets.map((ticket) => ticket.implementsDecisions)).toEqual([null]);
+    const [row] = await getDb().select().from(schema.tickets).where(eq(schema.tickets.id, "t-old"));
+    expect(row!.implementsDecisionsJson).toBeNull();
+    const file = renderTicketFile({
+      label: "01-old",
+      title: tickets[0]!.title,
+      body: tickets[0]!.body,
+      blockedByLabels: [],
+      implementsDecisions: tickets[0]!.implementsDecisions,
+    });
+    expect(file).not.toContain("Implements decisions:");
+  });
+
+  it("every implemented-decisions shape the breakdown prompt describes is accepted", async () => {
+    const sessionId = await aSessionWithDecisions();
+    const first = scriptInterviewer([ticketsTurn([{ number: 1, slug: "one" }])]);
+    await breakIntoTickets.run({ sessionId });
+    const prompt = buildPrompt(first.requests[0] as BreakIntoTicketsRequest);
+    const section = prompt.slice(prompt.indexOf("## Decisions the tickets build"));
+
+    expect(section.startsWith("## Decisions the tickets build")).toBe(true);
+    expect(section).toContain("implementsDecisions");
+    for (const key of ["storage-engine", "api-shape", "new-key", "d-nokey"]) {
+      expect(section).toContain(`\`${key}\``);
+    }
+    for (const key of ["open-question-key", "old-key"]) {
+      expect(section).not.toContain(key);
+    }
+
+    const second = scriptInterviewer([
+      ticketsTurn([
+        { number: 1, slug: "one", implementsDecisions: ["storage-engine", "api-shape"] },
+        { number: 2, slug: "two", kind: "gate", waitsFor: GATE_WAIT, implementsDecisions: [] },
+        { number: 3, slug: "three", blockedBy: [2], implements: [], implementsDecisions: [] },
+      ]),
+    ]);
+    await breakIntoTickets.run({ sessionId });
+    expect(breakRequests(second)).toHaveLength(1);
+    expect(await storedKeys(sessionId)).toEqual([["storage-engine", "api-shape"], [], []]);
   });
 });

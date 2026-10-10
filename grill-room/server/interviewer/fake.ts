@@ -1010,6 +1010,7 @@ export function gateTicketTurns(): ScriptedTurn[] {
             kind: "build",
             waitsFor: null,
             implements: [1],
+            implementsDecisions: [],
           },
           {
             number: 2,
@@ -1020,6 +1021,7 @@ export function gateTicketTurns(): ScriptedTurn[] {
             kind: "gate",
             waitsFor: "A live account on the payment platform, with API keys issued.",
             implements: [],
+            implementsDecisions: [],
           },
           {
             number: 3,
@@ -1030,6 +1032,7 @@ export function gateTicketTurns(): ScriptedTurn[] {
             kind: "build",
             waitsFor: null,
             implements: [],
+            implementsDecisions: [],
           },
         ],
       },
@@ -1056,6 +1059,7 @@ export function uncoveredStoryTurns(): ScriptedTurn[] {
           body: "Build the workspace shell.",
           blockedBy: [],
           implements: [],
+          implementsDecisions: [],
         },
         {
           number: 2,
@@ -1064,6 +1068,7 @@ export function uncoveredStoryTurns(): ScriptedTurn[] {
           body: "Persist the workspace's data.",
           blockedBy: [1],
           implements: [],
+          implementsDecisions: [],
         },
       ],
     },
@@ -1098,6 +1103,7 @@ export function longChainTurns(): ScriptedTurn[] {
         kind: "build" as const,
         waitsFor: null,
         implements: index === 0 ? [1] : [],
+        implementsDecisions: [],
       })),
     },
   });
@@ -1165,6 +1171,7 @@ export function consistencyTickets(): ResultFor<"break-into-tickets">["tickets"]
     body,
     blockedBy,
     implements: stories,
+    implementsDecisions: [],
     kind: "build" as const,
     waitsFor: null,
   });
@@ -1663,6 +1670,7 @@ export function cannedInterviewTurns(): ScriptedTurn[] {
             body: "Build the workspace shell.",
             blockedBy: [],
             implements: [1],
+            implementsDecisions: [],
           },
           {
             number: 2,
@@ -1671,6 +1679,7 @@ export function cannedInterviewTurns(): ScriptedTurn[] {
             body: "Persist the workspace's data.",
             blockedBy: [1],
             implements: [],
+            implementsDecisions: [],
           },
         ],
       },

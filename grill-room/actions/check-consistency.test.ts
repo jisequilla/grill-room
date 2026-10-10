@@ -169,6 +169,7 @@ function flatTickets(count: number): Ticket[] {
     body: `Do the work of ticket ${index + 1}.`,
     blockedBy: [],
     implements: [1],
+    implementsDecisions: [],
     kind: "build" as const,
     waitsFor: null,
   }));
@@ -196,6 +197,7 @@ describe("check-consistency", () => {
         body: "The owner provides a staging account.",
         blockedBy: [],
         implements: [],
+        implementsDecisions: [],
         kind: "gate",
         waitsFor: "A staging account from the owner",
       };
@@ -820,6 +822,7 @@ describe("check-consistency", () => {
           body: "Build the workspace shell.",
           blockedBy: [],
           implements: [1],
+          implementsDecisions: [],
           kind: "build",
           waitsFor: null,
         },
@@ -852,6 +855,7 @@ describe("check-consistency", () => {
         body: "The owner provides a staging account.",
         blockedBy: [],
         implements: [],
+        implementsDecisions: [],
         kind: "gate",
         waitsFor: "An account on the staging host, from the owner",
       },

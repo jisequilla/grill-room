@@ -629,4 +629,9 @@ UPDATE gr_sessions SET last_durable_export_folder = last_working_export_folder W
     sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS adr_worthy BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS consequences TEXT`,
   },
+  {
+    version: 80,
+    name: "tickets-implements-decisions",
+    sql: `ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS implements_decisions_json TEXT`,
+  },
 ];

@@ -550,6 +550,9 @@ function renderTask(
         ...(request.userStories.length > 0
           ? ["", userStoriesTicketsSection(request.userStories)]
           : []),
+        ...((request.citableDecisionKeys ?? []).length > 0
+          ? ["", decisionsTicketsSection(request.citableDecisionKeys ?? [])]
+          : []),
       ].join("\n");
   }
 }
@@ -570,6 +573,25 @@ function userStoriesTicketsSection(userStories: readonly number[]): string {
     "in the `implements` of at least one ticket. A ticket that builds no story,",
     "such as one that only sets up the project, leaves `implements` empty. A gate",
     "implements no story: leave its `implements` empty.",
+  ].join("\n");
+}
+
+/**
+ * The break-into-tickets rule for a session with settled decisions: each
+ * ticket lists the keys of the decisions it builds in `implementsDecisions`.
+ * `decisionReasons` checks the same rule.
+ */
+function decisionsTicketsSection(keys: readonly string[]): string {
+  return [
+    "## Decisions the tickets build",
+    "",
+    "The decisions the spec settled are listed above with their keys in brackets.",
+    `The keys a ticket may cite: ${keys.map((key) => `\`${key}\``).join(", ")}.`,
+    "",
+    "In each ticket's `implementsDecisions`, list the keys of the settled",
+    "decisions that ticket builds. A ticket may list none. A gate implements no",
+    "decision: leave its `implementsDecisions` empty. Use only the keys listed",
+    "here.",
   ].join("\n");
 }
 

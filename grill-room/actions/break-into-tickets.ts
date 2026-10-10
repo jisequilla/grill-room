@@ -16,8 +16,12 @@ import { getInterviewer, MAX_HANDOFF_SCOUT_TICKETS } from "../server/interviewer
 import type { BreakIntoTicketsResult } from "../server/interviewer/index.js";
 import { lastExportFolders } from "../server/project-facts.js";
 import { getProject } from "../server/projects.js";
+import { describeDecisions } from "../server/tree.js";
 import {
   chainNote,
+  citableDecisionKeys,
+  decisionReasons,
+  storedImplementsDecisions,
   chainReason,
   numberRanges,
   storedImplements,
@@ -161,6 +165,11 @@ export default defineAction({
         // judged against the same list. None skips the story check.
         const stories = userStories(spec!.markdown).map((story) => story.number);
 
+        // The decisions the tickets may cite, read once like the stories. None
+        // skips the decision check.
+        const decisionViews = describeDecisions(rows);
+        const citableKeys = citableDecisionKeys(decisionViews);
+
         const interviewer = getInterviewer();
         let attemptsAsked = 0;
         // A long chain is sent back at most once per breakdown, and never on
@@ -191,6 +200,7 @@ export default defineAction({
                 verifyCommand,
                 trackedFiles,
                 userStories: stories,
+                citableDecisionKeys: citableKeys,
                 rejectionReason,
               },
               observer,
@@ -209,6 +219,7 @@ export default defineAction({
               ...storyReasons(result.tickets, stories, {
                 lastAttempt: attemptsAsked > MAX_TURN_RETRIES,
               }),
+              ...decisionReasons(result.tickets, decisionViews),
             ];
             const chain = chainReason(result.tickets);
             if (chain !== null && !chainSentBack && attemptsAsked <= MAX_TURN_RETRIES) {
@@ -262,6 +273,11 @@ export default defineAction({
             waitsFor: ticket.kind === "gate" ? storedWaitsFor(ticket) : null,
             implementsJson: JSON.stringify(
               stories.length === 0 ? [] : storedImplements(ticket.implements),
+            ),
+            implementsDecisionsJson: JSON.stringify(
+              citableKeys.length === 0
+                ? []
+                : storedImplementsDecisions(ticket.implementsDecisions),
             ),
             blockedByJson: JSON.stringify(
               ticket.blockedBy.flatMap((number) => {
