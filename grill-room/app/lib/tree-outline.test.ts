@@ -29,6 +29,8 @@ function decision(
     restatementReason: null,
     replacedBy: null,
     settledBy: null,
+    adrWorthy: false,
+    consequences: null,
     dispositionTarget: null,
     settledAt: null,
     reopenedAt: null,

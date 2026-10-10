@@ -44,6 +44,8 @@ function decision(key: string, overrides: Partial<DecisionView> = {}): DecisionV
     restatementReason: null,
     replacedBy: null,
     settledBy: null,
+    adrWorthy: false,
+    consequences: null,
     dispositionTarget: null,
     settledAt: "2026-09-01T00:00:00.000Z",
     reopenedAt: null,
