@@ -10,6 +10,7 @@ import { useTempGitRepos } from "../test/git-repos";
 import {
   countMutantLines,
   isEntryPoint,
+  planStrykerRun,
   rangesFromCoverage,
   rangesFromDiff,
   scopeFor,
@@ -229,12 +230,73 @@ describe("countMutantLines", () => {
         ].join("\n"),
       );
       const counted = await countMutantLines(["f.ts:1-7"], cwd);
-      expect(counted.map(({ line }) => line)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-      expect(counted.find(({ line }) => line === 5)?.count).toBe(0);
+      expect(counted).toEqual([
+        { file: "f.ts", line: 1, count: 1 },
+        { file: "f.ts", line: 2, count: 5 },
+        { file: "f.ts", line: 3, count: 1 },
+        { file: "f.ts", line: 4, count: 0 },
+        { file: "f.ts", line: 5, count: 0 },
+        { file: "f.ts", line: 6, count: 1 },
+        { file: "f.ts", line: 7, count: 0 },
+      ]);
       expect(trimToCap(counted, 100)).toEqual({ kept: ["f.ts:1-7"], dropped: [] });
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
+  });
+});
+
+describe("planStrykerRun", () => {
+  it("planStrykerRun: kept lines without a mutant do not start Stryker", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "mutate-plan-"));
+    try {
+      const heavy = `export const total = ${Array.from({ length: 104 }, () => "a").join(" + ")};`;
+      writeFileSync(path.join(cwd, "f.ts"), `// comment\n${heavy}\n`);
+      const counted = await countMutantLines(["f.ts:1-2"], cwd);
+      expect(counted[0]).toEqual({ file: "f.ts", line: 1, count: 0 });
+      expect(counted[1].count).toBeGreaterThan(100);
+
+      const plan = planStrykerRun(counted, 100);
+      expect(plan).toEqual({ kept: ["f.ts:1-1"], dropped: ["f.ts:2-2"], startable: false });
+      expect(
+        summarize(null, {
+          outcome: "nothing-kept",
+          base: null,
+          scope: ["f.ts:1-2"],
+          dropped: plan.dropped,
+          command: null,
+          elapsedMs: null,
+          exitCode: null,
+          stderrTail: null,
+        }),
+      ).toEqual({
+        status: "truncated",
+        base: null,
+        scope: ["f.ts:1-2"],
+        dropped: ["f.ts:2-2"],
+        command: null,
+        elapsedMs: null,
+        mutants: 0,
+        score: null,
+        survivors: [],
+        exitCode: null,
+        stderrTail: null,
+      });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("planStrykerRun: a kept line with mutants is startable", () => {
+    expect(
+      planStrykerRun(
+        [
+          { file: "a.ts", line: 1, count: 0 },
+          { file: "a.ts", line: 2, count: 3 },
+        ],
+        100,
+      ),
+    ).toEqual({ kept: ["a.ts:1-2"], dropped: [], startable: true });
   });
 });
 
@@ -444,6 +506,23 @@ describe("scopeFor", () => {
       },
     });
     expect(scopeFor(base, root)).toEqual({ kind: "ranges", ranges: ["server/a.ts:2-3"] });
+  });
+
+  it("scopeFor: an app in a subfolder yields paths relative to it and skips files outside it", () => {
+    const repo = repos.create({
+      files: {
+        "grill-room/server/a.ts": "export const a = 1;\n",
+        "other/b.ts": "export const b = 1;\n",
+      },
+    });
+    const app = path.join(repo, "grill-room");
+    const base = commitChange(repo, {
+      write: {
+        "grill-room/server/a.ts": "export const a = 1;\nexport const c = 3;\n",
+        "other/b.ts": "export const b = 1;\nexport const d = 4;\n",
+      },
+    });
+    expect(scopeFor(base, app)).toEqual({ kind: "ranges", ranges: ["server/a.ts:2-2"] });
   });
 
   it("scopeFor: each test-only row", () => {

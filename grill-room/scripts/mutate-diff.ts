@@ -154,6 +154,14 @@ export function trimToCap(
   lines: LineCount[],
   cap: number,
 ): { kept: string[]; dropped: string[] } {
+  const { keptLines, droppedLines } = splitAtCap(lines, cap);
+  return { kept: mergeLines(keptLines), dropped: mergeLines(droppedLines) };
+}
+
+function splitAtCap(
+  lines: LineCount[],
+  cap: number,
+): { keptLines: LineCount[]; droppedLines: LineCount[] } {
   let total = 0;
   let stopAt = lines.length;
   for (let i = 0; i < lines.length; i++) {
@@ -163,9 +171,18 @@ export function trimToCap(
     }
     total += lines[i].count;
   }
+  return { keptLines: lines.slice(0, stopAt), droppedLines: lines.slice(stopAt) };
+}
+
+export function planStrykerRun(
+  lines: LineCount[],
+  cap: number,
+): { kept: string[]; dropped: string[]; startable: boolean } {
+  const { keptLines, droppedLines } = splitAtCap(lines, cap);
   return {
-    kept: mergeLines(lines.slice(0, stopAt)),
-    dropped: mergeLines(lines.slice(stopAt)),
+    kept: mergeLines(keptLines),
+    dropped: mergeLines(droppedLines),
+    startable: keptLines.some((entry) => entry.count > 0),
   };
 }
 
@@ -456,8 +473,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { kept, dropped } = trimToCap(counted, CAP);
-  if (kept.length === 0) {
+  const { kept, dropped, startable } = planStrykerRun(counted, CAP);
+  if (!startable) {
     emit(summarize(null, { ...empty, outcome: "nothing-kept", scope: ranges, dropped }), cwd);
     return;
   }
