@@ -680,6 +680,18 @@ describe("preferred ranges", () => {
         { kept: ["a.ts:1-2"], dropped: ["z.ts:10-10"], startable: true },
       ],
       [
+        "two preferred ranges, only the second holds a scope line",
+        ["a.ts:1x60", "a.ts:2x40", "z.ts:10x5"],
+        ["y.ts:1-5", "z.ts:10-10"],
+        { kept: ["a.ts:1-1", "z.ts:10-10"], dropped: ["a.ts:2-2"], startable: true },
+      ],
+      [
+        "preferred lines are not counted twice against the cap",
+        ["a.ts:1x20", "z.ts:10x60", "z.ts:11x20"],
+        ["z.ts:10-10"],
+        { kept: ["a.ts:1-1", "z.ts:10-11"], dropped: [], startable: true },
+      ],
+      [
         "preferred line that does not fit",
         ["f.ts:1x0", "f.ts:2x105"],
         ["f.ts:2-2"],
@@ -808,6 +820,8 @@ describe("test:mutate CLI: --prefer", () => {
       { "f.ts": "// only a comment\n" },
       ["--mutate", "f.ts:1-1", "--prefer", "f.ts:1-1,g.ts:5-9"],
     );
+    const noPrefer = runCli(files, ["--mutate", "f.ts:1-2"]);
+    const mixedPrefer = runCli({}, ["--mutate", "f.ts:1-2", "--prefer", "f.ts:2-2,bad"]);
     const badPrefer = runCli({}, ["--prefer", "server/a.ts"]);
     const badBoth = runCli({}, ["--mutate", "x", "--prefer", "y"]);
     const emptyPrefer = runCli({}, ["--prefer", ""]);
@@ -816,6 +830,8 @@ describe("test:mutate CLI: --prefer", () => {
       first: [first.status, JSON.parse(first.stdout)],
       second: [second.status, JSON.parse(second.stdout)],
       noScope: [noScope.status, JSON.parse(noScope.stdout)],
+      noPrefer: [noPrefer.status, JSON.parse(noPrefer.stdout)],
+      mixedPrefer: [mixedPrefer.status, mixedPrefer.stdout, mixedPrefer.stderr],
       badPrefer: [badPrefer.status, badPrefer.stdout, badPrefer.stderr],
       badBoth: [badBoth.status, badBoth.stdout, badBoth.stderr],
       emptyPrefer: [emptyPrefer.status, emptyPrefer.stdout, emptyPrefer.stderr],
@@ -839,6 +855,8 @@ describe("test:mutate CLI: --prefer", () => {
           preferNotCovered: ["g.ts:5-9"],
         },
       ],
+      noPrefer: [0, { ...truncated([]), dropped: ["f.ts:2-2"] }],
+      mixedPrefer: [1, "", `--prefer takes comma-separated file:start-end ranges.${usage}`],
       badPrefer: [1, "", `--prefer takes comma-separated file:start-end ranges.${usage}`],
       badBoth: [1, "", `--mutate takes comma-separated file:start-end ranges.${usage}`],
       emptyPrefer: [1, "", `--prefer takes comma-separated file:start-end ranges.${usage}`],
