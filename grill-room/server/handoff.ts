@@ -51,6 +51,7 @@ import type {
   TicketKind,
 } from "../shared/session-constants.js";
 import { BUNDLE_TOKEN, DOCS_TOKEN, withBundleToken, withDocsToken } from "../shared/bundle-tokens.js";
+import { inputGapPhrase } from "../shared/input-gaps.js";
 import { DEFAULT_MAX_TICKETS_IN_FLIGHT } from "../shared/session-constants.js";
 import { cardsCurrent } from "./consistency.js";
 import {
@@ -80,8 +81,10 @@ import {
   computeWaves,
   describeTickets,
   type ImplicitEdge,
+  type InputGap,
   longestChain,
   uncoveredStories,
+  unresolvedInputs,
   type UserStory,
   userStories,
 } from "./tickets.js";
@@ -193,6 +196,14 @@ export interface HandoffSource {
    * only with values it already hashes.
    */
   uncoveredStories?: readonly UserStory[] | null;
+  /**
+   * The consumed items no ticket produces, in ticket order (`unresolvedInputs`).
+   * Null (or absent) when any ticket was made before the consumes check. The
+   * stored gaps change only with new ticket rows, whose ids the fingerprint
+   * already hashes, and `not-upstream` is recomputed from `blockedBy`, which it
+   * hashes too, so the field never enters the fingerprint.
+   */
+  unresolvedInputs?: readonly InputGap[] | null;
   /**
    * The session's open reopen cards, in number order, while the consistency
    * check that stored them is current (`cardsCurrent`); empty or absent
@@ -1398,6 +1409,21 @@ function uncoveredStoriesSection(stories: readonly UserStory[]): string {
   ].join("\n");
 }
 
+function unresolvedInputsSection(source: HandoffSource, gaps: readonly InputGap[]): string {
+  const total = source.tickets.length;
+  const label = (n: number) => padTicketNumber(n, total);
+  return [
+    "## Inputs no ticket produces",
+    "",
+    "A ticket below needs an input no ticket produces. Before delegating it, add a ticket that produces it, add the missing Blocked by, or confirm with the owner that it already exists.",
+    "",
+    ...gaps.map((gap) => {
+      const slug = source.tickets.find((ticket) => ticket.number === gap.ticket)?.slug;
+      return `- Ticket ${label(gap.ticket)}${slug === undefined ? "" : ` (${slug})`} needs ${JSON.stringify(gap.item)}: ${inputGapPhrase(gap, label)}`;
+    }),
+  ].join("\n");
+}
+
 /** A card's place in HANDOFF.md: the spec section, or the ticket padded as its issue file is. */
 function handoffCardPlace(place: ConsistencyPlace, totalTickets: number): string {
   return place.artefact === "spec"
@@ -1617,6 +1643,9 @@ export function renderHandoffMarkdown(
     ...(source.adrTicket ? [recordingAdrsSection(source)] : []),
     ...(source.uncoveredStories && source.uncoveredStories.length > 0
       ? [uncoveredStoriesSection(source.uncoveredStories)]
+      : []),
+    ...(source.unresolvedInputs && source.unresolvedInputs.length > 0
+      ? [unresolvedInputsSection(source, source.unresolvedInputs)]
       : []),
     ...[openQuestionsSection(source, grounding)].filter((section): section is string => section !== null),
     lifecycleSection(source, groundingCurrent, grounding),
@@ -2255,6 +2284,7 @@ export async function loadHandoffSource(
         maxTicketsInFlight: project.maxTicketsInFlight,
       },
       uncoveredStories: uncovered,
+      unresolvedInputs: unresolvedInputs(tickets),
       openCards,
       adrTicket,
       consistencyNotCurrent,

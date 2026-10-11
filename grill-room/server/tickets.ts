@@ -9,6 +9,7 @@
  * ordering and cycle-naming rules are exact enough to state as unit cases
  * without an action's setup around them.
  */
+import type { ConsumeSource, GapReason } from "../shared/input-gaps.js";
 import type { TicketKind, TicketStatus } from "./db/schema.js";
 import { parseStringArray, type DecisionView } from "./tree.js";
 
@@ -33,20 +34,12 @@ export interface ProposedTicket {
   produces?: readonly string[];
 }
 
-/** Where a consumed item comes from: a ticket number, `"repo"`, or no known source. */
-export type ConsumeSource = number | "repo" | null;
+export type { GapReason, ConsumeSource } from "../shared/input-gaps.js";
 
 export interface TicketConsume {
   item: string;
   from: ConsumeSource;
 }
-
-export type GapReason =
-  | "no-source"
-  | "not-produced"
-  | "unknown-ticket"
-  | "not-upstream"
-  | "not-tracked";
 
 /** A consumed item nothing resolves, as `unproducedInputs` reports it. */
 export interface InputGap {
@@ -1095,6 +1088,57 @@ export function upstreamGaps(tickets: readonly TicketForInputs[]): InputGap[] {
         });
       }
     }
+  }
+  return gaps;
+}
+
+/**
+ * Every unresolved consumed item of a stored set, for HANDOFF.md and the
+ * tickets page: each build ticket's stored gaps plus the `not-upstream` ones
+ * recomputed from today's `blockedBy`, in ticket-number order and, inside a
+ * ticket, in the order of its `consumes` (a stored gap sits at its first
+ * matching entry; one matching none goes last, in stored order). Null when
+ * any ticket has no `consumes` (made before the consumes check); empty for a
+ * set with duplicate numbers. Only `consumes` decides null.
+ */
+export function unresolvedInputs(
+  tickets: readonly Pick<
+    TicketView,
+    "number" | "kind" | "blockedBy" | "consumes" | "produces" | "unproduced"
+  >[],
+): InputGap[] | null {
+  if (tickets.some((ticket) => ticket.consumes === null)) return null;
+  if (hasDuplicateNumbers(tickets)) return [];
+  const gaps: InputGap[] = [];
+  for (const ticket of [...tickets].sort((a, b) => a.number - b.number)) {
+    if (ticket.kind === "gate") continue;
+    const consumes = ticket.consumes ?? [];
+    const placed: { index: number; gap: InputGap }[] = [];
+    const unmatched: InputGap[] = [];
+    for (const stored of ticket.unproduced ?? []) {
+      if (stored.reason === "not-upstream") continue;
+      const gap: InputGap = { ticket: ticket.number, ...stored };
+      const index = consumes.findIndex(
+        (entry) => entry.item.trim() === stored.item && entry.from === stored.from,
+      );
+      if (index === -1) unmatched.push(gap);
+      else placed.push({ index, gap });
+    }
+    consumes.forEach((entry, index) => {
+      if (isUpstreamGap(tickets, ticket, entry)) {
+        placed.push({
+          index,
+          gap: {
+            ticket: ticket.number,
+            item: entry.item.trim(),
+            from: entry.from,
+            reason: "not-upstream",
+          },
+        });
+      }
+    });
+    placed.sort((a, b) => a.index - b.index);
+    gaps.push(...placed.map((p) => p.gap), ...unmatched);
   }
   return gaps;
 }

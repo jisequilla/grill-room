@@ -1242,6 +1242,7 @@ describe("list-tickets", () => {
 
     expect(await listTickets.run({ sessionId })).toEqual({
       tickets: [],
+      unresolvedInputs: [],
       ticketsCurrent: false,
       waves: [],
     });

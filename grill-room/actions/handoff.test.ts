@@ -20,6 +20,7 @@ import {
   consistencyFindingsResult,
   consistencySpecMarkdown,
   consistencyTickets,
+  unproducedInputsTurns,
 } from "../server/interviewer/fake.js";
 import {
   type ConsistencyFinding,
@@ -91,6 +92,8 @@ interface TicketSpec {
   kind?: "build" | "gate";
   waitsFor?: string;
   implements?: number[];
+  consumes?: { item: string; from: number | "repo" | null }[];
+  produces?: string[];
 }
 
 function ticketsTurn(tickets: TicketSpec[]): ScriptedTurn {
@@ -1532,5 +1535,69 @@ describe("loadHandoffSource sets the ADR ticket", () => {
     });
 
     expect((await loadedSource(session.id)).adrTicket).toBeNull();
+  });
+});
+
+describe("inputs no ticket produces", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  /** A confirmed session whose breakdown stores a `no-source` gap on ticket 2. */
+  async function aSessionWithAnUnproducedInput() {
+    const root = repos.create();
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+    });
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A local app that grills me about an idea until it is decided.",
+      projectId: project.id,
+    });
+    await getDb()
+      .update(schema.sessions)
+      .set({ state: "confirmed" })
+      .where(eq(schema.sessions.id, session.id));
+    scriptInterviewer([
+      { kind: "synthesize-spec", result: { markdown: SPEC_MARKDOWN } },
+      ...unproducedInputsTurns().slice(-2),
+    ]);
+    await synthesizeSpec.run({ sessionId: session.id });
+    await breakIntoTickets.run({ sessionId: session.id });
+    return session;
+  }
+
+  it("lists the inputs no ticket produces", async () => {
+    const session = await aSessionWithAnUnproducedInput();
+
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+
+    expect(markdown).toContain(
+      [
+        "## Inputs no ticket produces",
+        "",
+        "A ticket below needs an input no ticket produces. Before delegating it, add a ticket that produces it, add the missing Blocked by, or confirm with the owner that it already exists.",
+        "",
+        '- Ticket 02 (show-spans) needs "spans writer": no ticket or repository file provides it.',
+        "",
+        "## Delegation lifecycle",
+      ].join("\n"),
+    );
+    expect(markdown.indexOf("## Waves")).toBeLessThan(markdown.indexOf("## Inputs no ticket produces"));
+  });
+
+  it("renders no inputs section for tickets made before the consumes check", async () => {
+    const session = await aSessionWithAnUnproducedInput();
+    await getDb()
+      .update(schema.tickets)
+      .set({ consumesJson: null })
+      .where(eq(schema.tickets.sessionId, session.id));
+
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+
+    expect(markdown).not.toContain("## Inputs no ticket produces");
+    const loaded = await loadHandoffSource(session.id);
+    expect("source" in loaded && loaded.source.unresolvedInputs).toBeNull();
   });
 });

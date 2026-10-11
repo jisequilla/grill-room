@@ -4331,3 +4331,135 @@ describe("the fingerprint holds the ADR ticket only when it exists", () => {
     expect(groundingFingerprint(aSource())).toBe(PINNED);
   });
 });
+
+describe("Inputs no ticket produces", () => {
+  const INTRO =
+    "A ticket below needs an input no ticket produces. Before delegating it, add a ticket that produces it, add the missing Blocked by, or confirm with the owner that it already exists.";
+  const sectionOf = (...bullets: string[]) =>
+    ["## Inputs no ticket produces", "", INTRO, "", ...bullets].join("\n");
+  const WRITER = { ticket: 2, item: "spans writer", from: null, reason: "no-source" } as const;
+  const TABLE = { ticket: 3, item: "gr_spans table", from: 4, reason: "not-upstream" } as const;
+
+  /** `count` tickets, all but the first blocked by it: slug `ticket-<n>`, except 2 and 3. */
+  function aSourceOf(count: number): HandoffSource {
+    const slugs: Record<number, string> = { 2: "show-spans", 3: "cost-view" };
+    const numbers = Array.from({ length: count }, (_, index) => index + 1);
+    return {
+      ...aSource(),
+      tickets: numbers.map((number) => ({
+        id: `t${number}`,
+        number,
+        slug: slugs[number] ?? `ticket-${number}`,
+        title: `Ticket ${number}`,
+        body: "Build it.",
+        blockedBy: number === 1 ? [] : [1],
+      })),
+      waves: [[1], numbers.slice(1)],
+    };
+  }
+
+  it.each([
+    ["absent", undefined],
+    ["null", null],
+    ["empty", []],
+  ] as const)("renders no section when unresolvedInputs is %s", (_, unresolvedInputs) => {
+    const markdown = renderHandoffMarkdown({ ...aSource(), unresolvedInputs });
+
+    expect(markdown).toBe(renderHandoffMarkdown(aSource()));
+    expect(markdown).not.toContain("## Inputs no ticket produces");
+  });
+
+  it("renders one bullet per gap, between the Waves and the delegation lifecycle", () => {
+    const source = aSourceOf(12);
+    const without = renderHandoffMarkdown(source);
+    const markdown = renderHandoffMarkdown({ ...source, unresolvedInputs: [WRITER, TABLE] });
+
+    const section = sectionOf(
+      '- Ticket 02 (show-spans) needs "spans writer": no ticket or repository file provides it.',
+      '- Ticket 03 (cost-view) needs "gr_spans table": ticket 04 produces it but is not upstream through Blocked by.',
+    );
+    expect(markdown).toBe(
+      without.replace("\n\n## Delegation lifecycle", `\n\n${section}\n\n## Delegation lifecycle`),
+    );
+  });
+
+  it("renders it after the uncovered stories", () => {
+    const source: HandoffSource = {
+      ...aSourceOf(12),
+      uncoveredStories: [{ number: 4, text: "As an owner, I want it all." }],
+    };
+    const markdown = renderHandoffMarkdown({ ...source, unresolvedInputs: [WRITER] });
+
+    expect(markdown.indexOf("## Stories no ticket implements")).toBeLessThan(
+      markdown.indexOf("## Inputs no ticket produces"),
+    );
+    expect(markdown.indexOf("## Inputs no ticket produces")).toBeLessThan(
+      markdown.indexOf("## Delegation lifecycle"),
+    );
+  });
+
+  it("renders it before the open questions", () => {
+    const markdown = renderHandoffMarkdown({
+      ...aSourceOf(12),
+      unresolvedInputs: [WRITER],
+      openCards: [scenarioOpenCards()[1]!],
+      consistencyNotCurrent: false,
+    });
+
+    expect(markdown.indexOf("## Inputs no ticket produces")).toBeGreaterThan(-1);
+    expect(markdown.indexOf("## Inputs no ticket produces")).toBeLessThan(
+      markdown.indexOf("## Questions the spec and tickets leave open"),
+    );
+  });
+
+  it("writes the item with JSON.stringify", () => {
+    const markdown = renderHandoffMarkdown({
+      ...aSourceOf(12),
+      unresolvedInputs: [{ ...WRITER, item: 'say "hi"' }],
+    });
+
+    expect(markdown).toContain(String.raw`needs "say \"hi\"": no ticket or repository file provides it.`);
+  });
+
+  it("pads the numbers to the width of the ticket count", () => {
+    const markdown = renderHandoffMarkdown({
+      ...aSourceOf(100),
+      unresolvedInputs: [WRITER, TABLE],
+    });
+
+    expect(markdown).toContain("- Ticket 002 (show-spans) needs ");
+    expect(markdown).toContain("ticket 004 produces it but");
+  });
+
+  it("leaves out the slug of a ticket the source does not have", () => {
+    const twelve = aSourceOf(12);
+    const markdown = renderHandoffMarkdown({
+      ...twelve,
+      tickets: twelve.tickets.filter((ticket) => ticket.number !== 7),
+      waves: [[1], [2, 3, 4, 5, 6, 8, 9, 10, 11, 12]],
+      unresolvedInputs: [{ ...WRITER, ticket: 7 }],
+    });
+
+    expect(markdown).toContain('- Ticket 07 needs "spans writer": no ticket or repository file provides it.');
+  });
+
+  it("leaves the briefs alone", () => {
+    const source = aSourceOf(12);
+
+    expect(renderHandoff({ ...source, unresolvedInputs: [WRITER] }).briefs).toEqual(
+      renderHandoff(source).briefs,
+    );
+  });
+});
+
+describe("unresolvedInputs never enters the fingerprint", () => {
+  it("hashes a source with gaps as it hashes the same source without", () => {
+    const withGaps: HandoffSource = {
+      ...aSource(),
+      unresolvedInputs: [{ ticket: 2, item: "spans writer", from: null, reason: "no-source" }],
+    };
+
+    expect(handoffFingerprint(withGaps)).toBe(handoffFingerprint(aSource()));
+    expect(groundingFingerprint(withGaps)).toBe(groundingFingerprint(aSource()));
+  });
+});

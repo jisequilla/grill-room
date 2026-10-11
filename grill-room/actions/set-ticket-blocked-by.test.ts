@@ -178,4 +178,30 @@ describe("set-ticket-blocked-by export", () => {
       "# 02 Ticket 2\n\nStatus: ready-for-agent\nBlocked by: 01\n\nDo the work of ticket 2.",
     );
   });
+
+  it("clears a not-upstream gap when the producer becomes a blocker", async () => {
+    const session = await aSession();
+    const bookkeeping = { consumesJson: "[]", producesJson: "[]", unproducedJson: "[]" };
+    await insertTicket(session.id, { number: 1, slug: "one", ...bookkeeping });
+    const id3 = await insertTicket(session.id, {
+      number: 3,
+      slug: "three",
+      ...bookkeeping,
+      consumesJson: '[{"item":"gr_spans table","from":4}]',
+    });
+    await insertTicket(session.id, {
+      number: 4,
+      slug: "four",
+      ...bookkeeping,
+      producesJson: '["gr_spans table"]',
+    });
+
+    const before = await listTickets.run({ sessionId: session.id });
+    const after = await setTicketBlockedBy.run({ ticketId: id3, blockedBy: [4] });
+
+    expect(before.unresolvedInputs).toEqual([
+      { ticket: 3, item: "gr_spans table", from: 4, reason: "not-upstream" },
+    ]);
+    expect(after.unresolvedInputs).toEqual([]);
+  });
 });

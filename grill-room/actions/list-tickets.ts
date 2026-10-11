@@ -3,7 +3,7 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { computeWaves, describeTickets, ticketsAreCurrent } from "../server/tickets.js";
+import { computeWaves, describeTickets, ticketsAreCurrent, unresolvedInputs } from "../server/tickets.js";
 
 export default defineAction({
   description:
@@ -45,6 +45,7 @@ export default defineAction({
 
     return {
       tickets,
+      unresolvedInputs: unresolvedInputs(tickets),
       ticketsCurrent: ticketsAreCurrent(spec ?? null),
       waves: wavesResult.ok ? wavesResult.waves : [],
     };
