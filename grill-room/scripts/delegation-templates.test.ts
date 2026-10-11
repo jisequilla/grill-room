@@ -75,6 +75,18 @@ describe("builder.md", () => {
     }
   });
 
+  it("the pnpm rules", () => {
+    const lines = BUILDER.split("\n");
+    expect(
+      lines.find((l) => l.startsWith("- If `node_modules` is missing")),
+    ).toBe(
+      "- If `node_modules` is missing, run `(cd grill-room && pnpm install --frozen-lockfile)` first.",
+    );
+    expect(lines.find((l) => l.startsWith("- Never pass `--pm-on-fail`"))).toBe(
+      "- Never pass `--pm-on-fail` to pnpm. If pnpm says the project is configured to use a different pnpm version, stop and report the message: another pnpm version rewrites `grill-room/pnpm-workspace.yaml`.",
+    );
+  });
+
   it("placeholders", () => {
     const found = new Set(BUILDER.match(/\{\{\s*\w+\s*\}\}/g) ?? []);
     for (const p of found) {
