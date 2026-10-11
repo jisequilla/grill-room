@@ -37,10 +37,15 @@ delete process.env.CLAUDE_CONFIG_DIR;
  * each file in a child process, where it does reach; Stryker's vitest runner
  * forces the `threads` pool. There, `os.homedir()` follows `process.env.HOME`
  * as it does in a process, and `syncBuiltinESMExports` carries the change to
- * modules that import `homedir` by name.
+ * modules that import `homedir` by name. A reused thread runs this file once
+ * per test file, so the wrapper is marked and installed only once.
  */
-if (!isMainThread) {
+const FOLLOWS_HOME = Symbol.for("grill-room.homedirFollowsHome");
+type MarkedHomedir = typeof os.homedir & { [FOLLOWS_HOME]?: true };
+if (!isMainThread && !(os.homedir as MarkedHomedir)[FOLLOWS_HOME]) {
   const realHomedir = os.homedir;
-  os.homedir = () => process.env.HOME || realHomedir();
+  const followsHome: MarkedHomedir = () => process.env.HOME || realHomedir();
+  followsHome[FOLLOWS_HOME] = true;
+  os.homedir = followsHome;
   syncBuiltinESMExports();
 }

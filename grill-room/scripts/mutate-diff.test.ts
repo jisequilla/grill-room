@@ -48,6 +48,10 @@ describe("rangesFromDiff", () => {
     ["cjs", diffOf("server/c.cjs", ["@@ -2,0 +3,1 @@"]), ["server/c.cjs:3-3"]],
     ["jsx", diffOf("app/w.jsx", ["@@ -7,0 +8,2 @@"]), ["app/w.jsx:8-9"]],
     ["snapshot", diffOf("fixtures/out.snap", ["@@ -1,0 +1,2 @@"]), []],
+    ["stryker config", diffOf("stryker.config.mjs", ["@@ -1,0 +1,9 @@"]), []],
+    ["vitest config", diffOf("vitest.config.ts", ["@@ -3,0 +4,2 @@"]), []],
+    ["vite config in a folder", diffOf("app/vite.config.ts", ["@@ -1,0 +1,1 @@"]), []],
+    ["a name that only contains config", diffOf("server/config.ts", ["@@ -1,0 +1,1 @@"]), ["server/config.ts:1-1"]],
     [
       "context text after the header",
       diffOf("server/d.ts", ["@@ -1,0 +2 @@ export function d() {"]),
