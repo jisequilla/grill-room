@@ -98,12 +98,13 @@ A line is covered when it falls inside any Evidence range on the same path, from
 | `Mutation run (round R): no-scope, nothing to mutate.` | No survivor findings: nothing was mutated. The gate was not skipped, so the verdict comment says nothing was mutated. On a test-only PR it adds that nothing judged its tests' strength this round |
 | A test-only PR whose gate is skipped | The verdict comment says nothing judged its tests' strength this round. No finding |
 | A `Dropped over the cap:` range overlaps an Evidence range | The verdict comment names the dropped range as unjudged. No finding |
+| A `Preferred ranges not covered by the scope:` line lists a range that falls inside or overlaps an Evidence range on the same path (the survivors rule: strip a leading `grill-room/` from each Evidence range, ends included) | The verdict comment names that range as unjudged: no line of the mutation scope falls in it, so the mutation run did not judge it. No finding. For example the line `Preferred ranges not covered by the scope: server/a.ts:3-4` against the Evidence range `grill-room/server/a.ts:1-5` is named as unjudged, and so is `Preferred ranges not covered by the scope: server/a.ts:701-701` against the single-line Evidence range `grill-room/server/a.ts:701` |
 
 When the Mutation section has no line starting `Mutation run (round`, the main session filled this template by hand and you run the step yourself in your scratch worktree:
 
 1. `(cd grill-room && pnpm install --frozen-lockfile --prefer-offline)`.
-2. `(cd grill-room && pnpm test:mutate --base origin/main)`, with the Bash tool's `run_in_background`, waiting for its completion notice. The run can take longer than a foreground call allows.
-3. Read `grill-room/.scratch/mutation/summary.json`. A `status` of `overrun` or `runner-failed` means the gate was skipped. A non-empty `dropped` array is the dropped-range case.
+2. `(cd grill-room && pnpm test:mutate --base origin/main)`, adding `--prefer` with the PR body's Evidence ranges (written as in the Mutate prompt of the workflow) when there are any, with the Bash tool's `run_in_background`, waiting for its completion notice. The run can take longer than a foreground call allows.
+3. Read `grill-room/.scratch/mutation/summary.json`. A `status` of `overrun` or `runner-failed` means the gate was skipped. A non-empty `dropped` array is the dropped-range case. A non-empty `preferNotCovered` array is the case above.
    A `status` of `no-scope` means nothing was mutated.
 
 ## Findings

@@ -178,16 +178,40 @@ function splitAtCap(
   return { keptLines: lines.slice(0, stopAt), droppedLines: lines.slice(stopAt) };
 }
 
+function inAnyRange(line: LineCount, ranges: Array<{ file: string; start: number; end: number }>) {
+  return ranges.some(
+    (range) => range.file === line.file && line.line >= range.start && line.line <= range.end,
+  );
+}
+
 export function planStrykerRun(
   lines: LineCount[],
   cap: number,
+  prefer: string[] = [],
 ): { kept: string[]; dropped: string[]; startable: boolean } {
-  const { keptLines, droppedLines } = splitAtCap(lines, cap);
+  const preferred = prefer.map(parseRange);
+  const isPreferred = (line: LineCount) => inAnyRange(line, preferred);
+  const ranked = [...lines.filter(isPreferred), ...lines.filter((line) => !isPreferred(line))];
+  const { keptLines } = splitAtCap(ranked, cap);
+  const keptSet = new Set(keptLines);
+  const inScopeOrder = lines.filter((line) => keptSet.has(line));
+  const droppedLines = lines.filter((line) => !keptSet.has(line));
   return {
-    kept: mergeLines(keptLines),
+    kept: mergeLines(inScopeOrder),
     dropped: mergeLines(droppedLines),
-    startable: keptLines.some((entry) => entry.count > 0),
+    startable: inScopeOrder.some((entry) => entry.count > 0),
   };
+}
+
+export function uncoveredPreferred(lines: LineCount[], prefer: string[]): string[] {
+  return prefer.filter((range) => {
+    const parsed = [parseRange(range)];
+    return !lines.some((line) => inAnyRange(line, parsed));
+  });
+}
+
+export function preferNotCoveredFor(counted: LineCount[] | null, prefer: string[]): string[] | null {
+  return counted === null ? null : uncoveredPreferred(counted, prefer);
 }
 
 export interface RunRecord {
@@ -199,6 +223,7 @@ export interface RunRecord {
   elapsedMs: number | null;
   exitCode: number | null;
   stderrTail: string | null;
+  preferNotCovered: string[] | null;
 }
 
 export interface StrykerReport {
@@ -233,6 +258,7 @@ export interface Summary {
   survivors: Survivor[] | null;
   exitCode: number | null;
   stderrTail: string | null;
+  preferNotCovered: string[] | null;
 }
 
 export function summarize(report: StrykerReport | null, run: RunRecord): Summary {
@@ -244,6 +270,7 @@ export function summarize(report: StrykerReport | null, run: RunRecord): Summary
     elapsedMs: run.elapsedMs,
     exitCode: run.exitCode,
     stderrTail: run.stderrTail,
+    preferNotCovered: run.preferNotCovered,
   };
   const unknown = { mutants: null, score: null, survivors: null };
 
@@ -392,7 +419,7 @@ function runInGroup(args: string[], cwd: string, timeoutMs: number): Promise<Fin
 
 function usageError(message: string): never {
   process.stderr.write(
-    `${message}\nUsage: pnpm test:mutate [--base <ref>] [--mutate <file:start-end>[,...]]\n`,
+    `${message}\nUsage: pnpm test:mutate [--base <ref>] [--mutate <file:start-end>[,...]] [--prefer <file:start-end>[,...]]\n`,
   );
   process.exit(1);
 }
@@ -406,18 +433,28 @@ function emit(summary: Summary, cwd: string): void {
 
 async function main(): Promise<void> {
   const { values } = parseArgs({
-    options: { base: { type: "string" }, mutate: { type: "string" } },
+    options: {
+      base: { type: "string" },
+      mutate: { type: "string" },
+      prefer: { type: "string" },
+    },
     strict: true,
   });
   const cwd = process.cwd();
+
+  const validRanges = (list: string[]) => list.every((range) => RANGE_ARGUMENT.test(range));
+  if (values.mutate !== undefined && !validRanges(values.mutate.split(","))) {
+    usageError("--mutate takes comma-separated file:start-end ranges.");
+  }
+  if (values.prefer !== undefined && !validRanges(values.prefer.split(","))) {
+    usageError("--prefer takes comma-separated file:start-end ranges.");
+  }
+  const prefer = values.prefer === undefined ? [] : values.prefer.split(",");
 
   let base: string | null = null;
   let scope: Scope;
   if (values.mutate !== undefined) {
     const ranges = values.mutate.split(",");
-    if (ranges.some((range) => !RANGE_ARGUMENT.test(range))) {
-      usageError("--mutate takes comma-separated file:start-end ranges.");
-    }
     scope = { kind: "ranges", ranges };
   } else {
     base = values.base ?? DEFAULT_BASE;
@@ -433,6 +470,7 @@ async function main(): Promise<void> {
     elapsedMs: null,
     exitCode: null,
     stderrTail: null,
+    preferNotCovered: [],
   };
 
   let ranges: string[] = [];
@@ -463,6 +501,7 @@ async function main(): Promise<void> {
           elapsedMs: Date.now() - started,
           exitCode: finished.exitCode,
           stderrTail: finished.stderrTail,
+          preferNotCovered: preferNotCoveredFor(null, prefer),
         }),
         cwd,
       );
@@ -473,13 +512,29 @@ async function main(): Promise<void> {
 
   const counted = ranges.length > 0 ? await countMutantLines(ranges, cwd) : [];
   if (!counted.some((entry) => entry.count > 0)) {
-    emit(summarize(null, { ...empty, scope: ranges }), cwd);
+    emit(
+      summarize(null, {
+        ...empty,
+        scope: ranges,
+        preferNotCovered: preferNotCoveredFor(counted, prefer),
+      }),
+      cwd,
+    );
     return;
   }
 
-  const { kept, dropped, startable } = planStrykerRun(counted, CAP);
+  const { kept, dropped, startable } = planStrykerRun(counted, CAP, prefer);
   if (!startable) {
-    emit(summarize(null, { ...empty, outcome: "nothing-kept", scope: ranges, dropped }), cwd);
+    emit(
+      summarize(null, {
+        ...empty,
+        outcome: "nothing-kept",
+        scope: ranges,
+        dropped,
+        preferNotCovered: preferNotCoveredFor(counted, prefer),
+      }),
+      cwd,
+    );
     return;
   }
 
@@ -503,6 +558,7 @@ async function main(): Promise<void> {
       elapsedMs: Date.now() - started,
       exitCode: finished.exitCode,
       stderrTail: outcome === "finished" ? null : finished.stderrTail,
+      preferNotCovered: preferNotCoveredFor(counted, prefer),
     }),
     cwd,
   );
