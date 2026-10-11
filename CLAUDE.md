@@ -66,7 +66,7 @@ Issues and specs live as local markdown under `.grill-room/<feature>/`. See `doc
 
 ### Domain docs
 
-Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root, created lazily. See `docs/agents/domain.md`.
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root, created lazily. See `docs/agents/domain.md`. The engineering skills (`improve-codebase-architecture`, `domain-modeling`, `codebase-design`) read `GLOSSARY.md`; re-running `/setup-matt-pocock-skills` regenerates `docs/agents/domain.md` pointing at `CONTEXT.md`, so set it back afterwards.
 
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
