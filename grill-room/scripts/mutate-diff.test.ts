@@ -915,6 +915,7 @@ describe("test:mutate CLI: --prefer", () => {
     });
 
     function failedSummary(result: ReturnType<typeof runCli>) {
+      expect(result.stdout).not.toBe("");
       const { stderrTail, ...rest } = JSON.parse(result.stdout);
       return { exit: result.status, rest, stderrTail, file: JSON.parse(result.summary ?? "null") };
     }
