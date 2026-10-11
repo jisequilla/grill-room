@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { repoPath } from "../../test/repo-root.js";
 import {
   APP_ADDENDUM,
   DOCS_FOLDER_ADDENDUM,
@@ -19,12 +19,8 @@ import {
 } from "./test-fixtures.js";
 
 /** The upstream skills, as installed at the repository root. */
-const REPO_GRILLING_SKILL = fileURLToPath(
-  new URL("../../../.claude/skills/grilling/SKILL.md", import.meta.url),
-);
-const REPO_TO_SPEC_SKILL = fileURLToPath(
-  new URL("../../../.claude/skills/to-spec/SKILL.md", import.meta.url),
-);
+const REPO_GRILLING_SKILL = repoPath(".claude/skills/grilling/SKILL.md");
+const REPO_TO_SPEC_SKILL = repoPath(".claude/skills/to-spec/SKILL.md");
 
 describe("the installed instruction copies", () => {
   it("keeps the grilling skill byte-identical to the repository's own", () => {
