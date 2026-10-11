@@ -735,7 +735,7 @@ describe("preferred ranges", () => {
         "export function small(a: number) {\n  return a > 1;\n}\n",
       );
       const span = (start: number, end: number) => ({ start: { line: start }, end: { line: end } });
-      const coverage = {
+      const coverage: Parameters<typeof rangesFromCoverage>[0] = {
         [path.join(cwd, "a.ts")]: {
           statementMap: { "0": span(1, 1), "1": span(2, 2) },
           s: { "0": 1, "1": 1 },
