@@ -44,7 +44,7 @@ want="$(printf '%s\n' \
   '**e2e can hang on its own PGlite lock (gr-tte).**' \
   '**Agent replies arrive truncated.**' \
   '**The classifier blocks chained gh writes.**')"
-section="$(awk '/^## /{ on = ($0 == "## Failure modes seen 2026-10-10"); next } on' "$skill")"
+section="$(awk '/^## /{ on = ($0 == "## Failure modes"); next } on' "$skill")"
 got="$(printf '%s\n' "$section" | grep '^\*\*')"
 [ "$got" = "$want" ]
 report $? "failure modes"
