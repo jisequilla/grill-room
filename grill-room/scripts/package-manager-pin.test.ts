@@ -27,4 +27,9 @@ describe("pnpm pin at the repository root", () => {
     const lines = readFileSync(repoPath(".gitignore"), "utf8").split("\n");
     expect(lines).toContain("/node_modules/");
   });
+
+  it("root pnpm-lock.yaml is ignored", () => {
+    const lines = readFileSync(repoPath(".gitignore"), "utf8").split("\n");
+    expect(lines).toContain("/pnpm-lock.yaml");
+  });
 });

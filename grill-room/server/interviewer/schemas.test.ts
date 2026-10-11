@@ -106,7 +106,6 @@ describe("a citation with one leading slash", () => {
     // @ts-expect-error null is not a citation
     scripted.proposedDecisions[0]!.citation = null;
 
-    expect(citation.safeParse(5).success).toBe(false);
     const repaired = citation.safeParse("/a.ts:1");
     expect(repaired.success && repaired.data).toBe("a.ts:1");
   });

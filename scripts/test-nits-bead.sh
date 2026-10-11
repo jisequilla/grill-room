@@ -17,28 +17,35 @@ report() {
   if [ "$1" -eq 0 ]; then echo "ok   $2"; else echo "FAIL $2"; fail=1; fi
 }
 
+# stdout_matches <actual file> <expected text>: byte-exact, so a trailing blank
+# line is a mismatch. Empty expected text means empty stdout.
+stdout_matches() {
+  local want="$tmp/want"
+  if [ -z "$2" ]; then : >"$want"; else printf '%s\n' "$2" >"$want"; fi
+  cmp -s "$1" "$want"
+}
+
 # entry_row <name> <entry json> <expected line>
 entry_row() {
   n=$((n + 1))
-  local f="$tmp/entry-$n.json" out err code want
+  local f="$tmp/entry-$n.json" err code
   printf '{"bead":"gr-t.1","pr":1,"nonBlocking":[%s]}' "$2" >"$f"
-  out="$("$nits" "$f" 2>"$tmp/err")"; code=$?
+  "$nits" "$f" >"$tmp/out" 2>"$tmp/err"; code=$?
   err="$(cat "$tmp/err")"
-  want="$(printf 'PR #1 nits: gr-t.1\n\n%s' "$3")"
-  [ "$out" = "$want" ] && [ -z "$err" ] && [ "$code" -eq 0 ]
+  stdout_matches "$tmp/out" "$(printf 'PR #1 nits: gr-t.1\n\n%s' "$3")" && [ -z "$err" ] && [ "$code" -eq 0 ]
   report $? "entry: $1"
 }
 
 # call_row <name> <file or ''> <expected stdout> <expected stderr> <expected exit>
 call_row() {
-  local out err code
+  local err code
   if [ -z "$2" ]; then
-    out="$("$nits" 2>"$tmp/err")"; code=$?
+    "$nits" >"$tmp/out" 2>"$tmp/err"; code=$?
   else
-    out="$("$nits" "$2" 2>"$tmp/err")"; code=$?
+    "$nits" "$2" >"$tmp/out" 2>"$tmp/err"; code=$?
   fi
   err="$(cat "$tmp/err")"
-  [ "$out" = "$3" ] && [ "$err" = "$4" ] && [ "$code" -eq "$5" ]
+  stdout_matches "$tmp/out" "$3" && [ "$err" = "$4" ] && [ "$code" -eq "$5" ]
   report $? "call: $1"
 }
 
@@ -59,6 +66,17 @@ entry_row "trailing newline" '{"level":"nit","file":"i.ts","line":2,"claim":"Tai
 entry_row "newline in evidence" '{"level":"should-fix","file":"j.ts","line":5,"claim":"Split","evidence":"a\nb"}' '- should-fix · j.ts:5 · Split · evidence: `a b`'
 entry_row "blocker passed by mistake" '{"level":"blocker","file":"g.ts","line":8,"claim":"Passed by mistake"}' '- blocker · g.ts:8 · Passed by mistake'
 entry_row "absent keys" '{"level":"nit","file":"e.ts","line":4,"claim":"Absent keys"}' '- nit · e.ts:4 · Absent keys'
+
+entry_row "empty claim" '{"level":"nit","file":"e.ts","line":4,"claim":""}' '- nit · e.ts:4'
+entry_row "null claim" '{"level":"nit","file":"e.ts","line":4,"claim":null}' '- nit · e.ts:4'
+entry_row "absent claim" '{"level":"nit","file":"e.ts","line":4}' '- nit · e.ts:4'
+entry_row "whitespace claim" '{"level":"nit","file":"e.ts","line":4,"claim":"  "}' '- nit · e.ts:4'
+entry_row "empty claim with evidence and sentToFix" '{"level":"should-fix","file":"e.ts","line":4,"claim":"","evidence":"cmd","sentToFix":1}' '- should-fix · e.ts:4 · evidence: `cmd` · addressed in round 1'
+entry_row "claim present" '{"level":"nit","file":"e.ts","line":4,"claim":"Rename q"}' '- nit · e.ts:4 · Rename q'
+entry_row "newline in file with line" '{"level":"nit","file":"dir\nx.ts","line":3,"claim":"c"}' '- nit · dir x.ts:3 · c'
+entry_row "newline in file with null line" '{"level":"nit","file":"x\ny.md","line":null,"claim":"c"}' '- nit · x y.md · c'
+entry_row "newline in equivalentMutant" '{"level":"nit","file":"a.ts","line":3,"claim":"c","equivalentMutant":"p\nq"}' '- nit · a.ts:3 · c · equivalent: `p q`'
+entry_row "newline-only equivalentMutant" '{"level":"nit","file":"a.ts","line":3,"claim":"c","equivalentMutant":"\n"}' '- nit · a.ts:3 · c'
 
 two="$tmp/two.json"
 printf '{"bead":"gr-abc.1","pr":190,"nonBlocking":[%s,%s]}' "$E1" "$E2" >"$two"
@@ -87,5 +105,15 @@ bad_row 4 '{"bead":"","pr":190,"nonBlocking":[]}' "empty bead"
 bad_row 5 '' "empty file"
 bad_row 6 '{"bead":"gr-abc.1","pr":190}' "no nonBlocking"
 bad_row 7 '{"bead":"gr-abc.1","pr":190,"nonBlocking":"x"}' "nonBlocking string"
+
+# harness: trailing blank line is detected
+blank="$tmp/blank-wrapper.sh"
+printf '#!/usr/bin/env bash\n"%s" "$@"; echo\n' "$nits" >"$blank"
+chmod +x "$blank"
+printf '{"bead":"gr-t.1","pr":1,"nonBlocking":[%s]}' "$E1" >"$tmp/blank.json"
+"$blank" "$tmp/blank.json" >"$tmp/blank-out" 2>/dev/null
+stdout_matches "$tmp/blank-out" "$(printf 'PR #1 nits: gr-t.1\n\n- nit · server/x.ts:12 · Rename q to query')"
+[ $? -ne 0 ]
+report $? "harness: trailing blank line is detected"
 
 exit "$fail"

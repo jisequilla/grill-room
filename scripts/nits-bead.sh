@@ -38,8 +38,8 @@ jq -r '
   "",
   (.nonBlocking[] |
     ([ "- \(.level | flat)",
-       (if .line == null then (.file | flat) else "\(.file | flat):\(.line)" end),
-       (.claim | flat) ]
+       (if .line == null then (.file | flat) else "\(.file | flat):\(.line)" end)]
+     + (if (.claim | flat) != "" then [.claim | flat] else [] end)
      + (if (.evidence | flat) != "" then ["evidence: `\(.evidence | flat)`"] else [] end)
      + (if (.equivalentMutant | flat) != "" then ["equivalent: `\(.equivalentMutant | flat)`"] else [] end)
      + (if .sentToFix != null then ["addressed in round \(.sentToFix)"] else [] end)
