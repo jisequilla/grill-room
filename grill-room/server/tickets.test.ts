@@ -17,6 +17,7 @@ import {
   unproducedInputs,
   unproducedNote,
   unproducedReason,
+  unresolvedInputs,
   upstreamGaps,
   upstreamOf,
   userStories,
@@ -1016,5 +1017,263 @@ describe("consumes/produces seam: every shape the prompt describes", () => {
     const parsed = breakIntoTicketsResultSchema.parse({ tickets: raw });
 
     expect(unproducedInputs(parsed.tickets, listed)).toEqual(expected);
+  });
+});
+
+describe("unresolvedInputs (stored gaps plus recomputed not-upstream)", () => {
+  type Stored = Omit<InputGap, "ticket">;
+  type Row = Parameters<typeof unresolvedInputs>[0][number];
+  const stored = (item: string, from: ConsumeSource, reason: InputGap["reason"]): Stored => ({
+    item,
+    from,
+    reason,
+  });
+  const row = (
+    number: number,
+    fields: Partial<Omit<Row, "number">> = {},
+  ): Row => ({
+    number,
+    kind: "build",
+    blockedBy: [],
+    consumes: [],
+    produces: [],
+    unproduced: [],
+    ...fields,
+  });
+
+  it("is null when a build ticket has consumes null", () => {
+    const tickets = [
+      row(1, { consumes: null, unproduced: null }),
+      row(2, { consumes: [consume("a", null)], unproduced: [stored("a", null, "no-source")] }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toBeNull();
+  });
+
+  it("is null when a gate has consumes null", () => {
+    const tickets = [
+      row(1, { kind: "gate", consumes: null }),
+      row(2, { consumes: [consume("a", null)], unproduced: [stored("a", null, "no-source")] }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toBeNull();
+  });
+
+  it("checks null before the duplicate-number guard", () => {
+    expect(unresolvedInputs([row(1, { consumes: null }), row(3), row(3)])).toBeNull();
+  });
+
+  it("is not null for a null produces, and recomputes no not-upstream from it", () => {
+    const tickets = [
+      row(1),
+      row(3, {
+        blockedBy: [1],
+        consumes: [consume("x", 4)],
+        unproduced: [stored("x", 4, "not-produced")],
+      }),
+      row(4, { produces: null }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([gap(3, "x", 4, "not-produced")]);
+  });
+
+  it("is empty when nothing is unresolved", () => {
+    expect(unresolvedInputs([row(1), row(2)])).toEqual([]);
+  });
+
+  it("returns a stored gap with its ticket number", () => {
+    const tickets = [
+      row(1),
+      row(2, {
+        consumes: [consume("spans writer", null)],
+        unproduced: [stored("spans writer", null, "no-source")],
+      }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([gap(2, "spans writer", null, "no-source")]);
+  });
+
+  it("recomputes not-upstream from blockedBy", () => {
+    const base = (blockedBy: number[]) => [
+      row(1),
+      row(3, { blockedBy, consumes: [consume("gr_spans table", 4)] }),
+      row(4, { produces: ["gr_spans table"] }),
+    ];
+
+    expect(unresolvedInputs(base([1]))).toEqual([gap(3, "gr_spans table", 4, "not-upstream")]);
+    expect(unresolvedInputs(base([4]))).toEqual([]);
+  });
+
+  it("orders a ticket's gaps by consumes: recomputed first", () => {
+    const tickets = [
+      row(1),
+      row(3, {
+        blockedBy: [1],
+        consumes: [consume("gr_spans table", 4), consume("spans writer", null)],
+        unproduced: [stored("spans writer", null, "no-source")],
+      }),
+      row(4, { produces: ["gr_spans table"] }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([
+      gap(3, "gr_spans table", 4, "not-upstream"),
+      gap(3, "spans writer", null, "no-source"),
+    ]);
+  });
+
+  it("orders a ticket's gaps by consumes: stored first", () => {
+    const tickets = [
+      row(1),
+      row(3, {
+        blockedBy: [1],
+        consumes: [consume("spans writer", null), consume("gr_spans table", 4)],
+        unproduced: [stored("spans writer", null, "no-source")],
+      }),
+      row(4, { produces: ["gr_spans table"] }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([
+      gap(3, "spans writer", null, "no-source"),
+      gap(3, "gr_spans table", 4, "not-upstream"),
+    ]);
+  });
+
+  it("matches a stored gap on item and from", () => {
+    const tickets = [
+      row(1),
+      row(3, {
+        blockedBy: [5],
+        consumes: [consume("x", 5), consume("x", 4), consume("x", null)],
+        unproduced: [stored("x", null, "no-source")],
+      }),
+      row(4, { produces: ["x"] }),
+      row(5, { produces: ["x"] }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([
+      gap(3, "x", 4, "not-upstream"),
+      gap(3, "x", null, "no-source"),
+    ]);
+  });
+
+  it("matches a stored gap on the trimmed entry", () => {
+    const tickets = [
+      row(1),
+      row(3, {
+        blockedBy: [1],
+        consumes: [consume("gr_spans table", 4), consume(" x ", null)],
+        unproduced: [stored("zz", null, "no-source"), stored("x", null, "no-source")],
+      }),
+      row(4, { produces: ["gr_spans table"] }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([
+      gap(3, "gr_spans table", 4, "not-upstream"),
+      gap(3, "x", null, "no-source"),
+      gap(3, "zz", null, "no-source"),
+    ]);
+  });
+
+  it("drops a stored not-upstream gap", () => {
+    const tickets = [
+      row(3, {
+        blockedBy: [4],
+        consumes: [consume("a", 4)],
+        unproduced: [stored("a", 4, "not-upstream")],
+      }),
+      row(4, { produces: ["a"] }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([]);
+  });
+
+  it("orders tickets by number", () => {
+    const tickets = [
+      row(5, { consumes: [consume("b", null)], unproduced: [stored("b", null, "no-source")] }),
+      row(2, { consumes: [consume("a", null)], unproduced: [stored("a", null, "no-source")] }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([
+      gap(2, "a", null, "no-source"),
+      gap(5, "b", null, "no-source"),
+    ]);
+  });
+
+  it("leaves out a gate's gaps", () => {
+    const tickets = [
+      row(1, {
+        kind: "gate",
+        consumes: [],
+        unproduced: [stored("x", null, "no-source")],
+      }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([]);
+  });
+
+  it("reads a null unproduced with a non-null consumes as no stored gaps", () => {
+    expect(unresolvedInputs([row(1), row(2, { unproduced: null }), row(3)])).toEqual([]);
+  });
+
+  it("puts a stored gap that matches no entry after the matched ones", () => {
+    const tickets = [
+      row(3, {
+        consumes: [consume("a", null)],
+        unproduced: [stored("zz", null, "no-source"), stored("a", null, "no-source")],
+      }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([
+      gap(3, "a", null, "no-source"),
+      gap(3, "zz", null, "no-source"),
+    ]);
+  });
+
+  it("does not de-duplicate identical entries", () => {
+    const tickets = [
+      row(3, {
+        consumes: [consume("x", null), consume("x", null)],
+        unproduced: [stored("x", null, "no-source"), stored("x", null, "no-source")],
+      }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([
+      gap(3, "x", null, "no-source"),
+      gap(3, "x", null, "no-source"),
+    ]);
+  });
+
+  it("keeps stored order for gaps at one index", () => {
+    const tickets = [
+      row(3, {
+        consumes: [consume("x", null)],
+        unproduced: [stored("x", null, "not-tracked"), stored("x", null, "no-source")],
+      }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([
+      gap(3, "x", null, "not-tracked"),
+      gap(3, "x", null, "no-source"),
+    ]);
+  });
+
+  it("trims the item of a recomputed not-upstream gap", () => {
+    const tickets = [
+      row(1),
+      row(3, { blockedBy: [1], consumes: [consume(" gr_spans table ", 4)] }),
+      row(4, { produces: ["gr_spans table"] }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([gap(3, "gr_spans table", 4, "not-upstream")]);
+  });
+
+  it("returns nothing for duplicate ticket numbers, whichever kind of gap", () => {
+    const tickets = [
+      row(3, { unproduced: [stored("a", null, "no-source")], consumes: [consume("a", null)] }),
+      row(3, { blockedBy: [1], consumes: [consume("gr_spans table", 4)] }),
+      row(4, { produces: ["gr_spans table"] }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([]);
   });
 });

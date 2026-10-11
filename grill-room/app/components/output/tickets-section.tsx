@@ -5,6 +5,7 @@ import {
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { IconRefresh, IconTicket } from "@tabler/icons-react";
+import { ticketGapLines, ticketHashLabel } from "@shared/input-gaps";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -112,6 +113,9 @@ export function TicketsSection({
   const tickets = data?.tickets ?? [];
   const ticketsCurrent = data?.ticketsCurrent ?? false;
   const waves = data?.waves ?? [];
+  const unresolvedInputs = data?.unresolvedInputs ?? [];
+  const gapLinesOf = (number: number) =>
+    ticketGapLines(unresolvedInputs, number, ticketHashLabel);
 
   const waveByNumber = new Map<number, number>();
   waves.forEach((wave, index) => {
@@ -268,10 +272,30 @@ export function TicketsSection({
                               })}
                             </Badge>
                           ) : null}
+                          {gapLinesOf(ticket.number).length > 0 ? (
+                            <Badge
+                              variant="outline"
+                              className="font-normal"
+                              data-testid={`ticket-unresolved-${ticket.number}`}
+                            >
+                              {t("output.ticketUnresolved", {
+                                count: gapLinesOf(ticket.number).length,
+                              })}
+                            </Badge>
+                          ) : null}
                         </div>
                         <p className="font-mono text-xs text-muted-foreground">
                           {ticket.slug}
                         </p>
+                        {gapLinesOf(ticket.number).map((line, index) => (
+                          <p
+                            key={index}
+                            className="text-xs text-muted-foreground"
+                            data-testid={`ticket-unresolved-item-${ticket.number}-${index}`}
+                          >
+                            {t("output.ticketUnresolvedLabel")}: {line}
+                          </p>
+                        ))}
                         {ticket.kind === "gate" ? (
                           <p
                             className="text-xs text-muted-foreground"
