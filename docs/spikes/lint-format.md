@@ -6,15 +6,29 @@ Bead gr-rn6. grill-room runs typecheck, vitest, mutation testing, Playwright and
 
 It then classifies what they find, measures what a one-time format would change, and checks whether Vite+ could sit beside agent-native's CLI.
 
-## Verdict: adopt nothing yet
+## Verdict: adopt only a linter, with one rule
 
-No linter run found a real bug. That covers default oxlint, type-aware oxlint, Biome, and the Anti-Slop-equivalent set. That last set is the strict one: 1,319 findings, 242 of them in production code. Every finding sampled was style or noise.
+**On current code, no linter run found a real bug.** That covers four runs:
+- default oxlint;
+- type-aware oxlint;
+- Biome;
+- the Anti-Slop-equivalent set: 1,319 findings, 242 of them in production code.
 
-None of the 82 failed first attempts in `docs/delegation-log.md` is the kind any of these rules catches. The one candidate, gr-c0t.26's erased proposal types, was re-run on the pre-fix code, and no rule fires on it. None of the 17 `pr-nits` beads is a lint or format nit.
+Every finding sampled was style or noise.
 
-The formatters are safe: tests and typecheck pass on a fully formatted tree. But a one-time format touches 303 to 426 files, and nothing in the record shows that formatting differences have ever cost anything.
+**The delegation record has one catch: 1 of 82 failed first attempts.**
+- gr-c0t.26 erased the delegation proposals' types to `unknown`. On the pre-fix commit `11e5368`, `typescript/no-unnecessary-type-parameters` fires on exactly that code. That rule is type-aware and off by default.
+- With the fix (`b59dc8c`) the rule is silent there.
+- All 111 `typescript/*` rules were run on that pair, and it is the only rule whose findings change.
+- Five other type- or schema-shaped failures were re-run the same way. No finding disappears in their fixes.
 
-The cheapest path is already installed. The scaffold ships `oxfmt` 0.56.0 as a devDependency and commits a `grill-room/.oxfmtrc.json`, but nothing runs it. That is the framework's own convention (see "What already exists"). If a trigger below fires, start there, not with Biome.
+**What the rule costs.** On current main it reports 3 findings, all in test helpers and none a bug. It runs in 0.26 s and does not need `.generated/`.
+
+**So: adopt oxlint with that single rule** (config under "Recommendation"). Leave out the default rules, the Anti-Slop families and a formatter. Each costs more than it has caught. None of the 17 `pr-nits` beads is a lint or format nit.
+
+**The formatters are safe but unearned.** Tests and typecheck pass on a fully formatted tree. But a one-time format touches 303 to 426 files, and nothing in the record shows that formatting differences have ever cost anything.
+
+**If a formatter is wanted later, it is already installed.** The scaffold ships `oxfmt` 0.56.0 as a devDependency and commits a `grill-room/.oxfmtrc.json`, but nothing runs it. That is the framework's own convention (see "What already exists"). Start there, not with Biome.
 
 ## What already exists
 
@@ -36,18 +50,18 @@ An earlier wrapper timed through two `python3 -c` start-ups. It added about 0.23
 | oxlint | 1.87.0 | `oxlint --format=json .` | none (default `correctness` category, 96 rules) | 0.054, 0.048, 0.050 s | 452 | **13** (4 production, 9 test) | no-unused-vars 8, no-useless-spread 2, no-useless-escape 2, no-unsafe-finally 1 |
 | oxlint `--type-aware` | 1.87.0 + oxlint-tsgolint 7.0.2004 | `OXLINT_TSGOLINT_PATH=<tmp>/tsgolint oxlint --type-aware --format=json .` | none (111 rules) | 0.659, 0.661, 0.658 s | 452 | **34** (28 with `e2e/fixtures/**` and `.agents/**` ignored: 7 production, 21 test) | no-redundant-type-constituents 9, no-unused-vars 8, require-array-sort-compare 8, no-useless-spread 2, no-useless-escape 2, unbound-method 2, no-unsafe-finally 1, no-floating-promises 1, no-base-to-string 1 |
 | oxlint `--type-aware`, before `pnpm typecheck` | same | same | none | not re-timed | 452 | 71 | no-redundant-type-constituents 46 (37 extra, all phantom); the rest identical |
-| Biome lint | 2.5.15 | `biome lint --reporter=json --max-diagnostics=none .` | none | 0.366, 0.314, 0.310 s (worktree) | 497 (clean tree) | **1,184** (91 errors, 1,061 warnings, 32 info) | noNonNullAssertion 1,038, useTemplate 32, useHookAtTopLevel 26, noArrayIndexKey 19, useExhaustiveDependencies 14, noSvgWithoutTitle 9, noExplicitAny 7, noImplicitAnyLet 7, noPrototypeBuiltins 4, noDynamicNamespaceImportAccess 4, parse 4, useOptionalChain 3, useImportType 2, noLabelWithoutControl 2, useIterableCallbackReturn 2 (+9 more rules with 1 to 2 each) |
+| Biome lint | 2.5.15 | `biome lint --reporter=json --max-diagnostics=none .` | none | 0.366, 0.314, 0.310 s (worktree) | 467 (clean tree) | **1,184** (91 errors, 1,061 warnings, 32 info) | noNonNullAssertion 1,038, useTemplate 32, useHookAtTopLevel 26, noArrayIndexKey 19, useExhaustiveDependencies 14, noSvgWithoutTitle 9, noExplicitAny 7, noImplicitAnyLet 7, noPrototypeBuiltins 4, noDynamicNamespaceImportAccess 4, parse 4, useOptionalChain 3, useImportType 2, noLabelWithoutControl 2, useIterableCallbackReturn 2 (+9 more rules with 1 to 2 each) |
 
 Here, "test" means a `.test.` file or anything under `e2e/` or `test/`.
 
 **Type-aware runs need the generated types.**
 - oxlint looks for `oxlint-tsgolint` in the project's `node_modules`. Run from a temp install, it fails with `Failed to find tsgolint executable. You may need to add the oxlint-tsgolint package to your project?`. Setting `OXLINT_TSGOLINT_PATH` fixes that.
 - In a fresh worktree, `.generated/action-types.d.ts` does not exist until `pnpm typecheck` (or dev) writes it. Until then, every `AgentNativeActionRegistry[...]["result"]` resolves to an error type, which produces 37 phantom `'any' overrides all other types` findings.
-- So a type-aware lint step must run after typecheck.
+- So a type-aware lint step that runs the default rules must run after typecheck. The single rule recommended below does not depend on the generated types: it gives the same 3 findings on a cold `git archive` tree with no `.generated/`.
 
 **Biome needs config to run at all usefully.**
 - With no config, it ignores `.gitignore` and lints whatever gitignored output the tree holds.
-- A clean tree (`git archive ad7fc56`, nothing generated) gives the 1,184 above.
+- A clean tree (`git archive ad7fc56` extracted into a fresh directory outside the worktree, nothing generated) gives the 1,184 above on 467 files. One earlier run on an extracted tree reported 497 files; it did not reproduce on a re-run of the same directory or on a fresh extract.
 - This worktree, after typecheck, gives 1,196, adding `.react-router/` (8) and `.generated/` (4).
 - The main checkout, where e2e has run, gives **7,939**. 6,743 of those are under `playwright-report/`. `test-results/` would be linted too when present; it was absent there.
 - It also cannot parse Tailwind v4 directives in `app/global.css` (4 parse errors).
@@ -72,6 +86,22 @@ Here, "test" means a `.test.` file or anything under `e2e/` or `test/`.
 | Wider, for comparison (type-aware) | `no-unsafe-assignment` 146, `no-unsafe-member-access` 116, `no-unsafe-call` 32, `no-unsafe-return` 19, `no-unsafe-argument` 19, `no-await-in-loop` 111 | 1,762 with the core set | 302 | 1,460 |
 
 The whole repo has nine `vi.mock`, `vi.spyOn` or `vi.stub*` calls, all in test files: 5 `vi.mock`, 2 `vi.spyOn`, 2 `vi.stubEnv`. No `reduce` spreads its accumulator. The 47 production `no-await-in-loop` findings are sequential filesystem walks and ordered retries.
+
+### `typescript/no-unnecessary-type-parameters`
+
+This rule is not one of the Anti-Slop families. It is the only rule found to catch a logged failure (see "Testing the 'zero of the delegation failures' claim"). It is type-aware and off by default, and flags a type parameter used only once in a signature. A `T` used once is a generic that throws its type away.
+
+| Tree | Findings | Where |
+|------|----------|-------|
+| `11e5368` (gr-c0t.26 before its fix) | 5 | **`server/interviewer/schemas.ts:548`** "Type parameter Citation is used only once"; **`schemas.ts:549`** "Type parameter T is used only once"; plus the 3 test helpers below |
+| `b59dc8c` (the fix) | 3 | the 3 test helpers only |
+| `ad7fc56` (current main) | 3 | `actions/ask-consistency-findings.test.ts:61`, `server/project-facts.test.ts:50`, `server/projects.test.ts:36` |
+
+The three findings on main are **style**, not bugs.
+- `bind<T extends object>(target: T, prop)` would be the same as `(target: object, prop)`.
+- `facts<T extends object>(outcome: T)` and `registered<T extends object>(outcome: T)` take a typed result and then cast it back with `as { facts: ... }`. That is the same erasure shape as the defect, but in test helpers whose casts match what the tests assert. Each fix is a one-line signature change.
+
+Wall time is 0.278, 0.256 and 0.261 s for the single rule with `--type-aware`. It gives the same 3 findings on a cold tree with no `.generated/`.
 
 ### Formatters
 
@@ -207,14 +237,30 @@ All 82 were checked.
 - gr-c0t.31: "a spread that always adds the field". This is a test blind to a spread, not accumulation.
 - gr-c0t.26, below.
 
-**The gr-c0t.26 near miss is decided: no rule catches it.**
-- **The defect.** In gr-c0t.26 (PR #137), "a slot helper erased the proposal types to `unknown`". The pre-fix code is commit `11e5368` and the fix is `b59dc8c`, both in `grill-room/server/interviewer/schemas.ts`. The erasure was a parameter annotation, `slot: <T extends z.ZodType>(shape: T) => z.ZodType`. It returns the base `ZodType`, so the inferred output is `unknown`. There is no `as` and no `any`.
-- **The test.** Both commits were extracted with `git archive` into scratch directories, typechecked so `.generated/` existed (exit 0 each), and linted with the extended Anti-Slop set: core, plus every `no-unsafe-*` rule and `no-await-in-loop`.
-- **The extended set:** 1,397 findings before the fix and 1,397 after. Keyed by file, rule and message, there is no difference. No finding is in `schemas.ts` at all.
-- **Default type-aware oxlint:** 19 findings before and 19 after, identical.
-- **Why nothing fires.** `unknown` is the type-safe top type. Every rule here targets `any`, assertions or non-null. A value typed `unknown` that is passed on and re-validated by another schema trips none of them.
+**gr-c0t.26 is caught, by `typescript/no-unnecessary-type-parameters`.**
+- **The defect.** In gr-c0t.26 (PR #137), "a slot helper erased the proposal types to `unknown`". The pre-fix code is commit `11e5368` and the fix is `b59dc8c`, both in `grill-room/server/interviewer/schemas.ts`.
+- **How the erasure works.** The pre-fix code is a parameter annotation, `slot: <T extends z.ZodType>(shape: T) => z.ZodType` (line 549). It returns the base `ZodType`, so the inferred output is `unknown`. There is no `as` and no `any`.
+- **The test.** Both commits were extracted with `git archive` into scratch directories and typechecked so `.generated/` existed (exit 0 each). Both were then linted with all 111 `typescript/*` rules, type-aware, everything else off.
+- **The result.** 5,624 findings before the fix and 5,622 after. Keyed by file, rule and message, the whole difference is two findings, both of `no-unnecessary-type-parameters` in `schemas.ts`:
+  - `548` "Type parameter Citation is used only once in the function signature";
+  - `549` "Type parameter T is used only once in the function signature".
+- **No other rule moves on that change.**
+- **Why the earlier runs missed it.** The default type-aware set (19 = 19) and the Anti-Slop sets (1,397 = 1,397) do not include this rule. Those sets target `any`, assertions and non-null. A generic whose type parameter is used once is a different signal.
+- **Would it have saved a review round? No.** Review round 1 of gr-c0t.26 had two other blockers, a wrong AGENTS.md line and five untested prompt clauses. The lint would have removed one of three findings before review, not the round.
 
-**The claim holds at 0 of 82**, for the default rule sets and for the Anti-Slop families.
+**The other type- and schema-shaped failures.** Five more of the 82 are about types, schemas or columns and have a pre-fix commit on their PR. Each pair was extracted, typechecked (exit 0) and run with all `typescript/*` rules:
+
+| Failure | Before → after | Findings | What changed |
+|---------|----------------|----------|--------------|
+| gr-7jg.3, attempt kind stored as null (PR #14) | `e151302` → `f697f40` | 2,072 → 2,078 | only new test lines (`no-non-null-assertion`, `no-unnecessary-type-assertion` in `request-next-round.test.ts`) |
+| gr-c0t.14, dropped usage and 32-bit INTEGER columns (PR #99) | `9fdbdfd` → `c75fd91` | 4,221 → 4,230 | only new test lines in `claude-cli.test.ts` and `turn-records.test.ts` |
+| gr-c0t.8 + .12, a shape rule and fixtures as evidence (PR #129) | `bed7414` → `0fc60f5` | 5,541 → 5,541 | none |
+| gr-c0t.25, proposals schema untested (PR #134) | `12558d0` → `42f8637` | 5,585 → 5,585 | none |
+| gr-c0t.32, filter on the wrong column untested (PR #141) | `89cefff` → `eb776bf` | 5,798 → 5,798 | none |
+
+No finding disappears with any of these fixes, so no rule catches them.
+
+**The claim fails at 1 of 82.** No default rule set and no Anti-Slop family catches any failure. `typescript/no-unnecessary-type-parameters` catches gr-c0t.26.
 
 **Elsewhere in the record.** None of the 17 `pr-nits` beads (`bd list --label pr-nits --all`) is a lint, format, cast, `any` or mocking nit. What the linters find that reviewers did not: 2 dead imports, 1 dead variable, 2 useless escapes and spreads. None of them changes behaviour.
 
@@ -240,37 +286,57 @@ agent-native's CLI resolves the project's `vite` binary for `dev` (`findViteBin(
 
 ## Recommendation
 
-**Adopt nothing yet.** The evidence:
-- 0 real bugs among 13 default oxlint findings, 34 type-aware, 1,184 Biome, and 1,319 Anti-Slop-equivalent (242 production). 48 were sampled and read in place, 16 of them production Anti-Slop findings.
-- 0 of 82 failed first attempts caught, by default rules or by the Anti-Slop families. The one candidate, gr-c0t.26's `unknown` erasure, was re-run on the pre-fix commit, and no rule fires on it.
-- 0 of 17 nits beads are lint-shaped.
-- Formatting is safe: 3,407 tests and typecheck exit 0 on both formatted trees. But its value is unevidenced, and its one-time cost is a 303-file commit at the committed width, or 343 files at width 100.
+**Adopt only a linter: oxlint, type-aware, with exactly one rule, `typescript/no-unnecessary-type-parameters`.** No formatter, no default rules, no Anti-Slop families, no Biome.
 
-**Rule set.** The smallest set that catches the real bugs found is empty. If a linter is adopted anyway as cheap hygiene, the smallest useful start is:
-- oxlint's default `correctness` category;
-- `no-unused-vars` with `ignoreRestSiblings: true`;
-- `ignorePatterns` for `e2e/fixtures/**` and `.agents/**`.
+**The evidence.**
+- **Catches:** 1 of 82 failed first attempts, gr-c0t.26. This rule fires on the erasure at `11e5368` and goes silent with the fix. It is the only one of 111 `typescript/*` rules whose findings change, and five other type- or schema-shaped failures show no rule catching them.
+- **Cost on current code:** 3 findings, all test helpers, all style. Each is a one-line signature change to fix, with no suppression needed. After that the rule stays at 0 until someone writes a generic that discards its type parameter: the shape of the logged defect.
+- **Runtime:** 0.26 s per run. It needs `oxlint-tsgolint` installed beside `oxlint`, but it does not need `.generated/`, so it can run before or after typecheck.
+- **Everything else measured catches nothing:** 0 real bugs among 13 default oxlint findings, 34 type-aware, 1,184 Biome and 1,319 Anti-Slop-equivalent (242 production). 48 findings were sampled and read in place.
+- **Each wider set costs more than it can show.** Default `correctness` adds 13 findings to fix and the type-aware defaults 34. The Anti-Slop families add 242 production findings, almost all casts that the next line or a schema has already checked. None of these maps to a logged failure.
+- **Formatting is safe** (3,407 tests and typecheck exit 0 on both formatted trees), but nothing in the record shows a cost it would remove. Its one-time price is a 303-file commit.
 
-That leaves 8 findings to fix once, all style.
+**Why adopt on one catch.** It is a weak case, and that should be plain:
+- The catch would not have saved gr-c0t.26 a review round, since the round had two other blockers.
+- What it buys is that a builder sees this one defect class before review, for 0.26 s and three one-line test fixes. The rule targets exactly the shape of a defect that reached review.
+- Every other candidate was measured against the same record and caught nothing.
 
-Leave out the type-aware rules and the Anti-Slop families. The type-aware rules add 21 findings, none real, and need typecheck to run first. The Anti-Slop families add 242 production findings, almost all casts that the next line or a schema has already checked. Each would need an inline suppression or a rewrite that changes no behaviour.
+If the owner weighs one catch in 82 as too little, "adopt nothing yet" is the alternative; it costs nothing to keep. A formatter stays out either way.
 
-**What would change the verdict.**
-- A logged delegation failure or reviewer finding that a named rule would have caught. A real `no-floating-promises`, `require-array-sort-compare` or unchecked-cast bug in production code is the most likely candidate.
-- The owner deciding that diff noise from inconsistent wrapping costs review attention.
+**Config** (`grill-room/.oxlintrc.json`):
 
-**Adoption cost, if a trigger fires**, assuming oxfmt and oxlint:
+```json
+{
+  "categories": { "correctness": "off" },
+  "rules": { "typescript/no-unnecessary-type-parameters": "error" },
+  "ignorePatterns": ["e2e/fixtures/**", ".agents/**"]
+}
+```
+
+Tested as written, through `-c`, on `ad7fc56`: 3 findings, exit 1.
+
+**Wiring.**
+- `package.json` devDependencies get `"oxlint": "1.87.0"` and `"oxlint-tsgolint": "7.0.2004"`.
+- The script is `"lint": "oxlint --type-aware"`.
+- `justfile` gets a recipe, `lint:` running `pnpm lint`, and `check: typecheck lint test e2e`.
+- The verify commands a builder runs become `pnpm test`, `pnpm typecheck` and `pnpm lint` from `grill-room/`, named in `.claude/rules/worktrees.md` ("The subagent") and the builder template.
+- It does not join `pnpm test`: vitest stays focused, and Stryker reuses it.
+
+**Adoption cost.**
 
 | Item | Cost |
 |------|------|
-| oxfmt dependency | none: 0.56.0 is installed (bumping to 0.72.0 changes 2 more files) |
-| oxfmt config | `.oxfmtrc.json` exists. Choose `printWidth` 80 (as committed) or 100. Add an ignore for `.agents/` (vendored framework skills, 16 files would change), `e2e/fixtures/`, `CHANGELOG.md` and `changelog/`: about 5 lines |
-| oxlint dependency | one devDependency (`oxlint` 1.87.0); `oxlint-tsgolint` only if type-aware |
-| oxlint config | `.oxlintrc.json`, about 10 lines (ignore patterns, one rule option) |
-| Scripts | `"fmt": "oxfmt ."`, `"fmt:check": "oxfmt --check ."`, `"lint": "oxlint ."` in `package.json`; a `lint` recipe in `justfile`, joined to `check: typecheck test e2e` |
-| Where it runs | not inside `pnpm test` (vitest stays focused, and Stryker reuses it); as a third verify command in the builder template, after `pnpm typecheck`. Cost per run: about 0.05 s each |
-| One-time format commit | 303 files, +19,680 / −6,588 at width 80; plus a `.git-blame-ignore-revs` line |
-| Conflicts | `gh pr list --repo jisequilla/grill-room --state open` returned none before this PR. But the commit touches 60% of files, so any worktree branch in flight when it lands will conflict. Land it between waves, with no tickets running |
+| Dependencies | two devDependencies (`oxlint` 1.87.0, `oxlint-tsgolint` 7.0.2004); `pnpm-lock.yaml` regenerates |
+| Config | `.oxlintrc.json`, 5 lines (above) |
+| Scripts | one `package.json` script, one `justfile` recipe, `lint` added to `check` |
+| Process | one line in `.claude/rules/worktrees.md` and the builder template's verify list |
+| One-time fixes | 3 test-helper signatures: `actions/ask-consistency-findings.test.ts:61`, `server/project-facts.test.ts:50`, `server/projects.test.ts:36` |
+| Per run | 0.26 s |
+| Conflicts | none: no format commit. `gh pr list --repo jisequilla/grill-room --state open` returned none before this PR |
+
+**What would widen it.**
+- Another logged failure that a named rule catches. Add that rule, measured the same way: before and after the fix, then its cost on main.
+- The owner deciding that diff noise from inconsistent wrapping costs review attention. oxfmt is then the step, with the costs measured above: 303 files at width 80, no new dependency, land between waves.
 
 Biome is the worse fit:
 - It needs a config just to run cleanly; with none, it reports 7,939 findings on a checkout where e2e has run.
@@ -313,11 +379,11 @@ bash $S/antislop.sh $EV/oxlint-typeaware-ad7fc56.json "$PWD" default-ta         
 python3 -I $S/count_oxlint.py $EV/oxlint-plain-ad7fc56.json
 
 # Biome lint on a clean tree, on this worktree, and on the main checkout (gitignored dirs counted by top-level directory)
-mkdir clean && git archive ad7fc56 grill-room | tar -x -C clean
-python3 -I $S/biome_dirs.py clean/grill-room $EV/biome-lint-clean-ad7fc56.json                # 1,184 on 497 files
+C=$(mktemp -d) && git archive ad7fc56 grill-room | tar -x -C "$C"                       # outside the worktree
+python3 -I $S/biome_dirs.py "$C/grill-room" $EV/biome-lint-clean2-ad7fc56.json                # 1,184 on 467 files
 python3 -I $S/biome_dirs.py . $EV/biome-lint-worktree-ad7fc56.json                            # 1,196 (.react-router 8, .generated 4)
 python3 -I $S/biome_dirs.py <main checkout>/grill-room $EV/biome-lint-main-checkout.json      # 7,939 (playwright-report 6,743)
-(cd clean/grill-room && "$B/biome" format --reporter=json --max-diagnostics=none . > $EV/biome-format-clean-ad7fc56.json)   # 427 of 459
+(cd "$C/grill-room" && "$B/biome" format --reporter=json --max-diagnostics=none . > $EV/biome-format-clean-ad7fc56.json)   # 427 of 459
 
 # Anti-Slop-equivalent rules (core: 1,319; extended: 1,762; mock+accumulation: 5; vi.mock ban: 5)
 bash $S/antislop.sh $EV/antislop-core.json "$PWD" core
@@ -337,6 +403,25 @@ bash $S/antislop.sh $EV/prefix-11e5368-default-ta.json tree-11e5368/grill-room d
 bash $S/antislop.sh $EV/postfix-b59dc8c-default-ta.json tree-b59dc8c/grill-room default-ta
 python3 -I $S/diff_findings.py $EV/prefix-11e5368-antislop-extended.json $EV/postfix-b59dc8c-antislop-extended.json   # before=1397 after=1397
 python3 -I $S/diff_findings.py $EV/prefix-11e5368-default-ta.json $EV/postfix-b59dc8c-default-ta.json                 # before=19 after=19
+
+# every typescript/* rule (111, listed from oxlint's configuration_schema.json into $S/ts-rules.txt), and the one rule
+python3 -I -c "import json,re;s=json.dumps(json.load(open('$T/node_modules/oxlint/configuration_schema.json')));print('\n'.join(sorted(set(re.findall(r'\"(typescript/[a-z0-9-]+)\"',s)))))" > $S/ts-rules.txt
+bash $S/tsall.sh $EV/prefix-11e5368-tsall.json tree-11e5368/grill-room $S/ts-rules.txt
+bash $S/tsall.sh $EV/postfix-b59dc8c-tsall.json tree-b59dc8c/grill-room $S/ts-rules.txt
+python3 -I $S/diff_findings.py $EV/prefix-11e5368-tsall.json $EV/postfix-b59dc8c-tsall.json   # 5624 -> 5622: only no-unnecessary-type-parameters, schemas.ts:548, :549
+echo typescript/no-unnecessary-type-parameters > $S/rule-nutp.txt
+bash $S/tsall.sh $EV/nutp-11e5368.json tree-11e5368/grill-room $S/rule-nutp.txt   # 5
+bash $S/tsall.sh $EV/nutp-b59dc8c.json tree-b59dc8c/grill-room $S/rule-nutp.txt   # 3
+bash $S/tsall.sh $EV/nutp-ad7fc56.json "$PWD" $S/rule-nutp.txt                    # 3, all test helpers
+
+# the other type/schema failures: archive each pre/post commit to $S/t-<sha>.tar, then
+for c in e151302 f697f40 9fdbdfd c75fd91 bed7414 0fc60f5 12558d0 42f8637 89cefff eb776bf; do
+  git archive --format=tar --output=$S/t-$c.tar $c grill-room && bash $S/pair_tsall.sh $c; done
+bash $S/pairs.sh                                     # per-pair diffs into $EV/tsall-diff-<bead>.txt
+
+# the recommended config, on main, timed, and on a cold tree
+OXLINT_TSGOLINT_PATH="$B/tsgolint" "$B/oxlint" --type-aware -c $S/oxlintrc-proposed.json .   # 3 findings, exit 1
+python3 -I $S/timeruns.py proposed-lint 3 $EV/wall-times.log -- "$B/oxlint" --type-aware -c $S/oxlintrc-proposed.json .
 
 # format trials: apply, measure, verify with exit codes, restore (repeat per formatter)
 "$B/oxfmt" --write .      # or: "$B/oxfmt" -c $S/empty-oxfmtrc.json --write . | "$B/biome" format --write . | "$B/biome" format --indent-style=space --write .
