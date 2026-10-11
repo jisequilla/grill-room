@@ -34,11 +34,14 @@ Other lenses may review the same PR at the same time, so give your scratch work 
 ```bash
 git fetch origin
 P=$(mktemp)
-git diff --no-renames --name-only origin/main...HEAD | grep -v -E '\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|/)(e2e|test|__snapshots__)/' | xargs git diff --no-renames --binary origin/main...HEAD -- > "$P"
+git diff --no-renames --name-only origin/main...HEAD | grep -v -E '\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|/)(e2e|test|__snapshots__)/' | xargs -r git diff --no-renames --binary origin/main...HEAD -- > "$P"
 if [ -s "$P" ]; then
-  git apply -R "$P"
-  <the Evidence entry's test command>
-  git apply "$P"
+  if git apply -R "$P"; then
+    <the Evidence entry's test command>
+    git apply "$P"
+  else
+    echo "git apply -R failed"
+  fi
 else
   echo "test-only PR: no source to revert"
 fi
@@ -46,8 +49,8 @@ fi
 
 Put the Evidence entry's test command on the marker line and run the whole block as one Bash call: shell state, `P` included, does not survive between separate tool calls. A failing test does not stop the block, so the source is always re-applied. Run the block from the worktree root: the paths it reads are relative to the current directory, so from `grill-room/` it would revert nothing. Put any `cd grill-room` in a subshell on the marker line, as `(cd grill-room && <test command>)`.
 
-- If `git apply -R` fails, stop the re-run: remove the scratch worktree with `git worktree remove --force <folder>` (the failed apply leaves it modified, so a plain remove exits 128), create a fresh one in a new folder, detached at `origin/{{branch}}`, and run the block once more. If it fails again, record a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command. Never rebuild the change by hand.
-- If `git apply` fails, do the same: a fresh worktree, one more try, then a `blocker` whose `claim` quotes the error.
+- If `git apply -R` fails, stop the re-run: remove the scratch worktree with `git worktree remove --force <folder>` (the tree may be left modified, and then a plain remove exits 128), create a fresh one in a new folder that keeps the `rv<pr>-r<round>-<lens>` naming with a `-2` suffix, detached at `origin/{{branch}}`, and run the block once more. If it fails again, record a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command. Never rebuild the change by hand.
+- If `git apply` fails, do the same: a fresh worktree, one more try, then a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command.
 - Never use `git stash` to save or restore local changes: the stash stack is shared by every worktree and session.
 
 ## Re-running Evidence
@@ -105,7 +108,7 @@ When the Mutation section has no line starting `Mutation run (round`, the main s
 1. `(cd grill-room && pnpm install --frozen-lockfile --prefer-offline)`.
 2. `(cd grill-room && pnpm test:mutate --base origin/main)`, adding `--prefer` with the PR body's Evidence ranges (written as in the Mutate prompt of the workflow) when there are any, with the Bash tool's `run_in_background`, waiting for its completion notice. The run can take longer than a foreground call allows.
 3. Read `grill-room/.scratch/mutation/summary.json`. A `status` of `overrun` or `runner-failed` means the gate was skipped. A non-empty `dropped` array is the dropped-range case. A non-empty `preferNotCovered` array is the case above.
-   A `status` of `no-scope` means nothing was mutated.
+   A `status` of `no-scope` means nothing was mutated (the no-scope row above).
 
 ## Findings
 
