@@ -214,6 +214,22 @@ describe("mutation step", () => {
       { ...OK_MUTATION, status: "overrun", elapsedMs: 601234, dropped: ["server/z.ts:40-90"] },
       `Mutation run (round 1): overrun after 601 s. ${SKIP}`,
     ],
+    [
+      "no-scope with dropped",
+      { ...OK_MUTATION, status: "no-scope", dropped: ["server/z.ts:40-90"] },
+      "Mutation run (round 1): no-scope, nothing to mutate.",
+    ],
+    [
+      "runner-failed with dropped",
+      { ...OK_MUTATION, status: "runner-failed", elapsedMs: 7000, dropped: ["server/z.ts:40-90"] },
+      `Mutation run (round 1): runner-failed after 7 s. ${SKIP}`,
+    ],
+    [
+      "ok with null mutants",
+      { ...OK_MUTATION, mutants: null },
+      "Mutation run (round 1): ok, n/a mutants, score n/a, 5 s, 0 survivors.",
+    ],
+    ["ok with null survivors", { ...OK_MUTATION, survivors: null }, OK_MUTATION_TEXT(1)],
   ];
   for (const [name, mutation, text] of rows) {
     it(`mutation text: ${name}`, async () => {
@@ -393,6 +409,20 @@ describe("routing", () => {
     });
   }
 
+  it("routing: a null lens beside a blocker", async () => {
+    const lens1 = verdict("changes-requested", [
+      finding("blocker", "a.ts", { line: 2, claim: "A", evidence: "ea" }),
+    ]);
+    const { result, labels } = await run({
+      reviewers: ["M", "N"],
+      canned: { [R1]: lens1, "review:gr-x:r1:lens2": null },
+    });
+    expect(result.outcome).toBe("reviewer-died");
+    expect(result.rounds[0].review).toEqual({ verdict: "reviewer-died", verdicts: [lens1, null] });
+    expect(labels.some((l) => l.startsWith("fix:"))).toBe(false);
+    expect(labels.includes("mutate:gr-x:r2")).toBe(false);
+  });
+
   it("round 2 gets the fix list", async () => {
     const { call } = await run({
       reviewers: ["P:{{prior_round}}"],
@@ -499,11 +529,11 @@ describe("evidence re-ask", () => {
       canned: { [R1]: verdict("changes-requested", [blockerNoEvidence]), [`${R1}:again`]: null },
     });
     expect(result.outcome).toBe("reviewer-died");
-    expect(result.rounds[0].review.verdict).toBe("reviewer-died");
+    expect(result.rounds[0].review).toEqual({ verdict: "reviewer-died", verdicts: [null] });
   });
 
   it("re-ask answer blocked", async () => {
-    const { result } = await run({
+    const { result, labels } = await run({
       reviewers: ["M"],
       canned: {
         [R1]: verdict("changes-requested", [blockerNoEvidence]),
@@ -511,6 +541,7 @@ describe("evidence re-ask", () => {
       },
     });
     expect(result.outcome).toBe("blocked");
+    expect(labels.some((l) => l.startsWith("fix:"))).toBe(false);
   });
 
   it("re-ask answer still without evidence", async () => {
@@ -520,6 +551,26 @@ describe("evidence re-ask", () => {
         [R1]: verdict("changes-requested", [blockerNoEvidence]),
         [`${R1}:again`]: verdict("changes-requested", [
           finding("blocker", "a.ts", { line: 2, claim: "A", evidence: null }),
+        ]),
+        "fix:gr-x:r1": FIX_OK,
+        [R2]: verdict("approved"),
+      },
+    });
+    expect(labels.filter((l) => l.endsWith(":again"))).toEqual([`${R1}:again`]);
+    expect(call("fix:gr-x:r1").prompt).toBe("FIX 1. [blocker] a.ts:2: A");
+  });
+});
+
+describe("whitespace evidence", () => {
+  it("re-ask answer with whitespace-only evidence", async () => {
+    const { call, labels } = await run({
+      reviewers: ["M"],
+      canned: {
+        [R1]: verdict("changes-requested", [
+          finding("blocker", "a.ts", { line: 2, claim: "A", evidence: null }),
+        ]),
+        [`${R1}:again`]: verdict("changes-requested", [
+          finding("blocker", "a.ts", { line: 2, claim: "A", evidence: "  " }),
         ]),
         "fix:gr-x:r1": FIX_OK,
         [R2]: verdict("approved"),
@@ -616,8 +667,22 @@ describe("nonBlocking", () => {
     expect(result.nonBlocking).toEqual([]);
   });
 
+  it("a blocked lens beside a blocker", async () => {
+    const BL1 = finding("blocker", "a.ts", { line: 2, claim: "A", evidence: "ea" });
+    const { result, labels } = await run({
+      reviewers: ["M", "N"],
+      canned: {
+        [R1]: { verdict: "blocked", findings: [], blocked: "hook" },
+        "review:gr-x:r1:lens2": verdict("changes-requested", [BL1]),
+      },
+    });
+    expect(result.outcome).toBe("blocked");
+    expect(result.nonBlocking).toEqual([]);
+    expect(labels.some((l) => l.startsWith("fix:"))).toBe(false);
+  });
+
   it("blocked round adds nothing", async () => {
-    const { result } = await run({
+    const { result, labels } = await run({
       reviewers: ["M", "N"],
       canned: {
         [R1]: { verdict: "blocked", findings: [], blocked: "hook" },
@@ -626,6 +691,7 @@ describe("nonBlocking", () => {
     });
     expect(result.outcome).toBe("blocked");
     expect(result.nonBlocking).toEqual([]);
+    expect(labels.some((l) => l.startsWith("fix:"))).toBe(false);
     expect(result.rounds[0].review).toEqual({
       verdict: "blocked",
       verdicts: [{ verdict: "blocked", findings: [], blocked: "hook" }, verdict("approved", [NIT1])],
@@ -681,9 +747,10 @@ describe("fix rounds", () => {
 
   it("fix: body edit with verification still running", async () => {
     const pending = { ...FIX_OK, commit: null, bodyEdited: true, verification: "vitest still running" };
-    const { result, labels } = await fixCase({ "fix:gr-x:r1": pending, "fix:gr-x:r1:again": pending });
+    const { result, labels, call } = await fixCase({ "fix:gr-x:r1": pending, "fix:gr-x:r1:again": pending });
     expect(result.outcome).toBe("fix-failed");
     expect(fixCalls(labels)).toBe(2);
+    expect(call("fix:gr-x:r1:again").prompt).toBe(FIX_PROMPT + FIX_NOT_SETTLED);
     expect(labels.includes(R2)).toBe(false);
   });
 

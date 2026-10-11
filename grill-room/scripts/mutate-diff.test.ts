@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,7 +53,25 @@ describe("rangesFromDiff", () => {
     ["snapshot", diffOf("fixtures/out.snap", ["@@ -1,0 +1,2 @@"]), []],
     ["stryker config", diffOf("stryker.config.mjs", ["@@ -1,0 +1,9 @@"]), []],
     ["vitest config", diffOf("vitest.config.ts", ["@@ -3,0 +4,2 @@"]), []],
-    ["vite config in a folder", diffOf("app/vite.config.ts", ["@@ -1,0 +1,1 @@"]), []],
+    ["agent-native config", diffOf("agent-native.config.ts", ["@@ -1,0 +1,1 @@"]), []],
+    ["playwright config", diffOf("playwright.config.ts", ["@@ -1,0 +1,1 @@"]), []],
+    ["react-router config", diffOf("react-router.config.ts", ["@@ -1,0 +1,1 @@"]), []],
+    ["vite config", diffOf("vite.config.ts", ["@@ -1,0 +1,1 @@"]), []],
+    [
+      "a module named .config.ts in a folder",
+      diffOf("server/foo.config.ts", ["@@ -1,0 +1,1 @@"]),
+      ["server/foo.config.ts:1-1"],
+    ],
+    [
+      "a config at the root that is not in the list",
+      diffOf("new.config.ts", ["@@ -1,0 +1,1 @@"]),
+      ["new.config.ts:1-1"],
+    ],
+    [
+      "vite config in a folder",
+      diffOf("app/vite.config.ts", ["@@ -1,0 +1,1 @@"]),
+      ["app/vite.config.ts:1-1"],
+    ],
     ["a name that only contains config", diffOf("server/config.ts", ["@@ -1,0 +1,1 @@"]), ["server/config.ts:1-1"]],
     ["config only midway through the name", diffOf("app/theme.config.json.ts", ["@@ -1,0 +1,1 @@"]), ["app/theme.config.json.ts:1-1"]],
     [
@@ -164,6 +182,14 @@ describe("rangesFromCoverage", () => {
         "outside root",
         { "/elsewhere/node_modules/x/index.js": coverageFor([[1, 1, 1]]) },
         [],
+      ],
+      [
+        "tooling config out, a module named .config.ts in",
+        {
+          [`${root}/vitest.config.ts`]: coverageFor([[1, 1, 1]]),
+          [`${root}/server/foo.config.ts`]: coverageFor([[1, 1, 1]]),
+        },
+        ["server/foo.config.ts:1-1"],
       ],
       [
         "key order kept",
@@ -786,14 +812,21 @@ describe("test:mutate CLI: --prefer", () => {
     "\nUsage: pnpm test:mutate [--base <ref>] [--mutate <file:start-end>[,...]] [--prefer <file:start-end>[,...]]\n";
   const heavy = `export const total = ${Array.from({ length: 105 }, () => "a").join(" + ")};`;
 
-  function runCli(files: Record<string, string>, args: string[]) {
-    const cwd = mkdtempSync(path.join(tmpdir(), "mutate-cli-"));
+  function runCli(files: Record<string, string>, args: string[], existingDirectory?: string) {
+    const cwd = existingDirectory ?? mkdtempSync(path.join(tmpdir(), "mutate-cli-"));
     try {
-      for (const [name, contents] of Object.entries(files)) writeFileSync(path.join(cwd, name), contents);
-      const result = spawnSync(tsx, [script, ...args], { cwd, encoding: "utf8" });
-      return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+      for (const [name, contents] of Object.entries(files)) {
+        mkdirSync(path.dirname(path.join(cwd, name)), { recursive: true });
+        writeFileSync(path.join(cwd, name), contents);
+      }
+      const env: NodeJS.ProcessEnv = { ...process.env };
+      for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) delete env[name];
+      const result = spawnSync(tsx, [script, ...args], { cwd, encoding: "utf8", env });
+      const summaryFile = path.join(cwd, ".scratch", "mutation", "summary.json");
+      const summary = existsSync(summaryFile) ? readFileSync(summaryFile, "utf8") : null;
+      return { status: result.status, stdout: result.stdout, stderr: result.stderr, summary };
     } finally {
-      rmSync(cwd, { recursive: true, force: true });
+      if (existingDirectory === undefined) rmSync(cwd, { recursive: true, force: true });
     }
   }
 
@@ -862,6 +895,77 @@ describe("test:mutate CLI: --prefer", () => {
       emptyPrefer: [1, "", `--prefer takes comma-separated file:start-end ranges.${usage}`],
     });
   });
+
+  describe("test:mutate CLI: bad input", () => {
+    const repos = useTempGitRepos();
+    const stale = { ".scratch/mutation/summary.json": '{"status":"ok","stale":true}\n' };
+
+    const runnerFailed = (base: string | null) => ({
+      status: "runner-failed",
+      base,
+      scope: [],
+      dropped: [],
+      command: null,
+      elapsedMs: null,
+      mutants: null,
+      score: null,
+      survivors: null,
+      exitCode: null,
+      preferNotCovered: null,
+    });
+
+    function failedSummary(result: ReturnType<typeof runCli>) {
+      expect(result.stdout).not.toBe("");
+      const { stderrTail, ...rest } = JSON.parse(result.stdout);
+      return { exit: result.status, rest, stderrTail, file: JSON.parse(result.summary ?? "null") };
+    }
+
+    it("nonexistent --mutate file", () => {
+      for (const files of [{}, stale]) {
+        const result = runCli(files, ["--mutate", "nope.ts:1-2"]);
+        const { exit, rest, stderrTail, file } = failedSummary(result);
+        expect(exit).toBe(1);
+        expect(rest).toEqual(runnerFailed(null));
+        expect(stderrTail).toMatch(/^ENOENT: no such file or directory, open '.*nope\.ts'$/);
+        expect(file).toEqual({ ...rest, stderrTail });
+      }
+    });
+
+    it("unknown --base", () => {
+      for (const files of [{}, stale]) {
+        const root = repos.create({ files: { "f.ts": "export const a = 1;\n" } });
+        const result = runCli(files, ["--base", "no-such-ref"], root);
+        const { exit, rest, stderrTail, file } = failedSummary(result);
+        expect(exit).toBe(1);
+        expect(rest).toEqual(runnerFailed("no-such-ref"));
+        expect(stderrTail).toMatch(/no-such-ref\.\.\.HEAD/);
+        expect(file).toEqual({ ...rest, stderrTail });
+      }
+    });
+
+    it("a stale summary is deleted when the run emits nothing", () => {
+      const badRange = runCli(
+        { ...stale, "f.ts": "// only a comment\n" },
+        ["--mutate", "f.ts:1-1", "--prefer", "bad"],
+      );
+      const bogus = runCli(stale, ["--bogus"]);
+      expect({
+        badRange: [badRange.status, badRange.stdout, badRange.stderr, badRange.summary],
+        bogus: [bogus.status === 0, bogus.summary],
+      }).toEqual({
+        badRange: [1, "", `--prefer takes comma-separated file:start-end ranges.${usage}`, null],
+        bogus: [false, null],
+      });
+    });
+
+    it("a valid run after a stale summary", () => {
+      const result = runCli({ ...stale, "f.ts": "// only a comment\n" }, ["--mutate", "f.ts:1-1"]);
+      expect(result.status).toBe(0);
+      const summary = JSON.parse(result.stdout);
+      expect(summary).toMatchObject({ status: "no-scope", mutants: 0, scope: ["f.ts:1-1"], preferNotCovered: [] });
+      expect(JSON.parse(result.summary ?? "null")).toEqual(summary);
+    });
+  });
 });
 
 describe("main: every emit takes preferNotCovered from preferNotCoveredFor", () => {
@@ -884,7 +988,13 @@ describe("main: every emit takes preferNotCovered from preferNotCoveredFor", () 
     }
     const withHelper = calls.filter((call) => call.includes("preferNotCovered: preferNotCoveredFor("));
     expect(withHelper).toEqual(calls);
-    expect(calls).toHaveLength(4);
-    expect(calls[0]).toContain("preferNotCoveredFor(null, prefer)");
+    expect(calls.length).toBe(5);
+    expect(calls.map((call) => /preferNotCovered: preferNotCoveredFor\(([^)]*)\)/.exec(call)?.[1])).toEqual([
+      "null, prefer",
+      "counted, prefer",
+      "counted, prefer",
+      "counted, prefer",
+      "null, prefer",
+    ]);
   });
 });

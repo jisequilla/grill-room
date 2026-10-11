@@ -19,16 +19,23 @@ const COVERAGE_DIR = path.join(OUTPUT_DIR, "coverage");
 const TEST_SIDE = /\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|\/)(e2e|test|__snapshots__)\//;
 const SOURCE_EXTENSION = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
-// Tooling configuration (stryker.config.mjs, vitest.config.ts, vite.config.ts)
-// is read by the tools, not imported by any test, so Stryker would find no
-// test to run against its mutants and stop with "No tests were executed".
-const TOOLING_CONFIG = /(^|\/)[^/]+\.config\.[cm]?[jt]sx?$/;
+// Tooling configuration is read by the tools, not imported by any test, so
+// Stryker would find no test to run against its mutants and stop with
+// "No tests were executed". Paths are relative to grill-room/.
+const TOOLING_CONFIGS = new Set([
+  "agent-native.config.ts",
+  "playwright.config.ts",
+  "react-router.config.ts",
+  "stryker.config.mjs",
+  "vite.config.ts",
+  "vitest.config.ts",
+]);
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 const RANGE_ARGUMENT = /^(.+):(\d+)-(\d+)$/;
 
 export const isTestSidePath = (file: string): boolean => TEST_SIDE.test(file);
 export const isSourcePath = (file: string): boolean =>
-  SOURCE_EXTENSION.test(file) && !isTestSidePath(file) && !TOOLING_CONFIG.test(file);
+  SOURCE_EXTENSION.test(file) && !isTestSidePath(file) && !TOOLING_CONFIGS.has(file);
 
 export function isEntryPoint(importMetaUrl: string, argv1: string | undefined): boolean {
   return argv1 !== undefined && importMetaUrl === pathToFileURL(argv1).href;
@@ -432,6 +439,8 @@ function emit(summary: Summary, cwd: string): void {
 }
 
 async function main(): Promise<void> {
+  const cwd = process.cwd();
+  rmSync(path.join(cwd, SUMMARY_FILE), { force: true });
   const { values } = parseArgs({
     options: {
       base: { type: "string" },
@@ -440,7 +449,6 @@ async function main(): Promise<void> {
     },
     strict: true,
   });
-  const cwd = process.cwd();
 
   const validRanges = (list: string[]) => list.every((range) => RANGE_ARGUMENT.test(range));
   if (values.mutate !== undefined && !validRanges(values.mutate.split(","))) {
@@ -451,16 +459,7 @@ async function main(): Promise<void> {
   }
   const prefer = values.prefer === undefined ? [] : values.prefer.split(",");
 
-  let base: string | null = null;
-  let scope: Scope;
-  if (values.mutate !== undefined) {
-    const ranges = values.mutate.split(",");
-    scope = { kind: "ranges", ranges };
-  } else {
-    base = values.base ?? DEFAULT_BASE;
-    scope = scopeFor(base, cwd);
-  }
-
+  const base = values.mutate !== undefined ? null : (values.base ?? DEFAULT_BASE);
   const empty: RunRecord = {
     outcome: "no-scope",
     base,
@@ -473,95 +472,113 @@ async function main(): Promise<void> {
     preferNotCovered: [],
   };
 
-  let ranges: string[] = [];
-  if (scope.kind === "ranges") {
-    ranges = scope.ranges;
-  } else if (scope.kind === "coverage") {
-    rmSync(path.join(cwd, COVERAGE_DIR), { recursive: true, force: true });
-    const args = [
-      "pnpm",
-      "exec",
-      "vitest",
-      "--run",
-      "--coverage.enabled",
-      "--coverage.provider=v8",
-      "--coverage.reporter=json",
-      `--coverage.reportsDirectory=${COVERAGE_DIR}`,
-      ...scope.testFiles,
-    ];
-    const started = Date.now();
-    const finished = await runInGroup(args, cwd, OVERRUN_MS);
-    const coverageFile = path.join(cwd, COVERAGE_DIR, "coverage-final.json");
-    if (finished.exitCode !== 0 || !existsSync(coverageFile)) {
+  try {
+    const scope: Scope =
+      values.mutate !== undefined
+        ? { kind: "ranges", ranges: values.mutate.split(",") }
+        : scopeFor(base ?? DEFAULT_BASE, cwd);
+
+    let ranges: string[] = [];
+    if (scope.kind === "ranges") {
+      ranges = scope.ranges;
+    } else if (scope.kind === "coverage") {
+      rmSync(path.join(cwd, COVERAGE_DIR), { recursive: true, force: true });
+      const args = [
+        "pnpm",
+        "exec",
+        "vitest",
+        "--run",
+        "--coverage.enabled",
+        "--coverage.provider=v8",
+        "--coverage.reporter=json",
+        `--coverage.reportsDirectory=${COVERAGE_DIR}`,
+        ...scope.testFiles,
+      ];
+      const started = Date.now();
+      const finished = await runInGroup(args, cwd, OVERRUN_MS);
+      const coverageFile = path.join(cwd, COVERAGE_DIR, "coverage-final.json");
+      if (finished.exitCode !== 0 || !existsSync(coverageFile)) {
+        emit(
+          summarize(null, {
+            ...empty,
+            outcome: finished.timedOut ? "overrun" : "runner-failed",
+            command: args.join(" "),
+            elapsedMs: Date.now() - started,
+            exitCode: finished.exitCode,
+            stderrTail: finished.stderrTail,
+            preferNotCovered: preferNotCoveredFor(null, prefer),
+          }),
+          cwd,
+        );
+        return;
+      }
+      ranges = rangesFromCoverage(JSON.parse(readFileSync(coverageFile, "utf8")), cwd);
+    }
+
+    const counted = ranges.length > 0 ? await countMutantLines(ranges, cwd) : [];
+    if (!counted.some((entry) => entry.count > 0)) {
       emit(
         summarize(null, {
           ...empty,
-          outcome: finished.timedOut ? "overrun" : "runner-failed",
-          command: args.join(" "),
-          elapsedMs: Date.now() - started,
-          exitCode: finished.exitCode,
-          stderrTail: finished.stderrTail,
-          preferNotCovered: preferNotCoveredFor(null, prefer),
+          scope: ranges,
+          preferNotCovered: preferNotCoveredFor(counted, prefer),
         }),
         cwd,
       );
       return;
     }
-    ranges = rangesFromCoverage(JSON.parse(readFileSync(coverageFile, "utf8")), cwd);
-  }
 
-  const counted = ranges.length > 0 ? await countMutantLines(ranges, cwd) : [];
-  if (!counted.some((entry) => entry.count > 0)) {
-    emit(
-      summarize(null, {
-        ...empty,
-        scope: ranges,
-        preferNotCovered: preferNotCoveredFor(counted, prefer),
-      }),
-      cwd,
-    );
-    return;
-  }
+    const { kept, dropped, startable } = planStrykerRun(counted, CAP, prefer);
+    if (!startable) {
+      emit(
+        summarize(null, {
+          ...empty,
+          outcome: "nothing-kept",
+          scope: ranges,
+          dropped,
+          preferNotCovered: preferNotCoveredFor(counted, prefer),
+        }),
+        cwd,
+      );
+      return;
+    }
 
-  const { kept, dropped, startable } = planStrykerRun(counted, CAP, prefer);
-  if (!startable) {
+    rmSync(path.join(cwd, STRYKER_REPORT_FILE), { force: true });
+    const args = ["pnpm", "exec", "stryker", "run", "--mutate", kept.join(",")];
+    const started = Date.now();
+    const finished = await runInGroup(args, cwd, OVERRUN_MS);
+    const reportFile = path.join(cwd, STRYKER_REPORT_FILE);
+    const report: StrykerReport | null =
+      !finished.timedOut && finished.exitCode === 0 && existsSync(reportFile)
+        ? JSON.parse(readFileSync(reportFile, "utf8"))
+        : null;
+    const outcome = finished.timedOut ? "overrun" : report === null ? "runner-failed" : "finished";
     emit(
-      summarize(null, {
-        ...empty,
-        outcome: "nothing-kept",
+      summarize(report, {
+        outcome,
+        base,
         scope: ranges,
         dropped,
+        command: args.join(" "),
+        elapsedMs: Date.now() - started,
+        exitCode: finished.exitCode,
+        stderrTail: outcome === "finished" ? null : finished.stderrTail,
         preferNotCovered: preferNotCoveredFor(counted, prefer),
       }),
       cwd,
     );
-    return;
+  } catch (error) {
+    emit(
+      summarize(null, {
+        ...empty,
+        outcome: "runner-failed",
+        stderrTail: error instanceof Error ? error.message : String(error),
+        preferNotCovered: preferNotCoveredFor(null, prefer),
+      }),
+      cwd,
+    );
+    process.exitCode = 1;
   }
-
-  rmSync(path.join(cwd, STRYKER_REPORT_FILE), { force: true });
-  const args = ["pnpm", "exec", "stryker", "run", "--mutate", kept.join(",")];
-  const started = Date.now();
-  const finished = await runInGroup(args, cwd, OVERRUN_MS);
-  const reportFile = path.join(cwd, STRYKER_REPORT_FILE);
-  const report: StrykerReport | null =
-    !finished.timedOut && finished.exitCode === 0 && existsSync(reportFile)
-      ? JSON.parse(readFileSync(reportFile, "utf8"))
-      : null;
-  const outcome = finished.timedOut ? "overrun" : report === null ? "runner-failed" : "finished";
-  emit(
-    summarize(report, {
-      outcome,
-      base,
-      scope: ranges,
-      dropped,
-      command: args.join(" "),
-      elapsedMs: Date.now() - started,
-      exitCode: finished.exitCode,
-      stderrTail: outcome === "finished" ? null : finished.stderrTail,
-      preferNotCovered: preferNotCoveredFor(counted, prefer),
-    }),
-    cwd,
-  );
 }
 
 if (isEntryPoint(import.meta.url, process.argv[1])) {
