@@ -1,0 +1,5 @@
+{
+  "categories": { "correctness": "off" },
+  "rules": { "typescript/no-unnecessary-type-parameters": "error" },
+  "ignorePatterns": ["e2e/fixtures/**", ".agents/**"]
+}

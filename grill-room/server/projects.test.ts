@@ -33,7 +33,7 @@ function refusalCode(outcome: object): string | undefined {
     : undefined;
 }
 
-function registered<T extends object>(outcome: T) {
+function registered(outcome: object) {
   if ("refusal" in outcome) {
     throw new Error(`Expected a project, got a refusal: ${JSON.stringify(outcome)}`);
   }

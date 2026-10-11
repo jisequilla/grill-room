@@ -143,8 +143,11 @@ demo:
 typecheck:
     pnpm typecheck
 
+lint:
+    pnpm lint
+
 # Everything that should pass before a merge
-check: typecheck test e2e
+check: typecheck lint test e2e
 
 doctor:
     pnpm doctor

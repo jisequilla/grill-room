@@ -6,7 +6,7 @@
 # Run from inside the repo or a linked worktree of it. Each <branch> is a name
 # on origin (no origin/ prefix). The branches are merged, in the order given,
 # into a scratch worktree of origin/main; the checkout itself is never changed.
-# In that worktree it runs the install, vitest and typecheck (and `just e2e`
+# In that worktree it runs the install, vitest, typecheck and lint (and `just e2e`
 # with --e2e), prints a summary, and removes the worktree on every exit.
 # Output of every command goes to <repo root>/.scratch/verify-wave/<pid>/;
 # stdout and stderr hold only the lines below.
@@ -103,7 +103,7 @@ run_step() {
   return "$rc"
 }
 
-install_rc=""; vitest_rc=""; typecheck_rc=""; e2e_rc=""
+install_rc=""; vitest_rc=""; typecheck_rc=""; lint_rc=""; e2e_rc=""
 
 run_step install pnpm install --frozen-lockfile --prefer-offline
 install_rc=$?
@@ -112,6 +112,8 @@ if [ "$install_rc" -eq 0 ]; then
   vitest_rc=$?
   run_step typecheck pnpm typecheck
   typecheck_rc=$?
+  run_step lint pnpm lint
+  lint_rc=$?
   if [ "$e2e" -eq 1 ]; then
     run_step e2e just e2e
     e2e_rc=$?
@@ -136,6 +138,7 @@ if [ -n "$vitest_rc" ]; then
   grep -E '^[[:space:]]*Tests[[:space:]]' "$logdir/vitest.log" | tail -n 1 | sed 's/^[[:space:]]*//'
 fi
 step_line typecheck "$typecheck_rc"
+step_line lint "$lint_rc"
 step_line e2e "$e2e_rc"
 [ -n "$install_rc" ] && [ "$install_rc" -ne 0 ] && result=fail
 echo "RESULT: $result"

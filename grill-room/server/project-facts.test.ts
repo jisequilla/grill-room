@@ -47,7 +47,7 @@ function refusalCode(outcome: object): string | undefined {
     : undefined;
 }
 
-function facts<T extends object>(outcome: T) {
+function facts(outcome: object) {
   if ("refusal" in outcome) {
     throw new Error(`Expected facts, got a refusal: ${JSON.stringify(outcome)}`);
   }

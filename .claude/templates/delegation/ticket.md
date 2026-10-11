@@ -42,7 +42,7 @@ Files and symbols the ticket depends on. The builder's first step is to confirm 
 
 ## Verify
 
-The exact commands, run from `grill-room/`, and what passing looks like. Include `just e2e` when the ticket changes what the user sees.
+The exact commands, run from `grill-room/`, and what passing looks like. Name `pnpm test`, `pnpm typecheck` and `pnpm lint` (exit 0, no findings). Include `just e2e` when the ticket changes what the user sees.
 
 ## Open questions
 
