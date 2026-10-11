@@ -28,6 +28,9 @@ import {
   storedWaitsFor,
   storyReasons,
   uncoveredStories,
+  unproducedInputs,
+  unproducedNote,
+  unproducedReason,
   userStories,
   validateTicketSet,
 } from "../server/tickets.js";
@@ -175,6 +178,8 @@ export default defineAction({
         // A long chain is sent back at most once per breakdown, and never on
         // the last attempt: after that it is accepted and noted below.
         let chainSentBack = false;
+        // Unresolved consumed inputs are sent back the same way: once.
+        let gapsSentBack = false;
 
         const accepted = await askUntilAccepted<BreakIntoTicketsResult>({
           conversationId: session!.conversationId,
@@ -226,6 +231,11 @@ export default defineAction({
               reasons.push(chain);
               chainSentBack = true;
             }
+            const gaps = unproducedInputs(result.tickets, trackedFiles);
+            if (gaps.length > 0 && !gapsSentBack && attemptsAsked <= MAX_TURN_RETRIES) {
+              reasons.push(unproducedReason(gaps));
+              gapsSentBack = true;
+            }
             return reasons;
           },
           exhausted: (lastReason) =>
@@ -248,6 +258,9 @@ export default defineAction({
         }
         const chain = chainNote(accepted.result.tickets);
         if (chain !== null) notes.push(chain);
+        const gaps = unproducedInputs(accepted.result.tickets, trackedFiles);
+        const gapNote = unproducedNote(gaps);
+        if (gapNote !== null) notes.push(gapNote);
         if (notes.length > 0) await recorder?.noted(notes.join(" "));
 
         const now = new Date().toISOString();
@@ -278,6 +291,13 @@ export default defineAction({
               citableKeys.length === 0
                 ? []
                 : storedImplementsDecisions(ticket.implementsDecisions),
+            ),
+            consumesJson: JSON.stringify(ticket.kind === "gate" ? [] : trimmedConsumes(ticket.consumes)),
+            producesJson: JSON.stringify(trimmedProduces(ticket.produces)),
+            unproducedJson: JSON.stringify(
+              gaps
+                .filter((gap) => gap.ticket === ticket.number && gap.reason !== "not-upstream")
+                .map(({ item, from, reason }) => ({ item, from, reason })),
             ),
             blockedByJson: JSON.stringify(
               ticket.blockedBy.flatMap((number) => {
@@ -333,3 +353,13 @@ export default defineAction({
     return listTickets.run({ sessionId });
   },
 });
+
+function trimmedConsumes(consumes: BreakIntoTicketsResult["tickets"][number]["consumes"]) {
+  return consumes
+    .map(({ item, from }) => ({ item: item.trim(), from }))
+    .filter(({ item }) => item !== "");
+}
+
+function trimmedProduces(produces: readonly string[]): string[] {
+  return produces.map((entry) => entry.trim()).filter((entry) => entry !== "");
+}

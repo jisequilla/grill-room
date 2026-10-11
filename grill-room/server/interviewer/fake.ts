@@ -269,6 +269,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   "gate-ticket": { turns: gateTicketTurns() },
   "uncovered-story": { turns: uncoveredStoryTurns() },
   "long-chain": { turns: longChainTurns() },
+  "unproduced-inputs": { turns: unproducedInputsTurns() },
   "consistency-findings": { turns: consistencyFindingsTurns() },
   "consistency-check-rate-limited": { turns: consistencyCheckRateLimitedTurns() },
   ...(demoScenario ? { [DEMO_SCENARIO]: demoScenario } : {}),
@@ -1115,6 +1116,49 @@ export function longChainTurns(): ScriptedTurn[] {
 }
 
 /**
+ * {@link cannedInterviewTurns} with its breakdown replaced by two, each with
+ * one ticket that consumes an item no ticket and nothing in the repository
+ * provides: the first is sent back for it, and the retry, with the same gap,
+ * is accepted and stores it. What `unproduced-inputs` schedules.
+ */
+export function unproducedInputsTurns(): ScriptedTurn[] {
+  const breakdown = (): ScriptedTurn => ({
+    kind: "break-into-tickets",
+    result: {
+      tickets: [
+        {
+          number: 1,
+          slug: "build-the-workspace",
+          title: "The workspace",
+          body: "Build the workspace.",
+          blockedBy: [],
+          kind: "build" as const,
+          waitsFor: null,
+          implements: [1],
+          implementsDecisions: [],
+          consumes: [],
+          produces: [],
+        },
+        {
+          number: 2,
+          slug: "show-spans",
+          title: "Showing spans",
+          body: "Show the spans on the workspace.",
+          blockedBy: [1],
+          kind: "build" as const,
+          waitsFor: null,
+          implements: [],
+          implementsDecisions: [],
+          consumes: [{ item: "spans writer", from: null }],
+          produces: [],
+        },
+      ],
+    },
+  });
+  return [...cannedInterviewTurns().slice(0, -1), breakdown(), breakdown()];
+}
+
+/**
  * The spec `consistency-findings` synthesizes: one statement of each kind a
  * consistency check reports, in the words of the reviews that asked for the
  * check. Shared with the tests.
@@ -1172,6 +1216,8 @@ export function consistencyTickets(): ResultFor<"break-into-tickets">["tickets"]
     blockedBy,
     implements: stories,
     implementsDecisions: [],
+    consumes: [],
+    produces: [],
     kind: "build" as const,
     waitsFor: null,
   });

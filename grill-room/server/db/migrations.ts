@@ -634,4 +634,11 @@ ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS consequences TEXT`,
     name: "tickets-implements-decisions",
     sql: `ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS implements_decisions_json TEXT`,
   },
+  {
+    version: 81,
+    name: "tickets-consumes-produces",
+    sql: `ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS consumes_json TEXT;
+ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS produces_json TEXT;
+ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS unproduced_json TEXT`,
+  },
 ];

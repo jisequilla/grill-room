@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { collisionKey } from "./brief-grounding.js";
+import { breakIntoTicketsResultSchema } from "./interviewer/schemas.js";
 import {
   chainLimit,
   chainReason,
@@ -8,11 +9,23 @@ import {
   computeWaves,
   longestChain,
   numberRanges,
+  parseConsumes,
   parseImplements,
+  parseProduces,
+  parseUnproduced,
   separateOverlaps,
+  unproducedInputs,
+  unproducedNote,
+  unproducedReason,
+  upstreamGaps,
+  upstreamOf,
   userStories,
+  type ConsumeSource,
   type ImplicitEdge,
+  type InputGap,
   type ProposedTicket,
+  type TicketConsume,
+  type TicketForInputs,
   type TicketForSeparation,
   type TicketForWaves,
 } from "./tickets.js";
@@ -449,5 +462,542 @@ describe("citability", () => {
 
   it("calls an unsettled decision that was replaced not settled", () => {
     expect(citability(settled("deferred", { replacedBy: { id: "d-2" } }))).toBe("not-settled");
+  });
+});
+
+type Io = TicketForInputs;
+const consume = (item: string, from: ConsumeSource): TicketConsume => ({ item, from });
+const build = (
+  number: number,
+  blockedBy: number[] = [],
+  consumes?: TicketConsume[],
+  produces?: string[],
+): Io => ({ number, kind: "build", blockedBy, consumes, produces });
+const gate = (
+  number: number,
+  blockedBy: number[] = [],
+  produces?: string[],
+  consumes?: TicketConsume[],
+): Io => ({ number, kind: "gate", blockedBy, consumes, produces });
+const gap = (
+  ticket: number,
+  item: string,
+  from: ConsumeSource,
+  reason: InputGap["reason"],
+): InputGap => ({ ticket, item, from, reason });
+const tracked = (files: string[], omitted = 0) => ({ files, omitted });
+
+describe("upstreamOf", () => {
+  it("walks blockedBy transitively", () => {
+    expect(upstreamOf([build(1), build(2, [1]), build(3, [2])], 3)).toEqual(new Set([1, 2]));
+  });
+
+  it("terminates on a cycle", { timeout: 2000 }, () => {
+    expect(upstreamOf([build(2, [3]), build(3, [2])], 3)).toEqual(new Set([2]));
+  });
+
+  it("skips numbers that are not in the set", () => {
+    expect(upstreamOf([build(3, [9])], 3)).toEqual(new Set());
+  });
+
+  it("never includes the start, even when it blocks itself", () => {
+    expect(upstreamOf([build(3, [3])], 3)).toEqual(new Set());
+  });
+
+  it("passes through a gate", () => {
+    expect(upstreamOf([build(1), gate(2, [1]), build(3, [2])], 3)).toEqual(new Set([1, 2]));
+  });
+});
+
+describe("unproducedInputs", () => {
+  it.each<[string, Io[], { files: string[]; omitted: number } | null, InputGap[]]>([
+    [
+      "no source",
+      [build(1, [], [consume("spans writer", null)])],
+      null,
+      [gap(1, "spans writer", null, "no-source")],
+    ],
+    [
+      "produced by a blocker",
+      [build(1, [], [], ["gr_spans table"]), build(2, [1], [consume("gr_spans table", 1)])],
+      null,
+      [],
+    ],
+    [
+      "item normalized (case, whitespace runs)",
+      [build(1, [], [], ["gr_spans table"]), build(2, [1], [consume("GR_SPANS  Table", 1)])],
+      null,
+      [],
+    ],
+    [
+      "produces side normalized",
+      [build(1, [], [], ["  GR_SPANS   Table "]), build(2, [1], [consume("gr_spans table", 1)])],
+      null,
+      [],
+    ],
+    [
+      "only ticket `from`'s produces counts",
+      [build(1, [], [], ["a"]), build(2, [], [], ["b"]), build(3, [1, 2], [consume("b", 1)])],
+      null,
+      [gap(3, "b", 1, "not-produced")],
+    ],
+    [
+      "transitively upstream",
+      [build(1, [], [], ["x"]), build(2, [1]), build(3, [2], [consume("x", 1)])],
+      null,
+      [],
+    ],
+    [
+      "upstream through a gate",
+      [build(1, [], [], ["x"]), gate(2, [1]), build(3, [2], [consume("x", 1)])],
+      null,
+      [],
+    ],
+    [
+      "ticket order is ascending number, not array order",
+      [
+        build(2, [], [consume("b", null)]),
+        build(1, [], [consume("a", null)]),
+      ],
+      null,
+      [gap(1, "a", null, "no-source"), gap(2, "b", null, "no-source")],
+    ],
+    [
+      "the source does not produce it",
+      [build(1, [], [], ["gr_runs table"]), build(2, [1], [consume("gr_spans table", 1)])],
+      null,
+      [gap(2, "gr_spans table", 1, "not-produced")],
+    ],
+    [
+      "no such ticket",
+      [build(1, [], [consume("x", 9)])],
+      null,
+      [gap(1, "x", 9, "unknown-ticket")],
+    ],
+    [
+      "itself as the source",
+      [build(1), build(2), build(3, [], [consume("x", 3)], ["x"])],
+      null,
+      [gap(3, "x", 3, "unknown-ticket")],
+    ],
+    [
+      "produced but not upstream",
+      [build(1, [], [], ["gr_spans table"]), build(2, [], [consume("gr_spans table", 1)])],
+      null,
+      [gap(2, "gr_spans table", 1, "not-upstream")],
+    ],
+    [
+      "a gate's produces counts as a source",
+      [gate(1, [], ["Stripe test account"]), build(2, [1], [consume("Stripe test account", 1)])],
+      null,
+      [],
+    ],
+    [
+      "a gate's consumes is not checked",
+      [build(1), gate(2, [1], [], [consume("x", null)]), build(3, [2])],
+      null,
+      [],
+    ],
+    [
+      "repo path tracked",
+      [build(1, [], [consume("server/db/schema.ts", "repo")])],
+      tracked(["server/db/schema.ts"]),
+      [],
+    ],
+    [
+      "repo path with a leading ./",
+      [build(1, [], [consume("./server/db/schema.ts", "repo")])],
+      tracked(["server/db/schema.ts"]),
+      [],
+    ],
+    [
+      "repo path is case-sensitive",
+      [build(1, [], [consume("Server/DB/schema.ts", "repo")])],
+      tracked(["server/db/schema.ts"]),
+      [gap(1, "Server/DB/schema.ts", "repo", "not-tracked")],
+    ],
+    [
+      "repo path not tracked",
+      [build(1, [], [consume("server/spans.ts", "repo")])],
+      tracked(["server/db/schema.ts"]),
+      [gap(1, "server/spans.ts", "repo", "not-tracked")],
+    ],
+    [
+      "repo non-file thing is trusted",
+      [build(1, [], [consume("gr_sessions table", "repo")])],
+      tracked(["server/db/schema.ts"]),
+      [],
+    ],
+    [
+      "repo root file name with an extension but no slash is trusted",
+      [build(1, [], [consume("justfile.md", "repo")])],
+      tracked([]),
+      [],
+    ],
+    [
+      "repo field with a dot but no slash is trusted",
+      [build(1, [], [consume("gr_tickets.consumes", "repo")])],
+      tracked([]),
+      [],
+    ],
+    [
+      "repo endpoint without an extension is trusted",
+      [build(1, [], [consume("api/sessions", "repo")])],
+      tracked([]),
+      [],
+    ],
+    [
+      "repo folder is trusted",
+      [build(1, [], [consume("server/db/", "repo")])],
+      tracked([]),
+      [],
+    ],
+    [
+      "repo path with a leading slash is trusted",
+      [build(1, [], [consume("/server/db/schema.ts", "repo")])],
+      tracked([]),
+      [],
+    ],
+    [
+      "repo path trimmed before matching",
+      [build(1, [], [consume("  server/db/schema.ts ", "repo")])],
+      tracked(["server/db/schema.ts"]),
+      [],
+    ],
+    [
+      "repo path trimmed before the shape check",
+      [build(1, [], [consume("  server/spans.ts ", "repo")])],
+      tracked([]),
+      [gap(1, "server/spans.ts", "repo", "not-tracked")],
+    ],
+    [
+      "item side trimmed",
+      [build(1, [], [], ["gr_spans table"]), build(2, [1], [consume(" gr_spans table ", 1)])],
+      null,
+      [],
+    ],
+    [
+      "repo path with a colon is trusted",
+      [build(1, [], [consume("server/a:b.ts", "repo")])],
+      tracked([]),
+      [],
+    ],
+    [
+      "repo path with whitespace is trusted",
+      [build(1, [], [consume("server/my file.ts", "repo")])],
+      tracked([]),
+      [],
+    ],
+    [
+      "repo ./package.json has no inner slash and is trusted",
+      [build(1, [], [consume("./package.json", "repo")])],
+      tracked([]),
+      [],
+    ],
+    [
+      "unknown-ticket wins over not-produced",
+      [build(1), build(2), build(3, [], [consume("y", 3)], ["x"])],
+      null,
+      [gap(3, "y", 3, "unknown-ticket")],
+    ],
+    [
+      "duplicate numbers are not checked, even for no-source",
+      [build(1), build(1), build(2, [], [consume("x", null)])],
+      null,
+      [],
+    ],
+    [
+      "an empty tracked list still counts as a list",
+      [build(1, [], [consume("server/spans.ts", "repo")])],
+      tracked([]),
+      [gap(1, "server/spans.ts", "repo", "not-tracked")],
+    ],
+    [
+      "api/v1.2 reads as having an extension",
+      [build(1, [], [consume("api/v1.2", "repo")])],
+      tracked([]),
+      [gap(1, "api/v1.2", "repo", "not-tracked")],
+    ],
+    ["an item empty after trimming is skipped", [build(1, [], [consume(" ", null)])], null, []],
+    [
+      "a gate is upstream only through blockedBy",
+      [gate(1, [], ["Stripe test account"]), build(2, [], [consume("Stripe test account", 1)])],
+      null,
+      [gap(2, "Stripe test account", 1, "not-upstream")],
+    ],
+    [
+      "the same entry twice is two gaps",
+      [build(1, [], [consume("x", null), consume("x", null)])],
+      null,
+      [gap(1, "x", null, "no-source"), gap(1, "x", null, "no-source")],
+    ],
+    [
+      "a null source is a gap even when another ticket produces the item",
+      [
+        build(1, [], [], ["x"]),
+        build(2, [1], [consume("x", 1), consume("x", null)]),
+      ],
+      null,
+      [gap(2, "x", null, "no-source")],
+    ],
+    ["no consumes field at all", [build(1)], null, []],
+    [
+      "repo path missing from a cut list cannot be told",
+      [build(1, [], [consume("server/spans.ts", "repo")])],
+      tracked(["server/db/schema.ts"], 3),
+      [],
+    ],
+    [
+      "repo path with no tracked list cannot be told",
+      [build(1, [], [consume("anything/else.ts", "repo")])],
+      null,
+      [],
+    ],
+  ])("%s", (_, tickets, trackedFiles, expected) => {
+    expect(unproducedInputs(tickets, trackedFiles)).toEqual(expected);
+  });
+
+  it("first applicable reason wins", () => {
+    const tickets = [build(1, [], [], ["a"]), build(2, [], [consume("b", 1)])];
+
+    expect(unproducedInputs(tickets, null)).toEqual([gap(2, "b", 1, "not-produced")]);
+  });
+
+  it("gaps come in consumes order, whatever the reason", () => {
+    const tickets = [
+      build(1, [], [], ["a"]),
+      build(2, [], [consume("a", 1), consume("b", null)]),
+    ];
+
+    expect(unproducedInputs(tickets, null)).toEqual([
+      gap(2, "a", 1, "not-upstream"),
+      gap(2, "b", null, "no-source"),
+    ]);
+  });
+
+  it("a gate's consumes is not checked", () => {
+    expect(
+      unproducedInputs([build(1), gate(2, [1], [], [consume("x", null)]), build(3, [2])], null),
+    ).toEqual([]);
+  });
+});
+
+describe("upstreamGaps", () => {
+  it("returns a consumed item whose producer is not upstream", () => {
+    const tickets = [build(1, [], [], ["a"]), build(2, [], [consume("a", 1)])];
+
+    expect(upstreamGaps(tickets)).toEqual([gap(2, "a", 1, "not-upstream")]);
+  });
+
+  it("loses the gap once the producer blocks the consumer", () => {
+    const tickets = [build(1, [], [], ["a"]), build(2, [1], [consume("a", 1)])];
+
+    expect(upstreamGaps(tickets)).toEqual([]);
+  });
+
+  it("reads null consumes and undefined produces as empty", () => {
+    const tickets: Io[] = [
+      { number: 1, kind: "build", blockedBy: [], produces: undefined },
+      { number: 2, kind: "build", blockedBy: [], consumes: null },
+    ];
+
+    expect(upstreamGaps(tickets)).toEqual([]);
+  });
+
+  it("skips a gate's consumes", () => {
+    expect(upstreamGaps([build(1, [], [], ["a"]), gate(2, [], [], [consume("a", 1)])])).toEqual([]);
+  });
+
+  it("does not check a set with duplicate numbers", () => {
+    const tickets = [
+      build(1, [], [], ["a"]),
+      build(1, [], [], ["a"]),
+      build(2, [], [consume("a", 1)]),
+    ];
+
+    expect(upstreamGaps(tickets)).toEqual([]);
+  });
+
+  it("leaves out an entry that is not produced", () => {
+    expect(upstreamGaps([build(1, [], [], ["a"]), build(2, [], [consume("b", 1)])])).toEqual([]);
+  });
+});
+
+describe("parseConsumes / parseProduces / parseUnproduced", () => {
+  it.each([
+    ["oops", []],
+    ["{}", []],
+    ['[{"item":"a","from":null},{"item":5}]', [{ item: "a", from: null }]],
+    ['[{"item":"a"}]', []],
+    ['[{"item":"a","from":"x"}]', []],
+    ['[{"item":"a","from":"repo"}]', [{ item: "a", from: "repo" }]],
+    ['[{"item":"","from":null}]', []],
+    ['[{"item":" ","from":null}]', []],
+    ['[{"item":"a","from":0}]', []],
+    ['[{"item":"a","from":1.5}]', []],
+    ['[{"item":"a","from":2}]', [{ item: "a", from: 2 }]],
+  ])("parseConsumes %j", (json, expected) => {
+    expect(parseConsumes(json)).toEqual(expected);
+  });
+
+  it("parseConsumes reads a NULL column as null", () => {
+    expect(parseConsumes(null)).toBeNull();
+  });
+
+  it("parseProduces keeps the non-blank strings", () => {
+    expect(parseProduces('["a",""," ",5]')).toEqual(["a"]);
+    expect(parseProduces("oops")).toEqual([]);
+    expect(parseProduces(null)).toBeNull();
+  });
+
+  it.each([
+    [
+      '[{"item":"a","from":"repo","reason":"not-tracked"}]',
+      [{ item: "a", from: "repo", reason: "not-tracked" }],
+    ],
+    ['[{"item":"a","from":null,"reason":"bogus"}]', []],
+    ['[{"item":" ","from":null,"reason":"no-source"}]', []],
+    ['[{"item":"a","from":"repo"}]', []],
+    ["{}", []],
+  ])("parseUnproduced %j", (json, expected) => {
+    expect(parseUnproduced(json)).toEqual(expected);
+  });
+
+  it("parseUnproduced reads a NULL column as null", () => {
+    expect(parseUnproduced(null)).toBeNull();
+  });
+});
+
+describe("unproducedReason / unproducedNote", () => {
+  const HEAD =
+    'Some tickets consume inputs that are unresolved. For each line, add a ticket that produces it, name the ticket that does in `from` (it must be upstream through `blockedBy`), copy that ticket\'s `produces` wording exactly, or, for a file that exists, use `"repo"` with its tracked path:';
+
+  it("says no source", () => {
+    expect(unproducedReason([gap(4, "spans writer", null, "no-source")])).toBe(
+      `${HEAD}\n- ticket 4 consumes "spans writer" (from: null): no source`,
+    );
+  });
+
+  it("says the source does not produce it", () => {
+    expect(unproducedReason([gap(5, "gr_spans table", 1, "not-produced")])).toBe(
+      `${HEAD}\n- ticket 5 consumes "gr_spans table" (from: 1): ticket 1 does not produce it`,
+    );
+  });
+
+  it("says there is no such ticket", () => {
+    expect(unproducedReason([gap(6, "x", 9, "unknown-ticket")])).toBe(
+      `${HEAD}\n- ticket 6 consumes "x" (from: 9): no ticket 9`,
+    );
+  });
+
+  it("says a ticket cannot be its own source", () => {
+    expect(unproducedReason([gap(3, "x", 3, "unknown-ticket")])).toBe(
+      `${HEAD}\n- ticket 3 consumes "x" (from: 3): no ticket 3 other than ticket 3 itself`,
+    );
+  });
+
+  it("says the source is not upstream", () => {
+    expect(unproducedReason([gap(7, "gr_spans table", 1, "not-upstream")])).toBe(
+      `${HEAD}\n- ticket 7 consumes "gr_spans table" (from: 1): ticket 1 is not upstream of ticket 7`,
+    );
+  });
+
+  it("says a file is not tracked", () => {
+    expect(unproducedReason([gap(8, "server/spans.ts", "repo", "not-tracked")])).toBe(
+      `${HEAD}\n- ticket 8 consumes "server/spans.ts" (from: "repo"): not a tracked file`,
+    );
+  });
+
+  it("escapes quotes in an item", () => {
+    expect(unproducedReason([gap(1, 'a "b"', null, "no-source")])).toBe(
+      `${HEAD}\n- ticket 1 consumes "a \\"b\\"" (from: null): no source`,
+    );
+    expect(unproducedNote([gap(1, 'a "b"', null, "no-source")])).toBe(
+      'Accepted with 1 unresolved input: ticket 1 "a \\"b\\"" (no source).',
+    );
+  });
+
+  it("counts one unresolved input and several", () => {
+    expect(unproducedNote([gap(4, "spans writer", null, "no-source")])).toBe(
+      'Accepted with 1 unresolved input: ticket 4 "spans writer" (no source).',
+    );
+    expect(
+      unproducedNote([
+        gap(4, "spans writer", null, "no-source"),
+        gap(7, "gr_spans table", 1, "not-upstream"),
+      ]),
+    ).toBe(
+      'Accepted with 2 unresolved inputs: ticket 4 "spans writer" (no source), ticket 7 "gr_spans table" (ticket 1 is not upstream of ticket 7).',
+    );
+  });
+
+  it("has no note without gaps", () => {
+    expect(unproducedNote([])).toBeNull();
+  });
+});
+
+describe("consumes/produces seam: every shape the prompt describes", () => {
+  const ticket = (extra: Record<string, unknown>) => ({
+    slug: "t",
+    title: "T",
+    body: "",
+    blockedBy: [],
+    ...extra,
+  });
+  const listed = tracked(["server/db/schema.ts"]);
+
+  it.each<[string, Record<string, unknown>[], InputGap[]]>([
+    [
+      "a ticket-number source that is upstream",
+      [
+        ticket({ number: 1, produces: ["gr_spans table"] }),
+        ticket({ number: 2, blockedBy: [1], consumes: [{ item: "gr_spans table", from: 1 }] }),
+      ],
+      [],
+    ],
+    [
+      "repo with a tracked path",
+      [ticket({ number: 1, consumes: [{ item: "server/db/schema.ts", from: "repo" }] })],
+      [],
+    ],
+    [
+      "repo with an untracked path",
+      [ticket({ number: 1, consumes: [{ item: "server/spans.ts", from: "repo" }] })],
+      [gap(1, "server/spans.ts", "repo", "not-tracked")],
+    ],
+    [
+      "repo with non-path items",
+      [
+        ticket({
+          number: 1,
+          consumes: [
+            "gr_sessions table",
+            "gr_tickets.consumes",
+            "api/sessions",
+            "server/db/",
+            "/server/db/schema.ts",
+          ].map((item) => ({ item, from: "repo" })),
+        }),
+      ],
+      [],
+    ],
+    [
+      "null",
+      [ticket({ number: 1, consumes: [{ item: "spans writer", from: null }] })],
+      [gap(1, "spans writer", null, "no-source")],
+    ],
+    [
+      "a gate with produces and empty consumes",
+      [
+        ticket({ number: 1, kind: "gate", waitsFor: "An account", produces: ["Stripe account"] }),
+        ticket({ number: 2, blockedBy: [1], consumes: [{ item: "Stripe account", from: 1 }] }),
+      ],
+      [],
+    ],
+    ["a ticket with both lists empty", [ticket({ number: 1, consumes: [], produces: [] })], []],
+  ])("%s", (_, raw, expected) => {
+    const parsed = breakIntoTicketsResultSchema.parse({ tickets: raw });
+
+    expect(unproducedInputs(parsed.tickets, listed)).toEqual(expected);
   });
 });
