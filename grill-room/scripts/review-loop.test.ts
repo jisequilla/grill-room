@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { repoPath } from "../test/repo-root.js";
+
 const SCRIPT = readFileSync(
-  new URL("../../.claude/workflows/ticket-build-review-loop.js", import.meta.url),
+  repoPath(".claude/workflows/ticket-build-review-loop.js"),
   "utf8",
 ).replace("export const meta =", "const meta =");
 

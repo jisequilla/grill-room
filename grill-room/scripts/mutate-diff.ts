@@ -19,12 +19,16 @@ const COVERAGE_DIR = path.join(OUTPUT_DIR, "coverage");
 const TEST_SIDE = /\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|\/)(e2e|test|__snapshots__)\//;
 const SOURCE_EXTENSION = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
+// Tooling configuration (stryker.config.mjs, vitest.config.ts, vite.config.ts)
+// is read by the tools, not imported by any test, so Stryker would find no
+// test to run against its mutants and stop with "No tests were executed".
+const TOOLING_CONFIG = /(^|\/)[^/]+\.config\.[cm]?[jt]sx?$/;
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 const RANGE_ARGUMENT = /^(.+):(\d+)-(\d+)$/;
 
 export const isTestSidePath = (file: string): boolean => TEST_SIDE.test(file);
 export const isSourcePath = (file: string): boolean =>
-  SOURCE_EXTENSION.test(file) && !isTestSidePath(file);
+  SOURCE_EXTENSION.test(file) && !isTestSidePath(file) && !TOOLING_CONFIG.test(file);
 
 export function isEntryPoint(importMetaUrl: string, argv1: string | undefined): boolean {
   return argv1 !== undefined && importMetaUrl === pathToFileURL(argv1).href;

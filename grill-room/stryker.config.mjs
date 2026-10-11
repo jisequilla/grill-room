@@ -1,3 +1,12 @@
+import path from "node:path";
+
+// Tests that compare against files outside the app (the upstream skills, the
+// review-loop workflow) find the repository as the app's parent directory.
+// The sandbox copy at .stryker-tmp/sandbox-* has a different parent, so name
+// the repository here; Stryker's workers and vitest's inherit the variable.
+// See test/repo-root.ts.
+process.env.GRILL_ROOM_REPO_ROOT ??= path.resolve(import.meta.dirname, "..");
+
 /** @type {import("@stryker-mutator/api/core").PartialStrykerOptions} */
 export default {
   // pnpm does not hoist the runner next to core, so Stryker's default
