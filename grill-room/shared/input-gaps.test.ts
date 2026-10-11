@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { inputGapPhrase, ticketGapLines, type InputGapLike } from "./input-gaps.js";
+import { inputGapPhrase, ticketGapLines, ticketHashLabel, type InputGapLike } from "./input-gaps.js";
 
 const padded = (n: number) => String(n).padStart(2, "0");
 const hashed = (n: number) => `#${n}`;
@@ -89,5 +89,20 @@ describe("ticketGapLines", () => {
     expect(
       ticketGapLines([{ ticket: 2, item: 'say "hi"', from: null, reason: "no-source" }], 2, hashed),
     ).toEqual([`${JSON.stringify('say "hi"')} — no ticket or repository file provides it.`]);
+  });
+});
+
+describe("ticketHashLabel", () => {
+  it.each([
+    [4, "#4"],
+    [12, "#12"],
+  ])("labels ticket %i as %s", (n, expected) => {
+    expect(ticketHashLabel(n)).toBe(expected);
+  });
+
+  it("gives a not-upstream gap its full sentence on the page", () => {
+    expect(
+      inputGapPhrase({ ticket: 3, from: 4, reason: "not-upstream" }, ticketHashLabel),
+    ).toBe("ticket #4 produces it but is not upstream through Blocked by.");
   });
 });

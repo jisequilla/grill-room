@@ -60,3 +60,6 @@ export function ticketGapLines(
     .filter((gap) => gap.ticket === ticket)
     .map((gap) => `${JSON.stringify(gap.item)} — ${inputGapPhrase(gap, label)}`);
 }
+
+/** How the tickets page names a ticket in a gap line. */
+export const ticketHashLabel = (n: number): string => `#${n}`;

@@ -5,7 +5,7 @@ import {
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { IconRefresh, IconTicket } from "@tabler/icons-react";
-import { ticketGapLines } from "@shared/input-gaps";
+import { ticketGapLines, ticketHashLabel } from "@shared/input-gaps";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -115,7 +115,7 @@ export function TicketsSection({
   const waves = data?.waves ?? [];
   const unresolvedInputs = data?.unresolvedInputs ?? [];
   const gapLinesOf = (number: number) =>
-    ticketGapLines(unresolvedInputs, number, (n) => `#${n}`);
+    ticketGapLines(unresolvedInputs, number, ticketHashLabel);
 
   const waveByNumber = new Map<number, number>();
   waves.forEach((wave, index) => {

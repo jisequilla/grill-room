@@ -1257,6 +1257,16 @@ describe("unresolvedInputs (stored gaps plus recomputed not-upstream)", () => {
     ]);
   });
 
+  it("trims the item of a recomputed not-upstream gap", () => {
+    const tickets = [
+      row(1),
+      row(3, { blockedBy: [1], consumes: [consume(" gr_spans table ", 4)] }),
+      row(4, { produces: ["gr_spans table"] }),
+    ];
+
+    expect(unresolvedInputs(tickets)).toEqual([gap(3, "gr_spans table", 4, "not-upstream")]);
+  });
+
   it("returns nothing for duplicate ticket numbers, whichever kind of gap", () => {
     const tickets = [
       row(3, { unproduced: [stored("a", null, "no-source")], consumes: [consume("a", null)] }),
