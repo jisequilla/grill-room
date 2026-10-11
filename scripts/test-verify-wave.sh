@@ -306,32 +306,44 @@ vwrun "STUB_SEEN=$seen" "$clone" feat-b feat-a
 report $? "origin not local${leak:+ (leaks:$leak)}"
 
 # ---------------------------------------------------------------------------
-# SIGTERM: exits within 5 s, process group gone, worktree and temp dir removed
+# TERM, INT, HUP: exits within 5 s with the signal's code, process group gone,
+# worktree and temp dir removed. Job control gives the job default signal
+# dispositions; a plain background job of a non-interactive shell ignores INT.
 # ---------------------------------------------------------------------------
-mkrepo no
-snapshot
-sleeppid="$base/sleep.pid"
-cd "$clone" || exit 1
-TMPDIR="$ttmp" STUB_LOG="$stub_log" PATH="$stubs:$PATH" STUB_VITEST_SLEEP=1 STUB_SLEEPPID="$sleeppid" "$vw" feat-b feat-a >"$base/term-out" 2>"$base/term-err" &
-spid=$!
-cd "$OLDPWD" || exit 1
-i=0
-while [ ! -s "$sleeppid" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
-finished=0
-if [ -s "$sleeppid" ]; then
-  kill -TERM "$spid"
+# signal_row <SIG> <expected code>
+signal_row() {
+  local sig="$1" want="$2" sleeppid spid i finished sig_code sleeper sleeper_alive
+  mkrepo no
+  snapshot
+  sleeppid="$base/sleep.pid"
+  cd "$clone" || exit 1
+  set -m
+  TMPDIR="$ttmp" STUB_LOG="$stub_log" PATH="$stubs:$PATH" STUB_VITEST_SLEEP=1 STUB_SLEEPPID="$sleeppid" "$vw" feat-b feat-a >"$base/$sig-out" 2>"$base/$sig-err" &
+  spid=$!
+  set +m
+  cd "$OLDPWD" || exit 1
   i=0
-  while kill -0 "$spid" 2>/dev/null && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
-  kill -0 "$spid" 2>/dev/null || finished=1
-fi
-kill -KILL "$spid" 2>/dev/null
-wait "$spid" 2>/dev/null
-term_code=$?
-leaks
-sleeper="$(cat "$sleeppid" 2>/dev/null)"
-sleeper_alive=1
-if [ -n "$sleeper" ]; then kill -0 "$sleeper" 2>/dev/null || sleeper_alive=0; fi
-[ "$finished" -eq 1 ] && [ "$term_code" -ne 0 ] && [ -n "$sleeper" ] && [ "$sleeper_alive" -eq 0 ] && [ -z "$leak" ]
-report $? "sigterm${leak:+ (leaks:$leak)}"
+  while [ ! -s "$sleeppid" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+  finished=0
+  if [ -s "$sleeppid" ]; then
+    kill -"$sig" "$spid"
+    i=0
+    while kill -0 "$spid" 2>/dev/null && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+    kill -0 "$spid" 2>/dev/null || finished=1
+  fi
+  kill -KILL "$spid" 2>/dev/null
+  wait "$spid" 2>/dev/null
+  sig_code=$?
+  leaks
+  sleeper="$(cat "$sleeppid" 2>/dev/null)"
+  sleeper_alive=1
+  if [ -n "$sleeper" ]; then kill -0 "$sleeper" 2>/dev/null || sleeper_alive=0; fi
+  [ "$finished" -eq 1 ] && [ "$sig_code" -eq "$want" ] && [ -n "$sleeper" ] && [ "$sleeper_alive" -eq 0 ] && [ -z "$leak" ]
+  report $? "sig$sig exits $want${leak:+ (leaks:$leak)}"
+}
+
+signal_row TERM 143
+signal_row INT 130
+signal_row HUP 129
 
 exit "$fail"

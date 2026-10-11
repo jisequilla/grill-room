@@ -13,7 +13,8 @@
 #
 # stdout: merged / conflict, then one line per step, then RESULT.
 # stderr: pid: <n> (the script's own PID, so a caller can stop it), or one error line.
-# Exit: 0 all steps passed, 1 a step failed, 2 usage error, unknown branch or conflict.
+# Exit: 0 all steps passed, 1 a step failed, 2 usage error, unknown branch or conflict,
+# 143, 130 or 129 when stopped by TERM, INT or HUP.
 set -uo pipefail
 
 usage_line="usage: verify-wave.sh [--e2e] <branch>..."
@@ -64,13 +65,14 @@ cleanup() {
   fi
 }
 
-on_signal() {
-  cleanup
-  exit 143
-}
+on_term() { cleanup; exit 143; }
+on_int() { cleanup; exit 130; }
+on_hup() { cleanup; exit 129; }
 
 trap cleanup EXIT
-trap on_signal TERM INT HUP
+trap on_term TERM
+trap on_int INT
+trap on_hup HUP
 
 git -C "$root" fetch origin "+refs/heads/main:refs/remotes/origin/main" >>"$gitlog" 2>&1
 wt="$(mktemp -d "${TMPDIR:-/tmp}/verify-wave.XXXXXXXX")"

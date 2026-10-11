@@ -647,6 +647,34 @@ describe("reasonsToRefuseHandoffGrounding's buildsOn citation syntax check", () 
     );
   });
 
+  it("refuses a buildsOn citation whose line range runs backwards", async () => {
+    const root = repos.create({ files: { "README.md": "# Marathon\nSecond line\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [blockerTicket(), aCitationBuildsOnTicket("README.md:2-1")] },
+      { projectRoot: root, tickets: TICKETS },
+    );
+
+    expect(reasons).toEqual(
+      expect.arrayContaining([
+        `Ticket 2's buildsOn on ticket 1 cites "README.md:2-1", whose line range ends before it starts; cite a range from its first line to its last.`,
+      ]),
+    );
+  });
+
+  it("accepts a valid buildsOn citation", async () => {
+    const root = repos.create({ files: { "README.md": "# Marathon\n" } });
+
+    const reasons = await reasonsToRefuseHandoffGrounding(
+      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [blockerTicket(), aCitationBuildsOnTicket("README.md:1")] },
+      { projectRoot: root, tickets: TICKETS },
+    );
+
+    expect(reasons).toEqual([]);
+  });
+});
+
+describe("leading-slash handoff citations", () => {
   it("refuses a leading-slash buildsOnFiles citation", async () => {
     const root = repos.create({ files: { "src/a.ts": "export const a = 1;\n" } });
     const ticket = aTicket(1, {}, null, [], "true");
@@ -675,32 +703,6 @@ describe("reasonsToRefuseHandoffGrounding's buildsOn citation syntax check", () 
     expect(reasons).toEqual([
       'Citation "/src/a.ts:1" points outside the project; cite a path relative to the project root.',
     ]);
-  });
-
-  it("refuses a buildsOn citation whose line range runs backwards", async () => {
-    const root = repos.create({ files: { "README.md": "# Marathon\nSecond line\n" } });
-
-    const reasons = await reasonsToRefuseHandoffGrounding(
-      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [blockerTicket(), aCitationBuildsOnTicket("README.md:2-1")] },
-      { projectRoot: root, tickets: TICKETS },
-    );
-
-    expect(reasons).toEqual(
-      expect.arrayContaining([
-        `Ticket 2's buildsOn on ticket 1 cites "README.md:2-1", whose line range ends before it starts; cite a range from its first line to its last.`,
-      ]),
-    );
-  });
-
-  it("accepts a valid buildsOn citation", async () => {
-    const root = repos.create({ files: { "README.md": "# Marathon\n" } });
-
-    const reasons = await reasonsToRefuseHandoffGrounding(
-      { delegationProposals: NO_DELEGATION_PROPOSALS, tickets: [blockerTicket(), aCitationBuildsOnTicket("README.md:1")] },
-      { projectRoot: root, tickets: TICKETS },
-    );
-
-    expect(reasons).toEqual([]);
   });
 });
 

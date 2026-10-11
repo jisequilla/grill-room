@@ -14,3 +14,4 @@
 local/
 .ngine-run.json
 /node_modules/
+/pnpm-lock.yaml
