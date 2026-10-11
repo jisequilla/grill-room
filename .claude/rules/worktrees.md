@@ -50,7 +50,7 @@ Pre-flight, verification on the branch merged with `main`, and the merge stay in
 ## The subagent
 
 - Commits only on its worktree branch; runs no git command outside its worktree and never touches `main`.
-- Runs the verification the prompt names in the foreground, and reports only once every command has finished. For grill-room that is `pnpm test` and `pnpm typecheck` from `grill-room/`, plus `just e2e` when the ticket touches the UI.
+- Runs the verification the prompt names in the foreground, and reports only once every command has finished. For grill-room that is `pnpm test`, `pnpm typecheck` and `pnpm lint` from `grill-room/`, plus `just e2e` when the ticket touches the UI.
 - Proves each acceptance line by reverting the change it covers, watching its test fail, and restoring it.
 - Keeps inside the ticket's files. A minimal edit elsewhere is allowed only when the PR body names the file and says why it was needed.
 - Pushes its branch and opens a **draft** pull request against `main` with `gh pr create --draft`. The title names the bead (`gr-xxx: <summary>`); the body carries the ticket path, files changed, the exact verification output, and anything the prompt left ambiguous. `gh` must be on the `jisequilla` account.

@@ -58,7 +58,7 @@ vi.mock("../server/db/index.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../server/db/index.js")>();
   // `getDb()` may hand back a lazy chain-recording proxy (itself a function)
   // while the database starts: its members are passed through untouched.
-  const bind = <T extends object>(target: T, prop: string | symbol) => {
+  const bind = (target: object, prop: string | symbol) => {
     const value = Reflect.get(target, prop);
     return typeof value === "function" && typeof target !== "function" ? value.bind(target) : value;
   };
