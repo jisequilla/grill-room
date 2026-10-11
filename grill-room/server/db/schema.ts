@@ -630,6 +630,19 @@ export const tickets = table(
      * for tickets made before the decision check existed.
      */
     implementsDecisionsJson: text("implements_decisions_json"),
+    /**
+     * JSON array of `{item, from}`: what this ticket reads and where each item
+     * comes from. NULL for tickets made before the consumes check existed.
+     */
+    consumesJson: text("consumes_json"),
+    /** JSON array of what this ticket produces. NULL like `consumesJson`. */
+    producesJson: text("produces_json"),
+    /**
+     * JSON array of `{item, from, reason}`: the consumed items nothing resolved
+     * at breakdown, `not-upstream` aside (it is recomputed from `blockedBy`).
+     * NULL like `consumesJson`.
+     */
+    unproducedJson: text("unproduced_json"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },

@@ -15,10 +15,17 @@ import {
   createFakeInterviewer,
   longChainTurns,
   rateLimitedTurn,
+  unproducedInputsTurns,
 } from "../server/interviewer/fake.js";
 import { renderTicketFile } from "../server/export.js";
 import { buildPrompt } from "../server/interviewer/prompt.js";
-import { type ProposedTicket, validateTicketSet } from "../server/tickets.js";
+import {
+  type InputGap,
+  type ProposedTicket,
+  unproducedNote,
+  unproducedReason,
+  validateTicketSet,
+} from "../server/tickets.js";
 import { MAX_TURN_RETRIES } from "../server/turn.js";
 import { findLatestTurn } from "../server/turn-records.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
@@ -97,6 +104,8 @@ function ticketsTurn(
     waitsFor?: string | null;
     implements?: number[];
     implementsDecisions?: string[];
+    consumes?: { item: string; from: number | "repo" | null }[];
+    produces?: string[];
   }[],
 ): ScriptedTurn {
   return {
@@ -2268,5 +2277,274 @@ describe("a ticket's implemented decisions", () => {
     await breakIntoTickets.run({ sessionId });
     expect(breakRequests(second)).toHaveLength(1);
     expect(await storedKeys(sessionId)).toEqual([["storage-engine", "api-shape"], [], []]);
+  });
+});
+
+describe("unresolved consumed inputs", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+  const repos = useTempGitRepos();
+
+  type Row = Parameters<typeof ticketsTurn>[0][number];
+
+  function rejectionOf(request: unknown): string {
+    return (request as BreakIntoTicketsRequest).rejectionReason ?? "";
+  }
+
+  const LONG_CHAIN =
+    "The longest chain of tickets that must be built one after another is 6 build tickets (1 → 2 → 3 → 4 → 5 → 6), in a set of 6 build tickets; keep it to 4 or fewer. List a ticket in `blockedBy` only when it uses that ticket's output, and give a file that many tickets change its own early ticket, so more tickets can be built side by side.";
+  const LONG_CHAIN_NOTE =
+    "Accepted with the longest chain at 6 build tickets (1 → 2 → 3 → 4 → 5 → 6), over the limit of 4 for a set of 6 build tickets.";
+
+  const NO_SOURCE_GAP = (ticket: number, item = "spans writer"): InputGap => ({
+    ticket,
+    item,
+    from: null,
+    reason: "no-source",
+  });
+
+  /** Ticket 1 plus ticket 2, which consumes an item with no source. */
+  const withGap: Row[] = [
+    { number: 1, slug: "one" },
+    { number: 2, slug: "two", blockedBy: [1], consumes: [{ item: "spans writer", from: null }] },
+  ];
+
+  const SLUGS = ["one", "two", "three", "four", "five", "six"];
+  const longChainWithGap: Row[] = SLUGS.map((slug, index) => ({
+    number: index + 1,
+    slug,
+    blockedBy: index === 0 ? [] : [index],
+    implements: [],
+    consumes: index === 5 ? [{ item: "x", from: null }] : [],
+  }));
+
+  async function storedRows(sessionId: string) {
+    const rows = await getDb()
+      .select()
+      .from(schema.tickets)
+      .where(eq(schema.tickets.sessionId, sessionId));
+    return rows.sort((a, b) => a.number - b.number);
+  }
+
+  async function lastAttemptReason(sessionId: string) {
+    const turn = await findLatestTurn({ sessionId, turnKind: "break-into-tickets" });
+    const attempts = turn!.runs[0]!.attempts;
+    return attempts[attempts.length - 1]!.reason;
+  }
+
+  it("the unproduced-inputs scenario is sent back once and stored with its gap", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const interviewer = scriptInterviewer(unproducedInputsTurns().slice(-2));
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(3);
+    expect(rejectionOf(interviewer.requests[1])).toBe(unproducedReason([NO_SOURCE_GAP(2)]));
+    const rows = await storedRows(sessionId);
+    expect(rows[1]!.unproducedJson).toBe('[{"item":"spans writer","from":null,"reason":"no-source"}]');
+    expect(String(await lastAttemptReason(sessionId))).toContain(
+      unproducedNote([NO_SOURCE_GAP(2)])!,
+    );
+  });
+
+  it("what is stored for consumes, produces and gaps", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const set = ticketsTurn([
+      { number: 1, slug: "one", produces: ["gr_spans table"] },
+      {
+        number: 2,
+        slug: "two",
+        blockedBy: [3],
+        consumes: [{ item: " gr_spans table ", from: 1 }],
+      },
+      {
+        number: 3,
+        slug: "account",
+        kind: "gate",
+        body: "The owner opens the account.",
+        waitsFor: "A live account",
+        consumes: [{ item: "x", from: null }],
+        produces: ["live account"],
+      },
+    ]);
+    scriptInterviewer([set, set]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    const rows = await storedRows(sessionId);
+    expect(rows[0]!.producesJson).toBe('["gr_spans table"]');
+    expect(rows[1]!.consumesJson).toBe('[{"item":"gr_spans table","from":1}]');
+    expect(rows[1]!.unproducedJson).toBe("[]");
+    expect(rows[2]!.consumesJson).toBe("[]");
+    expect(rows[2]!.producesJson).toBe('["live account"]');
+    expect(rows[2]!.unproducedJson).toBe("[]");
+  });
+
+  it("trims and drops blank consumes and produces entries before storing", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const set = ticketsTurn([
+      { number: 1, slug: "one", produces: [" gr_spans table ", " "] },
+      {
+        number: 2,
+        slug: "two",
+        blockedBy: [1],
+        consumes: [
+          { item: " gr_spans table ", from: 1 },
+          { item: " ", from: null },
+        ],
+      },
+    ]);
+    const interviewer = scriptInterviewer([set, set]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    const rows = await storedRows(sessionId);
+    expect(rows[0]!.producesJson).toBe('["gr_spans table"]');
+    expect(rows[1]!.consumesJson).toBe('[{"item":"gr_spans table","from":1}]');
+    expect(rows[1]!.unproducedJson).toBe("[]");
+    expect(interviewer.requests).toHaveLength(2);
+  });
+
+  it("a chain and a gap are sent back together once", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const turn = ticketsTurn(longChainWithGap.map((row) => ({ ...row, implements: [1] })));
+    const interviewer = scriptInterviewer([turn, turn]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(3);
+    expect(rejectionOf(interviewer.requests[1])).toBe(
+      `${LONG_CHAIN} ${unproducedReason([NO_SOURCE_GAP(6, "x")])}`,
+    );
+    expect((await storedRows(sessionId))[5]!.unproducedJson).toBe(
+      '[{"item":"x","from":null,"reason":"no-source"}]',
+    );
+  });
+
+  it("a gap sent back alongside a hard refusal is not sent back again", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const first = ticketsTurn([
+      { number: 1, slug: "one", consumes: [{ item: "spans writer", from: null }] },
+      { number: 2, slug: "two", blockedBy: [9] },
+    ]);
+    const second = ticketsTurn([
+      { number: 1, slug: "one", consumes: [{ item: "spans writer", from: null }] },
+      { number: 2, slug: "two", blockedBy: [1] },
+    ]);
+    const interviewer = scriptInterviewer([first, second]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(3);
+    expect(rejectionOf(interviewer.requests[1])).toBe(
+      `Ticket 2 is blocked by 9, which is not a ticket number in this set. ${unproducedReason([NO_SOURCE_GAP(1)])}`,
+    );
+    expect((await storedRows(sessionId))[0]!.unproducedJson).toBe(
+      '[{"item":"spans writer","from":null,"reason":"no-source"}]',
+    );
+    expect(String(await lastAttemptReason(sessionId))).toBe(
+      'Accepted with 1 unresolved input: ticket 1 "spans writer" (no source).',
+    );
+  });
+
+  it("a gap on the last attempt is accepted without a send-back", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const refused = ticketsTurn([
+      { number: 1, slug: "a", consumes: [] },
+      { number: 1, slug: "b", consumes: [] },
+    ]);
+    const last = ticketsTurn([
+      { number: 1, slug: "one", consumes: [{ item: "spans writer", from: null }] },
+    ]);
+    const interviewer = scriptInterviewer([
+      ...Array.from({ length: MAX_TURN_RETRIES }, () => refused),
+      last,
+    ]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(interviewer.requests).toHaveLength(MAX_TURN_RETRIES + 2);
+    expect((await storedRows(sessionId))[0]!.unproducedJson).toBe(
+      '[{"item":"spans writer","from":null,"reason":"no-source"}]',
+    );
+    expect(String(await lastAttemptReason(sessionId))).toBe(
+      'Accepted with 1 unresolved input: ticket 1 "spans writer" (no source).',
+    );
+  });
+
+  it("the unproduced note follows the story and chain notes", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const turn = ticketsTurn(longChainWithGap);
+    scriptInterviewer(Array.from({ length: MAX_TURN_RETRIES + 1 }, () => turn));
+
+    await breakIntoTickets.run({ sessionId });
+
+    expect(await lastAttemptReason(sessionId)).toBe(
+      `Accepted after the last retry, with user story 1 in no ticket's implements. ${LONG_CHAIN_NOTE} Accepted with 1 unresolved input: ticket 6 "x" (no source).`,
+    );
+  });
+
+  it("a project session flags an untracked repo path", async () => {
+    const root = repos.create({ commit: true, files: { "src/real.ts": "export const a = 1;\n" } });
+    const project = await registerProject.run({
+      root,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+    });
+    const session = await createSession.run({
+      title: "Grill Room",
+      idea: "A local app that grills me about an idea until it is decided.",
+      projectId: project.id,
+    });
+    await confirm(session.id);
+    scriptInterviewer([{ kind: "synthesize-spec", result: { markdown: GOOD_SPEC_MARKDOWN } }]);
+    await synthesizeSpec.run({ sessionId: session.id });
+    const set = ticketsTurn([
+      { number: 1, slug: "one" },
+      {
+        number: 2,
+        slug: "two",
+        blockedBy: [1],
+        consumes: [
+          { item: "src/real.ts", from: "repo" },
+          { item: "server/spans.ts", from: "repo" },
+        ],
+      },
+    ]);
+    const interviewer = scriptInterviewer([set, set]);
+
+    await breakIntoTickets.run({ sessionId: session.id });
+
+    expect(interviewer.requests).toHaveLength(3);
+    expect(rejectionOf(interviewer.requests[1])).toBe(
+      unproducedReason([
+        { ticket: 2, item: "server/spans.ts", from: "repo", reason: "not-tracked" },
+      ]),
+    );
+    expect(rejectionOf(interviewer.requests[1])).toContain(
+      '- ticket 2 consumes "server/spans.ts" (from: "repo"): not a tracked file',
+    );
+    expect((await storedRows(session.id))[1]!.unproducedJson).toBe(
+      '[{"item":"server/spans.ts","from":"repo","reason":"not-tracked"}]',
+    );
+  });
+
+  it("a ticket stored before the consumes check reads consumes, produces and unproduced null", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    scriptInterviewer([ticketsTurn(withGap), ticketsTurn(withGap)]);
+    const fresh = await breakIntoTickets.run({ sessionId });
+    expect(fresh.tickets[1]).toMatchObject({
+      consumes: [{ item: "spans writer", from: null }],
+      produces: [],
+      unproduced: [{ item: "spans writer", from: null, reason: "no-source" }],
+    });
+
+    await getDb().execute(
+      sql`INSERT INTO gr_tickets (id, session_id, number, slug, title, body, status, kind, blocked_by_json, created_at, updated_at)
+          VALUES ('t-old', ${sessionId}, 9, 'old', 'Old', 'Made before the consumes check.', 'ready', 'build', '[]', 'now', 'now')`,
+    );
+    const { tickets } = await listTickets.run({ sessionId });
+    const old = tickets.find((ticket) => ticket.number === 9)!;
+    expect([old.consumes, old.produces, old.unproduced]).toEqual([null, null, null]);
   });
 });

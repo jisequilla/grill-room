@@ -2289,10 +2289,10 @@ describe("what the adapter sends to break a spec into tickets", () => {
     );
     if (greenfield) {
       expect(prompt).toContain(
-        `${paragraph}\n\n${CHAIN_PARAGRAPH}\n\n## This repository has no commits yet`,
+        `${paragraph}\n\n${CHAIN_PARAGRAPH}\n\n${CONSUMES_PARAGRAPH}\n\n## This repository has no commits yet`,
       );
     } else {
-      expect(prompt.endsWith(`${paragraph}\n\n${CHAIN_PARAGRAPH}`)).toBe(true);
+      expect(prompt.endsWith(`${paragraph}\n\n${CHAIN_PARAGRAPH}\n\n${CONSUMES_PARAGRAPH}`)).toBe(true);
     }
   });
 
@@ -2307,6 +2307,40 @@ describe("what the adapter sends to break a spec into tickets", () => {
     "make that change its own early ticket that the others list in `blockedBy`,",
     "rather than chaining them one after another through that file.",
   ].join("\n");
+  const CONSUMES_PARAGRAPH = [
+    "For each ticket, list in `consumes` everything it reads or that its",
+    "acceptance needs to exist already: a table, a field, a job, a file, an",
+    "endpoint, a stored or derived value. Give each its source in `from`: the",
+    "number of the ticket that produces it, which must be in this ticket's",
+    '`blockedBy` or upstream of it; "repo" when it exists in the repository',
+    "today, with `item` its path relative to the repository root for a file the",
+    "tracked-file list shows, or its name as the code spells it for anything",
+    "else, such as a table; or null when no ticket and nothing in the repository",
+    "provides it. In `produces`, list what the ticket creates or writes that",
+    "another ticket may consume, in the words a consumer will copy. A gate lists",
+    "in `produces` what it provides, such as an account, and leaves `consumes`",
+    "empty. A ticket that writes a stored value is its producer; a ticket that",
+    "only serves or reads it is not.",
+  ].join("\n");
+
+  it("break-into-tickets asks for consumes and produces", async () => {
+    const runner = recordingRunner([ok(anEnvelope({ structured_output: { tickets: [] } }))]);
+    await createClaudeCliInterviewer({ runCli: runner.runCli }).breakIntoTickets({
+      kind: "break-into-tickets",
+      context: aContext(),
+      specMarkdown: "## Problem Statement\n\nExport the training log.",
+      greenfield: false,
+      verifyCommand: "pnpm test",
+      userStories: [],
+      rejectionReason: null,
+    });
+    const prompt = valueOf(runner.invocations[0]!.args, "-p") as string;
+
+    expect(prompt).toContain(`${CHAIN_PARAGRAPH}\n\n${CONSUMES_PARAGRAPH}`);
+    expect(CONSUMES_PARAGRAPH.split("\n").join(" ")).toBe(
+      'For each ticket, list in `consumes` everything it reads or that its acceptance needs to exist already: a table, a field, a job, a file, an endpoint, a stored or derived value. Give each its source in `from`: the number of the ticket that produces it, which must be in this ticket\'s `blockedBy` or upstream of it; "repo" when it exists in the repository today, with `item` its path relative to the repository root for a file the tracked-file list shows, or its name as the code spells it for anything else, such as a table; or null when no ticket and nothing in the repository provides it. In `produces`, list what the ticket creates or writes that another ticket may consume, in the words a consumer will copy. A gate lists in `produces` what it provides, such as an account, and leaves `consumes` empty. A ticket that writes a stored value is its producer; a ticket that only serves or reads it is not.',
+    );
+  });
 
   it.each([
     ["no greenfield, no stories", false, [], null],
@@ -2328,10 +2362,10 @@ describe("what the adapter sends to break a spec into tickets", () => {
 
     expect(prompt.split(CHAIN_PARAGRAPH)).toHaveLength(2);
     if (next === null) {
-      expect(prompt.endsWith(`${GATE_END}\n\n${CHAIN_PARAGRAPH}`)).toBe(true);
-      expect(prompt.endsWith("rather than chaining them one after another through that file.")).toBe(true);
+      expect(prompt.endsWith(`${GATE_END}\n\n${CHAIN_PARAGRAPH}\n\n${CONSUMES_PARAGRAPH}`)).toBe(true);
+      expect(prompt.endsWith("only serves or reads it is not.")).toBe(true);
     } else {
-      expect(prompt).toContain(`${GATE_END}\n\n${CHAIN_PARAGRAPH}\n\n${next}`);
+      expect(prompt).toContain(`${GATE_END}\n\n${CHAIN_PARAGRAPH}\n\n${CONSUMES_PARAGRAPH}\n\n${next}`);
     }
     if (greenfield && userStories.length > 0) {
       expect(prompt.indexOf("## This repository has no commits yet")).toBeLessThan(
@@ -2344,7 +2378,7 @@ describe("what the adapter sends to break a spec into tickets", () => {
   });
 
   describe("in a repository with no commits yet", () => {
-    const RULES_END = "rather than chaining them one after another through that file.";
+    const RULES_END = "only serves or reads it is not.";
 
     async function promptFor(greenfield: boolean, verifyCommand: string | null): Promise<string> {
       const runner = recordingRunner([ok(anEnvelope({ structured_output: { tickets: [] } }))]);
@@ -2449,7 +2483,7 @@ describe("what the adapter sends to break a spec into tickets", () => {
       );
     } else {
       expect(withStories).toContain(
-        "rather than chaining them one after another through that file.\n\n## User stories",
+        "only serves or reads it is not.\n\n## User stories",
       );
     }
   });
@@ -2482,7 +2516,7 @@ describe("what the adapter sends to break a spec into tickets", () => {
   });
 
   describe("the tracked files", () => {
-    const CHAIN_END = "rather than chaining them one after another through that file.";
+    const CHAIN_END = "only serves or reads it is not.";
     const GREENFIELD_END =
       "directly or through another ticket's `blockedBy`; a gate need not.";
     const NAMING_RULE = [

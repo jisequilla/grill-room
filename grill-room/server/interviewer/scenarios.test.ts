@@ -560,6 +560,26 @@ describe("named scenarios for every request kind", () => {
     ]);
   });
 
+  it("unproduced-inputs is registered by name and ends with two breakdowns that share one gap", () => {
+    const session = "unproduced-inputs-session";
+    const interviewer = useScenario(session, "unproduced-inputs");
+    const turns = fakeScenarios["unproduced-inputs"]!.turns;
+
+    expect(interviewer.remainingFor(session)).toBe(turns.length);
+    const breakdowns = turns.slice(-2);
+    expect(breakdowns.map((turn) => turn.kind)).toEqual([
+      "break-into-tickets",
+      "break-into-tickets",
+    ]);
+    for (const turn of breakdowns) {
+      const tickets = (turn as { result: { tickets: { number: number; consumes?: unknown }[] } })
+        .result.tickets;
+      expect(tickets.find((ticket) => ticket.number === 2)?.consumes).toEqual([
+        { item: "spans writer", from: null },
+      ]);
+    }
+  });
+
   it("refusal-then-success scripts one refused attempt and the accepted retry, in the same turn", async () => {
     const session = await aSession();
     const interviewer = useScenario(session.id, "refusal-then-success");

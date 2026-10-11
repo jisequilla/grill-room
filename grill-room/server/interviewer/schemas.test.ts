@@ -755,3 +755,63 @@ describe("break-into-tickets: implementsDecisions", () => {
     expect(parsed.tickets[0]!.implementsDecisions).toEqual([]);
   });
 });
+
+describe("break-into-tickets: consumes and produces", () => {
+  it("the breakdown contract requires consumes and produces", () => {
+    const schema = jsonSchemaFor("break-into-tickets") as {
+      properties: { tickets: { items: { required: string[] } } };
+    };
+
+    expect(schema.properties.tickets.items.required).toEqual(
+      expect.arrayContaining(["consumes", "produces"]),
+    );
+  });
+
+  it("defaults consumes and produces to empty for a reply that predates them", () => {
+    const parsed = breakIntoTicketsResultSchema.parse({
+      tickets: [{ number: 1, slug: "one", title: "One", body: "", blockedBy: [] }],
+    });
+
+    expect(parsed.tickets[0]!.consumes).toEqual([]);
+    expect(parsed.tickets[0]!.produces).toEqual([]);
+  });
+
+  it.each([
+    ["a ticket number", 2],
+    ["repo", "repo"],
+    ["null", null],
+  ])("accepts %s as a source", (_, from) => {
+    const parsed = breakIntoTicketsResultSchema.parse({
+      tickets: [
+        {
+          number: 1,
+          slug: "one",
+          title: "One",
+          body: "",
+          blockedBy: [],
+          consumes: [{ item: "a table", from }],
+          produces: ["a field"],
+        },
+      ],
+    });
+
+    expect(parsed.tickets[0]!.consumes).toEqual([{ item: "a table", from }]);
+  });
+
+  it.each([["elsewhere"], [0], [1.5]])("refuses %j as a source", (from) => {
+    expect(() =>
+      breakIntoTicketsResultSchema.parse({
+        tickets: [
+          {
+            number: 1,
+            slug: "one",
+            title: "One",
+            body: "",
+            blockedBy: [],
+            consumes: [{ item: "a table", from }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+});

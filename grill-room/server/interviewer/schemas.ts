@@ -270,6 +270,21 @@ export const breakIntoTicketsResultSchema = z.strictObject({
       implements: z.array(z.number().int().positive()).default([]),
       /** Keys of the settled decisions this ticket builds, as the decision list shows them. */
       implementsDecisions: z.array(decisionKey).default([]),
+      /**
+       * What this ticket reads, each item with its source: a ticket number
+       * that produces it, "repo" for something the repository has today, or
+       * null when nothing provides it.
+       */
+      consumes: z
+        .array(
+          z.strictObject({
+            item: z.string().min(1),
+            from: z.union([z.number().int().positive(), z.literal("repo"), z.null()]),
+          }),
+        )
+        .default([]),
+      /** What this ticket creates or writes that another ticket may consume. */
+      produces: z.array(z.string().min(1)).default([]),
     }),
   ),
 });

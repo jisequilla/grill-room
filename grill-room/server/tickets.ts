@@ -27,6 +27,33 @@ export interface ProposedTicket {
   implements: readonly number[];
   /** The keys of the settled decisions this ticket builds. */
   implementsDecisions?: readonly string[];
+  /** What the ticket reads, each with where it comes from. */
+  consumes?: readonly TicketConsume[];
+  /** What the ticket creates or writes that another ticket may consume. */
+  produces?: readonly string[];
+}
+
+/** Where a consumed item comes from: a ticket number, `"repo"`, or no known source. */
+export type ConsumeSource = number | "repo" | null;
+
+export interface TicketConsume {
+  item: string;
+  from: ConsumeSource;
+}
+
+export type GapReason =
+  | "no-source"
+  | "not-produced"
+  | "unknown-ticket"
+  | "not-upstream"
+  | "not-tracked";
+
+/** A consumed item nothing resolves, as `unproducedInputs` reports it. */
+export interface InputGap {
+  ticket: number;
+  item: string;
+  from: ConsumeSource;
+  reason: GapReason;
 }
 
 export interface TicketSetValidation {
@@ -262,19 +289,9 @@ function greenfieldReasons(
     );
   }
 
-  const reachesFirst = new Map<number, boolean>();
-  function reaches(number: number): boolean {
-    const known = reachesFirst.get(number);
-    if (known !== undefined) return known;
-    const result = (byNumber.get(number)?.blockedBy ?? []).some(
-      (blocker) => blocker === 1 || reaches(blocker),
-    );
-    reachesFirst.set(number, result);
-    return result;
-  }
-
+  const tickets = [...byNumber.values()];
   for (const number of [...byNumber.keys()].sort((a, b) => a - b)) {
-    if (number !== 1 && byNumber.get(number)!.kind !== "gate" && !reaches(number)) {
+    if (number !== 1 && byNumber.get(number)!.kind !== "gate" && !upstreamOf(tickets, number).has(1)) {
       reasons.push(
         `Ticket ${number} does not depend on ticket 1. This repository has no commits yet and ticket 1 sets up the verify command, so every other ticket must list 1 in its \`blockedBy\`, directly or through another ticket's \`blockedBy\`.`,
       );
@@ -282,6 +299,29 @@ function greenfieldReasons(
   }
 
   return reasons;
+}
+
+/**
+ * Every ticket number reachable from `number` through `blockedBy`, gates
+ * included and `number` itself excluded. Terminates on a cycle and skips
+ * numbers that are not in the set.
+ */
+export function upstreamOf(
+  tickets: readonly { number: number; blockedBy: readonly number[] }[],
+  number: number,
+): Set<number> {
+  const byNumber = new Map(tickets.map((ticket) => [ticket.number, ticket]));
+  const upstream = new Set<number>();
+  const pending = [number];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    for (const blocker of byNumber.get(current)?.blockedBy ?? []) {
+      if (blocker === number || upstream.has(blocker) || !byNumber.has(blocker)) continue;
+      upstream.add(blocker);
+      pending.push(blocker);
+    }
+  }
+  return upstream;
 }
 
 /** A ticket as `computeWaves` needs it: a number and its blockers, already resolved to numbers. */
@@ -485,6 +525,12 @@ export interface StoredTicket {
   implementsJson: string | null;
   /** JSON array of decision keys; null for tickets made before the decision check. */
   implementsDecisionsJson: string | null;
+  /** JSON array of `{item, from}`; null for tickets made before the consumes check. */
+  consumesJson: string | null;
+  /** JSON array of strings; null for tickets made before the consumes check. */
+  producesJson: string | null;
+  /** JSON array of `{item, from, reason}`; null for tickets made before the consumes check. */
+  unproducedJson: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -505,6 +551,12 @@ export interface TicketView {
   implements: number[] | null;
   /** The keys of the settled decisions it builds; null for tickets made before the decision check. */
   implementsDecisions: string[] | null;
+  /** What it reads and where each item comes from; null for tickets made before the consumes check. */
+  consumes: TicketConsume[] | null;
+  /** What it creates for others to consume; null for tickets made before the consumes check. */
+  produces: string[] | null;
+  /** The consumed items nothing resolved at breakdown, `not-upstream` aside; null for tickets made before the consumes check. */
+  unproduced: Omit<InputGap, "ticket">[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -532,6 +584,9 @@ export function describeTickets(
       waitsFor: row.waitsFor,
       implements: parseImplements(row.implementsJson),
       implementsDecisions: parseImplementsDecisions(row.implementsDecisionsJson),
+      consumes: parseConsumes(row.consumesJson),
+      produces: parseProduces(row.producesJson),
+      unproduced: parseUnproduced(row.unproducedJson),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }));
@@ -570,6 +625,71 @@ export function parseImplementsDecisions(json: string | null): string[] | null {
   }
   if (!Array.isArray(parsed)) return [];
   return parsed.filter((value): value is string => typeof value === "string" && value !== "");
+}
+
+function parseJsonArray(json: string): unknown[] {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isConsumeSource(value: unknown): value is ConsumeSource {
+  return (
+    value === null ||
+    value === "repo" ||
+    (typeof value === "number" && Number.isInteger(value) && value > 0)
+  );
+}
+
+const GAP_REASONS: readonly string[] = [
+  "no-source",
+  "not-produced",
+  "unknown-ticket",
+  "not-upstream",
+  "not-tracked",
+];
+
+/** A stored `consumesJson` read back: null for a NULL column, otherwise the well-formed `{item, from}` entries. */
+export function parseConsumes(json: string | null): TicketConsume[] | null {
+  if (json === null) return null;
+  return parseJsonArray(json).flatMap((entry) =>
+    isRecord(entry) &&
+    typeof entry.item === "string" &&
+    entry.item.trim() !== "" &&
+    isConsumeSource(entry.from)
+      ? [{ item: entry.item, from: entry.from }]
+      : [],
+  );
+}
+
+/** A stored `producesJson` read back: null for a NULL column, otherwise the non-blank strings. */
+export function parseProduces(json: string | null): string[] | null {
+  if (json === null) return null;
+  return parseJsonArray(json).filter(
+    (value): value is string => typeof value === "string" && value.trim() !== "",
+  );
+}
+
+/** A stored `unproducedJson` read back: null for a NULL column, otherwise the well-formed `{item, from, reason}` entries. */
+export function parseUnproduced(json: string | null): Omit<InputGap, "ticket">[] | null {
+  if (json === null) return null;
+  return parseJsonArray(json).flatMap((entry) =>
+    isRecord(entry) &&
+    typeof entry.item === "string" &&
+    entry.item.trim() !== "" &&
+    isConsumeSource(entry.from) &&
+    typeof entry.reason === "string" &&
+    GAP_REASONS.includes(entry.reason)
+      ? [{ item: entry.item, from: entry.from, reason: entry.reason as GapReason }]
+      : [],
+  );
 }
 
 /** What a ticket's `implementsDecisions` is stored as: duplicates dropped, first order kept. */
@@ -888,6 +1008,180 @@ export function chainNote(tickets: readonly ProposedTicket[]): string | null {
   const long = longChainOf(tickets);
   if (long === null) return null;
   return `Accepted with the longest chain at ${long.length} build tickets (${long.path}), over the limit of ${long.limit} for a set of ${long.builds} build tickets.`;
+}
+
+/** A ticket as the consumes check needs it; `consumes` and `produces` may be absent. */
+export interface TicketForInputs {
+  number: number;
+  kind: TicketKind;
+  blockedBy: readonly number[];
+  consumes?: readonly TicketConsume[] | null;
+  produces?: readonly string[] | null;
+}
+
+/** Trimmed, whitespace runs collapsed, lower-cased: how an item meets a `produces` entry. */
+export function normalizeItem(text: string): string {
+  return text.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Whether a `"repo"` item names a file path the tracked list can vouch for:
+ * after trimming and one leading `./`, an inner `/` (not leading), a file
+ * extension, and no whitespace or `:`. Anything else is trusted.
+ */
+export function isPathShaped(item: string): boolean {
+  const path = withoutDotSlash(item);
+  return (
+    path.includes("/") &&
+    !path.startsWith("/") &&
+    /\.[A-Za-z0-9]+$/.test(path) &&
+    !/[\s:]/.test(path)
+  );
+}
+
+function withoutDotSlash(item: string): string {
+  const trimmed = item.trim();
+  return trimmed.startsWith("./") ? trimmed.slice(2) : trimmed;
+}
+
+function hasDuplicateNumbers(tickets: readonly { number: number }[]): boolean {
+  return new Set(tickets.map((ticket) => ticket.number)).size !== tickets.length;
+}
+
+/** The reason a numbered source fails before upstream is looked at, or null. */
+function numberedSourceReason(
+  byNumber: ReadonlyMap<number, TicketForInputs>,
+  ticket: TicketForInputs,
+  from: number,
+  item: string,
+): "unknown-ticket" | "not-produced" | null {
+  const source = byNumber.get(from);
+  if (!source || from === ticket.number) return "unknown-ticket";
+  const wanted = normalizeItem(item);
+  const produced = (source.produces ?? []).some((entry) => normalizeItem(entry) === wanted);
+  return produced ? null : "not-produced";
+}
+
+/**
+ * Whether one `consumes` entry's first applicable reason is `not-upstream`:
+ * its source ticket exists, is another ticket, produces the item, and is not
+ * upstream of `ticket` through `blockedBy`.
+ */
+export function isUpstreamGap(
+  tickets: readonly TicketForInputs[],
+  ticket: TicketForInputs,
+  entry: TicketConsume,
+): boolean {
+  const item = entry.item.trim();
+  if (item === "" || typeof entry.from !== "number") return false;
+  const byNumber = new Map(tickets.map((other) => [other.number, other]));
+  if (numberedSourceReason(byNumber, ticket, entry.from, item) !== null) return false;
+  return !upstreamOf(tickets, ticket.number).has(entry.from);
+}
+
+/** The `not-upstream` gaps of a set, in the shape and order `unproducedInputs` uses. */
+export function upstreamGaps(tickets: readonly TicketForInputs[]): InputGap[] {
+  if (hasDuplicateNumbers(tickets)) return [];
+  const gaps: InputGap[] = [];
+  for (const ticket of [...tickets].sort((a, b) => a.number - b.number)) {
+    if (ticket.kind === "gate") continue;
+    for (const entry of ticket.consumes ?? []) {
+      if (isUpstreamGap(tickets, ticket, entry)) {
+        gaps.push({
+          ticket: ticket.number,
+          item: entry.item.trim(),
+          from: entry.from,
+          reason: "not-upstream",
+        });
+      }
+    }
+  }
+  return gaps;
+}
+
+/** The request's tracked files, as the prompt showed them. */
+export interface TrackedFilesFacts {
+  files: readonly string[];
+  omitted: number;
+}
+
+/**
+ * Every consumed item nothing resolves: no source, a source ticket that does
+ * not produce it or does not exist, one that is not upstream, or a path-shaped
+ * `"repo"` file the shown tracked list lacks. Build tickets only; ticket
+ * order, then `consumes` order. A set with duplicate numbers is not checked.
+ */
+export function unproducedInputs(
+  tickets: readonly TicketForInputs[],
+  trackedFiles: TrackedFilesFacts | null,
+): InputGap[] {
+  if (hasDuplicateNumbers(tickets)) return [];
+  const byNumber = new Map(tickets.map((ticket) => [ticket.number, ticket]));
+  const gaps: InputGap[] = [];
+  for (const ticket of [...tickets].sort((a, b) => a.number - b.number)) {
+    if (ticket.kind === "gate") continue;
+    for (const entry of ticket.consumes ?? []) {
+      const item = entry.item.trim();
+      if (item === "") continue;
+      let reason: GapReason | null = null;
+      if (entry.from === null) {
+        reason = "no-source";
+      } else if (entry.from === "repo") {
+        if (
+          isPathShaped(item) &&
+          trackedFiles !== null &&
+          trackedFiles.omitted === 0 &&
+          !trackedFiles.files.includes(withoutDotSlash(item))
+        ) {
+          reason = "not-tracked";
+        }
+      } else {
+        reason =
+          numberedSourceReason(byNumber, ticket, entry.from, item) ??
+          (isUpstreamGap(tickets, ticket, entry) ? "not-upstream" : null);
+      }
+      if (reason !== null) gaps.push({ ticket: ticket.number, item, from: entry.from, reason });
+    }
+  }
+  return gaps;
+}
+
+function gapWhy(gap: InputGap): string {
+  switch (gap.reason) {
+    case "no-source":
+      return "no source";
+    case "not-produced":
+      return `ticket ${gap.from} does not produce it`;
+    case "unknown-ticket":
+      return gap.from === gap.ticket
+        ? `no ticket ${gap.from} other than ticket ${gap.from} itself`
+        : `no ticket ${gap.from}`;
+    case "not-upstream":
+      return `ticket ${gap.from} is not upstream of ticket ${gap.ticket}`;
+    case "not-tracked":
+      return "not a tracked file";
+  }
+}
+
+/** Why a set with unresolved consumed items is sent back, written for the interviewer. */
+export function unproducedReason(gaps: readonly InputGap[]): string {
+  const lines = gaps.map(
+    (gap) =>
+      `- ticket ${gap.ticket} consumes ${JSON.stringify(gap.item)} (from: ${JSON.stringify(gap.from)}): ${gapWhy(gap)}`,
+  );
+  return [
+    "Some tickets consume inputs that are unresolved. For each line, add a ticket that produces it, name the ticket that does in `from` (it must be upstream through `blockedBy`), copy that ticket's `produces` wording exactly, or, for a file that exists, use `\"repo\"` with its tracked path:",
+    ...lines,
+  ].join("\n");
+}
+
+/** The attempt-log note for a set accepted with unresolved inputs; null with none. */
+export function unproducedNote(gaps: readonly InputGap[]): string | null {
+  if (gaps.length === 0) return null;
+  const entries = gaps
+    .map((gap) => `ticket ${gap.ticket} ${JSON.stringify(gap.item)} (${gapWhy(gap)})`)
+    .join(", ");
+  return `Accepted with ${gaps.length} unresolved ${gaps.length === 1 ? "input" : "inputs"}: ${entries}.`;
 }
 
 /** The facts `ticketsAreCurrent` needs from a session's spec. */
