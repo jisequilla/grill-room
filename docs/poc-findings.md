@@ -47,6 +47,8 @@ The pass also found a defect no ticket had covered. One "I don't know" blocked a
 
 Grill-me worked as a container for the interview, and the design tree did the one thing chat cannot: reopening a decision made exactly the right dependents stale, and the interviewer reconfirmed or re-asked each with a reason. Two limits showed clearly. Without fact-finding, the interviewer will happily design a system you already built; grill-with-docs mode now exists for that. And the asymmetry between a reasoned recommendation and bare-label alternatives quietly steers the user toward accepting; the port now asks for a rationale per choice and an explicit recommended index.
 
+The skills drift as a set. Upstream's engineering skills renamed the domain glossary from `CONTEXT.md` to `GLOSSARY.md`, but the setup skill installed earlier still writes a pointer to `CONTEXT.md`, so an architecture review run against the older setup would read no glossary at all and say nothing about it. Installing one skill from the set means checking what its siblings expect.
+
 ## Where the evidence is
 
 - `docs/delegation-log.md`: one row per delegated task with model, outcome and the prompt gap.
