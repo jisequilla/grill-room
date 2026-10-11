@@ -492,8 +492,25 @@ describe("upstreamOf", () => {
     expect(upstreamOf([build(1), build(2, [1]), build(3, [2])], 3)).toEqual(new Set([1, 2]));
   });
 
-  it("terminates on a cycle", { timeout: 2000 }, () => {
-    expect(upstreamOf([build(2, [3]), build(3, [2])], 3)).toEqual(new Set([2]));
+  const readLimited = (number: number, blockedBy: number[]) => {
+    let reads = 0;
+    return {
+      number,
+      get blockedBy() {
+        if (++reads > 50) throw new Error("upstreamOf kept walking a cycle");
+        return blockedBy;
+      },
+    };
+  };
+
+  it("terminates on a cycle through the start", () => {
+    expect(upstreamOf([readLimited(2, [3]), readLimited(3, [2])], 3)).toEqual(new Set([2]));
+  });
+
+  it("terminates on a cycle that avoids the start", () => {
+    expect(
+      upstreamOf([readLimited(1, [2]), readLimited(2, [1]), readLimited(3, [1])], 3),
+    ).toEqual(new Set([1, 2]));
   });
 
   it("skips numbers that are not in the set", () => {

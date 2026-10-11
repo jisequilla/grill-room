@@ -2380,6 +2380,31 @@ describe("unresolved consumed inputs", () => {
     expect(rows[2]!.unproducedJson).toBe("[]");
   });
 
+  it("trims and drops blank consumes and produces entries before storing", async () => {
+    const sessionId = await aConfirmedSessionWithSpec();
+    const set = ticketsTurn([
+      { number: 1, slug: "one", produces: [" gr_spans table ", " "] },
+      {
+        number: 2,
+        slug: "two",
+        blockedBy: [1],
+        consumes: [
+          { item: " gr_spans table ", from: 1 },
+          { item: " ", from: null },
+        ],
+      },
+    ]);
+    const interviewer = scriptInterviewer([set, set]);
+
+    await breakIntoTickets.run({ sessionId });
+
+    const rows = await storedRows(sessionId);
+    expect(rows[0]!.producesJson).toBe('["gr_spans table"]');
+    expect(rows[1]!.consumesJson).toBe('[{"item":"gr_spans table","from":1}]');
+    expect(rows[1]!.unproducedJson).toBe("[]");
+    expect(interviewer.requests).toHaveLength(2);
+  });
+
   it("a chain and a gap are sent back together once", async () => {
     const sessionId = await aConfirmedSessionWithSpec();
     const turn = ticketsTurn(longChainWithGap.map((row) => ({ ...row, implements: [1] })));
