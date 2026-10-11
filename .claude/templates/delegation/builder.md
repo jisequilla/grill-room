@@ -78,6 +78,7 @@ Rules (from `.claude/rules/worktrees.md`):
 - Avoid a colon followed by quotes in gh arguments.
 - If any command is blocked by a hook or the permission classifier, stop. Report the exact command and message, and never work around the block.
 - Stop only processes you started, by their recorded PID. Never use `pgrep`, `pkill`, `killall`, `just stop` or `just restart`. Never use port 8082 or the claude-in-chrome tools. Other builders run their own servers at the same time. A server you did not record when you started it is theirs, not an orphan: report it, and never stop it.
-- If `node_modules` is missing, run `pnpm install --frozen-lockfile` in `grill-room/` first.
+- If `node_modules` is missing, run `(cd grill-room && pnpm install --frozen-lockfile)` first.
+- Never pass `--pm-on-fail` to pnpm. If pnpm says the project is configured to use a different pnpm version, stop and report the message: another pnpm version rewrites `grill-room/pnpm-workspace.yaml`.
 
 Report the PR number and branch, then stop.
