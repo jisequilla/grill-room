@@ -52,6 +52,7 @@ describe("rangesFromDiff", () => {
     ["vitest config", diffOf("vitest.config.ts", ["@@ -3,0 +4,2 @@"]), []],
     ["vite config in a folder", diffOf("app/vite.config.ts", ["@@ -1,0 +1,1 @@"]), []],
     ["a name that only contains config", diffOf("server/config.ts", ["@@ -1,0 +1,1 @@"]), ["server/config.ts:1-1"]],
+    ["config only midway through the name", diffOf("app/theme.config.json.ts", ["@@ -1,0 +1,1 @@"]), ["app/theme.config.json.ts:1-1"]],
     [
       "context text after the header",
       diffOf("server/d.ts", ["@@ -1,0 +2 @@ export function d() {"]),
