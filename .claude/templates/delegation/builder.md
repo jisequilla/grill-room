@@ -45,7 +45,7 @@ The block reads commits, not the working tree, so commit the change on the workt
 
 Push with exactly `git push -u origin <your branch>`, where the branch is the worktree branch you are on (it starts with `worktree-`); that form is pre-approved, other forms may be blocked. Then open a DRAFT PR against main with `gh pr create --draft --title "{{title}}" --body-file <file>`, where the file's name carries the bead id (for example `pr-body-{{bead}}.md`): builders share the scratchpad, and a generic name has overwritten another builder's body. The body opens with three sections, in this order:
 - `## Summary`: the smallest of a diff sketch, a call tree, a file tree or a Mermaid diagram that shows the change's shape. One, never more.
-- `## Evidence`: one entry per numbered acceptance line. Each entry gives the acceptance number, the test file and test name, the source ranges the test covers as `path:start-end` (several allowed, comma-separated), the quoted red run and the quoted green run. For a test-only PR, the entry quotes that line from the Revert block and gives the covered ranges. For a UI change, it also names the absolute folder of the screenshots and the exact command that regenerates them.
+- `## Evidence`: one entry per numbered acceptance line. Each entry gives the acceptance number, the test file and test name, the source ranges the test covers (written as under "Evidence ranges" below), the quoted red run and the quoted green run. For a test-only PR, the entry quotes that line from the Revert block and gives the covered ranges. For a UI change, it also names the absolute folder of the screenshots and the exact command that regenerates them.
 - `## Merge danger`: `One-way door` or `Two-way door`, plus the blast radius: what else reads or depends on what changed. A database migration is always a one-way door. A migration plus a UI toggle is a one-way door; a UI toggle alone, or a prompt's wording alone, is a two-way door.
 
 Then the body lists:
@@ -55,6 +55,22 @@ Then the body lists:
 - anything the ticket left ambiguous.
 
 The red run alone is TDD proof; there is no rule about commit order.
+
+### Evidence ranges
+
+Write each covered range as `<path>:<start>-<end>`, with the path relative to the repository root: `grill-room/server/a.ts:10-20`, never `a.ts:10-20`. A single line N is `N-N`. One range names one file; for two ranges in one file, write the path twice, comma-separated. A file outside `grill-room/` is written from the repository root in the same shape; mutation testing covers only `grill-room/`, so such a range is never mutated, which is expected.
+
+| Range as written | Accepted |
+|---|---|
+| `grill-room/server/a.ts:10-20` | yes |
+| `grill-room/server/a.ts:7-7` | yes |
+| `grill-room/server/a.ts:10-20,grill-room/server/a.ts:40-52` | yes |
+| `.claude/workflows/ticket-build-review-loop.js:102-107` | yes |
+| `grill-room/server/a.ts:7` | no |
+| `brief-grounding.ts:701-705` | no |
+| `:663-667` | no |
+| `grill-room/x.ts:1-5,9-12` | no |
+| `/Users/me/repo/grill-room/x.ts:1-5` | no |
 
 Rules (from `.claude/rules/worktrees.md`):
 - Commit only on your worktree branch. Never touch main, and never merge.
