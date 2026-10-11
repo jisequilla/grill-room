@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,11 +11,14 @@ import {
   countMutantLines,
   isEntryPoint,
   planStrykerRun,
+  preferNotCoveredFor,
   rangesFromCoverage,
   rangesFromDiff,
   scopeFor,
   summarize,
   trimToCap,
+  uncoveredPreferred,
+  type LineCount,
   type RunRecord,
   type StrykerReport,
 } from "./mutate-diff";
@@ -273,6 +276,7 @@ describe("planStrykerRun", () => {
           elapsedMs: null,
           exitCode: null,
           stderrTail: null,
+          preferNotCovered: [],
         }),
       ).toEqual({
         status: "truncated",
@@ -286,6 +290,7 @@ describe("planStrykerRun", () => {
         survivors: [],
         exitCode: null,
         stderrTail: null,
+        preferNotCovered: [],
       });
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -333,6 +338,7 @@ describe("summarize", () => {
     elapsedMs: 4200,
     exitCode: 0,
     stderrTail: null,
+    preferNotCovered: [],
   };
 
   it("summarize: survivors, mutants and score", () => {
@@ -368,10 +374,22 @@ describe("summarize", () => {
       stderrTail: null,
     };
 
-    expect(summarize(report, run)).toEqual({ status: "ok", dropped: [], ...finished });
-    expect(summarize(report, { ...run, dropped: ["server/a.ts:30-31"] })).toEqual({
+    expect(summarize(report, run)).toEqual({
+      status: "ok",
+      dropped: [],
+      preferNotCovered: [],
+      ...finished,
+    });
+    expect(
+      summarize(report, {
+        ...run,
+        dropped: ["server/a.ts:30-31"],
+        preferNotCovered: ["y.ts:1-5"],
+      }),
+    ).toEqual({
       status: "truncated",
       dropped: ["server/a.ts:30-31"],
+      preferNotCovered: ["y.ts:1-5"],
       ...finished,
     });
     expect(
@@ -395,6 +413,7 @@ describe("summarize", () => {
       survivors: [],
       exitCode: null,
       stderrTail: null,
+      preferNotCovered: [],
     });
     expect(
       summarize(null, {
@@ -416,9 +435,16 @@ describe("summarize", () => {
       survivors: null,
       exitCode: null,
       stderrTail: null,
+      preferNotCovered: [],
     });
     expect(
-      summarize(null, { ...run, outcome: "runner-failed", exitCode: 1, stderrTail: "boom" }),
+      summarize(null, {
+        ...run,
+        outcome: "runner-failed",
+        exitCode: 1,
+        stderrTail: "boom",
+        preferNotCovered: null,
+      }),
     ).toEqual({
       status: "runner-failed",
       base: "origin/main",
@@ -431,6 +457,7 @@ describe("summarize", () => {
       survivors: null,
       exitCode: 1,
       stderrTail: "boom",
+      preferNotCovered: null,
     });
     expect(
       summarize(null, {
@@ -442,6 +469,7 @@ describe("summarize", () => {
         elapsedMs: null,
         exitCode: null,
         stderrTail: null,
+        preferNotCovered: [],
       }),
     ).toEqual({
       status: "no-scope",
@@ -455,6 +483,7 @@ describe("summarize", () => {
       survivors: [],
       exitCode: null,
       stderrTail: null,
+      preferNotCovered: [],
     });
   });
 });
@@ -595,5 +624,267 @@ describe("isEntryPoint", () => {
     const vitest = path.resolve("node_modules/vitest/vitest.mjs");
     const moduleUrl = new URL("./mutate-diff.ts", import.meta.url).href;
     expect([isEntryPoint(moduleUrl, own), isEntryPoint(moduleUrl, vitest)]).toEqual([true, false]);
+  });
+});
+
+const lineList = (rows: string[]): LineCount[] =>
+  rows.map((row) => {
+    const [place, count] = row.split("x");
+    const [file, line] = place.split(":");
+    return { file, line: Number(line), count: Number(count) };
+  });
+
+describe("preferred ranges", () => {
+  it("planStrykerRun: prefer ranks ahead of the cap", () => {
+    const cases: Array<[string, string[], string[], object]> = [
+      [
+        "no prefer",
+        ["a.ts:1x60", "a.ts:2x40", "z.ts:10x5"],
+        [],
+        { kept: ["a.ts:1-2"], dropped: ["z.ts:10-10"], startable: true },
+      ],
+      [
+        "target after an unrelated file",
+        ["a.ts:1x60", "a.ts:2x40", "z.ts:10x5"],
+        ["z.ts:10-10"],
+        { kept: ["a.ts:1-1", "z.ts:10-10"], dropped: ["a.ts:2-2"], startable: true },
+      ],
+      [
+        "target deeper in the same file",
+        ["b.ts:201x60", "b.ts:202x40", "b.ts:601x5", "b.ts:602x5"],
+        ["b.ts:601-602"],
+        { kept: ["b.ts:201-201", "b.ts:601-602"], dropped: ["b.ts:202-202"], startable: true },
+      ],
+      [
+        "same lines without prefer",
+        ["b.ts:201x60", "b.ts:202x40", "b.ts:601x5", "b.ts:602x5"],
+        [],
+        { kept: ["b.ts:201-202"], dropped: ["b.ts:601-602"], startable: true },
+      ],
+      [
+        "list order differs from scope order",
+        ["a.ts:1x50", "c.ts:1x50", "m.ts:1x30"],
+        ["m.ts:1-1", "a.ts:1-1", "c.ts:1-1"],
+        { kept: ["a.ts:1-1", "c.ts:1-1"], dropped: ["m.ts:1-1"], startable: true },
+      ],
+      [
+        "partly covered range",
+        ["a.ts:1x60", "z.ts:10x30", "z.ts:11x30", "z.ts:12x30"],
+        ["z.ts:8-11"],
+        { kept: ["z.ts:10-11"], dropped: ["a.ts:1-1", "z.ts:12-12"], startable: true },
+      ],
+      [
+        "preferred ranges with no scope line",
+        ["a.ts:1x60", "a.ts:2x40", "z.ts:10x5"],
+        ["y.ts:1-5", "z.ts:50-60"],
+        { kept: ["a.ts:1-2"], dropped: ["z.ts:10-10"], startable: true },
+      ],
+      [
+        "two preferred ranges, only the second holds a scope line",
+        ["a.ts:1x60", "a.ts:2x40", "z.ts:10x5"],
+        ["y.ts:1-5", "z.ts:10-10"],
+        { kept: ["a.ts:1-1", "z.ts:10-10"], dropped: ["a.ts:2-2"], startable: true },
+      ],
+      [
+        "preferred lines are not counted twice against the cap",
+        ["a.ts:1x20", "z.ts:10x60", "z.ts:11x20"],
+        ["z.ts:10-10"],
+        { kept: ["a.ts:1-1", "z.ts:10-11"], dropped: [], startable: true },
+      ],
+      [
+        "preferred line that does not fit",
+        ["f.ts:1x0", "f.ts:2x105"],
+        ["f.ts:2-2"],
+        { kept: [], dropped: ["f.ts:1-2"], startable: false },
+      ],
+    ];
+    expect(cases.map(([name, rows, prefer]) => [name, planStrykerRun(lineList(rows), 100, prefer)])).toEqual(
+      cases.map(([name, , , expected]) => [name, expected]),
+    );
+  });
+
+  it("uncoveredPreferred: each table row", () => {
+    const cases: Array<[string, string[], string[], string[]]> = [
+      [
+        "partly, fully and not covered",
+        ["z.ts:10x5", "z.ts:11x5"],
+        ["z.ts:8-11", "y.ts:1-5", "z.ts:50-60", "z.ts:11-11"],
+        ["y.ts:1-5", "z.ts:50-60"],
+      ],
+      ["a zero-mutant line is still a scope line", ["f.ts:1x0"], ["f.ts:1-1"], []],
+      ["empty scope", [], ["g.ts:5-9"], ["g.ts:5-9"]],
+      ["nothing preferred", ["z.ts:10x5"], [], []],
+    ];
+    expect(cases.map(([name, rows, prefer]) => [name, uncoveredPreferred(lineList(rows), prefer)])).toEqual(
+      cases.map(([name, , , expected]) => [name, expected]),
+    );
+  });
+
+  it("preferNotCoveredFor: each table row", () => {
+    const cases: Array<[string, string[] | null, string[], string[] | null]> = [
+      ["unknown scope with prefer", null, ["y.ts:1-5"], null],
+      ["unknown scope without prefer", null, [], null],
+      ["no prefer", ["z.ts:10x5"], [], []],
+      ["one of two not covered", ["z.ts:10x5"], ["z.ts:10-10", "y.ts:1-5"], ["y.ts:1-5"]],
+      ["empty scope", [], ["g.ts:5-9"], ["g.ts:5-9"]],
+    ];
+    expect(
+      cases.map(([name, rows, prefer]) => [
+        name,
+        preferNotCoveredFor(rows === null ? null : lineList(rows), prefer),
+      ]),
+    ).toEqual(cases.map(([name, , , expected]) => [name, expected]));
+  });
+
+  it("planStrykerRun: a preferred range deeper than the cap reaches survives it", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "mutate-prefer-"));
+    try {
+      const sum = (name: string) =>
+        `export const ${name} = ${Array.from({ length: 70 }, () => "a").join(" + ")};`;
+      writeFileSync(path.join(cwd, "a.ts"), `${sum("first")}\n${sum("second")}\n`);
+      writeFileSync(
+        path.join(cwd, "z.ts"),
+        "export function small(a: number) {\n  return a > 1;\n}\n",
+      );
+      const span = (start: number, end: number) => ({ start: { line: start }, end: { line: end } });
+      const coverage: Parameters<typeof rangesFromCoverage>[0] = {
+        [path.join(cwd, "a.ts")]: {
+          statementMap: { "0": span(1, 1), "1": span(2, 2) },
+          s: { "0": 1, "1": 1 },
+        },
+        [path.join(cwd, "z.ts")]: {
+          statementMap: { "0": span(1, 3) },
+          s: { "0": 1 },
+        },
+      };
+      const ranges = rangesFromCoverage(coverage, cwd);
+      expect(ranges).toEqual(["a.ts:1-2", "z.ts:1-3"]);
+
+      const counted = await countMutantLines(ranges, cwd);
+      const [first, second] = counted;
+      expect(first.count).toBeLessThanOrEqual(100);
+      expect(second.count).toBeLessThanOrEqual(100);
+      expect(first.count + second.count).toBeGreaterThan(100);
+
+      expect({
+        without: planStrykerRun(counted, 100),
+        with: planStrykerRun(counted, 100, ["z.ts:1-3"]),
+      }).toEqual({
+        without: { kept: ["a.ts:1-1"], dropped: ["a.ts:2-2", "z.ts:1-3"], startable: true },
+        with: { kept: ["a.ts:1-1", "z.ts:1-3"], dropped: ["a.ts:2-2"], startable: true },
+      });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("test:mutate CLI: --prefer", () => {
+  const script = fileURLToPath(new URL("./mutate-diff.ts", import.meta.url));
+  const tsx = path.resolve("node_modules/.bin/tsx");
+  const usage =
+    "\nUsage: pnpm test:mutate [--base <ref>] [--mutate <file:start-end>[,...]] [--prefer <file:start-end>[,...]]\n";
+  const heavy = `export const total = ${Array.from({ length: 105 }, () => "a").join(" + ")};`;
+
+  function runCli(files: Record<string, string>, args: string[]) {
+    const cwd = mkdtempSync(path.join(tmpdir(), "mutate-cli-"));
+    try {
+      for (const [name, contents] of Object.entries(files)) writeFileSync(path.join(cwd, name), contents);
+      const result = spawnSync(tsx, [script, ...args], { cwd, encoding: "utf8" });
+      return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+
+  const truncated = (preferNotCovered: string[]) => ({
+    status: "truncated",
+    base: null,
+    scope: ["f.ts:1-2"],
+    dropped: ["f.ts:1-2"],
+    command: null,
+    elapsedMs: null,
+    mutants: 0,
+    score: null,
+    survivors: [],
+    exitCode: null,
+    stderrTail: null,
+    preferNotCovered,
+  });
+  const files = { "f.ts": `// comment\n${heavy}\n` };
+
+  it("test:mutate CLI: --prefer", () => {
+    const first = runCli(files, ["--mutate", "f.ts:1-2", "--prefer", "f.ts:2-2"]);
+    const second = runCli(files, ["--mutate", "f.ts:1-2", "--prefer", "f.ts:2-2,g.ts:701-701"]);
+    const noScope = runCli(
+      { "f.ts": "// only a comment\n" },
+      ["--mutate", "f.ts:1-1", "--prefer", "f.ts:1-1,g.ts:5-9"],
+    );
+    const noPrefer = runCli(files, ["--mutate", "f.ts:1-2"]);
+    const mixedPrefer = runCli({}, ["--mutate", "f.ts:1-2", "--prefer", "f.ts:2-2,bad"]);
+    const badPrefer = runCli({}, ["--prefer", "server/a.ts"]);
+    const badBoth = runCli({}, ["--mutate", "x", "--prefer", "y"]);
+    const emptyPrefer = runCli({}, ["--prefer", ""]);
+
+    expect({
+      first: [first.status, JSON.parse(first.stdout)],
+      second: [second.status, JSON.parse(second.stdout)],
+      noScope: [noScope.status, JSON.parse(noScope.stdout)],
+      noPrefer: [noPrefer.status, JSON.parse(noPrefer.stdout)],
+      mixedPrefer: [mixedPrefer.status, mixedPrefer.stdout, mixedPrefer.stderr],
+      badPrefer: [badPrefer.status, badPrefer.stdout, badPrefer.stderr],
+      badBoth: [badBoth.status, badBoth.stdout, badBoth.stderr],
+      emptyPrefer: [emptyPrefer.status, emptyPrefer.stdout, emptyPrefer.stderr],
+    }).toEqual({
+      first: [0, truncated([])],
+      second: [0, truncated(["g.ts:701-701"])],
+      noScope: [
+        0,
+        {
+          status: "no-scope",
+          base: null,
+          scope: ["f.ts:1-1"],
+          dropped: [],
+          command: null,
+          elapsedMs: null,
+          mutants: 0,
+          score: null,
+          survivors: [],
+          exitCode: null,
+          stderrTail: null,
+          preferNotCovered: ["g.ts:5-9"],
+        },
+      ],
+      noPrefer: [0, { ...truncated([]), dropped: ["f.ts:2-2"] }],
+      mixedPrefer: [1, "", `--prefer takes comma-separated file:start-end ranges.${usage}`],
+      badPrefer: [1, "", `--prefer takes comma-separated file:start-end ranges.${usage}`],
+      badBoth: [1, "", `--mutate takes comma-separated file:start-end ranges.${usage}`],
+      emptyPrefer: [1, "", `--prefer takes comma-separated file:start-end ranges.${usage}`],
+    });
+  });
+});
+
+describe("main: every emit takes preferNotCovered from preferNotCoveredFor", () => {
+  it("main: every emit takes preferNotCovered from preferNotCoveredFor", () => {
+    const source = readFileSync(fileURLToPath(new URL("./mutate-diff.ts", import.meta.url)), "utf8");
+    const main = source.slice(source.indexOf("async function main"));
+    const calls: string[] = [];
+    for (const match of main.matchAll(/emit\(\s*summarize\(/g)) {
+      const open = match.index! + "emit".length;
+      let depth = 0;
+      let end = open;
+      for (let i = open; i < main.length; i++) {
+        if (main[i] === "(") depth++;
+        if (main[i] === ")" && --depth === 0) {
+          end = i;
+          break;
+        }
+      }
+      calls.push(main.slice(open, end + 1));
+    }
+    const withHelper = calls.filter((call) => call.includes("preferNotCovered: preferNotCoveredFor("));
+    expect(withHelper).toEqual(calls);
+    expect(calls).toHaveLength(4);
+    expect(calls[0]).toContain("preferNotCoveredFor(null, prefer)");
   });
 });

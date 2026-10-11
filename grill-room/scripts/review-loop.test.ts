@@ -21,8 +21,8 @@ const MUTATE_TEXT = (branch: string) =>
     `You run one mutation-testing command for PR branch ${branch} and return its summary. You change no file, commit nothing and never use port 8082.`,
     `1. Run \`git fetch origin main ${branch}\`, then \`git checkout --detach origin/${branch}\`.`,
     "2. Run `cd grill-room && pnpm install --frozen-lockfile --prefer-offline`.",
-    "3. From grill-room/, run `pnpm test:mutate --base origin/main` with the Bash tool's run_in_background, and wait for its completion notice. Never poll with sleep: the run can take longer than a foreground Bash call allows.",
-    "4. Read grill-room/.scratch/mutation/summary.json and return its status, mutants, score, survivors, elapsedMs and dropped unchanged, with blocked null.",
+    `3. From grill-room/, read the PR body with \`gh pr view ${branch} --json body -q .body\`. In its \`## Evidence\` section, collect the source ranges each entry says its test covers. Write each as a range relative to grill-room/, like \`server/a.ts:10-20\`: drop a leading \`grill-room/\`, write a single line \`:N\` as \`:N-N\`, give a bare \`:start-end\` the file named earlier in the same entry, split \`path:a-b,c-d\` into \`path:a-b\` and \`path:c-d\` (each further \`,c-d\` or \`,N\` takes the file before it, and a single \`N\` after a comma becomes \`N-N\`), and resolve a bare file name to the one tracked file of that name under grill-room/ (\`git ls-files\`). Skip a range you cannot resolve to a file; a bare file name that matches more than one tracked file resolves to nothing and is skipped. Run \`pnpm test:mutate --base origin/main\`, adding \`--prefer\` with the ranges joined by commas with no spaces when there are any, with the Bash tool's run_in_background, and wait for its completion notice. Never poll with sleep: the run can take longer than a foreground Bash call allows.`,
+    "4. Read grill-room/.scratch/mutation/summary.json and return its status, mutants, score, survivors, elapsedMs, dropped and preferNotCovered unchanged, with blocked null.",
     "If any step fails, return blocked with the exact command and its error, status runner-failed, and null or empty values for the rest.",
   ].join("\n");
 
@@ -39,6 +39,7 @@ const OK_MUTATION = {
   elapsedMs: 5000,
   dropped: [],
   blocked: null,
+  preferNotCovered: [],
 };
 const OK_MUTATION_TEXT = (round: number) =>
   `Mutation run (round ${round}): ok, 0 mutants, score n/a, 5 s, 0 survivors.`;
@@ -121,7 +122,12 @@ describe("mutation step", () => {
       "elapsedMs",
       "dropped",
       "blocked",
+      "preferNotCovered",
     ]);
+    expect(c.opts.schema.properties.preferNotCovered).toEqual({
+      type: ["array", "null"],
+      items: { type: "string" },
+    });
     expect(c.opts.schema.properties.status.enum).toEqual([
       "ok",
       "truncated",
@@ -219,6 +225,56 @@ describe("mutation step", () => {
       expect(call(R1).prompt).toBe(`M:${text}`);
     });
   }
+
+  describe("mutation text: preferred ranges not covered", () => {
+    const PREFERRED = "Preferred ranges not covered by the scope: y.ts:1-5, z.ts:50-60";
+    const head = "Mutation run (round 1): ok, 0 mutants, score n/a, 5 s, 0 survivors.";
+    const { preferNotCovered: _omitted, ...withoutField } = OK_MUTATION;
+    const preferRows: Array<[string, Record<string, unknown>, string]> = [
+      [
+        "ok with two not-covered ranges",
+        { ...OK_MUTATION, preferNotCovered: ["y.ts:1-5", "z.ts:50-60"] },
+        `${head}\n${PREFERRED}`,
+      ],
+      [
+        "truncated after survivors and dropped",
+        {
+          status: "truncated",
+          mutants: 4,
+          score: 75,
+          elapsedMs: 61000,
+          survivors: [{ file: "server/a.ts", line: 41, mutator: "EqualityOperator", status: "Survived" }],
+          dropped: ["server/z.ts:40-90"],
+          blocked: null,
+          preferNotCovered: ["y.ts:1-5", "z.ts:50-60"],
+        },
+        [
+          "Mutation run (round 1): truncated, 4 mutants, score 75.0, 61 s, 1 survivor.",
+          "- server/a.ts:41 EqualityOperator (Survived)",
+          "Dropped over the cap: server/z.ts:40-90",
+          PREFERRED,
+        ].join("\n"),
+      ],
+      ["empty array", { ...OK_MUTATION, preferNotCovered: [] }, head],
+      ["null", { ...OK_MUTATION, preferNotCovered: null }, head],
+      ["undefined", withoutField, head],
+      [
+        "overrun with a non-empty array",
+        { ...OK_MUTATION, status: "overrun", elapsedMs: 601234, preferNotCovered: ["y.ts:1-5"] },
+        "Mutation run (round 1): overrun after 601 s. The gate is skipped for this round; say so in the verdict.",
+      ],
+    ];
+    for (const [name, mutation, text] of preferRows) {
+      it(name, async () => {
+        const { call } = await run({
+          reviewers: ["M:{{mutation}}"],
+          mutation,
+          canned: { [R1]: verdict("approved") },
+        });
+        expect(call(R1).prompt).toBe(`M:${text}`);
+      });
+    }
+  });
 
   it("empty blocked counts as null", async () => {
     const { call } = await run({

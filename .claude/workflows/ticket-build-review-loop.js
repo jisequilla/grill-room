@@ -94,16 +94,17 @@ const MUTATION = {
     elapsedMs: { type: ['integer', 'null'] },
     dropped: { type: 'array', items: { type: 'string' } },
     blocked: { type: ['string', 'null'] },
+    preferNotCovered: { type: ['array', 'null'], items: { type: 'string' } },
   },
-  required: ['status', 'mutants', 'score', 'survivors', 'elapsedMs', 'dropped', 'blocked'],
+  required: ['status', 'mutants', 'score', 'survivors', 'elapsedMs', 'dropped', 'blocked', 'preferNotCovered'],
 }
 
 const MUTATE = [
   'You run one mutation-testing command for PR branch {{branch}} and return its summary. You change no file, commit nothing and never use port 8082.',
   '1. Run `git fetch origin main {{branch}}`, then `git checkout --detach origin/{{branch}}`.',
   '2. Run `cd grill-room && pnpm install --frozen-lockfile --prefer-offline`.',
-  "3. From grill-room/, run `pnpm test:mutate --base origin/main` with the Bash tool's run_in_background, and wait for its completion notice. Never poll with sleep: the run can take longer than a foreground Bash call allows.",
-  '4. Read grill-room/.scratch/mutation/summary.json and return its status, mutants, score, survivors, elapsedMs and dropped unchanged, with blocked null.',
+  "3. From grill-room/, read the PR body with `gh pr view {{branch}} --json body -q .body`. In its `## Evidence` section, collect the source ranges each entry says its test covers. Write each as a range relative to grill-room/, like `server/a.ts:10-20`: drop a leading `grill-room/`, write a single line `:N` as `:N-N`, give a bare `:start-end` the file named earlier in the same entry, split `path:a-b,c-d` into `path:a-b` and `path:c-d` (each further `,c-d` or `,N` takes the file before it, and a single `N` after a comma becomes `N-N`), and resolve a bare file name to the one tracked file of that name under grill-room/ (`git ls-files`). Skip a range you cannot resolve to a file; a bare file name that matches more than one tracked file resolves to nothing and is skipped. Run `pnpm test:mutate --base origin/main`, adding `--prefer` with the ranges joined by commas with no spaces when there are any, with the Bash tool's run_in_background, and wait for its completion notice. Never poll with sleep: the run can take longer than a foreground Bash call allows.",
+  '4. Read grill-room/.scratch/mutation/summary.json and return its status, mutants, score, survivors, elapsedMs, dropped and preferNotCovered unchanged, with blocked null.',
   'If any step fails, return blocked with the exact command and its error, status runner-failed, and null or empty values for the rest.',
 ].join('\n')
 
@@ -137,6 +138,7 @@ function mutationText(round, m) {
     `${head} ${m.status}, ${mutants}, score ${score}, ${seconds}, ${plural(survivors.length, 'survivor')}.`,
     ...survivors.map((x) => `- ${x.file}:${x.line} ${x.mutator} (${x.status})`),
     ...(m.dropped.length ? [`Dropped over the cap: ${m.dropped.join(', ')}`] : []),
+    ...(m.preferNotCovered?.length ? [`Preferred ranges not covered by the scope: ${m.preferNotCovered.join(', ')}`] : []),
   ].join('\n')
 }
 
