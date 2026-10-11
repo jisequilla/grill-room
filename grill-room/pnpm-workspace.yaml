@@ -2,6 +2,9 @@ allowBuilds:
   tesseract.js: true
   node-pty: true
   esbuild: true
+  "@sentry/cli": false
+  "@vgpu/adapter-node": false
+  webgpu: false
 
 overrides:
   "@tiptap/starter-kit": "3.28.0"
