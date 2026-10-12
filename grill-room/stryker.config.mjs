@@ -14,6 +14,7 @@ export default {
   plugins: ["@stryker-mutator/vitest-runner"],
   testRunner: "vitest",
   coverageAnalysis: "perTest",
+  ignoreStatic: true,
   concurrency: 2,
   // Matches vitest's 30 s hookTimeout, which a loaded machine has needed.
   timeoutMS: 30_000,

@@ -19,6 +19,8 @@ Every number below is **measured** unless it is marked *inferred*. The commands 
 3. Leave out of the scope the `app/**/*.tsx` files that no vitest test reaches, and `app/i18n/**`. A component with a `*.test.tsx` sibling stays in: the repository has 15 such vitest files that render their components, for example `turn-attempt-log.test.tsx`. The rule this spike can support is narrower: a `.tsx` file with no `*.test.tsx` sibling and no test importing it. `app/components/output/tickets-section.tsx` is such a file. In the full run all 14 of its mutants are NoCoverage, so no vitest test executes it.
 4. Raise `CAP` from 100 to 500 mutants and keep the 600 s wall clock.
 
+Adopted in gr-4y9. The owner ruled that `--testFiles` applies only when every changed source file has its own changed test (otherwise Stryker runs related tests, as before), and that a PR whose source changes are all filtered out gets `no-scope`.
+
 **Measured effect:**
 
 | Diff | Today | With the four changes |
