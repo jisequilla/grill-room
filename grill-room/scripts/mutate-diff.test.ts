@@ -1328,7 +1328,7 @@ describe("main: the Stryker command comes only from strykerArgs", () => {
     const source = readFileSync(fileURLToPath(new URL("./mutate-diff.ts", import.meta.url)), "utf8");
     const main = source.slice(source.indexOf("async function main"));
     expect({
-      declaration: main.split("let testFiles: string[] = [];").length - 1,
+      declaration: main.match(/let testFiles: string\[\] = [^;]*\[\][^;]*;/g)?.length ?? 0,
       assignments: main.split("testFiles = scope.testFiles;").length - 1,
       calls: main.split("strykerArgs(").length - 1,
       call: main.split("strykerArgs(kept, testFiles)").length - 1,
