@@ -441,6 +441,22 @@ describe("accept-supersession: the lasting links", () => {
     expect(await listLooseEnds.run({ sessionId: session.id })).toEqual([]);
   });
 
+  it("K4: accepting a replacement clears the proposal's kind", async () => {
+    await aPendingReplacement();
+    await getDb()
+      .update(schema.decisions)
+      .set({ proposalKind: "replacement" })
+      .where(eq(schema.decisions.id, "d-storage"));
+
+    await acceptSupersession.run({ decisionId: "d-storage" });
+
+    expect(await readDecision("d-storage")).toMatchObject({
+      replacedById: "d-location",
+      supersededById: null,
+      proposalKind: null,
+    });
+  });
+
   it("on a loose end, links it to the decision whose answer settled it", async () => {
     await aPendingSupersession();
 

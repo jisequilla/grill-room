@@ -1,5 +1,7 @@
 import type { MigrationEntry } from "@agent-native/core/db";
 
+import { SETTLING_ANSWER_KINDS } from "../tree.js";
+
 /** Bookkeeping table this app owns; never shared with framework migrations. */
 export const MIGRATIONS_TABLE = "gr_migrations";
 
@@ -640,5 +642,53 @@ ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS consequences TEXT`,
     sql: `ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS consumes_json TEXT;
 ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS produces_json TEXT;
 ALTER TABLE gr_tickets ADD COLUMN IF NOT EXISTS unproduced_json TEXT`,
+  },
+  {
+    version: 82,
+    name: "decisions-proposal-kind-dismissals",
+    // A decision may hold at most one pending Proposal, and the kind column
+    // can name only one. A decision holding more stops the migration before
+    // anything is added, printing the statements that clear each Proposal so
+    // the owner chooses which to keep. Pending is what the actions test: a
+    // non-empty supersession or deferral, and any non-null restatement.
+    run: async (exec) => {
+      const { rows } = await exec.execute(
+        `SELECT id,
+          (superseded_by_id IS NOT NULL AND superseded_by_id <> '') AS supersession,
+          (deferral_reason IS NOT NULL AND deferral_reason <> '') AS deferral,
+          (restatement_text IS NOT NULL) AS restatement
+        FROM gr_decisions
+        WHERE (CASE WHEN superseded_by_id IS NOT NULL AND superseded_by_id <> '' THEN 1 ELSE 0 END)
+          + (CASE WHEN deferral_reason IS NOT NULL AND deferral_reason <> '' THEN 1 ELSE 0 END)
+          + (CASE WHEN restatement_text IS NOT NULL THEN 1 ELSE 0 END) > 1
+        ORDER BY id`,
+      );
+      if (rows.length === 0) return;
+      const literal = (id: string) => `'${id.replace(/'/g, "''")}'`;
+      const statements = rows.flatMap((row) => {
+        const where = `WHERE id = ${literal(String(row.id))};`;
+        return [
+          row.supersession
+            ? `UPDATE gr_decisions SET superseded_by_id = NULL, supersession_answer = NULL, supersession_reason = NULL ${where}`
+            : null,
+          row.deferral ? `UPDATE gr_decisions SET deferral_reason = NULL ${where}` : null,
+          row.restatement
+            ? `UPDATE gr_decisions SET restatement_text = NULL, restatement_notes = NULL, restatement_reason = NULL ${where}`
+            : null,
+        ].filter((statement): statement is string => statement != null);
+      });
+      throw new Error(
+        [
+          `Decisions hold more than one pending proposal: ${rows.map((row) => String(row.id)).join(", ")}.`,
+          ...statements,
+          "Run enough of these to leave at most one proposal on each decision, against the app's database, then restart.",
+        ].join("\n"),
+      );
+    },
+    sql: `ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS proposal_kind TEXT;
+ALTER TABLE gr_decisions ADD COLUMN IF NOT EXISTS dismissed_proposals_json TEXT;
+UPDATE gr_decisions SET proposal_kind = 'restatement' WHERE restatement_text IS NOT NULL;
+UPDATE gr_decisions SET proposal_kind = 'deferral' WHERE deferral_reason IS NOT NULL AND deferral_reason <> '';
+UPDATE gr_decisions SET proposal_kind = CASE WHEN answer_kind IN (${SETTLING_ANSWER_KINDS.map((kind) => `'${kind}'`).join(", ")}) THEN 'replacement' ELSE 'answered-by' END WHERE superseded_by_id IS NOT NULL AND superseded_by_id <> ''`,
   },
 ];

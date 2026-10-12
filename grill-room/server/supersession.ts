@@ -25,7 +25,8 @@
  * keeps its answer, its kind and its place in the tree until the user accepts;
  * the proposal columns (`supersededById`, `supersessionAnswer`,
  * `supersessionReason`, `deferralReason`, `restatementText`,
- * `restatementNotes`, `restatementReason`) are the whole of what this writes. An interviewer that
+ * `restatementNotes`, `restatementReason`) and the Proposal's kind
+ * (`proposalKind`) are the whole of what this writes. An interviewer that
  * is wrong here costs one dismissal, not a decision recorded in the user's
  * name. A pending proposal never blocks confirmation.
  *
@@ -628,6 +629,7 @@ async function scan(
         supersededById: answeredById,
         supersessionAnswer: entry.answer,
         supersessionReason: entry.reason,
+        proposalKind: "answered-by",
         updatedAt: now,
       })
       .where(eq(schema.decisions.id, looseEndId));
@@ -644,6 +646,7 @@ async function scan(
         supersededById: byId,
         supersessionAnswer: null,
         supersessionReason: entry.reason,
+        proposalKind: "replacement",
         updatedAt: now,
       })
       .where(eq(schema.decisions.id, replacedId));
@@ -655,7 +658,11 @@ async function scan(
 
     await db
       .update(schema.decisions)
-      .set({ deferralReason: entry.reason, updatedAt: now })
+      .set({
+        deferralReason: entry.reason,
+        proposalKind: "deferral",
+        updatedAt: now,
+      })
       .where(eq(schema.decisions.id, deferredId));
   }
 
@@ -669,6 +676,7 @@ async function scan(
         restatementText: entry.statement,
         restatementNotes: entry.operatorNotes,
         restatementReason: entry.reason,
+        proposalKind: "restatement",
         updatedAt: now,
       })
       .where(eq(schema.decisions.id, restatedId));

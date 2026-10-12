@@ -4,7 +4,11 @@ import { z } from "zod";
 
 import { settle } from "../server/answer-change.js";
 import { getDb, schema } from "../server/db/index.js";
-import { describeDecisions, isSettlingAnswerKind } from "../server/tree.js";
+import {
+  CLEARED_SUPERSESSION,
+  describeDecisions,
+  isSettlingAnswerKind,
+} from "../server/tree.js";
 import { failIfTurnInProgress } from "../server/turn.js";
 
 export default defineAction({
@@ -53,9 +57,7 @@ export default defineAction({
         .set({
           replacedById: row.supersededById,
           replacedReason: row.supersessionReason,
-          supersededById: null,
-          supersessionAnswer: null,
-          supersessionReason: null,
+          ...CLEARED_SUPERSESSION,
           updatedAt: now,
         })
         .where(eq(schema.decisions.id, decisionId))

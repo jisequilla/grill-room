@@ -86,6 +86,18 @@ describe("dismiss-deferral", () => {
     expect(await listLooseEnds.run({ sessionId: session.id })).toEqual([]);
   });
 
+  it("K2: clears the proposal's kind", async () => {
+    await aSettledOwnAnswer("It reads as waiting on launch.");
+    await getDb()
+      .update(schema.decisions)
+      .set({ proposalKind: "deferral" })
+      .where(eq(schema.decisions.id, "d-hold"));
+
+    await dismissDeferral.run({ decisionId: "d-hold" });
+
+    expect(await readDecision("d-hold")).toMatchObject({ deferralReason: null, proposalKind: null });
+  });
+
   it("clears the deferral only, leaving a supersession proposal on the same decision", async () => {
     const session = await aSettledOwnAnswer("It reads as waiting on launch.");
     const now = new Date().toISOString();

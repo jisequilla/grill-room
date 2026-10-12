@@ -231,6 +231,20 @@ export const sessions = table("gr_sessions", {
  * derived from `answerKind` and `dependsOnJson`, never stored: `settledAt` and
  * `reopenedAt` are the raw facts that derivation compares, not a cached state.
  */
+/**
+ * The kind of a decision's pending Proposal: a later decision answers this
+ * loose end, a later decision replaced this settled one, this own answer is
+ * really a deferral, or it holds more than the decision and should be
+ * restated. See `server/proposal.ts`.
+ */
+export const DECISION_PROPOSAL_KINDS = [
+  "answered-by",
+  "replacement",
+  "deferral",
+  "restatement",
+] as const;
+export type DecisionProposalKind = (typeof DECISION_PROPOSAL_KINDS)[number];
+
 export const decisions = table(
   "gr_decisions",
   {
@@ -334,6 +348,21 @@ export const decisions = table(
     restatementNotes: text("restatement_notes"),
     /** The interviewer's reason for the restatement: what it removed or fixed. */
     restatementReason: text("restatement_reason"),
+    /**
+     * The kind of the Proposal pending on this decision, or null when none is.
+     * Which payload columns hold it follows from the kind: the supersession
+     * columns for `answered-by` and `replacement`, `deferralReason` for
+     * `deferral`, the restatement columns for `restatement`. A decision holds
+     * at most one. Cleared with the payload, by the same writes.
+     */
+    proposalKind: text("proposal_kind", { enum: DECISION_PROPOSAL_KINDS }),
+    /**
+     * JSON array of the Proposals the owner dismissed for the answer the
+     * decision holds now, each `{ kind, targetId?, reason, dismissedAt,
+     * text? }`, or null when there are none. A matching Proposal is not
+     * offered again. Any write that changes or clears the answer forgets them.
+     */
+    dismissedProposalsJson: text("dismissed_proposals_json"),
     /**
      * The settled decision that replaced this one, once the user accepted the
      * replacement. The answer stays as it was; this is the lasting link that

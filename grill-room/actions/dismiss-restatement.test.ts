@@ -99,4 +99,12 @@ describe("dismiss-restatement", () => {
     ).toEqual([]);
     expect(await listLooseEnds.run({ sessionId: session.id })).toEqual([]);
   });
+
+  it("K5: clears the proposal's kind", async () => {
+    await aSettledOwnAnswer({ proposalKind: "restatement" });
+
+    await dismissRestatement.run({ decisionId: "d-provider" });
+
+    expect(await readDecision("d-provider")).toMatchObject({ restatementText: null, proposalKind: null });
+  });
 });

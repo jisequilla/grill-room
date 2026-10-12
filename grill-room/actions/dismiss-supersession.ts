@@ -3,7 +3,7 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { describeDecisions } from "../server/tree.js";
+import { CLEARED_SUPERSESSION, describeDecisions } from "../server/tree.js";
 
 export default defineAction({
   description:
@@ -34,9 +34,7 @@ export default defineAction({
     const [updated] = await db
       .update(schema.decisions)
       .set({
-        supersededById: null,
-        supersessionAnswer: null,
-        supersessionReason: null,
+        ...CLEARED_SUPERSESSION,
         updatedAt: now,
       })
       .where(eq(schema.decisions.id, decisionId))

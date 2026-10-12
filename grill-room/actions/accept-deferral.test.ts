@@ -6,7 +6,12 @@ import {
   scriptInterviewer,
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
-import { CLEARED_PROPOSAL, CLEARED_SUPERSESSION } from "../server/tree.js";
+import {
+  CLEARED_PENDING_PROPOSAL,
+  CLEARED_PROPOSAL,
+  CLEARED_RESTATEMENT,
+  CLEARED_SUPERSESSION,
+} from "../server/tree.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { MAX_TURN_RETRIES } from "../server/turn.js";
 import acceptDeferral from "./accept-deferral.js";
@@ -587,11 +592,23 @@ describe("accept-deferral: the answer change rule", () => {
 });
 
 describe("the proposal a changed answer clears", () => {
-  it("CLEARED_PROPOSAL clears the deferral and the restatement beside the supersession; CLEARED_SUPERSESSION does not", () => {
+  it("CLEARED_PROPOSAL clears the deferral, the restatement, the kind and the dismissals beside the supersession; CLEARED_SUPERSESSION does not", () => {
     expect(CLEARED_PROPOSAL).toEqual({
       supersededById: null,
       supersessionAnswer: null,
       supersessionReason: null,
+      proposalKind: null,
+      deferralReason: null,
+      restatementText: null,
+      restatementNotes: null,
+      restatementReason: null,
+      dismissedProposalsJson: null,
+    });
+    expect(CLEARED_PENDING_PROPOSAL).toEqual({
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+      proposalKind: null,
       deferralReason: null,
       restatementText: null,
       restatementNotes: null,
@@ -601,6 +618,13 @@ describe("the proposal a changed answer clears", () => {
       supersededById: null,
       supersessionAnswer: null,
       supersessionReason: null,
+      proposalKind: null,
+    });
+    expect(CLEARED_RESTATEMENT).toEqual({
+      restatementText: null,
+      restatementNotes: null,
+      restatementReason: null,
+      proposalKind: null,
     });
   });
 });

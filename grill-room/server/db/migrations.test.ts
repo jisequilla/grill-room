@@ -685,3 +685,115 @@ describe("sessions-last-export-folders migration", () => {
     ]);
   });
 });
+
+describe("decisions-proposal-kind-dismissals migration", () => {
+  beforeEach(dropSchema);
+
+  // By version rather than by name, so these still run with the entry reverted.
+  const VERSION = 82;
+
+  async function atPreviousVersion(): Promise<string> {
+    const before = appMigrations.filter((entry) => entry.version < VERSION);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+    const sessionId = randomUUID();
+    const now = new Date().toISOString();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [sessionId, "Grill Room", "An idea.", now, now],
+    });
+    return sessionId;
+  }
+
+  async function insertDecision(
+    sessionId: string,
+    id: string,
+    columns: Partial<
+      Record<"answer_kind" | "superseded_by_id" | "deferral_reason" | "restatement_text", string>
+    >,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    const names = Object.keys(columns);
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_decisions (id, session_id, question_title, created_at, updated_at${names.map((name) => `, ${name}`).join("")})
+            VALUES (?, ?, ?, ?, ?${names.map(() => ", ?").join("")})`,
+      args: [id, sessionId, `Question ${id}`, now, now, ...Object.values(columns)],
+    });
+  }
+
+  async function kinds(): Promise<Record<string, unknown>> {
+    const { rows } = await getDbExec().execute(
+      `SELECT * FROM gr_decisions ORDER BY id`,
+    );
+    return Object.fromEntries(
+      rows.map((row) => [String(row.id), { kind: row.proposal_kind, dismissed: row.dismissed_proposals_json }]),
+    );
+  }
+
+  it("M1: backfills each pending proposal's kind, null where none is pending, with no dismissals", async () => {
+    const sessionId = await atPreviousVersion();
+    await insertDecision(sessionId, "a-later", { answer_kind: "own-answer" });
+    await insertDecision(sessionId, "b-loose", { answer_kind: "unknown", superseded_by_id: "a-later" });
+    await insertDecision(sessionId, "c-settled", { answer_kind: "own-answer", superseded_by_id: "a-later" });
+    await insertDecision(sessionId, "d-deferral", { answer_kind: "own-answer", deferral_reason: "x" });
+    await insertDecision(sessionId, "e-restated", { answer_kind: "own-answer", restatement_text: "Clean." });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    expect(await kinds()).toEqual({
+      "a-later": { kind: null, dismissed: null },
+      "b-loose": { kind: "answered-by", dismissed: null },
+      "c-settled": { kind: "replacement", dismissed: null },
+      "d-deferral": { kind: "deferral", dismissed: null },
+      "e-restated": { kind: "restatement", dismissed: null },
+    });
+  });
+
+  it("M2: a kept repo decision's supersession is a replacement, an empty deferral or supersession is not pending, an empty restatement is", async () => {
+    const sessionId = await atPreviousVersion();
+    // `superseded_by_id` references a decision, so the empty id must exist.
+    await insertDecision(sessionId, "", { answer_kind: "own-answer" });
+    await insertDecision(sessionId, "a-later", { answer_kind: "own-answer" });
+    await insertDecision(sessionId, "b-repo", { answer_kind: "repo-established", superseded_by_id: "a-later" });
+    await insertDecision(sessionId, "c-empty-deferral", { answer_kind: "own-answer", deferral_reason: "" });
+    await insertDecision(sessionId, "d-empty-supersession", { answer_kind: "unknown", superseded_by_id: "" });
+    await insertDecision(sessionId, "e-empty-restatement", { answer_kind: "own-answer", restatement_text: "" });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    expect(await kinds()).toMatchObject({
+      "b-repo": { kind: "replacement" },
+      "c-empty-deferral": { kind: null },
+      "d-empty-supersession": { kind: null },
+      "e-empty-restatement": { kind: "restatement" },
+    });
+  });
+
+  it("M3: stops on decisions holding two proposals, naming them in id order with the statements that clear each, and adds nothing", async () => {
+    const sessionId = await atPreviousVersion();
+    await insertDecision(sessionId, "a-later", { answer_kind: "own-answer" });
+    await insertDecision(sessionId, "d2", { answer_kind: "own-answer", deferral_reason: "x", restatement_text: "Clean." });
+    await insertDecision(sessionId, "d1", { answer_kind: "own-answer", superseded_by_id: "a-later", deferral_reason: "y" });
+
+    const error = await applyMigrations(appMigrations, MIGRATIONS_TABLE).then(
+      () => null,
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      [
+        "Decisions hold more than one pending proposal: d1, d2.",
+        "UPDATE gr_decisions SET superseded_by_id = NULL, supersession_answer = NULL, supersession_reason = NULL WHERE id = 'd1';",
+        "UPDATE gr_decisions SET deferral_reason = NULL WHERE id = 'd1';",
+        "UPDATE gr_decisions SET deferral_reason = NULL WHERE id = 'd2';",
+        "UPDATE gr_decisions SET restatement_text = NULL, restatement_notes = NULL, restatement_reason = NULL WHERE id = 'd2';",
+        "Run enough of these to leave at most one proposal on each decision, against the app's database, then restart.",
+      ].join("\n"),
+    );
+
+    const { rows } = await getDbExec().execute(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'gr_decisions' AND column_name IN ('proposal_kind', 'dismissed_proposals_json')`,
+    );
+    expect(rows).toEqual([]);
+  });
+});
