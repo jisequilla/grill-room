@@ -763,6 +763,30 @@ describe("scopeFor", () => {
           testFiles: ["server/foo.bar.test.ts"],
         },
       },
+      {
+        name: "S12",
+        files: { "server/a.ts": "export const a = 1 + 2;\n// gone\n", "server/a.test.ts": "// t\n" },
+        change: { "server/a.ts": "export const a = 1 + 2;\n", "server/a.test.ts": "// t\n// more\n" },
+        expected: { kind: "coverage", testFiles: ["server/a.test.ts"] },
+      },
+      {
+        name: "S13",
+        files: {
+          "server/a.ts": "export const a = 1;\n",
+          "server/a.test.ts": "// t\n",
+          "server/x.test.ts": "// t\n",
+        },
+        change: {
+          "server/a.ts": mutable("a"),
+          "server/a.test.ts": "// t\n// more\n",
+          "server/x.test.ts": "// t\n// more\n",
+        },
+        expected: {
+          kind: "ranges",
+          ranges: ["server/a.ts:1-1"],
+          testFiles: ["server/a.test.ts", "server/x.test.ts"],
+        },
+      },
     ];
     const actual = rows.map((row) => {
       const root = repos.create({ files: row.files });
@@ -793,7 +817,7 @@ describe("scopeFor", () => {
       const onDiff = runStubbedCli(["--base", base], root, env);
       const onDiffLog = readFileSync(log, "utf8").trim().split("\n");
       rmSync(log);
-      const mutated = runStubbedCli(["--mutate", "server/a.ts:1-1"], root, env);
+      const mutated = runStubbedCli(["--mutate", "server/a.ts:1-1", "--base", base], root, env);
       const mutatedLog = readFileSync(log, "utf8").trim().split("\n");
 
       expect({
@@ -855,8 +879,9 @@ describe("inMutationScope", () => {
   });
 
   it("inMutationScope: a text that only contains the name is not a reference (8a-8c)", () => {
-    const texts = ["const foobar = 1;", "barfoo.x", "obj.foo.y"];
+    const texts = ["const foobar = 1;", "barfoo.x", "obj.foo.y", '"./foobar"'];
     expect(texts.map((text) => inMutationScope(foo, entry("app/a.test.tsx", text)))).toEqual([
+      false,
       false,
       false,
       false,
@@ -904,15 +929,26 @@ describe("loadTestIndex", () => {
     const l4 = repos.create({ files: { "grill-room/a.test.ts": "// a\n" } });
     const other = repos.create({ files: { "z.test.ts": "// z\n" } });
 
-    const previous = process.env.GIT_DIR;
-    process.env.GIT_DIR = path.join(other, ".git");
+    const otherGit = {
+      GIT_DIR: path.join(other, ".git"),
+      GIT_WORK_TREE: other,
+      GIT_INDEX_FILE: path.join(other, ".git", "index"),
+    };
+    const previous = Object.fromEntries(Object.keys(otherGit).map((name) => [name, process.env[name]]));
+    Object.assign(process.env, otherGit);
     let l5: TestIndex;
+    let l5Subfolder: TestIndex;
     try {
       l5 = loadTestIndex(l1);
+      l5Subfolder = loadTestIndex(path.join(l4, "grill-room"));
     } finally {
-      if (previous === undefined) delete process.env.GIT_DIR;
-      else process.env.GIT_DIR = previous;
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
     }
+    const longName = `${"d".repeat(120)}/${"e".repeat(120)}/${"f".repeat(60)}.test.ts`;
+    const l6 = repos.create({ files: { [longName]: "// long\n" } });
 
     expect({
       L1: paths(loadTestIndex(l1)),
@@ -920,6 +956,8 @@ describe("loadTestIndex", () => {
       L3: paths(loadTestIndex(l3)),
       L4: paths(loadTestIndex(path.join(l4, "grill-room"))),
       L5: paths(l5),
+      L5Subfolder: paths(l5Subfolder),
+      L6: paths(loadTestIndex(l6)),
       text: loadTestIndex(l1).find((entry) => entry.path === "a.test.ts")?.text,
     }).toEqual({
       L1: ["a.test.ts", "b.spec.tsx"],
@@ -927,6 +965,8 @@ describe("loadTestIndex", () => {
       L3: [],
       L4: ["a.test.ts"],
       L5: ["a.test.ts", "b.spec.tsx"],
+      L5Subfolder: ["a.test.ts"],
+      L6: [longName],
       text: "// a\n",
     });
   });
