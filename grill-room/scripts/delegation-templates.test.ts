@@ -1,13 +1,4 @@
-import { execFileSync } from "node:child_process";
-import {
-  chmodSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { repoPath } from "../test/repo-root.js";
@@ -30,29 +21,30 @@ const REVIEWER = readFileSync(
 const readTemplate = (path: string): string[] =>
   readFileSync(repoPath(path), "utf8").split("\n");
 
-const MARKER = "<the Evidence entry's test command>";
+const MARKER = "<the Evidence entry test command>";
 
-const REVERT_BLOCK = [
-  "git fetch origin",
-  "P=$(mktemp)",
-  "git diff --no-renames --name-only origin/main...HEAD | grep -v -E '\\.(test|spec)\\.[cm]?[jt]sx?$|\\.snap$|(^|/)(e2e|test|__snapshots__)/' | xargs -r git diff --no-renames --binary origin/main...HEAD -- > \"$P\"",
-  'if [ -s "$P" ]; then',
-  '  if git apply -R "$P"; then',
-  "    " + MARKER,
-  '    git apply "$P"',
-  "  else",
-  '    echo "git apply -R failed"',
-  "  fi",
-  "else",
-  '  echo "test-only PR: no source to revert"',
-  "fi",
-].join("\n");
+const REVERT_BLOCK = `scripts/revert-check.sh '${MARKER}'`;
 
 const REVERT_PARAGRAPH =
-  "The block reads commits, not the working tree, so commit the change on the worktree branch before running it. Substitute your own test command for the marker line and run the whole block as one command: shell state, `P` included, does not survive between separate tool calls. A failing test does not stop the block, so the source is always re-applied. Run the block from the worktree root: `git diff --name-only` prints paths from the repo root, but `xargs git diff -- <paths>` reads them relative to the current directory, so from `grill-room/` the block would revert nothing and print the test-only line. If the test command needs `grill-room/`, put the `cd grill-room` in a subshell on the marker line, as `(cd grill-room && <test command>)`. The red run is that command's output between `git apply -R` and `git apply`; the green run is a separate run of the same command after the block finishes.";
+  "The script reads commits, not the working tree, so commit the change on the worktree branch before running it. Put your own test command in place of the marker, inside the single quotes, and run the line as one plain command from the worktree root. The script moves to the worktree root, reverts every non-test file the branch changes against `origin/main`, runs your command there with `bash -c`, and re-applies the source even when the test fails or the run is interrupted. If the test command needs `grill-room/`, write it as `(cd grill-room && <test command>)`. Inside the command, use only double quotes. The red run is the script's output; the green run is a separate run of the same test command afterwards. A planted-bug line is the exception: its red run is the test with the planted edit applied.";
 
 const FAILURE_BULLET =
-  "- If `git apply -R` or `git apply` fails, stop and report, quoting the error. With the block above, a failed `git apply -R` shows as the printed line `git apply -R failed`, not as the block's exit code. Never rebuild the change by hand.";
+  "- If the script prints `git apply -R failed` (exit 3) or `git apply failed` (exit 4), stop and report, quoting git's error. Never rebuild the change by hand.";
+
+const REVIEWER_PARAGRAPH =
+  "Put the Evidence entry's test command in place of the marker, inside the single quotes, and run the line as one plain Bash call. Run the line from the scratch worktree root. The script moves to the worktree root, and it re-applies the source even when the test fails. Write any `cd grill-room` inside the command, as `(cd grill-room && <test command>)`, and use only double quotes inside it.";
+
+const REVIEWER_RED_RUN_LINE =
+  "The red run is the Revert block with that command in place of the marker. The green run is the same command after the block finishes. An entry that proves a planted-bug line is the exception: its red run is its quoted edit applied, as the rows below say, and the Revert block does not judge it.";
+
+const REVIEWER_REVERTED_ROW =
+  "| The test passes with the source reverted, on an entry that does not prove a planted-bug line | `blocker`. `evidence` is the block with that test command |";
+
+const BUILDER_PLANTED_BULLET =
+  "- **Prove a planted-bug line by planting it.** When an acceptance line names a planted bug, do not use the Revert block for it. Commit the change first. Then apply that edit in your working tree without committing it, run the line's test and confirm it fails on its own assertion, then undo the edit with `git checkout -- <file>` and run the test again. The Evidence entry quotes the planted edit as a diff, the red run and the green run.";
+
+const BUILDER_SCREENSHOT_LINE =
+  "  - Take \"before\" by running your screenshot script as the Revert block's test command, and \"after\" by running it again once the block finishes.";
 
 const revertBlockOf = (text: string): string => {
   const lines = text.split("\n");
@@ -62,50 +54,8 @@ const revertBlockOf = (text: string): string => {
   return lines.slice(open + 1, close).join("\n");
 };
 
-const runBlock = (
-  marker: string,
-  env: { rStatus: number; patch: string },
-): { stdout: string; calls: string[] } => {
-  const dir = mkdtempSync(join(tmpdir(), "revert-block-"));
-  try {
-    const log = join(dir, "calls.log");
-    writeFileSync(log, "");
-    const stub = join(dir, "git");
-    writeFileSync(
-      stub,
-      [
-        "#!/bin/sh",
-        'case "$1" in',
-        "  fetch) exit 0 ;;",
-        '  diff) case "$*" in',
-        '    *--name-only*) echo src/a.ts ;;',
-        '    *--binary*) [ -n "$STUB_PATCH" ] && printf "%s\\n" "$STUB_PATCH" ;;',
-        "  esac; exit 0 ;;",
-        '  apply) if [ "$2" = "-R" ]; then echo "apply -R" >> "$STUB_LOG"; exit "$STUB_R_STATUS"; fi',
-        '    echo "apply" >> "$STUB_LOG"; exit 0 ;;',
-        "esac",
-        "",
-      ].join("\n"),
-    );
-    chmodSync(stub, 0o755);
-    const script = revertBlockOf(BUILDER).replace(MARKER, marker);
-    const stdout = execFileSync("bash", ["-c", script], {
-      cwd: dir,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: dir + ":" + process.env.PATH,
-        STUB_LOG: log,
-        STUB_R_STATUS: String(env.rStatus),
-        STUB_PATCH: env.patch,
-      },
-    });
-    const calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
-    return { stdout, calls };
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-};
+const lineStarting = (text: string, prefix: string): string | undefined =>
+  text.split("\n").find((l) => l.startsWith(prefix));
 
 const EVIDENCE_BULLET =
   '- `## Evidence`: one entry per numbered acceptance line. Each entry gives the acceptance number, the test file and test name, the source ranges the test covers (written as under "Evidence ranges" below), the quoted red run and the quoted green run. For a test-only PR, the entry quotes that line from the Revert block and gives the covered ranges. For a UI change, it also names the absolute folder of the screenshots and the exact command that regenerates them. For a planted-bug line, the red run is the run with the planted edit applied, and the entry quotes that edit as a diff.';
@@ -174,6 +124,21 @@ describe("builder.md", () => {
     }
   });
 
+  it("the planted-bug bullet", () => {
+    const lines = BUILDER.split("\n");
+    const prove = lines.findIndex((l) =>
+      l.startsWith("- **Prove each acceptance line.**"),
+    );
+    expect(prove).toBeGreaterThan(-1);
+    expect(lines[prove + 1]).toBe(BUILDER_PLANTED_BULLET);
+  });
+
+  it("the screenshot before line", () => {
+    expect(lineStarting(BUILDER, '  - Take "before"')).toBe(
+      BUILDER_SCREENSHOT_LINE,
+    );
+  });
+
   it("the pnpm rules", () => {
     const lines = BUILDER.split("\n");
     expect(
@@ -205,37 +170,23 @@ describe("Revert block", () => {
     expect(revertBlockOf(text)).toBe(REVERT_BLOCK);
   });
 
-  it("a failed git apply -R runs no test and no re-apply", () => {
-    const r = runBlock("echo TEST_RAN", { rStatus: 1, patch: "diff" });
-    expect(r.stdout).toBe("git apply -R failed\n");
-    expect(r.calls).toEqual(["apply -R"]);
-  });
-
-  it("a failing test still re-applies", () => {
-    const r = runBlock("echo TEST_RAN; false", { rStatus: 0, patch: "diff" });
-    expect(r.stdout).toBe("TEST_RAN\n");
-    expect(r.calls).toEqual(["apply -R", "apply"]);
-  });
-
-  it("a passing test re-applies", () => {
-    const r = runBlock("echo TEST_RAN", { rStatus: 0, patch: "diff" });
-    expect(r.stdout).toBe("TEST_RAN\n");
-    expect(r.calls).toEqual(["apply -R", "apply"]);
-  });
-
-  it("an empty patch prints the test-only line", () => {
-    const r = runBlock("echo TEST_RAN", { rStatus: 0, patch: "" });
-    expect(r.stdout).toBe("test-only PR: no source to revert\n");
-    expect(r.calls).toEqual([]);
+  it("is a single call to scripts/revert-check.sh", () => {
+    for (const text of [BUILDER, FIX, REVIEWER]) {
+      const block = revertBlockOf(text);
+      expect(block.split("\n")).toEqual([
+        "scripts/revert-check.sh '<the Evidence entry test command>'",
+      ]);
+    }
   });
 });
 
 describe("Revert paragraph", () => {
   it("builder.md and fix.md end with the separate green run", () => {
     for (const text of [BUILDER, FIX]) {
-      const line = text
-        .split("\n")
-        .find((l) => l.startsWith("The block reads commits, not the working tree"));
+      const line = lineStarting(
+        text,
+        "The script reads commits, not the working tree",
+      );
       expect(line).toBe(REVERT_PARAGRAPH);
     }
   });
@@ -244,9 +195,7 @@ describe("Revert paragraph", () => {
 describe("Revert failure bullet", () => {
   it("builder.md and fix.md name the printed line", () => {
     for (const text of [BUILDER, FIX]) {
-      const line = text
-        .split("\n")
-        .find((l) => l.startsWith("- If `git apply -R` or `git apply` fails"));
+      const line = lineStarting(text, "- If the script prints `git apply -R failed`");
       expect(line).toBe(FAILURE_BULLET);
     }
   });
@@ -276,17 +225,52 @@ describe("reviewer.md", () => {
   it("the git apply failure bullets", () => {
     const branch = "origin/{" + "{branch}}";
     expect(
-      lines.find((l) => l.startsWith("- If `git apply -R` fails, stop the re-run")),
+      lines.find((l) => l.startsWith("- If the block prints `git apply -R failed`, stop the re-run")),
     ).toBe(
-      "- If `git apply -R` fails, stop the re-run: remove the scratch worktree with `git worktree remove --force <folder>` (the tree may be left modified, and then a plain remove exits 128), create a fresh one in a new folder that keeps the `rv<pr>-r<round>-<lens>` naming with a `-2` suffix, detached at `" +
+      "- If the block prints `git apply -R failed`, stop the re-run: remove the scratch worktree with `git worktree remove --force <folder>` (the tree may be left modified, and then a plain remove exits 128), create a fresh one in a new folder that keeps the `rv<pr>-r<round>-<lens>` naming with a `-2` suffix, detached at `" +
         branch +
         "`, and run the block once more. If it fails again, record a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command. Never rebuild the change by hand.",
     );
     expect(
-      lines.find((l) => l.startsWith("- If `git apply` fails, do the same")),
+      lines.find((l) => l.startsWith("- If the block prints `git apply failed`, do the same")),
     ).toBe(
-      "- If `git apply` fails, do the same: a fresh worktree, one more try, then a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command.",
+      "- If the block prints `git apply failed`, do the same: a fresh worktree, one more try, then a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command.",
     );
+  });
+
+  it("the Revert paragraph", () => {
+    expect(
+      lineStarting(REVIEWER, "Put the Evidence entry's test command in place of the marker"),
+    ).toBe(REVIEWER_PARAGRAPH);
+  });
+
+  it("the red run line", () => {
+    expect(lineStarting(REVIEWER, "The red run is the Revert block")).toBe(
+      REVIEWER_RED_RUN_LINE,
+    );
+  });
+
+  it("the reverted-source row", () => {
+    expect(
+      lineStarting(REVIEWER, "| The test passes with the source reverted"),
+    ).toBe(REVIEWER_REVERTED_ROW);
+  });
+
+  it("the planted-bug rows", () => {
+    const anchor = lines.findIndex((l) =>
+      l.startsWith("| An acceptance line has no Evidence entry"),
+    );
+    expect(anchor).toBeGreaterThan(-1);
+    const heading = lines
+      .slice(0, anchor)
+      .reverse()
+      .find((l) => l.startsWith("#"));
+    expect(heading).toBe("## Re-running Evidence");
+    expect(lines.slice(anchor + 1, anchor + 4)).toEqual([
+      "| An entry proves a planted-bug line: apply its quoted edit in your scratch worktree and run the command; it fails on the line's assertion, and passes again after `git checkout -- <file>` | none |",
+      "| The planted edit applied, the test still passes | `blocker`: the test does not guard the line. `evidence` is the edit and the command |",
+      "| An acceptance line the ticket marks with a planted bug, proved instead by the Revert block | `blocker` when its red run passes; otherwise `should-fix`, asking for the planted-bug entry |",
+    ]);
   });
 
   it("the no-scope pointer", () => {
@@ -316,39 +300,6 @@ describe("ticket.md", () => {
     expect(lines[at - 2]).toBe(
       "Numbered. Each line names the test that proves it. That test must fail when the change is reverted.",
     );
-  });
-});
-
-describe("builder.md planted bug", () => {
-  it("the planted-bug bullet", () => {
-    const lines = BUILDER.split("\n");
-    const prove = lines.findIndex((l) =>
-      l.startsWith("- **Prove each acceptance line.**"),
-    );
-    expect(prove).toBeGreaterThan(-1);
-    expect(lines[prove + 1]).toBe(
-      "- **Prove a planted-bug line by planting it.** When an acceptance line names a planted bug, do not use the Revert block for it. Apply that edit in your working tree without committing it, run the line's test and confirm it fails on its own assertion, then undo the edit with `git checkout -- <file>` and run the test again. The Evidence entry quotes the planted edit as a diff, the red run and the green run.",
-    );
-  });
-});
-
-describe("reviewer.md planted bug", () => {
-  it("the planted-bug rows", () => {
-    const lines = REVIEWER.split("\n");
-    const anchor = lines.findIndex((l) =>
-      l.startsWith("| An acceptance line has no Evidence entry"),
-    );
-    expect(anchor).toBeGreaterThan(-1);
-    const heading = lines
-      .slice(0, anchor)
-      .reverse()
-      .find((l) => l.startsWith("#"));
-    expect(heading).toBe("## Re-running Evidence");
-    expect(lines.slice(anchor + 1, anchor + 4)).toEqual([
-      "| An entry proves a planted-bug line: apply its quoted edit in your scratch worktree and run the command; it fails on the line's assertion, and passes again after `git checkout -- <file>` | none |",
-      "| The planted edit applied, the test still passes | `blocker`: the test does not guard the line. `evidence` is the edit and the command |",
-      "| An acceptance line the ticket marks with a planted bug, proved instead by the Revert block | `blocker` when its red run passes; otherwise `should-fix`, asking for the planted-bug entry |",
-    ]);
   });
 });
 

@@ -21,26 +21,14 @@ For each finding, write or extend a test that fails without your fix and passes 
 ### Revert
 
 ```bash
-git fetch origin
-P=$(mktemp)
-git diff --no-renames --name-only origin/main...HEAD | grep -v -E '\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|/)(e2e|test|__snapshots__)/' | xargs -r git diff --no-renames --binary origin/main...HEAD -- > "$P"
-if [ -s "$P" ]; then
-  if git apply -R "$P"; then
-    <the Evidence entry's test command>
-    git apply "$P"
-  else
-    echo "git apply -R failed"
-  fi
-else
-  echo "test-only PR: no source to revert"
-fi
+scripts/revert-check.sh '<the Evidence entry test command>'
 ```
 
-The block reads commits, not the working tree, so commit the change on the worktree branch before running it. Substitute your own test command for the marker line and run the whole block as one command: shell state, `P` included, does not survive between separate tool calls. A failing test does not stop the block, so the source is always re-applied. Run the block from the worktree root: `git diff --name-only` prints paths from the repo root, but `xargs git diff -- <paths>` reads them relative to the current directory, so from `grill-room/` the block would revert nothing and print the test-only line. If the test command needs `grill-room/`, put the `cd grill-room` in a subshell on the marker line, as `(cd grill-room && <test command>)`. The red run is that command's output between `git apply -R` and `git apply`; the green run is a separate run of the same command after the block finishes.
+The script reads commits, not the working tree, so commit the change on the worktree branch before running it. Put your own test command in place of the marker, inside the single quotes, and run the line as one plain command from the worktree root. The script moves to the worktree root, reverts every non-test file the branch changes against `origin/main`, runs your command there with `bash -c`, and re-applies the source even when the test fails or the run is interrupted. If the test command needs `grill-room/`, write it as `(cd grill-room && <test command>)`. Inside the command, use only double quotes. The red run is the script's output; the green run is a separate run of the same test command afterwards. A planted-bug line is the exception: its red run is the test with the planted edit applied.
 
 - Test files, snapshots and anything under an `e2e/` or `test/` folder stay in place while the source is reverted, so the new test runs against the old source.
 - If the test still passes with the source reverted, the line is not proved. Fix the test, never the rule it encodes.
-- If `git apply -R` or `git apply` fails, stop and report, quoting the error. With the block above, a failed `git apply -R` shows as the printed line `git apply -R failed`, not as the block's exit code. Never rebuild the change by hand.
+- If the script prints `git apply -R failed` (exit 3) or `git apply failed` (exit 4), stop and report, quoting git's error. Never rebuild the change by hand.
 - If the PR changes only test-side files, the patch is empty and the block prints `test-only PR: no source to revert`. The Evidence entry quotes that line and gives the covered ranges.
 - Paths containing spaces are not supported.
 - Never use `git stash`: the stash stack is shared by every worktree and session.
