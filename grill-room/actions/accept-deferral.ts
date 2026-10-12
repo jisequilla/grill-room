@@ -1,20 +1,15 @@
-import { randomUUID } from "node:crypto";
-
 import { defineAction, fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
+import { defer } from "../server/answer-change.js";
 import { getDb, schema } from "../server/db/index.js";
-import {
-  CLEARED_ANSWER_LINKS,
-  CLEARED_PROPOSAL,
-  describeDecisions,
-} from "../server/tree.js";
-import { withdrawClaimsOn } from "../server/withdraw-claims.js";
+import { describeDecisions } from "../server/tree.js";
+import { failIfTurnInProgress } from "../server/turn.js";
 
 export default defineAction({
   description:
-    "Accept the deferral proposed on a settled own answer: the interviewer read it as postponing the question rather than deciding it. The own answer moves to history, carrying the interviewer's reason, and the decision becomes a deferred loose end, which blocks confirmation until it is resolved; the next round request asks it again as a new card, exactly as if the user had deferred it in a round. Refuses a decision with no deferral pending.",
+    "Accept the deferral proposed on a settled own answer: the interviewer read it as postponing the question rather than deciding it. The own answer moves to history, carrying the interviewer's reason and the kind it had, and the decision becomes a deferred loose end, which blocks confirmation until it is resolved; the claims other decisions make about it are withdrawn and the session's spec, if any, is marked not current; the next round request asks it again as a new card, exactly as if the user had deferred it in a round. Refuses a decision with no deferral pending, and refuses while an interviewer turn is working.",
   schema: z.object({
     decisionId: z.string().min(1).describe("Decision id"),
   }),
@@ -36,42 +31,21 @@ export default defineAction({
       );
     }
 
-    const now = new Date().toISOString();
+    const [session] = await db
+      .select()
+      .from(schema.sessions)
+      .where(eq(schema.sessions.id, row.sessionId))
+      .limit(1);
 
-    await db.insert(schema.decisionHistory).values({
-      id: randomUUID(),
-      decisionId: row.id,
-      questionTitle: row.questionTitle,
-      questionBody: row.questionBody,
-      answer: row.currentAnswer,
-      answerKind: "own-answer",
-      // Why the answer reads as a deferral is the interviewer's own reasoning,
-      // the same column an accepted supersession writes its reason to.
-      interviewerReason: row.deferralReason,
-      recordedAt: now,
+    failIfTurnInProgress(
+      session!,
+      "The interviewer is working on this session. Wait for the turn to finish before accepting a deferral.",
+    );
+
+    const updated = await defer(row.id, {
+      now: new Date().toISOString(),
+      reason: row.deferralReason ?? undefined,
     });
-
-    // The text stays for now: it is what the owner wrote, and the round that
-    // asks the decision again records it to history before clearing it. The
-    // answer kind changes, so the links and any proposal about the settled
-    // answer go with it, as every other write that changes the answer does.
-    const [updated] = await db
-      .update(schema.decisions)
-      .set({
-        answerKind: "deferred",
-        settledAt: null,
-        ...CLEARED_ANSWER_LINKS,
-        ...CLEARED_PROPOSAL,
-        updatedAt: now,
-      })
-      .where(eq(schema.decisions.id, decisionId))
-      .returning();
-
-    if (!updated) fail("Failed to accept the deferral.", { statusCode: 500 });
-
-    // Its answer no longer stands, so what other decisions claim about it
-    // goes with it, exactly as a reopen drops them.
-    await withdrawClaimsOn(decisionId, now);
 
     return describeDecisions([updated])[0];
   },

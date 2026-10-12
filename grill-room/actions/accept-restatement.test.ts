@@ -76,6 +76,105 @@ async function aPendingRestatement(
   return session;
 }
 
+const NOW_STAMP = "2026-09-01T00:00:00.000Z";
+
+/**
+ * The answer change fixture: decision X in a confirmed session with a current
+ * spec, settled decisions V and W, Y with a pending supersession by X, Z
+ * replaced by X, and (where a row says so) W having settled X.
+ */
+async function anAnswerChangeFixture(
+  x: Partial<typeof schema.decisions.$inferInsert> = {},
+  session: { turnWorking?: boolean } = {},
+) {
+  const created = await aSession();
+  const sessionId = created.id;
+  await getDb()
+    .update(schema.sessions)
+    .set({
+      state: "confirmed",
+      doneSummary: "Everything is settled.",
+      ...(session.turnWorking
+        ? { turnStatus: "working", turnStartedAt: new Date().toISOString() }
+        : {}),
+    })
+    .where(eq(schema.sessions.id, sessionId));
+  await getDb().insert(schema.specs).values({
+    id: "spec-1",
+    sessionId,
+    markdown: "# Grill Room\n",
+    current: true,
+    createdAt: NOW_STAMP,
+    updatedAt: NOW_STAMP,
+  });
+  for (const id of ["v", "w"]) {
+    await insertDecision(sessionId, {
+      id: `d-${id}`,
+      key: id,
+      questionTitle: `Decision ${id.toUpperCase()}`,
+      answerKind: "own-answer",
+      currentAnswer: `Answer ${id.toUpperCase()}`,
+      settledAt: NOW_STAMP,
+    });
+  }
+  await insertDecision(sessionId, {
+    id: "d-x",
+    key: "x",
+    questionTitle: "Decision X",
+    questionBody: "X body",
+    answerKind: "own-answer",
+    currentAnswer: "A",
+    settledAt: NOW_STAMP,
+    ...x,
+  });
+  await insertDecision(sessionId, {
+    id: "d-y",
+    key: "y",
+    questionTitle: "Decision Y",
+    answerKind: "unknown",
+    currentAnswer: "",
+    supersededById: "d-x",
+    supersessionAnswer: "From X",
+    supersessionReason: "X answers it",
+  });
+  await insertDecision(sessionId, {
+    id: "d-z",
+    key: "z",
+    questionTitle: "Decision Z",
+    answerKind: "own-answer",
+    currentAnswer: "Old",
+    settledAt: NOW_STAMP,
+    replacedById: "d-x",
+    replacedReason: "X replaced it",
+  });
+  return sessionId;
+}
+
+async function readSpec() {
+  const [spec] = await getDb().select().from(schema.specs);
+  return spec!;
+}
+
+/** Expects the turn lock to refuse the call, writing nothing. */
+async function expectTurnLockRefusal(
+  run: () => Promise<unknown>,
+  message: string,
+) {
+  const decisionsBefore = await getDb().select().from(schema.decisions);
+  const specBefore = await readSpec();
+
+  const refusal = run();
+
+  await expect(refusal).rejects.toMatchObject({
+    errorCode: "turn-in-progress",
+    statusCode: 409,
+  });
+  await expect(refusal).rejects.toThrow(message);
+  expect(await getDb().select().from(schema.decisionHistory)).toEqual([]);
+  expect(await getDb().select().from(schema.decisions)).toEqual(decisionsBefore);
+  expect(await readSpec()).toEqual(specBefore);
+}
+
 function readDecision(id: string) {
   return getDb()
     .select()
@@ -140,40 +239,6 @@ describe("accept-restatement", () => {
       restatementText: STATEMENT,
     });
     expect(await historyOf("d-provider")).toEqual([]);
-  });
-
-  it("records the original text in history, with the interviewer's reason and the operator notes", async () => {
-    await aPendingRestatement();
-
-    await acceptRestatement.run({ decisionId: "d-provider" });
-
-    expect(await historyOf("d-provider")).toMatchObject([
-      {
-        answer: ORIGINAL,
-        answerKind: "own-answer",
-        interviewerReason: REASON,
-        operatorNotes: NOTES,
-        questionTitle: "Which payment provider handles payouts?",
-        questionBody: "The provider sets the fees.",
-      },
-    ]);
-  });
-
-  it("records empty operator notes when the restatement only fixed typos", async () => {
-    await aPendingRestatement({
-      currentAnswer: "Postgress with a read replca",
-      restatementText: "Postgres with a read replica",
-      restatementNotes: "",
-      restatementReason: "Fixed two typos.",
-    });
-
-    await acceptRestatement.run({ decisionId: "d-provider" });
-
-    expect(await historyOf("d-provider")).toMatchObject([
-      // "", not null: every accepted restatement's entry is marked, so the
-      // interviewer's context can leave it out whatever its notes.
-      { answer: "Postgress with a read replca", operatorNotes: "" },
-    ]);
   });
 
   it("replaces the answer with the statement, keeping kind, settledAt and settledById, and clears the proposal", async () => {
@@ -247,6 +312,108 @@ describe("accept-restatement", () => {
   });
 });
 
+describe("accept-restatement: the answer change rule", () => {
+  useTestDatabase();
+
+  const PROPOSAL = {
+    restatementText: "A clean",
+    restatementNotes: "n",
+    restatementReason: "r",
+  };
+
+  it("row 3: rewords with the whole answer change rule", async () => {
+    await anAnswerChangeFixture({
+      ...PROPOSAL,
+      settledById: "d-w",
+      deferralReason: "later",
+    });
+
+    await acceptRestatement.run({ decisionId: "d-x" });
+
+    expect(await readDecision("d-x")).toMatchObject({
+      currentAnswer: "A clean",
+      answerKind: "own-answer",
+      settledAt: NOW_STAMP,
+      settledById: "d-w",
+      deferralReason: null,
+      restatementText: null,
+      restatementNotes: null,
+      restatementReason: null,
+    });
+    expect(await readDecision("d-z")).toMatchObject({ replacedById: "d-x" });
+    expect(await readDecision("d-y")).toMatchObject({
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+    });
+    expect((await readSpec()).current).toBe(false);
+    expect(await historyOf("d-x")).toMatchObject([
+      {
+        answer: "A",
+        answerKind: "own-answer",
+        operatorNotes: "n",
+        interviewerReason: "r",
+        questionTitle: "Decision X",
+        questionBody: "X body",
+      },
+    ]);
+  });
+
+  it("row 4: history records the kind the answer had", async () => {
+    await anAnswerChangeFixture({
+      ...PROPOSAL,
+      answerKind: "accepted-recommendation",
+    });
+
+    await acceptRestatement.run({ decisionId: "d-x" });
+
+    expect(await historyOf("d-x")).toMatchObject([
+      { answerKind: "accepted-recommendation" },
+    ]);
+  });
+
+  it("row 8: refuses while the interviewer is working, writing nothing", async () => {
+    await anAnswerChangeFixture(PROPOSAL, { turnWorking: true });
+
+    await expectTurnLockRefusal(
+      () => acceptRestatement.run({ decisionId: "d-x" }),
+      "The interviewer is working on this session. Wait for the turn to finish before accepting a restatement.",
+    );
+  });
+
+  it("row 9: refuses no-restatement before checking the turn lock", async () => {
+    await anAnswerChangeFixture({}, { turnWorking: true });
+
+    await expect(
+      acceptRestatement.run({ decisionId: "d-x" }),
+    ).rejects.toMatchObject({ errorCode: "no-restatement", statusCode: 409 });
+  });
+
+  it("row 9: refuses an empty statement before checking the turn lock", async () => {
+    await anAnswerChangeFixture(PROPOSAL, { turnWorking: true });
+
+    await expect(
+      acceptRestatement.run({ decisionId: "d-x", statement: "   " }),
+    ).rejects.toMatchObject({ errorCode: "empty-statement", statusCode: 400 });
+  });
+
+  it("row 10: blank proposal notes are recorded as empty operator notes, not null", async () => {
+    await anAnswerChangeFixture({ ...PROPOSAL, restatementNotes: "  " });
+
+    await acceptRestatement.run({ decisionId: "d-x" });
+
+    expect(await historyOf("d-x")).toMatchObject([{ operatorNotes: "" }]);
+  });
+
+  it("row 11: the owner's edited statement is trimmed and becomes the answer", async () => {
+    await anAnswerChangeFixture(PROPOSAL);
+
+    await acceptRestatement.run({ decisionId: "d-x", statement: " B " });
+
+    expect(await readDecision("d-x")).toMatchObject({ currentAnswer: "B" });
+  });
+});
+
 describe("accept-restatement: the other rows that point at it", () => {
   useTestDatabase();
 
@@ -288,24 +455,6 @@ describe("accept-restatement: the other rows that point at it", () => {
     });
     return session;
   }
-
-  it("withdraws another row's pending supersession that names it", async () => {
-    const session = await aRestatementOthersPointAt();
-
-    await acceptRestatement.run({ decisionId: "d-provider" });
-
-    expect(await readDecision("d-window")).toMatchObject({
-      answerKind: "unknown",
-      supersededById: null,
-      supersessionAnswer: null,
-      supersessionReason: null,
-    });
-    expect(
-      (await listLooseEnds.run({ sessionId: session.id })).find(
-        (end) => end.key === "window",
-      ),
-    ).toMatchObject({ reason: "unknown", supersession: null });
-  });
 
   it("leaves what it replaced and what it settled pointing at it", async () => {
     await aRestatementOthersPointAt();

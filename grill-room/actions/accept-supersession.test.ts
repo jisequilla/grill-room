@@ -130,6 +130,105 @@ async function setLinks(decisionId: string) {
     .where(eq(schema.decisions.id, decisionId));
 }
 
+const NOW_STAMP = "2026-09-01T00:00:00.000Z";
+
+/**
+ * The answer change fixture: decision X in a confirmed session with a current
+ * spec, settled decisions V and W, Y with a pending supersession by X, Z
+ * replaced by X, and (where a row says so) W having settled X.
+ */
+async function anAnswerChangeFixture(
+  x: Partial<typeof schema.decisions.$inferInsert> = {},
+  session: { turnWorking?: boolean } = {},
+) {
+  const created = await aSession();
+  const sessionId = created.id;
+  await getDb()
+    .update(schema.sessions)
+    .set({
+      state: "confirmed",
+      doneSummary: "Everything is settled.",
+      ...(session.turnWorking
+        ? { turnStatus: "working", turnStartedAt: new Date().toISOString() }
+        : {}),
+    })
+    .where(eq(schema.sessions.id, sessionId));
+  await getDb().insert(schema.specs).values({
+    id: "spec-1",
+    sessionId,
+    markdown: "# Grill Room\n",
+    current: true,
+    createdAt: NOW_STAMP,
+    updatedAt: NOW_STAMP,
+  });
+  for (const id of ["v", "w"]) {
+    await insertDecision(sessionId, {
+      id: `d-${id}`,
+      key: id,
+      questionTitle: `Decision ${id.toUpperCase()}`,
+      answerKind: "own-answer",
+      currentAnswer: `Answer ${id.toUpperCase()}`,
+      settledAt: NOW_STAMP,
+    });
+  }
+  await insertDecision(sessionId, {
+    id: "d-x",
+    key: "x",
+    questionTitle: "Decision X",
+    questionBody: "X body",
+    answerKind: "own-answer",
+    currentAnswer: "A",
+    settledAt: NOW_STAMP,
+    ...x,
+  });
+  await insertDecision(sessionId, {
+    id: "d-y",
+    key: "y",
+    questionTitle: "Decision Y",
+    answerKind: "unknown",
+    currentAnswer: "",
+    supersededById: "d-x",
+    supersessionAnswer: "From X",
+    supersessionReason: "X answers it",
+  });
+  await insertDecision(sessionId, {
+    id: "d-z",
+    key: "z",
+    questionTitle: "Decision Z",
+    answerKind: "own-answer",
+    currentAnswer: "Old",
+    settledAt: NOW_STAMP,
+    replacedById: "d-x",
+    replacedReason: "X replaced it",
+  });
+  return sessionId;
+}
+
+async function readSpec() {
+  const [spec] = await getDb().select().from(schema.specs);
+  return spec!;
+}
+
+/** Expects the turn lock to refuse the call, writing nothing. */
+async function expectTurnLockRefusal(
+  run: () => Promise<unknown>,
+  message: string,
+) {
+  const decisionsBefore = await getDb().select().from(schema.decisions);
+  const specBefore = await readSpec();
+
+  const refusal = run();
+
+  await expect(refusal).rejects.toMatchObject({
+    errorCode: "turn-in-progress",
+    statusCode: 409,
+  });
+  await expect(refusal).rejects.toThrow(message);
+  expect(await getDb().select().from(schema.decisionHistory)).toEqual([]);
+  expect(await getDb().select().from(schema.decisions)).toEqual(decisionsBefore);
+  expect(await readSpec()).toEqual(specBefore);
+}
+
 function readDecision(id: string) {
   return getDb()
     .select()
@@ -191,18 +290,121 @@ describe("accept-supersession", () => {
     expect(await listLooseEnds.run({ sessionId: session.id })).toEqual([]);
   });
 
-  it("records the steering move it replaced, with the interviewer's reason", async () => {
-    await aPendingSupersession();
+});
 
-    await acceptSupersession.run({ decisionId: "d-storage" });
+describe("accept-supersession: the answer change rule", () => {
+  useTestDatabase();
 
-    expect(await historyOf("d-storage")).toMatchObject([
+  const LOOSE_END = {
+    answerKind: "unknown" as const,
+    currentAnswer: "dunno",
+    settledAt: null,
+    supersededById: "d-v",
+    supersessionAnswer: "B",
+    supersessionReason: "V answers it",
+  };
+  const REPLACED = {
+    supersededById: "d-v",
+    supersessionAnswer: null,
+    supersessionReason: "V replaced it",
+  };
+  const LOCK_MESSAGE =
+    "The interviewer is working on this session. Wait for the turn to finish before accepting a supersession.";
+
+  it("row 5: settles a loose end with the whole answer change rule", async () => {
+    await anAnswerChangeFixture({ ...LOOSE_END, deferralReason: "later" });
+
+    await acceptSupersession.run({ decisionId: "d-x" });
+
+    const row = await readDecision("d-x");
+    expect(row).toMatchObject({
+      currentAnswer: "B",
+      answerKind: "own-answer",
+      settledById: "d-v",
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+      deferralReason: null,
+    });
+    expect(row?.settledAt).not.toBeNull();
+    expect(await readDecision("d-y")).toMatchObject({
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+    });
+    expect(await readDecision("d-z")).toMatchObject({
+      replacedById: null,
+      replacedReason: null,
+    });
+    expect((await readSpec()).current).toBe(false);
+    expect(await historyOf("d-x")).toMatchObject([
       {
-        answer: "Not sure yet",
+        answer: "dunno",
         answerKind: "unknown",
-        interviewerReason: REASON,
+        interviewerReason: "V answers it",
       },
     ]);
+  });
+
+  it("row 6: a never-answered loose end settles with an empty answer and no history row", async () => {
+    await anAnswerChangeFixture({
+      ...LOOSE_END,
+      answerKind: null,
+      currentAnswer: null,
+      supersessionAnswer: null,
+    });
+
+    await acceptSupersession.run({ decisionId: "d-x" });
+
+    expect(await readDecision("d-x")).toMatchObject({
+      currentAnswer: "",
+      answerKind: "own-answer",
+      settledById: "d-v",
+    });
+    expect(await historyOf("d-x")).toEqual([]);
+  });
+
+  it("row 7: the replaced branch stays outside answer change", async () => {
+    await anAnswerChangeFixture(REPLACED);
+
+    await acceptSupersession.run({ decisionId: "d-x" });
+
+    expect(await readDecision("d-x")).toMatchObject({
+      replacedById: "d-v",
+      replacedReason: "V replaced it",
+      supersededById: null,
+      supersessionReason: null,
+      currentAnswer: "A",
+      settledAt: NOW_STAMP,
+    });
+    expect(await historyOf("d-x")).toEqual([]);
+    expect((await readSpec()).current).toBe(true);
+  });
+
+  it("row 8: refuses a loose end's supersession while the interviewer is working, writing nothing", async () => {
+    await anAnswerChangeFixture(LOOSE_END, { turnWorking: true });
+
+    await expectTurnLockRefusal(
+      () => acceptSupersession.run({ decisionId: "d-x" }),
+      LOCK_MESSAGE,
+    );
+  });
+
+  it("row 8: refuses a replacement while the interviewer is working, writing nothing", async () => {
+    await anAnswerChangeFixture(REPLACED, { turnWorking: true });
+
+    await expectTurnLockRefusal(
+      () => acceptSupersession.run({ decisionId: "d-x" }),
+      LOCK_MESSAGE,
+    );
+  });
+
+  it("row 9: refuses no-supersession before checking the turn lock", async () => {
+    await anAnswerChangeFixture({}, { turnWorking: true });
+
+    await expect(
+      acceptSupersession.run({ decisionId: "d-x" }),
+    ).rejects.toMatchObject({ errorCode: "no-supersession", statusCode: 409 });
   });
 });
 

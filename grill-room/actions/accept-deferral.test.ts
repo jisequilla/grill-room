@@ -74,6 +74,105 @@ async function aPendingDeferral() {
   return session;
 }
 
+const NOW_STAMP = "2026-09-01T00:00:00.000Z";
+
+/**
+ * The answer change fixture: decision X in a confirmed session with a current
+ * spec, settled decisions V and W, Y with a pending supersession by X, Z
+ * replaced by X, and (where a row says so) W having settled X.
+ */
+async function anAnswerChangeFixture(
+  x: Partial<typeof schema.decisions.$inferInsert> = {},
+  session: { turnWorking?: boolean } = {},
+) {
+  const created = await aSession();
+  const sessionId = created.id;
+  await getDb()
+    .update(schema.sessions)
+    .set({
+      state: "confirmed",
+      doneSummary: "Everything is settled.",
+      ...(session.turnWorking
+        ? { turnStatus: "working", turnStartedAt: new Date().toISOString() }
+        : {}),
+    })
+    .where(eq(schema.sessions.id, sessionId));
+  await getDb().insert(schema.specs).values({
+    id: "spec-1",
+    sessionId,
+    markdown: "# Grill Room\n",
+    current: true,
+    createdAt: NOW_STAMP,
+    updatedAt: NOW_STAMP,
+  });
+  for (const id of ["v", "w"]) {
+    await insertDecision(sessionId, {
+      id: `d-${id}`,
+      key: id,
+      questionTitle: `Decision ${id.toUpperCase()}`,
+      answerKind: "own-answer",
+      currentAnswer: `Answer ${id.toUpperCase()}`,
+      settledAt: NOW_STAMP,
+    });
+  }
+  await insertDecision(sessionId, {
+    id: "d-x",
+    key: "x",
+    questionTitle: "Decision X",
+    questionBody: "X body",
+    answerKind: "own-answer",
+    currentAnswer: "A",
+    settledAt: NOW_STAMP,
+    ...x,
+  });
+  await insertDecision(sessionId, {
+    id: "d-y",
+    key: "y",
+    questionTitle: "Decision Y",
+    answerKind: "unknown",
+    currentAnswer: "",
+    supersededById: "d-x",
+    supersessionAnswer: "From X",
+    supersessionReason: "X answers it",
+  });
+  await insertDecision(sessionId, {
+    id: "d-z",
+    key: "z",
+    questionTitle: "Decision Z",
+    answerKind: "own-answer",
+    currentAnswer: "Old",
+    settledAt: NOW_STAMP,
+    replacedById: "d-x",
+    replacedReason: "X replaced it",
+  });
+  return sessionId;
+}
+
+async function readSpec() {
+  const [spec] = await getDb().select().from(schema.specs);
+  return spec!;
+}
+
+/** Expects the turn lock to refuse the call, writing nothing. */
+async function expectTurnLockRefusal(
+  run: () => Promise<unknown>,
+  message: string,
+) {
+  const decisionsBefore = await getDb().select().from(schema.decisions);
+  const specBefore = await readSpec();
+
+  const refusal = run();
+
+  await expect(refusal).rejects.toMatchObject({
+    errorCode: "turn-in-progress",
+    statusCode: 409,
+  });
+  await expect(refusal).rejects.toThrow(message);
+  expect(await getDb().select().from(schema.decisionHistory)).toEqual([]);
+  expect(await getDb().select().from(schema.decisions)).toEqual(decisionsBefore);
+  expect(await readSpec()).toEqual(specBefore);
+}
+
 function readDecision(id: string) {
   return getDb()
     .select()
@@ -131,22 +230,6 @@ describe("accept-deferral", () => {
     expect(await historyOf("d-hold")).toEqual([]);
   });
 
-  it("records the own answer in history, with the interviewer's reason", async () => {
-    await aPendingDeferral();
-
-    await acceptDeferral.run({ decisionId: "d-hold" });
-
-    expect(await historyOf("d-hold")).toMatchObject([
-      {
-        answer: ANSWER,
-        answerKind: "own-answer",
-        interviewerReason: REASON,
-        questionTitle: "How long is a payout held?",
-        questionBody: "A hold protects against disputes.",
-      },
-    ]);
-  });
-
   it("makes the decision a deferred loose end, so confirmation is refused", async () => {
     const session = await aPendingDeferral();
 
@@ -195,46 +278,6 @@ describe("accept-deferral", () => {
         }),
       ]),
     );
-  });
-
-  it("clears every link and supersession column the settled answer carried", async () => {
-    const session = await aPendingDeferral();
-    await insertDecision(session.id, {
-      id: "d-disputes",
-      key: "disputes",
-      questionTitle: "How are disputes handled?",
-      answerKind: "own-answer",
-      currentAnswer: "By the platform, within 48 hours.",
-      settledAt: "2026-09-01T00:00:02.000Z",
-    });
-    await getDb()
-      .update(schema.decisions)
-      .set({
-        supersededById: "d-disputes",
-        supersessionAnswer: "Held for 48 hours.",
-        supersessionReason: "Disputes decide it.",
-        replacedById: "d-disputes",
-        replacedReason: "Disputes changed it.",
-        settledById: "d-disputes",
-      })
-      .where(eq(schema.decisions.id, "d-hold"));
-
-    const view = await acceptDeferral.run({ decisionId: "d-hold" });
-
-    expect(await readDecision("d-hold")).toMatchObject({
-      answerKind: "deferred",
-      supersededById: null,
-      supersessionAnswer: null,
-      supersessionReason: null,
-      replacedById: null,
-      replacedReason: null,
-      settledById: null,
-    });
-    expect(view).toMatchObject({
-      supersession: null,
-      replacedBy: null,
-      settledBy: null,
-    });
   });
 
   it("regression: a replacement proposed after a deferral can never settle the decision as an empty answer", async () => {
@@ -373,27 +416,6 @@ describe("accept-deferral: the claims other decisions make about its answer", ()
     replacedReason: null,
   };
 
-  it("withdraws a pending supersession on another decision that names it", async () => {
-    const session = await aDeferralOthersClaimOn();
-
-    await acceptDeferral.run({ decisionId: "d-disputes" });
-
-    expect(await readDecision("d-window")).toMatchObject(WITHDRAWN);
-    const looseEnds = await listLooseEnds.run({ sessionId: session.id });
-    expect(looseEnds.find((end) => end.key === "window")).toMatchObject({
-      reason: "unknown",
-      supersession: null,
-    });
-  });
-
-  it("clears Replaced by on another decision that points at it", async () => {
-    await aDeferralOthersClaimOn();
-
-    await acceptDeferral.run({ decisionId: "d-disputes" });
-
-    expect(await readDecision("d-old")).toMatchObject(CURRENT_AGAIN);
-  });
-
   it("regression: the withdrawn supersession can no longer settle the loose end with the deferred answer", async () => {
     const session = await aDeferralOthersClaimOn();
 
@@ -435,6 +457,89 @@ describe("accept-deferral: the claims other decisions make about its answer", ()
     expect(oldAccept).toEqual({ ...oldReopen, createdAt: oldAccept.createdAt });
     expect(windowAccept).toMatchObject(WITHDRAWN);
     expect(oldAccept).toMatchObject(CURRENT_AGAIN);
+  });
+});
+
+describe("accept-deferral: the answer change rule", () => {
+  useTestDatabase();
+
+  it("row 1: defers with the whole answer change rule", async () => {
+    await anAnswerChangeFixture({
+      settledById: "d-w",
+      deferralReason: "later",
+      restatementText: "A clean",
+      restatementNotes: "n",
+      restatementReason: "r",
+      replacedById: "d-v",
+      replacedReason: "own replaced",
+    });
+
+    await acceptDeferral.run({ decisionId: "d-x" });
+
+    expect(await readDecision("d-x")).toMatchObject({
+      answerKind: "deferred",
+      currentAnswer: "A",
+      settledAt: null,
+      settledById: null,
+      replacedById: null,
+      replacedReason: null,
+      deferralReason: null,
+      restatementText: null,
+      restatementNotes: null,
+      restatementReason: null,
+    });
+    expect(await readDecision("d-y")).toMatchObject({
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+    });
+    expect(await readDecision("d-z")).toMatchObject({
+      replacedById: null,
+      replacedReason: null,
+    });
+    expect((await readSpec()).current).toBe(false);
+    expect(await historyOf("d-x")).toMatchObject([
+      {
+        answer: "A",
+        answerKind: "own-answer",
+        interviewerReason: "later",
+        questionTitle: "Decision X",
+        questionBody: "X body",
+      },
+    ]);
+  });
+
+  it("row 2: history records the kind the answer had", async () => {
+    await anAnswerChangeFixture({
+      answerKind: "accepted-recommendation",
+      deferralReason: "later",
+    });
+
+    await acceptDeferral.run({ decisionId: "d-x" });
+
+    expect(await historyOf("d-x")).toMatchObject([
+      { answerKind: "accepted-recommendation" },
+    ]);
+  });
+
+  it("row 8: refuses while the interviewer is working, writing nothing", async () => {
+    await anAnswerChangeFixture(
+      { deferralReason: "later" },
+      { turnWorking: true },
+    );
+
+    await expectTurnLockRefusal(
+      () => acceptDeferral.run({ decisionId: "d-x" }),
+      "The interviewer is working on this session. Wait for the turn to finish before accepting a deferral.",
+    );
+  });
+
+  it("row 9: refuses no-deferral before checking the turn lock", async () => {
+    await anAnswerChangeFixture({}, { turnWorking: true });
+
+    await expect(
+      acceptDeferral.run({ decisionId: "d-x" }),
+    ).rejects.toMatchObject({ errorCode: "no-deferral", statusCode: 409 });
   });
 });
 
