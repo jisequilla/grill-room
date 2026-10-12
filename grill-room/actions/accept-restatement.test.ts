@@ -84,11 +84,14 @@ const NOW_STAMP = "2026-09-01T00:00:00.000Z";
  * replaced by X, and (where a row says so) W having settled X.
  */
 async function anAnswerChangeFixture(
-  x: Partial<typeof schema.decisions.$inferInsert> = {},
+  x: Omit<
+    Partial<typeof schema.decisions.$inferInsert>,
+    "id" | "key" | "questionTitle"
+  > = {},
   session: { turnWorking?: boolean } = {},
 ) {
   const created = await aSession();
-  const sessionId = created.id;
+  const sessionId = created.id!;
   await getDb()
     .update(schema.sessions)
     .set({
@@ -157,13 +160,13 @@ async function readSpec() {
 
 /** Expects the turn lock to refuse the call, writing nothing. */
 async function expectTurnLockRefusal(
-  run: () => Promise<unknown>,
+  run: () => unknown,
   message: string,
 ) {
   const decisionsBefore = await getDb().select().from(schema.decisions);
   const specBefore = await readSpec();
 
-  const refusal = run();
+  const refusal = Promise.resolve(run());
 
   await expect(refusal).rejects.toMatchObject({
     errorCode: "turn-in-progress",
