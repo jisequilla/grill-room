@@ -109,9 +109,7 @@ const interrupt = async (signal: "SIGTERM" | "SIGINT") => {
     stdio: ["ignore", "pipe", "pipe"],
   });
   const exited = new Promise<number | null>((resolve) => {
-    child.on("exit", (code, sig) =>
-      resolve(code ?? (sig === "SIGTERM" ? 143 : sig === "SIGINT" ? 130 : null)),
-    );
+    child.on("exit", (code) => resolve(code));
   });
   const pidFile = join(work, "sleeppid");
   try {
