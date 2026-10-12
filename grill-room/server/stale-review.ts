@@ -21,14 +21,12 @@ import { randomUUID } from "node:crypto";
 
 import { eq } from "@agent-native/core/db/schema";
 
+import { unsettle } from "./answer-change.js";
 import { getDb, schema } from "./db/index.js";
 import { getInterviewer } from "./interviewer/index.js";
 import type { ReviewStaleResult } from "./interviewer/index.js";
 import {
   deriveTreeStates,
-  CLEARED_ANSWER_LINKS,
-  CLEARED_PROPOSAL,
-  CLEARED_SUPERSESSION,
   recommendedChoiceRejection,
   transitiveDependencies,
   treeFacts,
@@ -293,67 +291,58 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
       new Date().toISOString(),
     );
 
-    for (const review of result.reviews) {
-      const row = byKey.get(review.decisionKey);
-      if (!row) continue;
+    // The whole review lands together or not at all.
+    await db.transaction(async (tx) => {
+      for (const review of result.reviews) {
+        const row = byKey.get(review.decisionKey);
+        if (!row) continue;
 
-      await db.insert(schema.decisionHistory).values({
-        id: randomUUID(),
-        decisionId: row.id,
-        questionTitle: row.questionTitle,
-        questionBody: row.questionBody,
-        answer: row.currentAnswer,
-        answerKind: row.answerKind,
-        interviewerReason:
-          review.reason.trim() === "" ? null : review.reason,
-        recordedAt: now,
-      });
+        const reason = review.reason.trim() === "" ? undefined : review.reason;
 
-      if (review.verdict === "reconfirm") {
-        await db
+        // A reconfirm keeps its answer and settles again: the answer it had,
+        // and why it still holds, go to history as they always have.
+        if (review.verdict === "reconfirm") {
+          await tx.insert(schema.decisionHistory).values({
+            id: randomUUID(),
+            decisionId: row.id,
+            questionTitle: row.questionTitle,
+            questionBody: row.questionBody,
+            answer: row.currentAnswer,
+            answerKind: row.answerKind,
+            interviewerReason: reason ?? null,
+            recordedAt: now,
+          });
+          await tx
+            .update(schema.decisions)
+            .set({ settledAt: now, updatedAt: now })
+            .where(eq(schema.decisions.id, row.id));
+          continue;
+        }
+
+        // A re-ask is a reopen: unsettled first, so history keeps the question
+        // as it was asked, with the claims other decisions hold about its
+        // answer withdrawn exactly as `reopen-decision` drops them. Only then
+        // does it take the interviewer's updated question.
+        await unsettle(row.id, { now, reason, db: tx });
+
+        await tx
           .update(schema.decisions)
-          .set({ settledAt: now, updatedAt: now })
+          .set({
+            questionTitle: review.title ?? row.questionTitle,
+            questionBody: review.body ?? row.questionBody,
+            offeredChoicesJson: JSON.stringify(
+              review.choices.map((choice) => choice.label),
+            ),
+            choiceRationalesJson: JSON.stringify(
+              review.choices.map((choice) => choice.rationale),
+            ),
+            recommendedChoice: review.recommendedChoice,
+            recommendedAnswer:
+              review.recommendedAnswer ?? row.recommendedAnswer,
+            updatedAt: now,
+          })
           .where(eq(schema.decisions.id, row.id));
-        continue;
       }
-
-      await db
-        .update(schema.decisions)
-        .set({
-          questionTitle: review.title ?? row.questionTitle,
-          questionBody: review.body ?? row.questionBody,
-          offeredChoicesJson: JSON.stringify(
-            review.choices.map((choice) => choice.label),
-          ),
-          choiceRationalesJson: JSON.stringify(
-            review.choices.map((choice) => choice.rationale),
-          ),
-          recommendedChoice: review.recommendedChoice,
-          recommendedAnswer: review.recommendedAnswer ?? row.recommendedAnswer,
-          currentAnswer: null,
-          answerKind: null,
-          dispositionTarget: null,
-          settledAt: null,
-          reopenedAt: now,
-          ...CLEARED_ANSWER_LINKS,
-          ...CLEARED_PROPOSAL,
-          updatedAt: now,
-        })
-        .where(eq(schema.decisions.id, row.id));
-
-      // A re-ask is a reopen: the claims other decisions hold about this one's
-      // answer go with it, exactly as `reopen-decision` drops them. A pending
-      // proposal that it answers or replaces something is withdrawn, and the
-      // decisions it replaced read as current again. `settledById` pointing at
-      // it is kept: it records where that answer came from.
-      await db
-        .update(schema.decisions)
-        .set({ ...CLEARED_SUPERSESSION, updatedAt: now })
-        .where(eq(schema.decisions.supersededById, row.id));
-      await db
-        .update(schema.decisions)
-        .set({ replacedById: null, replacedReason: null, updatedAt: now })
-        .where(eq(schema.decisions.replacedById, row.id));
-    }
+    });
   }
 }
