@@ -27,6 +27,9 @@ const REVIEWER = readFileSync(
   "utf8",
 );
 
+const readTemplate = (path: string): string[] =>
+  readFileSync(repoPath(path), "utf8").split("\n");
+
 const MARKER = "<the Evidence entry's test command>";
 
 const REVERT_BLOCK = [
@@ -105,7 +108,7 @@ const runBlock = (
 };
 
 const EVIDENCE_BULLET =
-  '- `## Evidence`: one entry per numbered acceptance line. Each entry gives the acceptance number, the test file and test name, the source ranges the test covers (written as under "Evidence ranges" below), the quoted red run and the quoted green run. For a test-only PR, the entry quotes that line from the Revert block and gives the covered ranges. For a UI change, it also names the absolute folder of the screenshots and the exact command that regenerates them.';
+  '- `## Evidence`: one entry per numbered acceptance line. Each entry gives the acceptance number, the test file and test name, the source ranges the test covers (written as under "Evidence ranges" below), the quoted red run and the quoted green run. For a test-only PR, the entry quotes that line from the Revert block and gives the covered ranges. For a UI change, it also names the absolute folder of the screenshots and the exact command that regenerates them. For a planted-bug line, the red run is the run with the planted edit applied, and the entry quotes that edit as a diff.';
 
 const EXPECTED_ROWS: Array<[string, boolean]> = [
   ["grill-room/server/a.ts:10-20", true],
@@ -291,6 +294,71 @@ describe("reviewer.md", () => {
       lines.find((l) => l.startsWith("   A `status` of `no-scope`")),
     ).toBe(
       "   A `status` of `no-scope` means nothing was mutated (the no-scope row above).",
+    );
+  });
+});
+
+describe("ticket.md", () => {
+  it("the planted-bug paragraph", () => {
+    const lines = readTemplate(".claude/templates/delegation/ticket.md");
+    const at = lines.findIndex((l) =>
+      l.startsWith("An acceptance line that says something never happens"),
+    );
+    expect(at).toBeGreaterThan(0);
+    expect(lines[at]).toBe(
+      'An acceptance line that says something never happens, such as a value that never enters a hash, cannot fail when the change is reverted, because the old code never did it either. Such a line names its planted bug: the smallest edit that makes the forbidden thing happen, for example "planted bug: hash `source.unresolvedInputs` in `handoffFingerprint`". Its test must fail with that edit applied.',
+    );
+    const heading = lines
+      .slice(0, at)
+      .reverse()
+      .find((l) => l.startsWith("#"));
+    expect(heading).toBe("## Acceptance");
+    expect(lines[at - 2]).toBe(
+      "Numbered. Each line names the test that proves it. That test must fail when the change is reverted.",
+    );
+  });
+});
+
+describe("builder.md planted bug", () => {
+  it("the planted-bug bullet", () => {
+    const lines = BUILDER.split("\n");
+    const prove = lines.findIndex((l) =>
+      l.startsWith("- **Prove each acceptance line.**"),
+    );
+    expect(prove).toBeGreaterThan(-1);
+    expect(lines[prove + 1]).toBe(
+      "- **Prove a planted-bug line by planting it.** When an acceptance line names a planted bug, do not use the Revert block for it. Apply that edit in your working tree without committing it, run the line's test and confirm it fails on its own assertion, then undo the edit with `git checkout -- <file>` and run the test again. The Evidence entry quotes the planted edit as a diff, the red run and the green run.",
+    );
+  });
+});
+
+describe("reviewer.md planted bug", () => {
+  it("the planted-bug rows", () => {
+    const lines = REVIEWER.split("\n");
+    const anchor = lines.findIndex((l) =>
+      l.startsWith("| An acceptance line has no Evidence entry"),
+    );
+    expect(anchor).toBeGreaterThan(-1);
+    const heading = lines
+      .slice(0, anchor)
+      .reverse()
+      .find((l) => l.startsWith("#"));
+    expect(heading).toBe("## Re-running Evidence");
+    expect(lines.slice(anchor + 1, anchor + 4)).toEqual([
+      "| An entry proves a planted-bug line: apply its quoted edit in your scratch worktree and run the command; it fails on the line's assertion, and passes again after `git checkout -- <file>` | none |",
+      "| The planted edit applied, the test still passes | `blocker`: the test does not guard the line. `evidence` is the edit and the command |",
+      "| An acceptance line the ticket marks with a planted bug, proved instead by the Revert block | `blocker` when its red run passes; otherwise `should-fix`, asking for the planted-bug entry |",
+    ]);
+  });
+});
+
+describe("worktrees.md and preflight.md", () => {
+  it("the planted-bug rule", () => {
+    expect(readTemplate(".claude/rules/worktrees.md")).toContain(
+      "- Each acceptance line names the test that proves it, and that test must fail with the change reverted. A line that says something never happens names a planted bug instead, and its test must fail with that bug applied.",
+    );
+    expect(readTemplate(".claude/templates/delegation/preflight.md")).toContain(
+      "3. **Contradictions.** The ticket conflicts with itself, with an existing rule in the code, or with a check that enforces it. For example, a prompt rule whose compliant answer the server check refuses. Run each acceptance check against the Behaviour table: it must fail for some input a row forbids and pass for every input a row allows. A check that cannot tell two rows apart, such as a grep that matches both a real citation and a kept example, is a contradiction. So is a table that leaves out a sentence or case the change must also cover. So is an acceptance line that says something never happens but names no planted bug. So is a row that cannot fail on its own rule:",
     );
   });
 });

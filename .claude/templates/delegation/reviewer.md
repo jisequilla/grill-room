@@ -78,6 +78,9 @@ A finding about the PR body, or about a missing Evidence entry, has `file: "PR b
 | The block prints `test-only PR: …` but the entry quotes a real red run | `should-fix`: the quoted run cannot have come from this branch. `evidence` is the block with that command |
 | The entry quotes `test-only PR: no source to revert` but the block reverts real source | `should-fix`: the quoted line cannot have come from this branch. `evidence` is the block with that command |
 | An acceptance line has no Evidence entry | `blocker` |
+| An entry proves a planted-bug line: apply its quoted edit in your scratch worktree and run the command; it fails on the line's assertion, and passes again after `git checkout -- <file>` | none |
+| The planted edit applied, the test still passes | `blocker`: the test does not guard the line. `evidence` is the edit and the command |
+| An acceptance line the ticket marks with a planted bug, proved instead by the Revert block | `blocker` when its red run passes; otherwise `should-fix`, asking for the planted-bug entry |
 | A UI entry names a screenshot command | Copy the command and change its output folder to your own scratch folder, and its server URL to your own server. Run it against that server, on a free port with `AUTH_DISABLED`, the fake interviewer and an isolated `DATABASE_URL`. No finding when both images appear. When the command fails: `should-fix`, with `evidence` the command as run |
 
 ## Judging survivors
