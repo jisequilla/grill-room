@@ -201,6 +201,18 @@ describe("Revert failure bullet", () => {
   });
 });
 
+const REVERT_TEST_FILES_BULLET =
+  "- Test files, snapshots, shell tests named `test-*.sh` and anything under an `e2e/` or `test/` folder stay in place while the source is reverted, so the new test runs against the old source.";
+
+describe("Revert test-files bullet", () => {
+  it("builder.md and fix.md name test-*.sh", () => {
+    for (const text of [BUILDER, FIX]) {
+      const line = lineStarting(text, "- Test files, snapshots");
+      expect(line).toBe(REVERT_TEST_FILES_BULLET);
+    }
+  });
+});
+
 describe("fix.md", () => {
   it("the Verify, push and report heading", () => {
     const lines = FIX.split("\n");
