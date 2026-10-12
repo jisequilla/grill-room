@@ -37,7 +37,7 @@ The script reads commits, not the working tree, so commit the change on the work
 
 - Re-quote only the Evidence entries whose test or covered ranges changed in this round, and add an entry for each new test.
 - Add a line `Round N: <what changed>` under Merge danger only when the blast radius changed. Write N as the round you are in.
-- When the findings include a blocker, fix the should-fix items too. Today the workflow passes only blocking findings; gr-g4v.2 reshapes the review schema so that should-fix items reach you. Until then this rule has nothing to act on.
+- When the findings include a blocker, fix the should-fix items too. A restart after an approval may send should-fix items with no blocker; fix them the same way.
 - You may propose that a surviving mutant is equivalent instead of writing a test. Give the mutant and why no test can kill it; the reviewer decides.
 - Update the PR body with `gh pr edit {{pr}} --body-file <file>`, where the file's name carries the bead, for example `pr-body-{{bead}}.md`.
 

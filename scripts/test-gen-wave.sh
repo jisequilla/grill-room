@@ -133,6 +133,35 @@ spec_row "empty ticket" "[{\"bead\":\"gr-a\",\"ticket\":\"\",\"title\":\"A\",\"l
 spec_row "non-string title" "[{\"bead\":\"gr-a\",\"ticket\":\"$t1\",\"title\":5,\"lenses\":[\"L\"]}]" "$(entry_err 0)"
 spec_row "non-string ticket" "[{\"bead\":\"gr-a\",\"ticket\":5,\"title\":\"A\",\"lenses\":[\"L\"]}]" "$(entry_err 0)"
 
+# model: optional, sonnet or opus, copied as the wave entry's last key
+model_err() { echo "gen-wave.py: spec entry $1 model must be sonnet or opus"; }
+model_spec() { # <model json fragment, empty for none>
+  printf '[{"bead":"gr-a","ticket":"%s","title":"Title A","lenses":["lensX"]%s}]' "$t1" "$1" >"$spec"
+  run "$spec" "$out_js" --root "$fx"
+}
+model_json() { # <model json fragment, empty for none>
+  printf '[{"bead": "gr-a", "builder": "B gr-a|Title A|T1", "reviewers": ["R lensX|T1|{{pr}}"], "fix": "F gr-a|T1|{{branch}}"%s}]' "$1"
+}
+model_spec ""
+check_out "model absent" "$(wave_text "$(model_json "")")"
+model_spec ',"model":"opus"'
+check_out "model opus" "$(wave_text "$(model_json ', "model": "opus"')")"
+model_spec ',"model":"sonnet"'
+check_out "model sonnet" "$(wave_text "$(model_json ', "model": "sonnet"')")"
+model_row() { # <name> <model json value>
+  model_spec ",\"model\":$2"
+  fails "$(model_err 0)" "$1"
+}
+model_row "model haiku" '"haiku"'
+model_row "model empty" '""'
+model_row "model number" '5'
+model_row "model null" 'null'
+model_row "model list" '[]'
+model_row "model object" '{}'
+spec_row "model error index" "[{\"bead\":\"gr-a\",\"ticket\":\"$t1\",\"title\":\"A\",\"lenses\":[\"L\"]},{\"bead\":\"gr-b\",\"ticket\":\"$t1\",\"title\":\"B\",\"lenses\":[\"L\"],\"model\":\"x\"}]" "$(model_err 1)"
+spec_row "model check after entry check" "[{\"bead\":\"gr-a\",\"ticket\":\"$t1\",\"title\":\"A\",\"model\":\"x\"}]" "$(entry_err 0)"
+spec_row "model order across entries" "[{\"bead\":\"gr-a\",\"ticket\":\"$t1\",\"title\":\"A\",\"lenses\":[\"L\"],\"model\":\"x\"},{\"bead\":\"gr-b\",\"ticket\":\"$t1\",\"title\":\"B\"}]" "$(model_err 0)"
+
 # spec file problems
 run "$tmp/no-such-spec.json" "$out_js" --root "$fx"
 fails "gen-wave.py: cannot read $tmp/no-such-spec.json" "missing spec"

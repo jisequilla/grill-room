@@ -12,8 +12,10 @@ Every delegation uses the templates in `.claude/templates/delegation/`:
 - `ticket.md`, for the ticket itself;
 - `preflight.md`, `builder.md`, `reviewer.md` and `fix.md`, one for each agent.
 
-A hand-run loop fills them in. A Workflow script receives the filled-in text through `args`, because scripts cannot read files. Both loops send the same words, so neither drifts from the other. The saved workflow `.claude/workflows/ticket-build-review-loop.js` is that script:
-- It takes one reviewer template per lens. With more than one lens, the main session marks the PR ready once every lens approves.
+A hand-run loop fills them in. A Workflow script receives the filled-in text through `args`, because scripts cannot read files. Both loops send the same words, so neither drifts from the other. The workflow appends one difference: the line telling its reviewers not to mark the PR ready. The saved workflow `.claude/workflows/ticket-build-review-loop.js` is that script:
+- It takes one reviewer template per lens. In a workflow run no reviewer marks the PR ready: the main session marks it ready on `approved-mark-ready`. On `approved-with-should-fix` in round 1 or 2, the main session asks the owner in plain text whether to restart at stage `fix` with round equal to the approving round plus one (so round 3 at most), passing the result's `shouldFix` lines as the findings, and restarts only on the owner's typed reply. In round 3, the owner chooses between merging as is and the hand loop.
+- The wave spec's optional `model` (`sonnet` or `opus`, `sonnet` by default) sets the builder and fixer model. The main session chooses it from what the ticket suggests. The mutation agent stays `sonnet` and the reviewers stay `opus`.
+- A builder block with a PR goes to review, and the reviewers are told about the block. On `approved-mark-ready` with a non-null `buildBlocked`, the main session still marks the PR ready after its own verification, and names the block in its report to the owner.
 - A mutation agent runs `pnpm test:mutate` before every review round, a resumed one included.
 - Findings have three levels, `blocker`, `should-fix` and `nit`, and the script routes them: blockers force a fix round, and should-fix items join it only when a blocker already forces one.
 - The result returns every should-fix item and nit in `nonBlocking`, for the nits bead the main session files after the merge.
@@ -78,7 +80,7 @@ Every PR is reviewed by a second agent before it can be merged. GitHub refuses a
   - claims in the PR body the diff does not support.
 - A reviewer is stochastic: the same commit reviewed twice has produced different real findings. A ticket that touches a server check, a schema or a model prompt therefore gets two reviewers with different lenses, one on correctness and one on tests. Every other ticket gets one.
 - Findings carry a level: `blocker`, `should-fix` or `nit`. Blockers force a fix round. Should-fix items go into a fix round only when a blocker already forces one. A reviewer never creates or edits a bead.
-- It posts its verdict as a PR comment (`gh pr comment`): approved, or changes requested with each finding. On approval it runs `gh pr ready <n>`, then reports and stops.
+- It posts its verdict as a PR comment (`gh pr comment`): approved, or changes requested with each finding. On approval it runs `gh pr ready <n>` in the hand loop (in a workflow run the main session does), then reports and stops.
 - Changes requested go back to the builder, on the same branch, and the same reviewer reviews again. After two rejected rounds the operator decides.
 
 ## The main session
@@ -103,6 +105,14 @@ Every PR is reviewed by a second agent before it can be merged. GitHub refuses a
     bd create --type=task --priority=3 --labels=pr-nits --title "$(sed -n 1p "$T")" --description "$(sed -n '3,$p' "$T")"
   fi
   rm -f "$T"
+  ```
+
+  After a restart at stage `fix`, step 1 builds the bead's object from both saved results instead. The first run's nits keep their own `round`, `lens` and `sentToFix`, and its should-fix items, which the restart fixed, are left out. The round numbers of the two runs may coincide; that is accepted.
+
+  ```bash
+  jq -n --slurpfile a .scratch/results/<first run>.json --slurpfile b .scratch/results/<restart run>.json \
+    '($a[0][] | select(.bead == "<bead>")) as $x | ($b[0][] | select(.bead == "<bead>")) as $y
+     | $y + {nonBlocking: ([$x.nonBlocking[] | select(.level == "nit")] + $y.nonBlocking)}' > .scratch/results/<bead>.json
   ```
 
 - Cleans up evidence. When the helper exited 0 with empty stdout, so no bead was filed, it deletes the main checkout's `.scratch/evidence/<bead>/` right after the merge. When the helper exited non-zero, it stops and reports: it files nothing and deletes nothing. Otherwise it deletes the folder when that PR's nits bead closes.
