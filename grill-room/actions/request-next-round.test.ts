@@ -1826,6 +1826,22 @@ describe("request-next-round through Answer change", () => {
     expect(await historyOf("e")).toMatchObject([{ answer: "", answerKind: "deferred" }]);
   });
 
+  it("clears pendingAsk on the cards a round opens", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, {
+      id: "e",
+      answerKind: "deferred",
+      currentAnswer: "later",
+      pendingAsk: true,
+    });
+    scriptInterviewer([round()]);
+
+    const result = await requestNextRound.run({ sessionId: session.id });
+
+    expect(result.round?.decisions.map((card) => card.id)).toEqual(["e"]);
+    expect((await readDecision("e")).pendingAsk).toBe(false);
+  });
+
   it("row 9: rolls the round's opening back when placing its cards fails", async () => {
     const session = await aDoneProposedSessionWithAReturningDeferral();
     scriptInterviewer([]);
@@ -1937,6 +1953,41 @@ describe("request-next-round through Answer change", () => {
       "tx insert roundDecisions",
       "tx update decisions",
     ]);
+  });
+
+  it("runs a round's opening on an interviewing session through one transaction's handle, with no return to interviewing", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, { id: "e", answerKind: "deferred", currentAnswer: "later" });
+    scriptInterviewer([round()]);
+
+    harness.recording = true;
+    await requestNextRound.run({ sessionId: session.id });
+    harness.recording = false;
+
+    expect(spanHolding(harness.log, "tx insert rounds")).toEqual([
+      // the returning deferral's unsettle, with no session update before it
+      "tx select",
+      "tx insert decisionHistory",
+      "tx update decisions",
+      "tx update decisions",
+      "tx update decisions",
+      "tx update specs",
+      // the round, its card, and the card no longer pending
+      "tx insert rounds",
+      "tx insert roundDecisions",
+      "tx update decisions",
+    ]);
+  });
+
+  it("accepts a push back on a key that is not in the tree, and withdraws nothing for it", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, { id: "n" });
+    scriptInterviewer([withdrawing(["no-such-key"], "x")]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect((await readDecision("n")).withdrawnAt).toBeNull();
+    expect(await historyOf("n")).toEqual([]);
   });
 
   it("runs every query of a stored proposal through one transaction's handle", async () => {
