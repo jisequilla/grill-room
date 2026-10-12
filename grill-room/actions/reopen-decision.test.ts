@@ -184,6 +184,12 @@ describe("reopen-decision", () => {
     });
 
     expect(result.round?.decisions.map((card) => card.key)).toEqual(["shape"]);
+    expect(
+      await getDb()
+        .select()
+        .from(schema.roundDecisions)
+        .where(eq(schema.roundDecisions.roundId, result.round!.id)),
+    ).toMatchObject([{ decisionId: result.round!.decisions[0]!.id, sortOrder: 0 }]);
     expect(result.round?.decisions[0]).toMatchObject({
       questionTitle: "Question shape",
       state: "frontier",
@@ -205,6 +211,18 @@ describe("reopen-decision", () => {
       "tone",
       "shape",
     ]);
+    const placements = await getDb()
+      .select()
+      .from(schema.roundDecisions)
+      .where(eq(schema.roundDecisions.roundId, result.round!.id));
+    expect(
+      placements
+        .map((placement) => [placement.decisionId, placement.sortOrder])
+        .sort((a, b) => Number(a[1]) - Number(b[1])),
+    ).toEqual([
+      [result.round!.decisions[0]!.id, 0],
+      [result.round!.decisions[1]!.id, 1],
+    ]);
     expect(interviewer.requests).toHaveLength(before);
     expect(
       await getDb()
@@ -212,6 +230,20 @@ describe("reopen-decision", () => {
         .from(schema.rounds)
         .where(eq(schema.rounds.sessionId, sessionId)),
     ).toHaveLength(4);
+  });
+
+  it("leaves an interviewing session's row as it was", async () => {
+    const { sessionId } = await aSettledChain();
+    const sessionRow = async () =>
+      getDb().select().from(schema.sessions).where(eq(schema.sessions.id, sessionId));
+    const before = await sessionRow();
+    expect(before[0]).toMatchObject({ state: "interviewing" });
+
+    await reopenDecision.run({
+      decisionId: await decisionId(sessionId, "shape"),
+    });
+
+    expect(await sessionRow()).toEqual(before);
   });
 
   it("returns a session that had proposed done to interviewing, and clears the summary", async () => {

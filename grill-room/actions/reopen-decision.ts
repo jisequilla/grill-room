@@ -98,16 +98,13 @@ export async function reopenDecisionCore(
     // The user reopened it to answer it differently, so it is asked straight
     // away. No interviewer turn: the question is the one already in the tree,
     // and what the change costs downstream is judged once the new answer is in.
-    let roundId = open?.id;
-    let sortOrder = 0;
-
-    if (roundId) {
-      const placements = await tx
-        .select()
-        .from(schema.roundDecisions)
-        .where(eq(schema.roundDecisions.roundId, roundId));
-      sortOrder = placements.length;
-    }
+    // On the open round, it goes after the cards already there.
+    const placements = open
+      ? await tx
+          .select()
+          .from(schema.roundDecisions)
+          .where(eq(schema.roundDecisions.roundId, open.id))
+      : [];
 
     // `reopenedAt` is the whole of what makes the dependents stale: derivation
     // compares it against each of their `settledAt`, so nothing downstream is
@@ -118,6 +115,7 @@ export async function reopenDecisionCore(
       await returnSessionToInterviewing(session, now, tx);
     }
 
+    let roundId = open?.id;
     if (!roundId) {
       roundId = randomUUID();
       await tx.insert(schema.rounds).values({
@@ -132,7 +130,7 @@ export async function reopenDecisionCore(
       id: randomUUID(),
       roundId,
       decisionId,
-      sortOrder,
+      sortOrder: placements.length,
     });
   });
 
