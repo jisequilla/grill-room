@@ -1,20 +1,15 @@
-import { randomUUID } from "node:crypto";
-
 import { defineAction, fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
+import { settle } from "../server/answer-change.js";
 import { getDb, schema } from "../server/db/index.js";
-import {
-  CLEARED_ANSWER_LINKS,
-  CLEARED_PROPOSAL,
-  describeDecisions,
-  LOOSE_END_ANSWER_KINDS,
-} from "../server/tree.js";
+import { describeDecisions, LOOSE_END_ANSWER_KINDS } from "../server/tree.js";
+import { failIfTurnInProgress } from "../server/turn.js";
 
 export default defineAction({
   description:
-    "Give a real answer to an unresolved loose end outside a round: a decision currently unknown, deferred, prototype flagged, or pushed back with no interviewer response yet. Records the previous state as history and settles the decision as an own answer. Never calls the interviewer; call request-next-round afterwards to let the tree move on.",
+    "Give a real answer to an unresolved loose end outside a round: a decision currently unknown, deferred, prototype flagged, or pushed back with no interviewer response yet. Records the previous state as history, settles the decision as an own answer, withdraws the claims other decisions make about it, and marks the session's spec not current. Refused while an interviewer turn is working. Never calls the interviewer; call request-next-round afterwards to let the tree move on.",
   schema: z.object({
     decisionId: z.string().min(1).describe("Decision id"),
     answer: z.string().describe("The real answer"),
@@ -49,34 +44,22 @@ export default defineAction({
       });
     }
 
-    const now = new Date().toISOString();
+    const [session] = await db
+      .select()
+      .from(schema.sessions)
+      .where(eq(schema.sessions.id, row.sessionId))
+      .limit(1);
 
-    await db.insert(schema.decisionHistory).values({
-      id: randomUUID(),
-      decisionId: row.id,
-      questionTitle: row.questionTitle,
-      questionBody: row.questionBody,
-      answer: row.currentAnswer,
-      answerKind: row.answerKind,
-      recordedAt: now,
-    });
+    failIfTurnInProgress(
+      session!,
+      "The interviewer is working on this session. Wait for the turn to finish before answering a decision.",
+    );
 
-    const [updated] = await db
-      .update(schema.decisions)
-      .set({
-        currentAnswer: answer,
-        answerKind: "own-answer",
-        settledAt: now,
-        // The user answered it themselves, so whatever the interviewer thought
-        // had already answered it is moot.
-        ...CLEARED_PROPOSAL,
-        ...CLEARED_ANSWER_LINKS,
-        updatedAt: now,
-      })
-      .where(eq(schema.decisions.id, decisionId))
-      .returning();
-
-    if (!updated) fail("Failed to answer the decision.", { statusCode: 500 });
+    const updated = await settle(
+      row.id,
+      { answer, kind: "own-answer" },
+      { now: new Date().toISOString() },
+    );
 
     return describeDecisions([updated])[0];
   },

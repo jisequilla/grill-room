@@ -1,22 +1,16 @@
-import { randomUUID } from "node:crypto";
-
 import { defineAction, fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
+import { settle } from "../server/answer-change.js";
 import { getDb, schema } from "../server/db/index.js";
 import { DECISION_DISPOSITION_TARGETS } from "../server/db/schema.js";
-import {
-  CLEARED_ANSWER_LINKS,
-  CLEARED_PROPOSAL,
-  classifyLooseEnds,
-  describeDecisions,
-  treeFacts,
-} from "../server/tree.js";
+import { classifyLooseEnds, describeDecisions, treeFacts } from "../server/tree.js";
+import { failIfTurnInProgress } from "../server/turn.js";
 
 export default defineAction({
   description:
-    "Resolve a loose end by moving it out of scope or into the notes as a named open question, instead of giving it a real answer. Records the previous state as history and settles the decision as dispositioned, which unblocks its dependents. Never calls the interviewer. Refuses a decision that is not a loose end at all, one that is stale (settled again by the stale review instead), or one that is unplaced (settled by the next proposal instead).",
+    "Resolve a loose end by moving it out of scope or into the notes as a named open question, instead of giving it a real answer. Records the previous state as history when it had one, settles the decision as dispositioned (which unblocks its dependents), withdraws the claims other decisions make about it, and marks the session's spec not current. Never calls the interviewer. Refuses a decision that is not a loose end at all, one that is stale (settled again by the stale review instead), or one that is unplaced (settled by the next proposal instead), and refuses while an interviewer turn is working.",
   schema: z.object({
     decisionId: z.string().min(1).describe("Decision id"),
     target: z
@@ -67,35 +61,22 @@ export default defineAction({
       );
     }
 
-    const now = new Date().toISOString();
+    const [session] = await db
+      .select()
+      .from(schema.sessions)
+      .where(eq(schema.sessions.id, row.sessionId))
+      .limit(1);
 
-    await db.insert(schema.decisionHistory).values({
-      id: randomUUID(),
-      decisionId: row.id,
-      questionTitle: row.questionTitle,
-      questionBody: row.questionBody,
-      answer: row.currentAnswer,
-      answerKind: row.answerKind,
-      recordedAt: now,
-    });
+    failIfTurnInProgress(
+      session!,
+      "The interviewer is working on this session. Wait for the turn to finish before dispositioning a decision.",
+    );
 
-    const [updated] = await db
-      .update(schema.decisions)
-      .set({
-        currentAnswer: note,
-        answerKind: "dispositioned",
-        dispositionTarget: target,
-        settledAt: now,
-        // Set aside is an answer to the same question a supersession proposed
-        // one for, and the user's answer wins.
-        ...CLEARED_PROPOSAL,
-        ...CLEARED_ANSWER_LINKS,
-        updatedAt: now,
-      })
-      .where(eq(schema.decisions.id, decisionId))
-      .returning();
-
-    if (!updated) fail("Failed to disposition the decision.", { statusCode: 500 });
+    const updated = await settle(
+      row.id,
+      { answer: note, kind: "dispositioned", dispositionTarget: target },
+      { now: new Date().toISOString() },
+    );
 
     return describeDecisions([updated])[0];
   },

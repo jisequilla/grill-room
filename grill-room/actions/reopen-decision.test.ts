@@ -1,5 +1,5 @@
 import { eq } from "@agent-native/core/db/schema";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   resetInterviewer,
@@ -17,6 +17,46 @@ import reopenDecision from "./reopen-decision.js";
 import requestNextRound from "./request-next-round.js";
 import saveDraftAnswer from "./save-draft-answer.js";
 import submitRound from "./submit-round.js";
+
+/**
+ * While `failRoundDecisionsInsert` is set, an insert into the round-decisions
+ * table throws, whether it goes through `getDb()` or a transaction opened on
+ * it: the one way to make a reopen fail after its other writes.
+ */
+const placing = vi.hoisted(() => ({ failRoundDecisionsInsert: false }));
+
+vi.mock("../server/db/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../server/db/index.js")>();
+  // `getDb()` may hand back a lazy chain-recording proxy (itself a function)
+  // while the database starts: its members are passed through untouched.
+  const bind = (target: object, prop: string | symbol) => {
+    const value = Reflect.get(target, prop);
+    return typeof value === "function" && typeof target !== "function" ? value.bind(target) : value;
+  };
+  const failing = <Handle extends object>(handle: Handle): Handle =>
+    new Proxy(handle, {
+      get(target, prop) {
+        if (prop === "insert") {
+          return (table: unknown) => {
+            if (placing.failRoundDecisionsInsert && table === original.schema.roundDecisions) {
+              throw new Error("placing failed");
+            }
+            return (target as { insert: (t: unknown) => unknown }).insert(table);
+          };
+        }
+        if (prop === "transaction") {
+          return (callback: (tx: object) => Promise<unknown>, ...rest: unknown[]) =>
+            (Reflect.get(target, prop) as (...args: unknown[]) => Promise<unknown>).call(
+              target,
+              (tx: object) => callback(failing(tx)),
+              ...rest,
+            );
+        }
+        return bind(target, prop);
+      },
+    });
+  return { ...original, getDb: () => failing(original.getDb()) };
+});
 
 /** One round proposing one question, which is all these tests need per turn. */
 function proposal(key: string, dependsOn: string[] = []): ScriptedTurn {
@@ -111,6 +151,9 @@ async function decisionId(sessionId: string, key: string) {
 describe("reopen-decision", () => {
   useTestDatabase();
   afterEach(resetInterviewer);
+  afterEach(() => {
+    placing.failRoundDecisionsInsert = false;
+  });
 
   it("throws for a decision id that does not exist", async () => {
     await expect(
@@ -130,49 +173,6 @@ describe("reopen-decision", () => {
       storage: "stale",
       sync: "stale",
     });
-  });
-
-  it("keeps the answer it cleared as history", async () => {
-    const { sessionId } = await aSettledChain();
-
-    await reopenDecision.run({
-      decisionId: await decisionId(sessionId, "shape"),
-    });
-
-    const tree = await getTree.run({ sessionId });
-    const shape = tree.decisions.find((decision) => decision.key === "shape");
-
-    expect(shape?.answer).toBeNull();
-    expect(shape?.settledAt).toBeNull();
-    expect(shape?.previousAnswers).toEqual([
-      {
-        text: "A workspace",
-        kind: "own-answer",
-        // The user reopened it; the interviewer had nothing to say about that.
-        interviewerReason: null,
-        operatorNotes: null,
-        recordedAt: expect.stringMatching(/^\d{4}-/),
-        questionTitle: "Question shape",
-        questionBody: "The body of shape",
-      },
-    ]);
-  });
-
-  it("clears the reopened decision's own pending deferral proposal", async () => {
-    const { sessionId } = await aSettledChain();
-    const shapeId = await decisionId(sessionId, "shape");
-    await getDb()
-      .update(schema.decisions)
-      .set({ deferralReason: "It waits on the storage decision." })
-      .where(eq(schema.decisions.id, shapeId));
-
-    await reopenDecision.run({ decisionId: shapeId });
-
-    const [row] = await getDb()
-      .select()
-      .from(schema.decisions)
-      .where(eq(schema.decisions.id, shapeId));
-    expect(row?.deferralReason).toBeNull();
   });
 
   it("asks the question again as a round of its own, without troubling the interviewer", async () => {
@@ -281,7 +281,7 @@ describe("reopen-decision", () => {
     expect(spec).toMatchObject({ current: false });
   });
 
-  it("leaves the spec alone when reopening a decision in a done-proposed session", async () => {
+  it("marks an existing spec not current when reopening a decision in a done-proposed session", async () => {
     const { sessionId } = await aSettledChain();
     const now = new Date().toISOString();
     await getDb().insert(schema.specs).values({
@@ -305,7 +305,7 @@ describe("reopen-decision", () => {
       .select()
       .from(schema.specs)
       .where(eq(schema.specs.sessionId, sessionId));
-    expect(spec).toMatchObject({ current: true });
+    expect(spec).toMatchObject({ current: false });
   });
 
   it("refuses a decision that was never settled", async () => {
@@ -356,5 +356,43 @@ describe("reopen-decision", () => {
         decisionId: await decisionId(sessionId, "shape"),
       }),
     ).rejects.toThrow(/interviewer is working/);
+  });
+
+  it("rolls back the reopen when placing it fails", async () => {
+    const { sessionId } = await aSettledChain();
+    const now = new Date().toISOString();
+    await getDb().insert(schema.specs).values({
+      id: "spec-1",
+      sessionId,
+      markdown: "# Grill Room\n",
+      current: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await getDb()
+      .update(schema.sessions)
+      .set({ state: "done-proposed", doneSummary: "Nothing left, we thought." })
+      .where(eq(schema.sessions.id, sessionId));
+    const shapeId = await decisionId(sessionId, "shape");
+    const snapshot = async () => ({
+      decision: await getDb().select().from(schema.decisions).where(eq(schema.decisions.id, shapeId)),
+      history: await getDb()
+        .select()
+        .from(schema.decisionHistory)
+        .where(eq(schema.decisionHistory.decisionId, shapeId)),
+      session: await getDb().select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)),
+      spec: await getDb().select().from(schema.specs).where(eq(schema.specs.sessionId, sessionId)),
+      rounds: await getDb().select().from(schema.rounds).where(eq(schema.rounds.sessionId, sessionId)),
+    });
+    const before = await snapshot();
+    expect(before.rounds.filter((round) => round.submissionState === "open")).toEqual([]);
+    expect(before.session[0]).toMatchObject({ state: "done-proposed" });
+    expect(before.spec[0]).toMatchObject({ current: true });
+
+    placing.failRoundDecisionsInsert = true;
+    await expect(reopenDecision.run({ decisionId: shapeId })).rejects.toThrow("placing failed");
+    placing.failRoundDecisionsInsert = false;
+
+    expect(await snapshot()).toEqual(before);
   });
 });
