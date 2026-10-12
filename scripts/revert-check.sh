@@ -22,7 +22,7 @@ if ! git fetch origin; then
   exit 5
 fi
 
-patch=$(mktemp)
+patch=$(mktemp "${TMPDIR:-/tmp}/revert-check.XXXXXX")
 reverted=0
 test_pid=""
 
@@ -41,7 +41,7 @@ forward() {
     kill -TERM -- "-$test_pid" 2>/dev/null
     wait "$test_pid" 2>/dev/null
   fi
-  reapply
+  reapply || exit 4
   exit "$status"
 }
 
@@ -58,11 +58,12 @@ if [ ! -s "$patch" ]; then
   exit 0
 fi
 
+reverted=1
 if ! git apply -R "$patch"; then
+  reverted=0
   echo "git apply -R failed"
   exit 3
 fi
-reverted=1
 
 set -m
 bash -c "$1" &

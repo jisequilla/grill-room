@@ -26,13 +26,13 @@ const MARKER = "<the Evidence entry test command>";
 const REVERT_BLOCK = `scripts/revert-check.sh '${MARKER}'`;
 
 const REVERT_PARAGRAPH =
-  "The script reads commits, not the working tree, so commit the change on the worktree branch before running it. Put your own test command in place of the marker, inside the single quotes, and run the line as one plain command from anywhere in the worktree. The script moves to the worktree root, reverts every non-test file the branch changes against `origin/main`, runs your command there with `bash -c`, and re-applies the source even when the test fails or the run is interrupted. If the test command needs `grill-room/`, write it as `(cd grill-room && <test command>)`. Inside the command, use only double quotes. The red run is the script's output; the green run is a separate run of the same test command afterwards. A planted-bug line is the exception: its red run is the test with the planted edit applied.";
+  "The script reads commits, not the working tree, so commit the change on the worktree branch before running it. Put your own test command in place of the marker, inside the single quotes, and run the line as one plain command from the worktree root. The script moves to the worktree root, reverts every non-test file the branch changes against `origin/main`, runs your command there with `bash -c`, and re-applies the source even when the test fails or the run is interrupted. If the test command needs `grill-room/`, write it as `(cd grill-room && <test command>)`. Inside the command, use only double quotes. The red run is the script's output; the green run is a separate run of the same test command afterwards. A planted-bug line is the exception: its red run is the test with the planted edit applied.";
 
 const FAILURE_BULLET =
   "- If the script prints `git apply -R failed` (exit 3) or `git apply failed` (exit 4), stop and report, quoting git's error. Never rebuild the change by hand.";
 
 const REVIEWER_PARAGRAPH =
-  "Put the Evidence entry's test command in place of the marker, inside the single quotes, and run the line as one plain Bash call. The script moves to the worktree root, so it runs the same from any folder of the scratch worktree, and it re-applies the source even when the test fails. Write any `cd grill-room` inside the command, as `(cd grill-room && <test command>)`, and use only double quotes inside it.";
+  "Put the Evidence entry's test command in place of the marker, inside the single quotes, and run the line as one plain Bash call. Run the line from the scratch worktree root. The script moves to the worktree root, and it re-applies the source even when the test fails. Write any `cd grill-room` inside the command, as `(cd grill-room && <test command>)`, and use only double quotes inside it.";
 
 const REVIEWER_RED_RUN_LINE =
   "The red run is the Revert block with that command in place of the marker. The green run is the same command after the block finishes. An entry that proves a planted-bug line is the exception: its red run is its quoted edit applied, as the rows below say, and the Revert block does not judge it.";

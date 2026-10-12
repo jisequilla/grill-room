@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -175,7 +176,7 @@ describe("scripts/revert-check.sh", () => {
     write(join(work, "src/a.ts"), "dirty\n");
     const result = run(work, "touch ran");
     expect(result.stdout).toBe("git apply -R failed\n");
-    expect(result.stderr).not.toBe("");
+    expect(result.stderr).toContain("error:");
     expect(result.status).toBe(3);
     expect(existsSync(join(work, "ran"))).toBe(false);
     expect(read(work, "src/a.ts")).toBe("dirty\n");
@@ -258,5 +259,52 @@ describe("scripts/revert-check.sh", () => {
     expect(result.stdout).toBe("git fetch failed\n");
     expect(result.status).toBe(5);
     expect(existsSync(join(work, "ran"))).toBe(false);
+  });
+
+  it(
+    "row 11: a TERM during the revert still re-applies the source",
+    async () => {
+      const { work } = makeFixture();
+      const shims = tempFolder("revert-shim-");
+      const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+      const shim = join(shims, "git");
+      writeFileSync(
+        shim,
+        `#!/usr/bin/env bash\nif [ "$1" = apply ] && [ "$2" = -R ]; then sleep 2; fi\nexec ${realGit} "$@"\n`,
+      );
+      chmodSync(shim, 0o755);
+      const child = spawn(SCRIPT, ["touch ran"], {
+        cwd: work,
+        env: { ...process.env, PATH: `${shims}:${process.env.PATH}` },
+        stdio: "ignore",
+      });
+      const exited = new Promise<number | null>((resolve) => {
+        child.on("exit", (code) => resolve(code));
+      });
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 1_200));
+        child.kill("SIGTERM");
+        expect(await exited).toBe(143);
+        expect(read(work, "src/a.ts")).toBe("branch\n");
+        expect(status(work)).toBe("");
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
+    },
+    20_000,
+  );
+
+  it("row 12: the temporary patch file is removed on exit", () => {
+    const { work } = makeFixture();
+    const tmp = tempFolder("revert-tmp-");
+    const result = spawnSync(SCRIPT, ["true"], {
+      cwd: work,
+      encoding: "utf8",
+      env: { ...process.env, TMPDIR: tmp },
+    });
+    expect(result.status).toBe(0);
+    expect(readdirSync(tmp)).toEqual([]);
   });
 });

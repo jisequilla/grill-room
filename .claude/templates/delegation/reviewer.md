@@ -35,7 +35,7 @@ Other lenses may review the same PR at the same time, so give your scratch work 
 scripts/revert-check.sh '<the Evidence entry test command>'
 ```
 
-Put the Evidence entry's test command in place of the marker, inside the single quotes, and run the line as one plain Bash call. The script moves to the worktree root, so it runs the same from any folder of the scratch worktree, and it re-applies the source even when the test fails. Write any `cd grill-room` inside the command, as `(cd grill-room && <test command>)`, and use only double quotes inside it.
+Put the Evidence entry's test command in place of the marker, inside the single quotes, and run the line as one plain Bash call. Run the line from the scratch worktree root. The script moves to the worktree root, and it re-applies the source even when the test fails. Write any `cd grill-room` inside the command, as `(cd grill-room && <test command>)`, and use only double quotes inside it.
 
 - If the block prints `git apply -R failed`, stop the re-run: remove the scratch worktree with `git worktree remove --force <folder>` (the tree may be left modified, and then a plain remove exits 128), create a fresh one in a new folder that keeps the `rv<pr>-r<round>-<lens>` naming with a `-2` suffix, detached at `origin/{{branch}}`, and run the block once more. If it fails again, record a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command. Never rebuild the change by hand.
 - If the block prints `git apply failed`, do the same: a fresh worktree, one more try, then a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command.
