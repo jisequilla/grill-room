@@ -214,6 +214,53 @@ describe("disposition-decision", () => {
     ).rejects.toMatchObject({ errorCode: "not-a-loose-end", statusCode: 409 });
   });
 
+  it("refuses a stale decision before checking the turn lock", async () => {
+    const session = await aSession();
+    const now = new Date().toISOString();
+    await insertDecision(session.id, {
+      id: "d-base",
+      key: "base-key",
+      questionTitle: "Base",
+      answerKind: "own-answer",
+      currentAnswer: "A workspace",
+      settledAt: now,
+    });
+    await insertDecision(session.id, {
+      id: "d-dependent",
+      key: "dependent-key",
+      questionTitle: "Dependent",
+      answerKind: "own-answer",
+      currentAnswer: "On disk",
+      settledAt: now,
+      dependsOnJson: JSON.stringify(["d-base"]),
+    });
+    await reopenDecision.run({ decisionId: "d-base" });
+    await getDb()
+      .update(schema.sessions)
+      .set({ turnStatus: "working", turnStartedAt: new Date().toISOString() })
+      .where(eq(schema.sessions.id, session.id));
+
+    await expect(
+      dispositionDecision.run({ decisionId: "d-dependent", target: "out-of-scope" }),
+    ).rejects.toMatchObject({ errorCode: "decision-stale", statusCode: 409 });
+  });
+
+  it("refuses an unplaced decision before checking the turn lock", async () => {
+    const session = await aSession();
+    const added = await addDecision.run({
+      sessionId: session.id,
+      title: "Should we support offline mode?",
+    });
+    await getDb()
+      .update(schema.sessions)
+      .set({ turnStatus: "working", turnStartedAt: new Date().toISOString() })
+      .where(eq(schema.sessions.id, session.id));
+
+    await expect(
+      dispositionDecision.run({ decisionId: added.id, target: "out-of-scope" }),
+    ).rejects.toMatchObject({ errorCode: "decision-unplaced", statusCode: 409 });
+  });
+
   it("refuses while the interviewer is working, writing nothing", async () => {
     const session = await aSession();
     await insertDecision(session.id, {
