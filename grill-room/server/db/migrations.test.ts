@@ -774,7 +774,12 @@ describe("decisions-proposal-kind-dismissals migration", () => {
     await insertDecision(sessionId, "d2", { answer_kind: "own-answer", deferral_reason: "x", restatement_text: "Clean." });
     await insertDecision(sessionId, "d1", { answer_kind: "own-answer", superseded_by_id: "a-later", deferral_reason: "y" });
 
-    await expect(applyMigrations(appMigrations, MIGRATIONS_TABLE)).rejects.toThrow(
+    const error = await applyMigrations(appMigrations, MIGRATIONS_TABLE).then(
+      () => null,
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
       [
         "Decisions hold more than one pending proposal: d1, d2.",
         "UPDATE gr_decisions SET superseded_by_id = NULL, supersession_answer = NULL, supersession_reason = NULL WHERE id = 'd1';",

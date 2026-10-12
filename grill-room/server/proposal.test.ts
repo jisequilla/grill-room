@@ -370,6 +370,16 @@ describe("proposal", () => {
     expect(eligibleFor("restatement", rows).map((r) => r.id)).toEqual([S, W]);
   });
 
+  it("row 10b: eligibility for a deferral and a restatement leaves out a row whose stored kind has no payload", async () => {
+    await fixture();
+    await propose(S, { kind: "deferral", reason: null }, { now: NOW });
+    expect(await row(S)).toMatchObject({ proposalKind: "deferral", deferralReason: null });
+    const rows = await sessionRows();
+
+    expect(eligibleFor("deferral", rows).map((r) => r.id)).toEqual([V, W]);
+    expect(eligibleFor("restatement", rows).map((r) => r.id)).toEqual([V, W]);
+  });
+
   it("row 11: eligibility for an answered-by leaves out a loose end holding one", async () => {
     await fixture({
       l: { supersededById: V, supersessionAnswer: "B", supersessionReason: "r", proposalKind: "answered-by" },
@@ -554,15 +564,16 @@ describe("proposal", () => {
     ]);
   });
 
+  const REPLACEMENT_BY_W: Dismissal = { kind: "replacement", targetId: W, reason: "w", dismissedAt: T0 };
+
   it("row 21: forgetDismissal removes the matching kind and target, changing nothing else", async () => {
     await fixture({
       s: {
-        dismissedProposalsJson: remembered(DEFERRAL_DISMISSAL, {
-          kind: "replacement",
-          targetId: V,
-          reason: "r",
-          dismissedAt: T0,
-        }),
+        dismissedProposalsJson: remembered(
+          DEFERRAL_DISMISSAL,
+          { kind: "replacement", targetId: V, reason: "r", dismissedAt: T0 },
+          REPLACEMENT_BY_W,
+        ),
       },
     });
     const before = await row(S);
@@ -571,7 +582,7 @@ describe("proposal", () => {
 
     expect(written).toEqual({
       ...before,
-      dismissedProposalsJson: remembered(DEFERRAL_DISMISSAL),
+      dismissedProposalsJson: remembered(DEFERRAL_DISMISSAL, REPLACEMENT_BY_W),
       updatedAt: NOW,
     });
     expect(await row(S)).toEqual(written);
