@@ -194,6 +194,26 @@ describe("disposition-decision", () => {
     ).rejects.toThrow();
   });
 
+  it("refuses a decision that is not a loose end before checking the turn lock", async () => {
+    const session = await aSession();
+    await insertDecision(session.id, {
+      id: "d-settled",
+      key: "settled-key",
+      questionTitle: "Settled",
+      answerKind: "own-answer",
+      currentAnswer: "A workspace",
+      settledAt: new Date().toISOString(),
+    });
+    await getDb()
+      .update(schema.sessions)
+      .set({ turnStatus: "working", turnStartedAt: new Date().toISOString() })
+      .where(eq(schema.sessions.id, session.id));
+
+    await expect(
+      dispositionDecision.run({ decisionId: "d-settled", target: "out-of-scope" }),
+    ).rejects.toMatchObject({ errorCode: "not-a-loose-end", statusCode: 409 });
+  });
+
   it("refuses while the interviewer is working, writing nothing", async () => {
     const session = await aSession();
     await insertDecision(session.id, {

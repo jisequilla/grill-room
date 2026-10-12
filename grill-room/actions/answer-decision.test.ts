@@ -139,6 +139,24 @@ describe("answer-decision", () => {
     ).rejects.toThrow(/answer needs some text/);
   });
 
+  it("refuses a decision that is not a loose end before checking the turn lock", async () => {
+    const session = await aSession();
+    await arrangeDecision(session.id, {
+      id: "decision-1",
+      key: "shape",
+      answerKind: "own-answer",
+      answer: "A workspace",
+    });
+    await getDb()
+      .update(schema.sessions)
+      .set({ turnStatus: "working", turnStartedAt: new Date().toISOString() })
+      .where(eq(schema.sessions.id, session.id));
+
+    await expect(
+      answerDecision.run({ decisionId: "decision-1", answer: "Something else" }),
+    ).rejects.toMatchObject({ errorCode: "not_a_loose_end", statusCode: 409 });
+  });
+
   it("refuses while the interviewer is working, writing nothing", async () => {
     const session = await aSession();
     await arrangeDecision(session.id, {
