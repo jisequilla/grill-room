@@ -1,5 +1,13 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -835,6 +843,33 @@ describe("scopeFor", () => {
       rmSync(stubs, { recursive: true, force: true });
     }
   });
+
+  it("main: a tsx file with a test reaches the Stryker command through the loaded index", () => {
+    const stubs = mkdtempSync(path.join(tmpdir(), "mutate-stub-"));
+    try {
+      const log = path.join(stubs, "argv.log");
+      writeFileSync(
+        path.join(stubs, "pnpm"),
+        '#!/bin/sh\nif [ "$1" = exec ] && [ "$2" = stryker ]; then printf \'%s\\n\' "$*" >> "$STUB_LOG"; exit 1; fi\nexit 0\n',
+        { mode: 0o755 },
+      );
+      const env = { PATH: `${stubs}:${process.env.PATH}`, STUB_LOG: log };
+      const root = repos.create({
+        files: { "app/x/foo.tsx": "export const a = 1;\n", "app/x/foo.test.tsx": "// t\n" },
+      });
+      const base = commitChange(root, {
+        write: { "app/x/foo.tsx": "export const a = 1 + 2;\n", "app/x/foo.test.tsx": "// t\n// more\n" },
+      });
+
+      runStubbedCli(["--base", base], root, env);
+
+      expect(readFileSync(log, "utf8").trim().split("\n")).toEqual([
+        "exec stryker run --mutate app/x/foo.tsx:1-1 --testFiles app/x/foo.test.tsx",
+      ]);
+    } finally {
+      rmSync(stubs, { recursive: true, force: true });
+    }
+  });
 });
 
 function runStubbedCli(args: string[], cwd: string, envOverride: NodeJS.ProcessEnv) {
@@ -872,6 +907,14 @@ describe("inMutationScope", () => {
     expect(rows.map(([name, file, index]) => [name, inMutationScope(file, index)])).toEqual(
       rows.map(([name, , , expected]) => [name, expected]),
     );
+  });
+
+  it("inMutationScope: a quote before the name is a reference", () => {
+    const texts = ['vi.mock("foo")', "from 'foo'"];
+    expect(texts.map((text) => inMutationScope(foo, entry("app/a.test.tsx", text)))).toEqual([
+      true,
+      true,
+    ]);
   });
 
   it("inMutationScope: the i18n rule wins over a sibling test (1b)", () => {
@@ -969,6 +1012,41 @@ describe("loadTestIndex", () => {
       L6: [longName],
       text: "// a\n",
     });
+  });
+});
+
+describe("loadTestIndex: git and the file system", () => {
+  const repos = useTempGitRepos();
+
+  it("loadTestIndex: a tracked symlink to a non-regular file is skipped (L7)", () => {
+    const root = repos.create({ files: { "a.test.ts": "// a\n" } });
+    symlinkSync("/dev/null", path.join(root, "n.test.ts"));
+    execFileSync("git", ["add", "."], { cwd: root });
+
+    expect(loadTestIndex(root).map((entry) => entry.path)).toEqual(["a.test.ts"]);
+  });
+
+  it("loadTestIndex: git runs with the rest of the parent environment, PATH included (L8)", () => {
+    const root = repos.create({ files: { "a.test.ts": "// a\n" } });
+    writeFileSync(path.join(root, "xyes.test.ts"), "// x\n");
+    const stubs = mkdtempSync(path.join(tmpdir(), "mutate-git-stub-"));
+    writeFileSync(
+      path.join(stubs, "git"),
+      '#!/bin/sh\nprintf "x%s.test.ts\\0" "$PROBE_MARKER"\n',
+      { mode: 0o755 },
+    );
+    const previous = { PATH: process.env.PATH, PROBE_MARKER: process.env.PROBE_MARKER };
+    process.env.PATH = `${stubs}:${previous.PATH}`;
+    process.env.PROBE_MARKER = "yes";
+    try {
+      expect(loadTestIndex(root).map((entry) => entry.path)).toEqual(["xyes.test.ts"]);
+    } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      rmSync(stubs, { recursive: true, force: true });
+    }
   });
 });
 
