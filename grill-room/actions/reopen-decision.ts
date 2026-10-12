@@ -4,17 +4,12 @@ import { defineAction, fail } from "@agent-native/core/action";
 import { and, desc, eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
+import { unsettle } from "../server/answer-change.js";
 import { getDb, schema } from "../server/db/index.js";
 import { laterTimestamp } from "../server/ordering.js";
 import { returnSessionToInterviewing } from "../server/session-state.js";
-import {
-  CLEARED_ANSWER_LINKS,
-  CLEARED_PROPOSAL,
-  deriveTreeStates,
-  treeFacts,
-} from "../server/tree.js";
+import { deriveTreeStates, treeFacts } from "../server/tree.js";
 import { failIfTurnInProgress } from "../server/turn.js";
-import { withdrawClaimsOn } from "../server/withdraw-claims.js";
 import getCurrentRound from "./get-current-round.js";
 
 /**
@@ -83,82 +78,60 @@ export async function reopenDecisionCore(
 
   const now = reopenStamp(rows);
 
-  await db.insert(schema.decisionHistory).values({
-    id: randomUUID(),
-    decisionId,
-    questionTitle: decision.questionTitle,
-    questionBody: decision.questionBody,
-    answer: decision.currentAnswer,
-    answerKind: decision.answerKind,
-    recordedAt: now,
-  });
-
-  // `reopenedAt` is the whole of what makes the dependents stale: derivation
-  // compares it against each of their `settledAt`, so nothing downstream is
-  // written here.
-  await db
-    .update(schema.decisions)
-    .set({
-      currentAnswer: null,
-      answerKind: null,
-      dispositionTarget: null,
-      settledAt: null,
-      reopenedAt: now,
-      ...CLEARED_ANSWER_LINKS,
-      ...CLEARED_PROPOSAL,
-      updatedAt: now,
-    })
-    .where(eq(schema.decisions.id, decisionId));
-
-  // It is no longer settled, so what other decisions claim about its answer
-  // goes with it.
-  await withdrawClaimsOn(decisionId, now);
-
-  if (session.state !== "interviewing") {
-    await returnSessionToInterviewing(session, now);
-  }
-
-  const [open] = await db
-    .select()
-    .from(schema.rounds)
-    .where(
-      and(
-        eq(schema.rounds.sessionId, sessionId),
-        eq(schema.rounds.submissionState, "open"),
-      ),
-    )
-    // Only one round is ever "open" at a time, so this tie-break is
-    // defensive rather than load-bearing: total order still costs nothing.
-    .orderBy(desc(schema.rounds.createdAt), schema.rounds.id)
-    .limit(1);
-
-  // The user reopened it to answer it differently, so it is asked straight
-  // away. No interviewer turn: the question is the one already in the tree,
-  // and what the change costs downstream is judged once the new answer is in.
-  let roundId = open?.id;
-  let sortOrder = 0;
-
-  if (roundId) {
-    const placements = await db
+  // Every write lands together or not at all: the unsettle, the session's
+  // return to interviewing and the question's place in a round.
+  await db.transaction(async (tx) => {
+    const [open] = await tx
       .select()
-      .from(schema.roundDecisions)
-      .where(eq(schema.roundDecisions.roundId, roundId));
-    sortOrder = placements.length;
-  } else {
-    roundId = randomUUID();
-    await db.insert(schema.rounds).values({
-      id: roundId,
-      sessionId,
-      submissionState: "open",
-      createdAt: now,
-    });
-  }
+      .from(schema.rounds)
+      .where(
+        and(
+          eq(schema.rounds.sessionId, sessionId),
+          eq(schema.rounds.submissionState, "open"),
+        ),
+      )
+      // Only one round is ever "open" at a time, so this tie-break is
+      // defensive rather than load-bearing: total order still costs nothing.
+      .orderBy(desc(schema.rounds.createdAt), schema.rounds.id)
+      .limit(1);
 
-  await db.insert(schema.roundDecisions).values({
-    id: randomUUID(),
-    roundId,
-    decisionId,
-    sortOrder,
+    // The user reopened it to answer it differently, so it is asked straight
+    // away. No interviewer turn: the question is the one already in the tree,
+    // and what the change costs downstream is judged once the new answer is in.
+    // On the open round, it goes after the cards already there.
+    const placements = open
+      ? await tx
+          .select()
+          .from(schema.roundDecisions)
+          .where(eq(schema.roundDecisions.roundId, open.id))
+      : [];
+
+    // `reopenedAt` is the whole of what makes the dependents stale: derivation
+    // compares it against each of their `settledAt`, so nothing downstream is
+    // written here.
+    await unsettle(decisionId, { now, db: tx });
+
+    if (session.state !== "interviewing") {
+      await returnSessionToInterviewing(session, now, tx);
+    }
+
+    let roundId = open?.id;
+    if (!roundId) {
+      roundId = randomUUID();
+      await tx.insert(schema.rounds).values({
+        id: roundId,
+        sessionId,
+        submissionState: "open",
+        createdAt: now,
+      });
+    }
+
+    await tx.insert(schema.roundDecisions).values({
+      id: randomUUID(),
+      roundId,
+      decisionId,
+      sortOrder: placements.length,
+    });
   });
 
   return getCurrentRound.run({ sessionId });
@@ -166,7 +139,7 @@ export async function reopenDecisionCore(
 
 export default defineAction({
   description:
-    "Reopen a settled decision: its answer becomes history, the decision returns to the frontier, and every decision downstream of it is marked stale. The question is put straight back to the user, as a new card on the open round or a round of its own. Allowed in any session state; a session that had proposed or confirmed done returns to interviewing.",
+    "Reopen a settled decision: its answer becomes history, the claims other decisions make about it are withdrawn, the decision returns to the frontier, and every decision downstream of it is marked stale. The session's spec, if any, is marked not current. The question is put straight back to the user, as a new card on the open round or a round of its own. Allowed in any session state; a session that had proposed or confirmed done returns to interviewing. Refused while an interviewer turn is working.",
   schema: z.object({
     decisionId: z.string().min(1).describe("Decision id"),
   }),

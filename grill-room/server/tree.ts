@@ -308,9 +308,9 @@ export function classifyLooseEnds(
 /**
  * The lasting links a decision's own answer carries: which later decision
  * replaced it, and which decision's answer settled it. Both describe the
- * answer as it stands, so any write that changes the answer or its kind
- * spreads this into the same update — other than accepting a supersession,
- * which is what sets them.
+ * answer as it stands, so Answer change (`server/answer-change.ts`) clears
+ * them on every transition but a reword. Accepting a supersession is what
+ * sets them.
  */
 export const CLEARED_ANSWER_LINKS = {
   replacedById: null,
@@ -320,9 +320,10 @@ export const CLEARED_ANSWER_LINKS = {
 
 /**
  * A pending supersession proposal alone: the three columns that name another
- * decision as answering or replacing this one. What a reopen or a re-ask
- * clears on the *other* rows whose proposal names the decision it unsettled —
- * a deferral names no other decision, so it is not part of this.
+ * decision as answering or replacing this one. What Answer change
+ * (`server/answer-change.ts`) withdraws from the *other* rows whose proposal
+ * names the decision it changes — a deferral names no other decision, so it
+ * is not part of this.
  */
 export const CLEARED_SUPERSESSION = {
   supersededById: null,
@@ -342,9 +343,9 @@ export const CLEARED_RESTATEMENT = {
 
 /**
  * A decision's own pending proposals: a supersession, a deferral and a
- * restatement. Each is a claim about the answer the decision holds, so a write
- * that changes or clears that answer drops them in the same update, beside
- * {@link CLEARED_ANSWER_LINKS}.
+ * restatement. Each is a claim about the answer the decision holds, so Answer
+ * change (`server/answer-change.ts`) drops them in the same update on every
+ * transition, beside {@link CLEARED_ANSWER_LINKS}.
  */
 export const CLEARED_PROPOSAL = {
   ...CLEARED_SUPERSESSION,
