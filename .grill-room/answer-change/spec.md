@@ -62,7 +62,7 @@ Behaviour the owner will notice:
 31. As a builder, I want the rule proven by one test table at the module's interface, so that a change to the rule fails one obvious test.
 32. As a builder, I want action tests to cover only each action's own preconditions and one check that the change happened, so that refactoring the rule doesn't break nine test files.
 33. As a reviewer, I want each transition's effects stated as a table, so that I can check a diff row by row.
-34. As the owner, I want reconfirming a decision in stale review to keep only re-stamping it as settled, so that a confirmation isn't recorded as a change.
+34. As the owner, I want reconfirming a decision in stale review to stay outside Answer change, re-stamping it as settled and keeping the interviewer's reason in its history as today, so that a confirmation withdraws no claims and leaves the spec current.
 35. As the owner, I want marking a decision replaced to stay a proposal concern, out of this module, so that the module covers answer changes only.
 36. As the owner, I want returning the session to interviewing and placing a reopened decision in a round to stay with the callers that do them today, so that Answer change touches only decisions, their history and the spec's currency.
 
@@ -97,7 +97,7 @@ Behaviour the owner will notice:
   - request-next-round, returning deferrals → unsettle
   - request-next-round, push-backs → withdraw
   - stale review, re-ask → unsettle, plus the caller's own rewrite of the question, in one transaction
-- **Out of the module:** stale-review reconfirm, which only re-stamps settledAt; accept-supersession's replaced branch, which sets links rather than an answer and belongs to a future decision-proposal module; returning the session to interviewing; round placement.
+- **Out of the module:** stale-review reconfirm, which re-stamps settledAt and records the interviewer's reason in history, as today; accept-supersession's replaced branch, which sets links rather than an answer and belongs to a future decision-proposal module; returning the session to interviewing; round placement.
 - **The doc-comment convention on the cleared-field constants is replaced** by Answer change. The constants become internal to the rule wherever no other module needs them.
 - **No schema change.** History already holds the answer, the answer kind, the interviewer's reason and the operator's notes.
 - **Domain terms:** Answer change, Proposal, Claim and Reword, as defined in the repo's glossary.
