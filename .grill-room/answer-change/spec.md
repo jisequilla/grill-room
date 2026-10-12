@@ -75,21 +75,21 @@ Behaviour the owner will notice:
   | settle (answer, kind, optional disposition target, optional settled-by) | the given answer and kind | now if the kind settles, else null | unchanged | cleared | cleared, then settled-by set when given | all withdrawn |
   | defer (reason) | kind `deferred`, answer text kept | null | unchanged | cleared | cleared | all withdrawn |
   | reword (text, notes, reason) | answer text replaced, kind kept | unchanged | unchanged | cleared | **kept** | **pending supersessions only** |
-  | unsettle | answer, kind and disposition target cleared | null | now **only if it was settled** | cleared | cleared | all withdrawn |
+  | unsettle | answer, kind and disposition target cleared | null | now **only if its prior kind is a settling kind** | cleared | cleared | all withdrawn |
   | withdraw (reason) | withdrawn now, answer and kind kept | unchanged | unchanged | cleared | cleared | all withdrawn |
 
   Every transition:
-  - writes a history row holding the prior answer and its prior kind, with the reason and notes passed in, **only when the decision had a prior answer or kind**;
-  - marks the session's spec not current, which does nothing when there is no spec.
+  - writes a history row holding the prior answer and its prior kind, **only when the decision had a prior answer** (a non-empty answer, or any kind). The row's interviewer reason is the optional reason every transition accepts. Its operator notes are reword's notes, and null for every other transition;
+  - marks the session's spec not current, in any session state, which does nothing when there is no spec.
 
 - **Transactions.** Every transition accepts an optional database handle. With none, it opens its own transaction. With one, it runs inside the caller's transaction, so multi-change callers can be atomic. This follows the existing pattern of the add-decision core and the session-state helpers.
 - **Claim withdrawal takes a handle.** The two claim-withdrawal helpers gain an optional database handle. Stale review's hand-rolled copy of claim withdrawal is deleted.
 - **Timestamps come from the caller.** Reopen and stale review compute their own stamps, so a transition takes `now` from the caller.
-- **Preconditions stay in the actions.** Not-found, no-pending-proposal, empty-answer, not-a-loose-end and similar refusals keep their codes and stay in each action. The turn-in-progress check also stays in the actions and is added to accept-deferral, accept-restatement, accept-supersession, answer-decision, disposition-decision and submit-round. Answer change can't own it, because stale review and next-round call it from inside a turn they hold.
+- **Preconditions stay in the actions.** Not-found, no-pending-proposal, empty-answer, not-a-loose-end and similar refusals keep their codes and stay in each action. The turn-in-progress check also stays in the actions, runs after every existing refusal, and is added to accept-deferral, accept-restatement, accept-supersession, answer-decision, disposition-decision and submit-round. Answer change can't own it, because stale review and next-round call it from inside a turn they hold.
 - **Writer mapping:**
   - answer-decision → settle
   - disposition-decision → settle (kind `dispositioned`, with a target)
-  - reopen-decision → unsettle; it keeps its own return to interviewing and its round placement
+  - reopen-decision → unsettle; it keeps its own return to interviewing and its round placement, in one transaction with the unsettle. Its other callers (the batch of reopens and the project scout) inherit the rule
   - accept-deferral → defer
   - accept-restatement → reword
   - accept-supersession, settled-by branch → settle with settled-by
