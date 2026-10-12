@@ -4,6 +4,7 @@ import { defineAction, fail } from "@agent-native/core/action";
 import { and, desc, eq, inArray } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
+import { unsettle, withdraw } from "../server/answer-change.js";
 import { getDb, schema } from "../server/db/index.js";
 import { getInterviewer } from "../server/interviewer/index.js";
 import type {
@@ -21,8 +22,6 @@ import {
 import {
   deferredFrontierIds,
   neverAnsweredFrontierIds,
-  CLEARED_ANSWER_LINKS,
-  CLEARED_PROPOSAL,
   toTreeDecision,
   validateProposal,
   type DecisionRow,
@@ -185,76 +184,56 @@ export default defineAction({
     const now = new Date().toISOString();
     const roundId = randomUUID();
 
-    // A round is about to open, so the interview is continuing: a session
-    // that had proposed (or, via a reopen elsewhere, confirmed) done returns
-    // to interviewing, its done summary is dropped, and — leaving
-    // `confirmed` — its spec is marked not current.
-    if (session.state !== "interviewing") {
-      await returnSessionToInterviewing(session, now);
-    }
-
-    // A deferred decision re-entering a round is a fresh ask: its deferral is
-    // recorded to history first, then its answer kind resets to null so its
-    // card comes up unanswered, same as a decision asked for the first time.
+    // A deferred decision re-entering a round is a fresh ask: unsettled, its
+    // deferral goes to history and its card comes up unanswered, same as a
+    // decision asked for the first time. `reopenedAt` stays as it was: a
+    // deferred decision was not settled, so nothing hangs off its answer.
     const returningDeferred = asking.filter(
       (row) => row.answerKind === "deferred",
     );
-    if (returningDeferred.length > 0) {
-      await db.insert(schema.decisionHistory).values(
-        returningDeferred.map((row) => ({
+
+    // Opening the round lands together or not at all: the session's return to
+    // interviewing, the returning deferrals, and the round with its cards.
+    await db.transaction(async (tx) => {
+      // A round is about to open, so the interview is continuing: a session
+      // that had proposed (or, via a reopen elsewhere, confirmed) done returns
+      // to interviewing, its done summary is dropped, and — leaving
+      // `confirmed` — its spec is marked not current.
+      if (session.state !== "interviewing") {
+        await returnSessionToInterviewing(session, now, tx);
+      }
+
+      for (const row of returningDeferred) {
+        await unsettle(row.id, { now, db: tx });
+      }
+
+      await tx.insert(schema.rounds).values({
+        id: roundId,
+        sessionId,
+        submissionState: "open",
+        turnId: proposalTurnId,
+        createdAt: now,
+      });
+
+      await tx.insert(schema.roundDecisions).values(
+        asking.map((row, index) => ({
           id: randomUUID(),
+          roundId,
           decisionId: row.id,
-          questionTitle: row.questionTitle,
-          questionBody: row.questionBody,
-          answer: row.currentAnswer,
-          answerKind: row.answerKind,
-          recordedAt: now,
+          sortOrder: index,
         })),
       );
-      await db
+
+      await tx
         .update(schema.decisions)
-        .set({
-          answerKind: null,
-          currentAnswer: null,
-          settledAt: null,
-          ...CLEARED_ANSWER_LINKS,
-          ...CLEARED_PROPOSAL,
-          updatedAt: now,
-        })
+        .set({ pendingAsk: false, updatedAt: now })
         .where(
           inArray(
             schema.decisions.id,
-            returningDeferred.map((row) => row.id),
+            asking.map((row) => row.id),
           ),
         );
-    }
-
-    await db.insert(schema.rounds).values({
-      id: roundId,
-      sessionId,
-      submissionState: "open",
-      turnId: proposalTurnId,
-      createdAt: now,
     });
-
-    await db.insert(schema.roundDecisions).values(
-      asking.map((row, index) => ({
-        id: randomUUID(),
-        roundId,
-        decisionId: row.id,
-        sortOrder: index,
-      })),
-    );
-
-    await db
-      .update(schema.decisions)
-      .set({ pendingAsk: false, updatedAt: now })
-      .where(
-        inArray(
-          schema.decisions.id,
-          asking.map((row) => row.id),
-        ),
-      );
 
     return getCurrentRound.run({ sessionId });
 
@@ -430,99 +409,94 @@ export default defineAction({
       );
       const resolveId = (key: string) => ids.get(key) ?? keyById.get(key);
 
-      if (result.proposedDecisions.length > 0) {
-        await db.insert(schema.decisions).values(
-          result.proposedDecisions.map((decision, index) => {
-            const createdAt = decisionCreatedAts[index] as string;
-            return {
-              id: ids.get(decision.key) as string,
-              sessionId,
-              key: decision.key,
-              questionTitle: decision.title,
-              questionBody: decision.body,
+      // Everything the proposal writes to the tree lands together or not at
+      // all. The done scan below is a model call, so it waits for the commit.
+      await db.transaction(async (tx) => {
+        if (result.proposedDecisions.length > 0) {
+          await tx.insert(schema.decisions).values(
+            result.proposedDecisions.map((decision, index) => {
+              const createdAt = decisionCreatedAts[index] as string;
+              return {
+                id: ids.get(decision.key) as string,
+                sessionId,
+                key: decision.key,
+                questionTitle: decision.title,
+                questionBody: decision.body,
+                offeredChoicesJson: JSON.stringify(
+                  decision.choices.map((choice) => choice.label),
+                ),
+                choiceRationalesJson: JSON.stringify(
+                  decision.choices.map((choice) => choice.rationale),
+                ),
+                recommendedChoice: decision.recommendedChoice,
+                recommendedAnswer: decision.recommendedAnswer,
+                dependsOnJson: JSON.stringify(
+                  decision.dependsOn.flatMap((key) => {
+                    const id = resolveId(key);
+                    return id ? [id] : [];
+                  }),
+                ),
+                adrWorthy: decision.adrWorthy,
+                consequences: storedConsequences(decision),
+                introducedBy: "interviewer" as const,
+                pendingAsk: decision.ask,
+                createdAt,
+                updatedAt: createdAt,
+              };
+            }),
+          );
+        }
+
+        // Push backs: the pushed-back decision leaves the tree, the user's
+        // reason for pushing back and the interviewer's answer to it both kept
+        // in decision history (a decision never answered has no reason to
+        // keep). A replacement or restructuring arrives as an ordinary entry
+        // of `proposedDecisions`, already inserted above.
+        for (const response of result.pushBackResponses) {
+          const row = rowByKey.get(response.decisionKey);
+          if (!row) continue;
+
+          await withdraw(row.id, {
+            now,
+            reason: response.explanation,
+            db: tx,
+          });
+        }
+
+        // User-added decisions the interviewer placed: the existing
+        // awaiting-placement row takes its dependencies, recommendation and
+        // choices, and stops awaiting. Its title and body are the user's own
+        // and are left untouched.
+        for (const placement of result.userDecisionPlacements) {
+          const row = rowByKey.get(placement.key);
+          if (!row) continue;
+
+          await tx
+            .update(schema.decisions)
+            .set({
+              recommendedAnswer: placement.recommendedAnswer,
+              recommendedChoice: placement.recommendedChoice,
+              adrWorthy: placement.adrWorthy,
+              consequences: storedConsequences(placement),
               offeredChoicesJson: JSON.stringify(
-                decision.choices.map((choice) => choice.label),
+                placement.choices.map((choice) => choice.label),
               ),
               choiceRationalesJson: JSON.stringify(
-                decision.choices.map((choice) => choice.rationale),
+                placement.choices.map((choice) => choice.rationale),
               ),
-              recommendedChoice: decision.recommendedChoice,
-              recommendedAnswer: decision.recommendedAnswer,
               dependsOnJson: JSON.stringify(
-                decision.dependsOn.flatMap((key) => {
+                placement.dependsOn.flatMap((key) => {
                   const id = resolveId(key);
                   return id ? [id] : [];
                 }),
               ),
-              adrWorthy: decision.adrWorthy,
-              consequences: storedConsequences(decision),
-              introducedBy: "interviewer" as const,
-              pendingAsk: decision.ask,
-              createdAt,
-              updatedAt: createdAt,
-            };
-          }),
-        );
-      }
-
-      // Push backs: the pushed-back decision leaves the tree, the user's reason
-      // for pushing back and the interviewer's answer to it both kept in
-      // decision history. A replacement or restructuring arrives as an ordinary
-      // entry of `proposedDecisions`, already inserted above.
-      for (const response of result.pushBackResponses) {
-        const row = rowByKey.get(response.decisionKey);
-        if (!row) continue;
-
-        await db.insert(schema.decisionHistory).values({
-          id: randomUUID(),
-          decisionId: row.id,
-          questionTitle: row.questionTitle,
-          questionBody: row.questionBody,
-          answer: row.currentAnswer,
-          answerKind: row.answerKind,
-          interviewerReason: response.explanation,
-          recordedAt: now,
-        });
-
-        await db
-          .update(schema.decisions)
-          .set({ withdrawnAt: now, updatedAt: now })
-          .where(eq(schema.decisions.id, row.id));
-      }
-
-      // User-added decisions the interviewer placed: the existing
-      // awaiting-placement row takes its dependencies, recommendation and
-      // choices, and stops awaiting. Its title and body are the user's own and
-      // are left untouched.
-      for (const placement of result.userDecisionPlacements) {
-        const row = rowByKey.get(placement.key);
-        if (!row) continue;
-
-        await db
-          .update(schema.decisions)
-          .set({
-            recommendedAnswer: placement.recommendedAnswer,
-            recommendedChoice: placement.recommendedChoice,
-            adrWorthy: placement.adrWorthy,
-            consequences: storedConsequences(placement),
-            offeredChoicesJson: JSON.stringify(
-              placement.choices.map((choice) => choice.label),
-            ),
-            choiceRationalesJson: JSON.stringify(
-              placement.choices.map((choice) => choice.rationale),
-            ),
-            dependsOnJson: JSON.stringify(
-              placement.dependsOn.flatMap((key) => {
-                const id = resolveId(key);
-                return id ? [id] : [];
-              }),
-            ),
-            pendingAsk: placement.ask,
-            awaitingPlacementSince: null,
-            updatedAt: now,
-          })
-          .where(eq(schema.decisions.id, row.id));
-      }
+              pendingAsk: placement.ask,
+              awaitingPlacementSince: null,
+              updatedAt: now,
+            })
+            .where(eq(schema.decisions.id, row.id));
+        }
+      });
 
       if (!result.done) return { conversationId, failure: null };
 

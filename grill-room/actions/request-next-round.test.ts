@@ -1,5 +1,5 @@
 import { eq } from "@agent-native/core/db/schema";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   recommendedChoiceIndex,
@@ -50,6 +50,122 @@ import updateSessionIdea from "./update-session-idea.js";
  * hook timeout and unrelated files fail. Reads that only report what this
  * action wrote therefore travel with it.
  */
+
+/**
+ * The database mock of `actions/reopen-decision.test.ts`, extended to fail a
+ * chosen write by count.
+ *
+ * While `recording` is set, every query and transaction is logged with the
+ * handle it went through: `db` for a `getDb()` handle, `tx` for a transaction
+ * opened on one, and `commit` when a transaction's callback finishes. The
+ * embedded database runs one connection, so a query that skipped the
+ * transaction would still roll back with it; only this log shows which handle
+ * it used.
+ *
+ * `failDecisionsUpdateAt` fails the Nth `decisions` update made through a
+ * transaction's handle, counted from that transaction's start; 0 fails none.
+ * While `failRoundDecisionsInsert` is set, an insert into the round-decisions
+ * table throws, through either handle.
+ */
+const harness = vi.hoisted(() => ({
+  recording: false,
+  log: [] as string[],
+  failDecisionsUpdateAt: 0,
+  decisionsUpdates: 0,
+  failRoundDecisionsInsert: false,
+}));
+
+vi.mock("../server/db/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../server/db/index.js")>();
+  // `getDb()` may hand back a lazy chain-recording proxy (itself a function)
+  // while the database starts: its members are passed through untouched.
+  const bind = (target: object, prop: string | symbol) => {
+    const value = Reflect.get(target, prop);
+    return typeof value === "function" && typeof target !== "function" ? value.bind(target) : value;
+  };
+  const name = (table: unknown) =>
+    (
+      [
+        [original.schema.decisions, "decisions"],
+        [original.schema.decisionHistory, "decisionHistory"],
+        [original.schema.specs, "specs"],
+        [original.schema.sessions, "sessions"],
+        [original.schema.rounds, "rounds"],
+        [original.schema.roundDecisions, "roundDecisions"],
+      ] as const
+    ).find(([candidate]) => candidate === table)?.[1] ?? "other";
+  const record = (handle: "db" | "tx", prop: string, table?: unknown) => {
+    if (!harness.recording) return;
+    harness.log.push(
+      prop === "select" || prop === "transaction"
+        ? `${handle} ${prop}`
+        : `${handle} ${prop} ${name(table)}`,
+    );
+  };
+  const failing = <Handle extends object>(handle: Handle, kind: "db" | "tx"): Handle =>
+    new Proxy(handle, {
+      get(target, prop) {
+        if (prop === "insert" || prop === "select" || prop === "update" || prop === "delete") {
+          return (...args: unknown[]) => {
+            record(kind, prop, args[0]);
+            if (
+              prop === "insert" &&
+              harness.failRoundDecisionsInsert &&
+              args[0] === original.schema.roundDecisions
+            ) {
+              throw new Error("placing failed");
+            }
+            if (prop === "update" && kind === "tx" && args[0] === original.schema.decisions) {
+              harness.decisionsUpdates += 1;
+              if (harness.decisionsUpdates === harness.failDecisionsUpdateAt) {
+                throw new Error("decisions update failed");
+              }
+            }
+            return (target as Record<typeof prop, (...a: unknown[]) => unknown>)[prop](...args);
+          };
+        }
+        if (prop === "transaction") {
+          return (callback: (tx: object) => Promise<unknown>, ...rest: unknown[]) => {
+            record(kind, "transaction");
+            harness.decisionsUpdates = 0;
+            return (Reflect.get(target, prop) as (...args: unknown[]) => Promise<unknown>).call(
+              target,
+              async (tx: object) => {
+                const result = await callback(failing(tx, "tx"));
+                if (harness.recording) harness.log.push("commit");
+                return result;
+              },
+              ...rest,
+            );
+          };
+        }
+        return bind(target, prop);
+      },
+    });
+  return { ...original, getDb: () => failing(original.getDb(), "db") };
+});
+
+/** Each transaction's entries in the log, between its `db transaction` and its `commit`. */
+function transactionSpans(log: readonly string[]): string[][] {
+  const spans: string[][] = [];
+  let open: string[] | null = null;
+  for (const entry of log) {
+    if (entry === "db transaction") {
+      open = [];
+    } else if (entry === "commit" && open) {
+      spans.push(open);
+      open = null;
+    } else {
+      open?.push(entry);
+    }
+  }
+  return spans;
+}
+
+/** The span of the first transaction holding `entry`, or null when none does. */
+function spanHolding(log: readonly string[], entry: string): string[] | null {
+  return transactionSpans(log).find((span) => span.includes(entry)) ?? null;
+}
 
 /**
  * A choice's rationale, derived from its label so a test that only cares about
@@ -759,20 +875,6 @@ describe("request-next-round", () => {
 
       const tree = await getTree.run({ sessionId: session.id });
       expect(tree.decisions).toMatchObject([{ key: "shape", state: "withdrawn" }]);
-
-      const history = await getDb()
-        .select()
-        .from(schema.decisionHistory)
-        .where(eq(schema.decisionHistory.decisionId, "decision-shape"));
-      // The user's reason for pushing back stays the answer; the interviewer's
-      // response to it is kept beside it, not on top of it.
-      expect(history).toMatchObject([
-        {
-          answer: "Too vague.",
-          answerKind: "pushed-back",
-          interviewerReason: "Dropping it; scope moved on.",
-        },
-      ]);
     });
 
     it("rejects a push back response that re-asks the same decision unchanged", async () => {
@@ -1522,6 +1624,374 @@ describe("request-next-round", () => {
         .where(eq(schema.specs.sessionId, session.id));
       expect(spec).toMatchObject({ current: false });
     });
+  });
+});
+
+/**
+ * A returning deferral and a push back change a decision's answer through
+ * Answer change (`server/answer-change.ts`), and each block of writes lands in
+ * one transaction. The tree is seeded directly, so each test starts from
+ * exactly the state its row names.
+ */
+describe("request-next-round through Answer change", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+  afterEach(() => {
+    harness.recording = false;
+    harness.log = [];
+    harness.failDecisionsUpdateAt = 0;
+    harness.failRoundDecisionsInsert = false;
+  });
+
+  const T0 = "2026-09-01T00:00:00.000Z";
+
+  async function seedDecision(
+    sessionId: string,
+    decision: Partial<typeof schema.decisions.$inferInsert> & { id: string },
+  ) {
+    const now = new Date().toISOString();
+    await getDb()
+      .insert(schema.decisions)
+      .values({
+        sessionId,
+        key: decision.id,
+        questionTitle: `Question ${decision.id}`,
+        dependsOnJson: "[]",
+        createdAt: now,
+        updatedAt: now,
+        ...decision,
+      });
+  }
+
+  function seedSettled(sessionId: string, id: string, extra: Partial<typeof schema.decisions.$inferInsert> = {}) {
+    return seedDecision(sessionId, {
+      id,
+      answerKind: "own-answer",
+      currentAnswer: `The answer to ${id}`,
+      settledAt: T0,
+      ...extra,
+    });
+  }
+
+  async function seedCurrentSpec(sessionId: string) {
+    const now = new Date().toISOString();
+    await getDb().insert(schema.specs).values({
+      id: `spec-${sessionId}`,
+      sessionId,
+      markdown: "# Grill Room\n",
+      current: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  async function readDecision(id: string) {
+    const [row] = await getDb().select().from(schema.decisions).where(eq(schema.decisions.id, id));
+    return row!;
+  }
+
+  function historyOf(decisionId: string) {
+    return getDb()
+      .select()
+      .from(schema.decisionHistory)
+      .where(eq(schema.decisionHistory.decisionId, decisionId));
+  }
+
+  async function readSession(sessionId: string) {
+    const [row] = await getDb().select().from(schema.sessions).where(eq(schema.sessions.id, sessionId));
+    return row!;
+  }
+
+  async function specCurrent(sessionId: string) {
+    const [spec] = await getDb()
+      .select()
+      .from(schema.specs)
+      .where(eq(schema.specs.sessionId, sessionId));
+    return spec!.current;
+  }
+
+  function roundsOf(sessionId: string) {
+    return getDb().select().from(schema.rounds).where(eq(schema.rounds.sessionId, sessionId));
+  }
+
+  /**
+   * Row 8's start state: a one-at-a-time session that proposed done, with a
+   * current spec and no open round. The deferred D is the only candidate; Y
+   * carries a pending replacement by D, and D replaced Z.
+   */
+  async function aDoneProposedSessionWithAReturningDeferral() {
+    const session = await aSession({ answeringMode: "one-at-a-time" });
+    await seedDecision(session.id, {
+      id: "d",
+      answerKind: "deferred",
+      currentAnswer: "later",
+      reopenedAt: T0,
+    });
+    await seedSettled(session.id, "y", {
+      supersededById: "d",
+      supersessionAnswer: null,
+      supersessionReason: "D replaces it.",
+    });
+    await seedSettled(session.id, "z", { replacedById: "d", replacedReason: "D replaced it." });
+    await getDb()
+      .update(schema.sessions)
+      .set({ state: "done-proposed", doneSummary: "Nothing left, we thought." })
+      .where(eq(schema.sessions.id, session.id));
+    await seedCurrentSpec(session.id);
+    return session;
+  }
+
+  /**
+   * Row 10's start state: a whole-round, interviewing session with a current
+   * spec. The pushed-back P carries its own pending supersession by V, was
+   * settled by W and replaced by U; Y carries a pending supersession by P,
+   * and P replaced Z.
+   */
+  async function anInterviewingSessionWithAPushBack() {
+    const session = await aSession();
+    await seedSettled(session.id, "v");
+    await seedSettled(session.id, "w");
+    await seedSettled(session.id, "u");
+    await seedDecision(session.id, {
+      id: "p",
+      answerKind: "pushed-back",
+      currentAnswer: "too vague",
+      supersededById: "v",
+      supersessionAnswer: null,
+      supersessionReason: "V replaces it.",
+      settledById: "w",
+      replacedById: "u",
+      replacedReason: "U replaced it.",
+    });
+    await seedSettled(session.id, "y", {
+      supersededById: "p",
+      supersessionAnswer: null,
+      supersessionReason: "P replaces it.",
+    });
+    await seedSettled(session.id, "z", { replacedById: "p", replacedReason: "P replaced it." });
+    return session;
+  }
+
+  /** A proposal of nothing but push-back responses withdrawing each key, with `explanation`. */
+  function withdrawing(keys: string[], explanation: string, extra: {
+    proposedDecisions?: ReturnType<typeof proposed>[];
+    userDecisionPlacements?: ReturnType<typeof proposed>[];
+  } = {}) {
+    return {
+      kind: "propose-round" as const,
+      result: {
+        proposedDecisions: extra.proposedDecisions ?? [],
+        pushBackResponses: keys.map((decisionKey) => ({
+          decisionKey,
+          response: "withdraw" as const,
+          explanation,
+          replacementKey: null,
+        })),
+        userDecisionPlacements: extra.userDecisionPlacements ?? [],
+        done: null,
+      },
+    };
+  }
+
+  it("row 8: a returning deferral is unsettled: history, claims withdrawn, spec not current, reopen kept", async () => {
+    const session = await aDoneProposedSessionWithAReturningDeferral();
+    scriptInterviewer([]);
+
+    const result = await requestNextRound.run({ sessionId: session.id });
+
+    expect(result.round?.decisions.map((card) => card.id)).toEqual(["d"]);
+    expect(await readDecision("d")).toMatchObject({
+      currentAnswer: null,
+      answerKind: null,
+      reopenedAt: T0,
+    });
+    expect(await historyOf("d")).toMatchObject([{ answer: "later", answerKind: "deferred" }]);
+    expect(await readDecision("y")).toMatchObject({
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+    });
+    expect(await readDecision("z")).toMatchObject({ replacedById: null });
+    expect(await specCurrent(session.id)).toBe(false);
+  });
+
+  it("row 8b: a deferral with no text still counts as a prior answer", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, { id: "e", answerKind: "deferred", currentAnswer: "" });
+    scriptInterviewer([round()]);
+
+    const result = await requestNextRound.run({ sessionId: session.id });
+
+    expect(result.round?.decisions.map((card) => card.id)).toEqual(["e"]);
+    expect(await historyOf("e")).toMatchObject([{ answer: "", answerKind: "deferred" }]);
+  });
+
+  it("row 9: rolls the round's opening back when placing its cards fails", async () => {
+    const session = await aDoneProposedSessionWithAReturningDeferral();
+    scriptInterviewer([]);
+    const snapshot = async () => ({
+      decisions: [await readDecision("d"), await readDecision("y"), await readDecision("z")],
+      history: await historyOf("d"),
+      rounds: await roundsOf(session.id),
+      session: await readSession(session.id),
+      spec: await specCurrent(session.id),
+    });
+    const before = await snapshot();
+    expect(before.session).toMatchObject({ state: "done-proposed" });
+    expect(before.spec).toBe(true);
+
+    harness.failRoundDecisionsInsert = true;
+    await expect(requestNextRound.run({ sessionId: session.id })).rejects.toThrow("placing failed");
+    harness.failRoundDecisionsInsert = false;
+
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it("row 10: a pushed-back decision is withdrawn: history, its own proposals and links cleared, claims withdrawn, spec not current", async () => {
+    const session = await anInterviewingSessionWithAPushBack();
+    await seedCurrentSpec(session.id);
+    scriptInterviewer([withdrawing(["p"], "x")]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    const history = await historyOf("p");
+    expect(history).toMatchObject([
+      { answer: "too vague", answerKind: "pushed-back", interviewerReason: "x" },
+    ]);
+    expect(await readDecision("p")).toMatchObject({
+      withdrawnAt: history[0]!.recordedAt,
+      currentAnswer: "too vague",
+      answerKind: "pushed-back",
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+      settledById: null,
+      replacedById: null,
+    });
+    expect(await readDecision("y")).toMatchObject({
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+    });
+    expect(await readDecision("z")).toMatchObject({ replacedById: null });
+    expect(await specCurrent(session.id)).toBe(false);
+  });
+
+  it("row 10c: a push back on a never-answered decision records no history", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, { id: "n" });
+    scriptInterviewer([withdrawing(["n"], "No longer needed.")]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect((await readDecision("n")).withdrawnAt).toEqual(expect.stringMatching(/^\d{4}-/));
+    expect(await historyOf("n")).toEqual([]);
+  });
+
+  it("row 10b: rolls the whole proposal back when a placement fails after the push back", async () => {
+    const session = await anInterviewingSessionWithAPushBack();
+    const added = await addDecision.run({ sessionId: session.id, title: "Should it work offline?" });
+    await seedCurrentSpec(session.id);
+    scriptInterviewer([
+      withdrawing(["p"], "x", {
+        proposedDecisions: [proposed({ key: "fresh", title: "A fresh question", ask: false })],
+        userDecisionPlacements: [proposed({ key: added.key as string, ask: false })],
+      }),
+    ]);
+    const before = await readDecision("p");
+
+    // The push back's withdraw makes three `decisions` updates: its own and
+    // two claim withdrawals. The fourth is the placement's.
+    harness.failDecisionsUpdateAt = 4;
+    await expect(requestNextRound.run({ sessionId: session.id })).rejects.toThrow(
+      "decisions update failed",
+    );
+    harness.failDecisionsUpdateAt = 0;
+
+    expect(await readDecision("p")).toEqual(before);
+    expect(await historyOf("p")).toEqual([]);
+    const fresh = await getDb().select().from(schema.decisions).where(eq(schema.decisions.key, "fresh"));
+    expect(fresh).toEqual([]);
+  });
+
+  it("runs every query of a round's opening through one transaction's handle", async () => {
+    const session = await aDoneProposedSessionWithAReturningDeferral();
+    scriptInterviewer([]);
+
+    harness.recording = true;
+    await requestNextRound.run({ sessionId: session.id });
+    harness.recording = false;
+
+    expect(spanHolding(harness.log, "tx update sessions")).toEqual([
+      // the return to interviewing
+      "tx update sessions",
+      // the returning deferral's unsettle
+      "tx select",
+      "tx insert decisionHistory",
+      "tx update decisions",
+      "tx update decisions",
+      "tx update decisions",
+      "tx update specs",
+      // the round, its card, and the card no longer pending
+      "tx insert rounds",
+      "tx insert roundDecisions",
+      "tx update decisions",
+    ]);
+  });
+
+  it("runs every query of a stored proposal through one transaction's handle", async () => {
+    const session = await anInterviewingSessionWithAPushBack();
+    const added = await addDecision.run({ sessionId: session.id, title: "Should it work offline?" });
+    scriptInterviewer([
+      withdrawing(["p"], "x", {
+        proposedDecisions: [proposed({ key: "fresh", title: "A fresh question" })],
+        userDecisionPlacements: [proposed({ key: added.key as string })],
+      }),
+    ]);
+
+    harness.recording = true;
+    await requestNextRound.run({ sessionId: session.id });
+    harness.recording = false;
+
+    expect(spanHolding(harness.log, "tx insert decisions")).toEqual([
+      // the proposed decision
+      "tx insert decisions",
+      // the push back's withdraw
+      "tx select",
+      "tx insert decisionHistory",
+      "tx update decisions",
+      "tx update decisions",
+      "tx update decisions",
+      "tx update specs",
+      // the user-added decision's placement
+      "tx update decisions",
+    ]);
+  });
+
+  it("commits a done proposal's transaction before the done scan's first query", async () => {
+    const session = await aSession();
+    scriptInterviewer([
+      {
+        kind: "propose-round",
+        result: {
+          proposedDecisions: [],
+          pushBackResponses: [],
+          userDecisionPlacements: [],
+          done: { summary: "Everything about grill-room is settled." },
+        },
+      },
+    ]);
+
+    harness.recording = true;
+    await requestNextRound.run({ sessionId: session.id });
+    harness.recording = false;
+
+    expect(harness.log.filter((entry) => entry.endsWith(" transaction"))).toEqual([
+      "db transaction",
+    ]);
+    const begin = harness.log.indexOf("db transaction");
+    // An empty span, then the done scan reading the tree outside it.
+    expect(harness.log.slice(begin, begin + 3)).toEqual(["db transaction", "commit", "db select"]);
   });
 });
 

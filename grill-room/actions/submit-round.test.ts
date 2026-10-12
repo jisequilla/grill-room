@@ -1,5 +1,5 @@
 import { eq } from "@agent-native/core/db/schema";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   rateLimitedTurn,
@@ -29,6 +29,112 @@ import submitRound from "./submit-round.js";
  * runs more files than this machine has cores: past that point the per-file
  * build outruns vitest's hook timeout and unrelated files start failing.
  */
+
+/**
+ * The database mock of `actions/reopen-decision.test.ts`, extended to fail a
+ * chosen write by count.
+ *
+ * While `recording` is set, every query and transaction is logged with the
+ * handle it went through: `db` for a `getDb()` handle, `tx` for a transaction
+ * opened on one, and `commit` when a transaction's callback finishes. The
+ * embedded database runs one connection, so a query that skipped the
+ * transaction would still roll back with it; only this log shows which handle
+ * it used.
+ *
+ * `failDecisionsUpdateAt` fails the Nth `decisions` update made through a
+ * transaction's handle, counted from that transaction's start; 0 fails none.
+ */
+const harness = vi.hoisted(() => ({
+  recording: false,
+  log: [] as string[],
+  failDecisionsUpdateAt: 0,
+  decisionsUpdates: 0,
+}));
+
+vi.mock("../server/db/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../server/db/index.js")>();
+  // `getDb()` may hand back a lazy chain-recording proxy (itself a function)
+  // while the database starts: its members are passed through untouched.
+  const bind = (target: object, prop: string | symbol) => {
+    const value = Reflect.get(target, prop);
+    return typeof value === "function" && typeof target !== "function" ? value.bind(target) : value;
+  };
+  const name = (table: unknown) =>
+    (
+      [
+        [original.schema.decisions, "decisions"],
+        [original.schema.decisionHistory, "decisionHistory"],
+        [original.schema.specs, "specs"],
+        [original.schema.sessions, "sessions"],
+        [original.schema.rounds, "rounds"],
+        [original.schema.roundDecisions, "roundDecisions"],
+      ] as const
+    ).find(([candidate]) => candidate === table)?.[1] ?? "other";
+  const record = (handle: "db" | "tx", prop: string, table?: unknown) => {
+    if (!harness.recording) return;
+    harness.log.push(
+      prop === "select" || prop === "transaction"
+        ? `${handle} ${prop}`
+        : `${handle} ${prop} ${name(table)}`,
+    );
+  };
+  const failing = <Handle extends object>(handle: Handle, kind: "db" | "tx"): Handle =>
+    new Proxy(handle, {
+      get(target, prop) {
+        if (prop === "insert" || prop === "select" || prop === "update" || prop === "delete") {
+          return (...args: unknown[]) => {
+            record(kind, prop, args[0]);
+            if (prop === "update" && kind === "tx" && args[0] === original.schema.decisions) {
+              harness.decisionsUpdates += 1;
+              if (harness.decisionsUpdates === harness.failDecisionsUpdateAt) {
+                throw new Error("decisions update failed");
+              }
+            }
+            return (target as Record<typeof prop, (...a: unknown[]) => unknown>)[prop](...args);
+          };
+        }
+        if (prop === "transaction") {
+          return (callback: (tx: object) => Promise<unknown>, ...rest: unknown[]) => {
+            record(kind, "transaction");
+            harness.decisionsUpdates = 0;
+            return (Reflect.get(target, prop) as (...args: unknown[]) => Promise<unknown>).call(
+              target,
+              async (tx: object) => {
+                const result = await callback(failing(tx, "tx"));
+                if (harness.recording) harness.log.push("commit");
+                return result;
+              },
+              ...rest,
+            );
+          };
+        }
+        return bind(target, prop);
+      },
+    });
+  return { ...original, getDb: () => failing(original.getDb(), "db") };
+});
+
+/** Each transaction's entries in the log, between its `db transaction` and its `commit`. */
+function transactionSpans(log: readonly string[]): string[][] {
+  const spans: string[][] = [];
+  let open: string[] | null = null;
+  for (const entry of log) {
+    if (entry === "db transaction") {
+      open = [];
+    } else if (entry === "commit" && open) {
+      spans.push(open);
+      open = null;
+    } else {
+      open?.push(entry);
+    }
+  }
+  return spans;
+}
+
+/** The span of the first transaction holding `entry`, or null when none does. */
+function spanHolding(log: readonly string[], entry: string): string[] | null {
+  return transactionSpans(log).find((span) => span.includes(entry)) ?? null;
+}
 
 /** Labels as the port takes them: each with its own case, derived from the label. */
 function withRationales(labels: readonly string[]) {
@@ -313,7 +419,7 @@ describe("submit-round", () => {
     expect(tree.decisions[0]?.settledAt).toBeNull();
   });
 
-  it("brings a deferred decision back once nothing else is pending, recording its deferral to history first", async () => {
+  it("brings a deferred decision back once nothing else is pending", async () => {
     const { session, round } = await aSessionMidRound(
       proposal({ key: "shape", title: "What shape?" }),
       proposal(),
@@ -329,12 +435,6 @@ describe("submit-round", () => {
     expect(next.round?.decisions.map((card) => card.key)).toEqual(["shape"]);
     expect(next.round?.decisions[0]?.answer).toBeNull();
     expect(next.round?.decisions[0]?.draft).toBeNull();
-
-    const history = await getDb()
-      .select()
-      .from(schema.decisionHistory)
-      .where(eq(schema.decisionHistory.decisionId, round.decisions[0]!.id));
-    expect(history).toMatchObject([{ answerKind: "deferred", answer: "" }]);
 
     const tree = await getTree.run({ sessionId: session.id });
     expect(tree.decisions.map((decision) => [decision.key, decision.state])).toEqual(
@@ -476,6 +576,328 @@ describe("submit-round", () => {
       ["shape", "settled"],
       ["storage", "frontier"],
       ["sync", "blocked"],
+    ]);
+  });
+});
+
+/**
+ * A submission gives every card's decision its answer through Answer change
+ * (`server/answer-change.ts`), all in one transaction. The rounds here are
+ * seeded directly, so each starts from exactly the state its row names.
+ */
+describe("submit-round through Answer change", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+  afterEach(() => {
+    harness.recording = false;
+    harness.log = [];
+    harness.failDecisionsUpdateAt = 0;
+  });
+
+  const nothingMore = proposal();
+  const LOCK_MESSAGE =
+    "The interviewer is working on this session. Wait for the turn to finish before submitting a round.";
+
+  async function seedDecision(
+    sessionId: string,
+    decision: Partial<typeof schema.decisions.$inferInsert> & { id: string },
+  ) {
+    const now = new Date().toISOString();
+    await getDb()
+      .insert(schema.decisions)
+      .values({
+        sessionId,
+        key: decision.id,
+        questionTitle: `Question ${decision.id}`,
+        dependsOnJson: "[]",
+        createdAt: now,
+        updatedAt: now,
+        ...decision,
+      });
+  }
+
+  /** An open round placing each decision with its draft, in the order given. */
+  async function seedOpenRound(
+    sessionId: string,
+    placements: {
+      decisionId: string;
+      draftAnswer: string | null;
+      draftAnswerKind: (typeof schema.roundDecisions.$inferInsert)["draftAnswerKind"];
+    }[],
+  ) {
+    const roundId = `round-${sessionId}`;
+    await getDb().insert(schema.rounds).values({
+      id: roundId,
+      sessionId,
+      submissionState: "open",
+      createdAt: new Date().toISOString(),
+    });
+    for (const [index, placement] of placements.entries()) {
+      await getDb()
+        .insert(schema.roundDecisions)
+        .values({ id: `${roundId}-${index}`, roundId, sortOrder: index, ...placement });
+    }
+    return roundId;
+  }
+
+  async function seedCurrentSpec(sessionId: string) {
+    const now = new Date().toISOString();
+    await getDb().insert(schema.specs).values({
+      id: `spec-${sessionId}`,
+      sessionId,
+      markdown: "# Grill Room\n",
+      current: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  async function setSession(
+    sessionId: string,
+    values: Partial<typeof schema.sessions.$inferInsert>,
+  ) {
+    await getDb().update(schema.sessions).set(values).where(eq(schema.sessions.id, sessionId));
+  }
+
+  async function readDecision(id: string) {
+    const [row] = await getDb().select().from(schema.decisions).where(eq(schema.decisions.id, id));
+    return row!;
+  }
+
+  function historyOf(decisionId: string) {
+    return getDb()
+      .select()
+      .from(schema.decisionHistory)
+      .where(eq(schema.decisionHistory.decisionId, decisionId));
+  }
+
+  async function readRound(roundId: string) {
+    const [row] = await getDb().select().from(schema.rounds).where(eq(schema.rounds.id, roundId));
+    return row!;
+  }
+
+  async function specCurrent(sessionId: string) {
+    const [spec] = await getDb()
+      .select()
+      .from(schema.specs)
+      .where(eq(schema.specs.sessionId, sessionId));
+    return spec!.current;
+  }
+
+  /** A complete round on a working session, which only the lock can refuse. */
+  async function aWorkingSessionWithACompleteRound() {
+    const session = await aSession();
+    await seedDecision(session.id, { id: "d", answerKind: "own-answer", currentAnswer: "A", settledAt: "2026-09-01T00:00:00.000Z" });
+    const roundId = await seedOpenRound(session.id, [
+      { decisionId: "d", draftAnswer: "B", draftAnswerKind: "own-answer" },
+    ]);
+    await setSession(session.id, { turnStatus: "working", turnStartedAt: new Date().toISOString() });
+    return { session, roundId };
+  }
+
+  it("row 1: settles a decision that had an answer, recording it and withdrawing the claims naming it", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, {
+      id: "d",
+      answerKind: "own-answer",
+      currentAnswer: "A",
+      settledAt: "2026-09-01T00:00:00.000Z",
+    });
+    await seedDecision(session.id, {
+      id: "y",
+      answerKind: "own-answer",
+      currentAnswer: "Y's answer",
+      settledAt: "2026-09-01T00:00:00.000Z",
+      supersededById: "d",
+      supersessionAnswer: "A",
+      supersessionReason: "d answers it",
+    });
+    const roundId = await seedOpenRound(session.id, [
+      { decisionId: "d", draftAnswer: "B", draftAnswerKind: "own-answer" },
+    ]);
+    scriptInterviewer([nothingMore]);
+
+    await submitRound.run({ id: roundId });
+
+    expect(await readDecision("d")).toMatchObject({ currentAnswer: "B", answerKind: "own-answer" });
+    expect(await historyOf("d")).toMatchObject([{ answer: "A", answerKind: "own-answer" }]);
+    expect(await readDecision("y")).toMatchObject({
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+    });
+  });
+
+  it("row 1b: settling a dispositioned decision drops its disposition target", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, {
+      id: "q",
+      answerKind: "dispositioned",
+      currentAnswer: "not now",
+      dispositionTarget: "out-of-scope",
+      settledAt: "2026-09-01T00:00:00.000Z",
+    });
+    const roundId = await seedOpenRound(session.id, [
+      { decisionId: "q", draftAnswer: "C", draftAnswerKind: "own-answer" },
+    ]);
+    scriptInterviewer([nothingMore]);
+
+    await submitRound.run({ id: roundId });
+
+    expect(await readDecision("q")).toMatchObject({
+      currentAnswer: "C",
+      answerKind: "own-answer",
+      dispositionTarget: null,
+    });
+    expect(await historyOf("q")).toMatchObject([{ answer: "not now", answerKind: "dispositioned" }]);
+  });
+
+  it("row 2: records no history for a decision answered for the first time", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, { id: "d" });
+    const roundId = await seedOpenRound(session.id, [
+      { decisionId: "d", draftAnswer: "B", draftAnswerKind: "own-answer" },
+    ]);
+    scriptInterviewer([nothingMore]);
+
+    await submitRound.run({ id: roundId });
+
+    expect(await readDecision("d")).toMatchObject({ currentAnswer: "B", answerKind: "own-answer" });
+    expect(await historyOf("d")).toEqual([]);
+  });
+
+  it("row 3: leaves a steering move unsettled", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, { id: "d" });
+    const roundId = await seedOpenRound(session.id, [
+      { decisionId: "d", draftAnswer: "", draftAnswerKind: "unknown" },
+    ]);
+    scriptInterviewer([nothingMore]);
+
+    await submitRound.run({ id: roundId });
+
+    expect(await readDecision("d")).toMatchObject({ answerKind: "unknown", settledAt: null });
+  });
+
+  it("row 4: marks a done-proposed session's spec not current", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, { id: "d" });
+    const roundId = await seedOpenRound(session.id, [
+      { decisionId: "d", draftAnswer: "B", draftAnswerKind: "own-answer" },
+    ]);
+    await setSession(session.id, { state: "done-proposed", doneSummary: "Nothing left, we thought." });
+    await seedCurrentSpec(session.id);
+    scriptInterviewer([nothingMore]);
+
+    await submitRound.run({ id: roundId });
+
+    expect(await specCurrent(session.id)).toBe(false);
+  });
+
+  it("row 5: refuses while a turn is working, changing nothing", async () => {
+    const { roundId } = await aWorkingSessionWithACompleteRound();
+    const before = await readDecision("d");
+
+    const submitting = submitRound.run({ id: roundId });
+    await expect(submitting).rejects.toThrow(LOCK_MESSAGE);
+    await expect(submitting).rejects.toMatchObject({ errorCode: "turn-in-progress", statusCode: 409 });
+
+    expect(await readDecision("d")).toEqual(before);
+    expect(await historyOf("d")).toEqual([]);
+    expect(await readRound(roundId)).toMatchObject({ submissionState: "open", submittedAt: null });
+  });
+
+  it("row 6a: refuses a submitted round as submitted before checking the turn lock", async () => {
+    const { roundId } = await aWorkingSessionWithACompleteRound();
+    await getDb()
+      .update(schema.rounds)
+      .set({ submissionState: "submitted", submittedAt: new Date().toISOString() })
+      .where(eq(schema.rounds.id, roundId));
+
+    await expect(submitRound.run({ id: roundId })).rejects.toMatchObject({
+      errorCode: "round_already_submitted",
+      statusCode: 409,
+    });
+  });
+
+  it("row 6b: refuses an incomplete round as incomplete before checking the turn lock", async () => {
+    const { roundId } = await aWorkingSessionWithACompleteRound();
+    await getDb()
+      .update(schema.roundDecisions)
+      .set({ draftAnswer: null, draftAnswerKind: null })
+      .where(eq(schema.roundDecisions.roundId, roundId));
+
+    await expect(submitRound.run({ id: roundId })).rejects.toMatchObject({
+      errorCode: "round_incomplete",
+      statusCode: 409,
+    });
+  });
+
+  it("row 7: rolls the whole submission back when one card's answer fails", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, {
+      id: "d1",
+      answerKind: "own-answer",
+      currentAnswer: "A",
+      settledAt: "2026-09-01T00:00:00.000Z",
+    });
+    await seedDecision(session.id, { id: "d2" });
+    const roundId = await seedOpenRound(session.id, [
+      { decisionId: "d1", draftAnswer: "B", draftAnswerKind: "own-answer" },
+      { decisionId: "d2", draftAnswer: "C", draftAnswerKind: "own-answer" },
+    ]);
+    const before = [await readDecision("d1"), await readDecision("d2")];
+    scriptInterviewer([nothingMore]);
+
+    // Each settle makes three `decisions` updates: its own and two claim
+    // withdrawals. The fourth is the second card's own.
+    harness.failDecisionsUpdateAt = 4;
+    await expect(submitRound.run({ id: roundId })).rejects.toThrow("decisions update failed");
+    harness.failDecisionsUpdateAt = 0;
+
+    expect([await readDecision("d1"), await readDecision("d2")]).toEqual(before);
+    expect(await historyOf("d1")).toEqual([]);
+    expect(await historyOf("d2")).toEqual([]);
+    expect(await readRound(roundId)).toMatchObject({ submissionState: "open", submittedAt: null });
+  });
+
+  it("runs every query of the submission through one transaction's handle", async () => {
+    const session = await aSession();
+    await seedDecision(session.id, {
+      id: "d1",
+      answerKind: "own-answer",
+      currentAnswer: "A",
+      settledAt: "2026-09-01T00:00:00.000Z",
+    });
+    await seedDecision(session.id, { id: "d2" });
+    const roundId = await seedOpenRound(session.id, [
+      { decisionId: "d1", draftAnswer: "B", draftAnswerKind: "own-answer" },
+      { decisionId: "d2", draftAnswer: "C", draftAnswerKind: "own-answer" },
+    ]);
+    await setSession(session.id, { state: "done-proposed", doneSummary: "Nothing left, we thought." });
+    scriptInterviewer([nothingMore]);
+
+    harness.recording = true;
+    await submitRound.run({ id: roundId });
+    harness.recording = false;
+
+    // The next round's transactions follow; the submission's holds its first write.
+    expect(spanHolding(harness.log, "tx insert decisionHistory")).toEqual([
+      // the first card, which had an answer
+      "tx select",
+      "tx insert decisionHistory",
+      "tx update decisions",
+      "tx update decisions",
+      "tx update decisions",
+      "tx update specs",
+      // the second card, answered for the first time
+      "tx select",
+      "tx update decisions",
+      "tx update decisions",
+      "tx update decisions",
+      "tx update specs",
+      // the round itself
+      "tx update rounds",
     ]);
   });
 });
