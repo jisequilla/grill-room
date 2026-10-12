@@ -32,25 +32,13 @@ Other lenses may review the same PR at the same time, so give your scratch work 
 ### Revert
 
 ```bash
-git fetch origin
-P=$(mktemp)
-git diff --no-renames --name-only origin/main...HEAD | grep -v -E '\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|/)(e2e|test|__snapshots__)/' | xargs -r git diff --no-renames --binary origin/main...HEAD -- > "$P"
-if [ -s "$P" ]; then
-  if git apply -R "$P"; then
-    <the Evidence entry's test command>
-    git apply "$P"
-  else
-    echo "git apply -R failed"
-  fi
-else
-  echo "test-only PR: no source to revert"
-fi
+scripts/revert-check.sh '<the Evidence entry test command>'
 ```
 
-Put the Evidence entry's test command on the marker line and run the whole block as one Bash call: shell state, `P` included, does not survive between separate tool calls. A failing test does not stop the block, so the source is always re-applied. Run the block from the worktree root: the paths it reads are relative to the current directory, so from `grill-room/` it would revert nothing. Put any `cd grill-room` in a subshell on the marker line, as `(cd grill-room && <test command>)`.
+Put the Evidence entry's test command in place of the marker, inside the single quotes, and run the line as one plain Bash call. The script moves to the worktree root, so it runs the same from any folder of the scratch worktree, and it re-applies the source even when the test fails. Write any `cd grill-room` inside the command, as `(cd grill-room && <test command>)`, and use only double quotes inside it.
 
-- If `git apply -R` fails, stop the re-run: remove the scratch worktree with `git worktree remove --force <folder>` (the tree may be left modified, and then a plain remove exits 128), create a fresh one in a new folder that keeps the `rv<pr>-r<round>-<lens>` naming with a `-2` suffix, detached at `origin/{{branch}}`, and run the block once more. If it fails again, record a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command. Never rebuild the change by hand.
-- If `git apply` fails, do the same: a fresh worktree, one more try, then a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command.
+- If the block prints `git apply -R failed`, stop the re-run: remove the scratch worktree with `git worktree remove --force <folder>` (the tree may be left modified, and then a plain remove exits 128), create a fresh one in a new folder that keeps the `rv<pr>-r<round>-<lens>` naming with a `-2` suffix, detached at `origin/{{branch}}`, and run the block once more. If it fails again, record a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command. Never rebuild the change by hand.
+- If the block prints `git apply failed`, do the same: a fresh worktree, one more try, then a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command.
 - Never use `git stash` to save or restore local changes: the stash stack is shared by every worktree and session.
 
 ## Re-running Evidence
@@ -62,7 +50,7 @@ For each Evidence entry, the test command is the one the entry quotes for its ru
 - A quoted command whose paths have no such prefix, such as `pnpm exec vitest --run scripts/x.test.ts`, runs as `(cd grill-room && <command>)`.
 - When the entry quotes no command, use `(cd grill-room && pnpm exec vitest --run <test file without a leading grill-room/> -t "<test name>")`.
 
-The red run is the Revert block with that command on the marker line. The green run is the same command after the block finishes.
+The red run is the Revert block with that command in place of the marker. The green run is the same command after the block finishes. An entry that proves a planted-bug line is the exception: its red run is its quoted edit applied, as the rows below say, and the Revert block does not judge it.
 
 A finding about the PR body, or about a missing Evidence entry, has `file: "PR body"` and `line: null`.
 
@@ -70,7 +58,7 @@ A finding about the PR body, or about a missing Evidence entry, has `file: "PR b
 |---|---|
 | Red fails, green passes, and the counts and test names match the quoted runs | none |
 | As above, but durations and timestamps differ | none |
-| The test passes with the source reverted | `blocker`. `evidence` is the block with that test command |
+| The test passes with the source reverted, on an entry that does not prove a planted-bug line | `blocker`. `evidence` is the block with that test command |
 | The test fails with the source applied | `blocker`. `evidence` is the test command |
 | Red fails and green passes, but the quoted output differs in counts or test names | `nit` about the PR body, at the Evidence entry |
 | Red fails for a reason other than the assertion the line proves, such as an import error or a missing file | `blocker`: the test does not prove the line. `evidence` is the block with that command. This row wins over the quoted-output row |
