@@ -1957,6 +1957,9 @@ describe("request-next-round through Answer change", () => {
 
   it("runs a round's opening on an interviewing session through one transaction's handle, with no return to interviewing", async () => {
     const session = await aSession();
+    // A never-answered card opens beside the returning deferral: only the
+    // deferral is unsettled.
+    await seedDecision(session.id, { id: "n" });
     await seedDecision(session.id, { id: "e", answerKind: "deferred", currentAnswer: "later" });
     scriptInterviewer([round()]);
 
@@ -1988,6 +1991,27 @@ describe("request-next-round through Answer change", () => {
 
     expect((await readDecision("n")).withdrawnAt).toBeNull();
     expect(await historyOf("n")).toEqual([]);
+  });
+
+  it("stores a placement's dependsOn as the ids of the decisions it names", async () => {
+    const session = await aSession();
+    await seedSettled(session.id, "s");
+    const added = await addDecision.run({ sessionId: session.id, title: "Should it work offline?" });
+    scriptInterviewer([
+      {
+        kind: "propose-round" as const,
+        result: {
+          proposedDecisions: [],
+          pushBackResponses: [],
+          userDecisionPlacements: [proposed({ key: added.key as string, dependsOn: ["s"] })],
+          done: null,
+        },
+      },
+    ]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect(JSON.parse((await readDecision(added.id as string)).dependsOnJson)).toEqual(["s"]);
   });
 
   it("runs every query of a stored proposal through one transaction's handle", async () => {
