@@ -15,7 +15,9 @@ export const meta = {
 //   builder,    // builder.md with {{bead}}, {{ticket}}, {{title}} filled
 //   reviewers,  // reviewer.md, one per lens, with {{ticket}} and {{lens}} filled; {{pr}}, {{branch}}, {{prior_round}} and {{mutation}} left for this script
 //   fix,        // fix.md with {{bead}} and {{ticket}} filled; {{pr}}, {{branch}}, {{findings}} left for this script
-//   start,      // optional { pr, branch, stage: 'review' | 'fix', round, findings }: pick up a ticket whose earlier stages already ran; findings are fix-list lines
+//   model,      // optional 'sonnet' | 'opus', default 'sonnet': the builder and fixer model
+//   start,      // optional { pr, branch, stage: 'review' | 'fix', round, findings }: pick up a ticket whose earlier stages already ran; findings are fix-list lines.
+//               // round may be 3 only with stage 'fix': the restart that fixes a round-2 approval's should-fix items
 // }]
 //
 // Resume replays only the unchanged prefix of agent calls, so a run that stops half way is continued with
@@ -119,7 +121,10 @@ async function askUntilSettled(prompt, opts, done, note = NOT_SETTLED) {
 }
 
 const multiLens = (t) => t.reviewers.length > 1
-const ONE_OF_SEVERAL = `\n\nYou are one of several reviewers, each with its own lens. Do not run gh pr ready; the main session marks the PR ready once every lens approves.`
+const ONE_OF_SEVERAL = `\n\nYou are one of several reviewers, each with its own lens. Do not run gh pr ready; the main session marks the PR ready.`
+const MAIN_MARKS_READY = `\n\nDo not run gh pr ready; the main session marks the PR ready.`
+const BUILDER_BLOCKED = `\n\nThe builder reported a block it could not get past: {{blocked}}. Check whether it left any acceptance line unproved or any verification step unrun, and report each one you find as a finding.`
+const buildModel = (t) => t.model ?? 'sonnet'
 
 const MUTATION_GATE_SKIPPED = 'The gate is skipped for this round; say so in the verdict.'
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -168,15 +173,16 @@ function mutate(t, branch, round) {
   })
 }
 
-async function review(t, pr, branch, round, priorFindings, mutation) {
+async function review(t, pr, branch, round, priorFindings, mutation, buildBlocked) {
   const prior = priorFindings
     ? `This is review round ${round}. Round ${round - 1} requested:\n${priorFindings.join('\n')}\nCheck that each is fixed, and look again for new defects.`
     : ''
   const mutationFill = mutationText(round, mutation)
+  const ending = (multiLens(t) ? ONE_OF_SEVERAL : MAIN_MARKS_READY) + (buildBlocked ? fill(BUILDER_BLOCKED, { blocked: buildBlocked }) : '')
   const verdicts = await parallel(
     t.reviewers.map((template, lens) => () =>
       askLens(
-        fill(template, { pr, branch, prior_round: prior, mutation: mutationFill }) + (multiLens(t) ? ONE_OF_SEVERAL : ''),
+        fill(template, { pr, branch, prior_round: prior, mutation: mutationFill }) + ending,
         `review:${t.bead}:r${round}:lens${lens + 1}`,
       ),
     ),
@@ -195,7 +201,7 @@ const fixSettled = (fix) => (Boolean(fix.commit) || fix.bodyEdited === true) && 
 async function fixRound(t, pr, branch, round, findings) {
   return askUntilSettled(
     fill(t.fix, { pr, branch, findings: findings.join('\n') }),
-    { label: `fix:${t.bead}:r${round}`, phase: 'Fix', model: 'sonnet', isolation: 'worktree', schema: FIX },
+    { label: `fix:${t.bead}:r${round}`, phase: 'Fix', model: buildModel(t), isolation: 'worktree', schema: FIX },
     fixSettled,
     FIX_NOT_SETTLED,
   )
@@ -217,15 +223,17 @@ const results = await pipeline(
     if (t.start) return { pr: t.start.pr, branch: t.start.branch, resumed: true }
     return askUntilSettled(
       t.builder,
-      { label: `build:${t.bead}`, phase: 'Build', model: 'sonnet', isolation: 'worktree', schema: BUILD },
+      { label: `build:${t.bead}`, phase: 'Build', model: buildModel(t), isolation: 'worktree', schema: BUILD },
       // A builder that opened a PR is not re-asked: a fresh worktree would build it again. The reviewers re-run verification.
       (build) => Boolean(build.pr),
     )
   },
   async (build, t) => {
     if (!build) return { bead: t.bead, outcome: 'builder-died', nonBlocking: [] }
-    if (build.blocked || !build.pr) return { bead: t.bead, outcome: 'build-blocked', build, nonBlocking: [] }
+    if (!build.pr) return { bead: t.bead, outcome: 'build-blocked', build, nonBlocking: [] }
     const { pr, branch } = build
+    // A builder that opened a PR and then hit a block still goes to review; the reviewers are told about the block.
+    const buildBlocked = build.blocked || null
     const rounds = []
     const sentTo = new Map()
     let round = t.start?.round ?? 1
@@ -233,34 +241,58 @@ const results = await pipeline(
     let pendingItems = []
     let priorFindings = t.start?.stage === 'review' ? t.start.findings ?? null : null
 
-    for (; round <= 2; round++) {
+    // Round 3 exists only as a restart at stage fix, to fix a round-2 approval's should-fix items.
+    const lastRound = t.start?.stage === 'fix' && t.start.round === 3 ? 3 : 2
+    for (; round <= lastRound; round++) {
       if (pendingFix) {
         pendingItems.forEach((f) => sentTo.set(f, round - 1))
         const fix = await fixRound(t, pr, branch, round - 1, pendingFix)
         rounds.push({ round: round - 1, fix })
         if (!fix || fix.blocked || !fixSettled(fix)) {
-          return { bead: t.bead, pr, branch, outcome: 'fix-failed', rounds, nonBlocking: collectNonBlocking(rounds, sentTo) }
+          return {
+            bead: t.bead,
+            pr,
+            branch,
+            outcome: 'fix-failed',
+            buildBlocked,
+            rounds,
+            nonBlocking: collectNonBlocking(rounds, sentTo),
+            shouldFix: [],
+          }
         }
         priorFindings = pendingFix
       }
       const mutation = await mutate(t, branch, round)
-      const { fixList, ...record } = await review(t, pr, branch, round, priorFindings, mutation)
+      const { fixList, ...record } = await review(t, pr, branch, round, priorFindings, mutation, buildBlocked)
       rounds.push({ round, mutation, review: record })
-      if (record.verdict !== 'changes-requested' || round === 2) break
+      if (record.verdict !== 'changes-requested' || round === lastRound) break
       pendingItems = fixList
       pendingFix = fixList.map((f, i) => fixLine(f, i + 1))
     }
 
     const last = rounds.filter((r) => r.review).at(-1)?.review
+    const lastShouldFix = (last?.findings ?? []).filter((f) => f.level === 'should-fix')
+    // No reviewer marks the PR ready in a workflow run: the main session does, or asks the owner first about should-fix items.
     const outcome = !last
       ? 'reviewer-died'
       : last.verdict === 'approved'
-        ? multiLens(t) || last.verdicts[0].verdict !== 'approved' ? 'approved-mark-ready' : 'approved'
+        ? lastShouldFix.length ? 'approved-with-should-fix' : 'approved-mark-ready'
         : last.verdict === 'changes-requested'
           ? 'operator-decides'
           : last.verdict
+    const shouldFix = outcome === 'approved-with-should-fix' ? lastShouldFix.map((f, i) => fixLine(f, i + 1)) : []
     const buildVerified = build.resumed || settled(build.verification)
-    return { bead: t.bead, pr, branch, outcome, buildVerified, rounds, nonBlocking: collectNonBlocking(rounds, sentTo) }
+    return {
+      bead: t.bead,
+      pr,
+      branch,
+      outcome,
+      buildVerified,
+      buildBlocked,
+      rounds,
+      nonBlocking: collectNonBlocking(rounds, sentTo),
+      shouldFix,
+    }
   },
 )
 return results

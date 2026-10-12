@@ -1,7 +1,7 @@
 """Build a wave script: the saved workflow with WAVE_ARGS filled from the delegation templates.
 
 usage: gen-wave.py <spec.json> <out.js> [--root <repo>]
-spec: [{"bead", "ticket" (path), "title", "lenses": [str, ...]}]
+spec: [{"bead", "ticket" (path), "title", "lenses": [str, ...], "model" (optional: "sonnet" or "opus")}]
 """
 import json
 import os
@@ -10,6 +10,8 @@ import sys
 
 USAGE = "usage: gen-wave.py <spec.json> <out.js> [--root <repo>]"
 SPEC_ENTRY_ERROR = "spec entry {} needs bead, ticket, title and lenses"
+MODEL_ERROR = "spec entry {} model must be sonnet or opus"
+MODELS = ("sonnet", "opus")
 
 
 def die(message):
@@ -78,6 +80,8 @@ def load_spec(path):
         )
         if not valid:
             die(SPEC_ENTRY_ERROR.format(i))
+        if "model" in entry and entry["model"] not in MODELS:
+            die(MODEL_ERROR.format(i))
     return spec
 
 
@@ -110,12 +114,15 @@ def main(argv):
 
     wave = []
     for t, ticket in zip(spec, tickets):
-        wave.append({
+        entry = {
             "bead": t["bead"],
             "builder": fill(builder, {"bead": t["bead"], "ticket": ticket, "title": t["title"]}),
             "reviewers": [fill(reviewer, {"ticket": ticket, "lens": lens}) for lens in t["lenses"]],
             "fix": fill(fix, {"bead": t["bead"], "ticket": ticket}),
-        })
+        }
+        if "model" in t:
+            entry["model"] = t["model"]
+        wave.append(entry)
 
     script = rewrite_workflow(workflow_lines, workflow_path, anchor, wave)
     with open(out_path, "w", encoding="utf-8") as f:

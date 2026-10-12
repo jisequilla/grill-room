@@ -27,7 +27,10 @@ const MUTATE_TEXT = (branch: string) =>
   ].join("\n");
 
 const ONE_OF_SEVERAL =
-  "\n\nYou are one of several reviewers, each with its own lens. Do not run gh pr ready; the main session marks the PR ready once every lens approves.";
+  "\n\nYou are one of several reviewers, each with its own lens. Do not run gh pr ready; the main session marks the PR ready.";
+const MAIN_MARKS_READY = "\n\nDo not run gh pr ready; the main session marks the PR ready.";
+const BUILDER_BLOCKED = (blocked: string) =>
+  `\n\nThe builder reported a block it could not get past: ${blocked}. Check whether it left any acceptance line unproved or any verification step unrun, and report each one you find as a finding.`;
 const FIX_NOT_SETTLED =
   "\n\nYour previous result was not final: it had no commit and no PR-body edit, or its verification said a command was still running. Run every verify command in the foreground, wait for each to finish, and report only then.";
 
@@ -62,6 +65,7 @@ async function run(opts: {
   canned?: Record<string, Canned>;
   mutation?: unknown;
   builder?: unknown;
+  model?: string;
 }) {
   const calls: Call[] = [];
   const counts: Record<string, number> = {};
@@ -94,6 +98,7 @@ async function run(opts: {
     reviewers: opts.reviewers ?? ["M:{{mutation}}|{{prior_round}}"],
     fix: "FIX {{findings}}",
     start: "start" in opts ? opts.start : { pr: 7, branch: "worktree-x", stage: "review", round: 1 },
+    ...(opts.model === undefined ? {} : { model: opts.model }),
   };
   const fn = new AsyncFunction("agent", "parallel", "pipeline", "log", "phase", "args", SCRIPT);
   const [result] = await fn(agent, parallel, pipeline, () => {}, () => {}, [ticket]);
@@ -238,7 +243,7 @@ describe("mutation step", () => {
         mutation,
         canned: { [R1]: verdict("approved") },
       });
-      expect(call(R1).prompt).toBe(`M:${text}`);
+      expect(call(R1).prompt).toBe(`M:${text}${MAIN_MARKS_READY}`);
     });
   }
 
@@ -287,7 +292,7 @@ describe("mutation step", () => {
           mutation,
           canned: { [R1]: verdict("approved") },
         });
-        expect(call(R1).prompt).toBe(`M:${text}`);
+        expect(call(R1).prompt).toBe(`M:${text}${MAIN_MARKS_READY}`);
       });
     }
   });
@@ -298,7 +303,7 @@ describe("mutation step", () => {
       mutation: { ...OK_MUTATION, blocked: "" },
       canned: { [R1]: verdict("approved") },
     });
-    expect(call(R1).prompt).toBe(`M:${OK_MUTATION_TEXT(1)}`);
+    expect(call(R1).prompt).toBe(`M:${OK_MUTATION_TEXT(1)}${MAIN_MARKS_READY}`);
   });
 
   it("mutation text reaches every lens", async () => {
@@ -332,7 +337,7 @@ describe("mutation step", () => {
         [R2]: verdict("approved"),
       },
     });
-    expect(call(R2).prompt).toBe(`M:${OK_MUTATION_TEXT(2)}`);
+    expect(call(R2).prompt).toBe(`M:${OK_MUTATION_TEXT(2)}${MAIN_MARKS_READY}`);
   });
 
   it("start at round 2 calls mutate first", async () => {
@@ -433,7 +438,7 @@ describe("routing", () => {
       },
     });
     expect(call(R2).prompt).toBe(
-      "P:This is review round 2. Round 1 requested:\n1. [blocker] a.ts:2: A (evidence: ea)\nCheck that each is fixed, and look again for new defects.",
+      `P:This is review round 2. Round 1 requested:\n1. [blocker] a.ts:2: A (evidence: ea)\nCheck that each is fixed, and look again for new defects.${MAIN_MARKS_READY}`,
     );
   });
 });
@@ -450,7 +455,7 @@ describe("fill", () => {
       },
     });
     expect(call(R2).prompt).toBe(
-      `M:${OK_MUTATION_TEXT(2)}|This is review round 2. Round 1 requested:\n1. [blocker] a.ts:2: quotes {{mutation}} and {{prior_round}} (evidence: ea)\nCheck that each is fixed, and look again for new defects.`,
+      `M:${OK_MUTATION_TEXT(2)}|This is review round 2. Round 1 requested:\n1. [blocker] a.ts:2: quotes {{mutation}} and {{prior_round}} (evidence: ea)\nCheck that each is fixed, and look again for new defects.${MAIN_MARKS_READY}`,
     );
   });
 });
@@ -467,7 +472,7 @@ describe("evidence re-ask", () => {
     });
     expect(labels.filter((l) => l.endsWith(":again"))).toEqual([`${R1}:again`]);
     expect(call(`${R1}:again`).prompt).toBe(
-      "M\n\nThese findings need evidence, the command that shows them: a.ts. Return all your findings again with evidence filled in.",
+      `M${MAIN_MARKS_READY}\n\nThese findings need evidence, the command that shows them: a.ts. Return all your findings again with evidence filled in.`,
     );
     expect(result.rounds[0].review.verdict).toBe("approved");
   });
@@ -485,7 +490,7 @@ describe("evidence re-ask", () => {
       },
     });
     expect(call(`${R1}:again`).prompt).toBe(
-      "M\n\nThese findings need evidence, the command that shows them: a.ts:3, b.ts. Return all your findings again with evidence filled in.",
+      `M${MAIN_MARKS_READY}\n\nThese findings need evidence, the command that shows them: a.ts:3, b.ts. Return all your findings again with evidence filled in.`,
     );
   });
 
@@ -650,6 +655,8 @@ describe("nonBlocking", () => {
     });
     expect(result.outcome).toBe("fix-failed");
     expect(result.nonBlocking).toEqual([{ ...SF1, lens: 1, round: 1, sentToFix: 1 }]);
+    expect(result.shouldFix).toEqual([]);
+    expect(result.buildBlocked).toBe(null);
   });
 
   it("build-blocked has empty nonBlocking", async () => {
@@ -659,12 +666,16 @@ describe("nonBlocking", () => {
     });
     expect(result.outcome).toBe("build-blocked");
     expect(result.nonBlocking).toEqual([]);
+    expect(result).not.toHaveProperty("buildBlocked");
+    expect(result).not.toHaveProperty("shouldFix");
   });
 
   it("builder-died has empty nonBlocking", async () => {
     const { result } = await run({ start: undefined, builder: null });
     expect(result.outcome).toBe("builder-died");
     expect(result.nonBlocking).toEqual([]);
+    expect(result).not.toHaveProperty("buildBlocked");
+    expect(result).not.toHaveProperty("shouldFix");
   });
 
   it("a blocked lens beside a blocker", async () => {
@@ -711,7 +722,7 @@ describe("fix rounds", () => {
     const { result, labels } = await fixCase({
       "fix:gr-x:r1": { ...FIX_OK, note: "tested countMutantLines instead" },
     });
-    expect(result.outcome).toBe("approved");
+    expect(result.outcome).toBe("approved-mark-ready");
     expect(fixCalls(labels)).toBe(1);
     expect(labels.includes(R2)).toBe(true);
   });
@@ -720,7 +731,7 @@ describe("fix rounds", () => {
     const { result, labels } = await fixCase({
       "fix:gr-x:r1": { ...FIX_OK, commit: null, bodyEdited: true },
     });
-    expect(result.outcome).toBe("approved");
+    expect(result.outcome).toBe("approved-mark-ready");
     expect(fixCalls(labels)).toBe(1);
     expect(labels.includes(R2)).toBe(true);
   });
@@ -730,7 +741,7 @@ describe("fix rounds", () => {
       "fix:gr-x:r1": { ...FIX_OK, commit: null },
       "fix:gr-x:r1:again": FIX_OK,
     });
-    expect(result.outcome).toBe("approved");
+    expect(result.outcome).toBe("approved-mark-ready");
     expect(fixCalls(labels)).toBe(2);
     expect(call("fix:gr-x:r1:again").prompt).toBe(FIX_PROMPT + FIX_NOT_SETTLED);
     expect(labels.includes(R2)).toBe(true);
@@ -786,9 +797,9 @@ describe("outcomes", () => {
     expect(result.outcome).toBe("approved-mark-ready");
   });
 
-  it("single lens approved → approved", async () => {
+  it("single lens approved → approved-mark-ready", async () => {
     const { result } = await run({ reviewers: ["M"], canned: { [R1]: verdict("approved") } });
-    expect(result.outcome).toBe("approved");
+    expect(result.outcome).toBe("approved-mark-ready");
   });
 
   it("lens 1 approved, lens 2 changes-requested with only nits → approved-mark-ready", async () => {
@@ -810,6 +821,358 @@ describe("outcomes", () => {
     });
     expect(result.outcome).toBe("operator-decides");
     expect(labels.filter((l) => l.startsWith("fix:"))).toEqual(["fix:gr-x:r1"]);
+  });
+});
+
+describe("outcome rows", () => {
+  const SF = finding("should-fix", "s.ts", { line: 1, claim: "S", evidence: "es" });
+  const NIT = finding("nit", "n.ts");
+
+  it("O1: single lens approved with a nit → approved-mark-ready", async () => {
+    const { result } = await run({ reviewers: ["M"], canned: { [R1]: verdict("approved", [NIT]) } });
+    expect(result.outcome).toBe("approved-mark-ready");
+  });
+
+  it("O3: single lens approved with a should-fix → approved-with-should-fix", async () => {
+    const { result } = await run({ reviewers: ["M"], canned: { [R1]: verdict("approved", [SF]) } });
+    expect(result.outcome).toBe("approved-with-should-fix");
+  });
+
+  it("O4: two lenses approved, should-fix only in lens 2 → approved-with-should-fix", async () => {
+    const { result } = await run({
+      reviewers: ["M", "N"],
+      canned: { [R1]: verdict("approved"), "review:gr-x:r1:lens2": verdict("approved", [SF]) },
+    });
+    expect(result.outcome).toBe("approved-with-should-fix");
+  });
+
+  it("O5: should-fix sent to fix in round 1, round 2 approved with a nit → approved-mark-ready", async () => {
+    const { result } = await run({
+      reviewers: ["M"],
+      canned: {
+        [R1]: verdict("changes-requested", [finding("blocker", "a.ts"), SF]),
+        "fix:gr-x:r1": FIX_OK,
+        [R2]: verdict("approved", [NIT]),
+      },
+    });
+    expect(result.outcome).toBe("approved-mark-ready");
+  });
+
+  it("O7: a lens blocked → blocked", async () => {
+    const { result } = await run({
+      reviewers: ["M"],
+      canned: { [R1]: { verdict: "blocked", findings: [], blocked: "hook" } },
+    });
+    expect(result.outcome).toBe("blocked");
+  });
+
+  it("O7: a lens died → reviewer-died", async () => {
+    const { result } = await run({ reviewers: ["M"], canned: { [R1]: null } });
+    expect(result.outcome).toBe("reviewer-died");
+  });
+
+  it("O8: single lens changes-requested with only a should-fix → approved-with-should-fix", async () => {
+    const { result } = await run({ reviewers: ["M"], canned: { [R1]: verdict("changes-requested", [SF]) } });
+    expect(result.outcome).toBe("approved-with-should-fix");
+  });
+
+  it("O9: single lens changes-requested with no findings → approved-mark-ready", async () => {
+    const { result } = await run({ reviewers: ["M"], canned: { [R1]: verdict("changes-requested") } });
+    expect(result.outcome).toBe("approved-mark-ready");
+  });
+
+  it("single lens prompt ends with MAIN_MARKS_READY", async () => {
+    const { call } = await run({ reviewers: ["M"], canned: { [R1]: verdict("approved") } });
+    expect(call(R1).prompt).toBe(`M${MAIN_MARKS_READY}`);
+  });
+});
+
+describe("shouldFix", () => {
+  it("shouldFix lists the last round's should-fix lines", async () => {
+    const { result } = await run({
+      reviewers: ["M", "N"],
+      canned: {
+        [R1]: verdict("approved", [
+          finding("nit", "m.ts"),
+          finding("should-fix", "z.ts", { line: 3, claim: "Z", evidence: "ez" }),
+          finding("should-fix", "k.ts", { line: 5, claim: "K", evidence: "ek" }),
+        ]),
+        "review:gr-x:r1:lens2": verdict("approved", [
+          finding("should-fix", "a.ts", { line: 4, claim: "A", evidence: "ea" }),
+          finding("nit", "b.ts"),
+        ]),
+      },
+    });
+    expect(result.outcome).toBe("approved-with-should-fix");
+    expect(result.shouldFix).toEqual([
+      "1. [should-fix] z.ts:3: Z (evidence: ez)",
+      "2. [should-fix] k.ts:5: K (evidence: ek)",
+      "3. [should-fix] a.ts:4: A (evidence: ea)",
+    ]);
+  });
+
+  it("shouldFix empty without should-fix", async () => {
+    const { result } = await run({ reviewers: ["M"], canned: { [R1]: verdict("approved", [finding("nit", "n.ts")]) } });
+    expect(result.outcome).toBe("approved-mark-ready");
+    expect(result.shouldFix).toEqual([]);
+  });
+
+  it("shouldFix empty on operator-decides", async () => {
+    const { result } = await run({
+      reviewers: ["M"],
+      canned: {
+        [R1]: verdict("changes-requested", [finding("blocker", "b.ts")]),
+        "fix:gr-x:r1": FIX_OK,
+        [R2]: verdict("changes-requested", [
+          finding("blocker", "b.ts"),
+          finding("should-fix", "c.ts", { line: 2, claim: "C", evidence: "ec" }),
+        ]),
+      },
+    });
+    expect(result.outcome).toBe("operator-decides");
+    expect(result.shouldFix).toEqual([]);
+  });
+
+  it("shouldFix reads only the last round", async () => {
+    const { result } = await run({
+      reviewers: ["M"],
+      canned: {
+        [R1]: verdict("changes-requested", [
+          finding("blocker", "b.ts"),
+          finding("should-fix", "y.ts", { line: 1, claim: "Y", evidence: "ey" }),
+        ]),
+        "fix:gr-x:r1": FIX_OK,
+        [R2]: verdict("approved", [finding("should-fix", "x.ts", { line: 2, claim: "X", evidence: "ex" })]),
+      },
+    });
+    expect(result.outcome).toBe("approved-with-should-fix");
+    expect(result.shouldFix).toEqual(["1. [should-fix] x.ts:2: X (evidence: ex)"]);
+  });
+});
+
+describe("round 3 by restart", () => {
+  const R3 = "review:gr-x:r3:lens1";
+  const start3 = { pr: 7, branch: "worktree-x", stage: "fix", round: 3, findings: ["1. [should-fix] a.ts:1: A"] };
+
+  it("round 3 by restart", async () => {
+    const { result, labels } = await run({
+      reviewers: ["M"],
+      start: start3,
+      canned: { "fix:gr-x:r2": FIX_OK, [R3]: verdict("approved") },
+    });
+    expect(labels).toEqual(["fix:gr-x:r2", "mutate:gr-x:r3", R3]);
+    expect(result.outcome).toBe("approved-mark-ready");
+  });
+
+  it("round 3 changes-requested → operator-decides", async () => {
+    const { result, labels } = await run({
+      reviewers: ["M"],
+      start: start3,
+      canned: {
+        "fix:gr-x:r2": FIX_OK,
+        [R3]: verdict("changes-requested", [finding("blocker", "a.ts")]),
+        "fix:gr-x:r3": FIX_OK,
+        "review:gr-x:r4:lens1": verdict("approved"),
+      },
+    });
+    expect(labels).toEqual(["fix:gr-x:r2", "mutate:gr-x:r3", R3]);
+    expect(result.outcome).toBe("operator-decides");
+  });
+
+  it("review start at round 3 runs nothing", async () => {
+    const { result, labels } = await run({
+      reviewers: ["M"],
+      start: { pr: 7, branch: "worktree-x", stage: "review", round: 3 },
+      canned: { [R3]: verdict("approved") },
+    });
+    expect(labels).toEqual([]);
+    expect(result.outcome).toBe("reviewer-died");
+  });
+
+  it("fix start at round 4 runs nothing", async () => {
+    const { result, labels } = await run({
+      reviewers: ["M"],
+      start: { pr: 7, branch: "worktree-x", stage: "fix", round: 4, findings: ["1. [should-fix] a.ts:1: A"] },
+      canned: {
+        "fix:gr-x:r3": FIX_OK,
+        "review:gr-x:r4:lens1": verdict("approved"),
+        [R3]: verdict("approved"),
+      },
+    });
+    expect(labels).toEqual([]);
+    expect(result.outcome).toBe("reviewer-died");
+  });
+});
+
+describe("build model", () => {
+  const BUILT = { pr: 7, branch: "worktree-x", verification: "ok", blocked: null, notes: "" };
+  const oneFix = {
+    [R1]: verdict("changes-requested", [finding("blocker", "a.ts")]),
+    "fix:gr-x:r1": FIX_OK,
+    [R2]: verdict("approved"),
+  };
+
+  it("model: default sonnet", async () => {
+    const { call, labels } = await run({ reviewers: ["M"], start: undefined, builder: BUILT, canned: oneFix });
+    expect(labels).toEqual(["build:gr-x", "mutate:gr-x:r1", R1, "fix:gr-x:r1", "mutate:gr-x:r2", R2]);
+    expect(call("build:gr-x").opts.model).toBe("sonnet");
+    expect(call("fix:gr-x:r1").opts.model).toBe("sonnet");
+    expect(call("mutate:gr-x:r1").opts.model).toBe("sonnet");
+    expect(call("mutate:gr-x:r2").opts.model).toBe("sonnet");
+    expect(call(R1).opts.model).toBe("opus");
+    expect(call(R2).opts.model).toBe("opus");
+  });
+
+  it("model: opus for build and fix", async () => {
+    const { call, labels } = await run({
+      reviewers: ["M"],
+      start: undefined,
+      builder: BUILT,
+      canned: oneFix,
+      model: "opus",
+    });
+    expect(labels).toEqual(["build:gr-x", "mutate:gr-x:r1", R1, "fix:gr-x:r1", "mutate:gr-x:r2", R2]);
+    expect(call("build:gr-x").opts.model).toBe("opus");
+    expect(call("fix:gr-x:r1").opts.model).toBe("opus");
+    expect(call("mutate:gr-x:r1").opts.model).toBe("sonnet");
+    expect(call("mutate:gr-x:r2").opts.model).toBe("sonnet");
+    expect(call(R1).opts.model).toBe("opus");
+    expect(call(R2).opts.model).toBe("opus");
+  });
+
+  it("model: opus on a start at fix", async () => {
+    const { call, labels } = await run({
+      reviewers: ["M"],
+      model: "opus",
+      start: { pr: 7, branch: "worktree-x", stage: "fix", round: 2, findings: ["1. [blocker] a.ts:1: A"] },
+      canned: { "fix:gr-x:r1": FIX_OK, [R2]: verdict("approved") },
+    });
+    expect(labels).toEqual(["fix:gr-x:r1", "mutate:gr-x:r2", R2]);
+    expect(call("fix:gr-x:r1").opts.model).toBe("opus");
+    expect(call("mutate:gr-x:r2").opts.model).toBe("sonnet");
+    expect(call(R2).opts.model).toBe("opus");
+  });
+});
+
+describe("builder block", () => {
+  const BLOCK = "hook refused X";
+  const built = (blocked: unknown) => ({ pr: 12, branch: "b", verification: "ok", blocked, notes: "" });
+
+  it("build blocked with a PR goes to review", async () => {
+    const { result, labels, call } = await run({
+      reviewers: ["M"],
+      start: undefined,
+      builder: built(BLOCK),
+      canned: { [R1]: verdict("approved") },
+    });
+    expect(labels).toContain("mutate:gr-x:r1");
+    expect(labels).toContain(R1);
+    expect(call(R1).prompt).toBe(`M${MAIN_MARKS_READY}${BUILDER_BLOCKED(BLOCK)}`);
+    expect(result.outcome).toBe("approved-mark-ready");
+    expect(result.buildBlocked).toBe(BLOCK);
+  });
+
+  it("build blocked with a PR goes to review: two lenses, round 2", async () => {
+    const { result, call } = await run({
+      reviewers: ["M", "N"],
+      start: undefined,
+      builder: built(BLOCK),
+      canned: {
+        [R1]: verdict("changes-requested", [finding("blocker", "a.ts")]),
+        "review:gr-x:r1:lens2": verdict("approved"),
+        "fix:gr-x:r1": FIX_OK,
+        [R2]: verdict("approved"),
+        "review:gr-x:r2:lens2": verdict("approved"),
+      },
+    });
+    expect(call(R2).prompt).toBe(`M${ONE_OF_SEVERAL}${BUILDER_BLOCKED(BLOCK)}`);
+    expect(call("review:gr-x:r2:lens2").prompt).toBe(`N${ONE_OF_SEVERAL}${BUILDER_BLOCKED(BLOCK)}`);
+    expect(result.buildBlocked).toBe(BLOCK);
+  });
+
+  it("build blocked: no PR, no block", async () => {
+    const { result, labels } = await run({
+      reviewers: ["M"],
+      start: undefined,
+      builder: { pr: null, branch: null, verification: "ok", blocked: null, notes: "" },
+    });
+    expect(result.outcome).toBe("build-blocked");
+    expect(labels.some((l) => l.startsWith("mutate:") || l.startsWith("review:"))).toBe(false);
+  });
+
+  for (const [name, blocked] of [
+    ["null", null],
+    ["empty string", ""],
+  ] as const) {
+    it(`buildBlocked null without a block: ${name}`, async () => {
+      const { result, call } = await run({
+        reviewers: ["M"],
+        start: undefined,
+        builder: built(blocked),
+        canned: { [R1]: verdict("approved") },
+      });
+      expect(call(R1).prompt).toBe(`M${MAIN_MARKS_READY}`);
+      expect(result.buildBlocked).toBe(null);
+    });
+  }
+
+  it("buildBlocked null on a start: review", async () => {
+    const { result, call } = await run({ reviewers: ["M"], canned: { [R1]: verdict("approved") } });
+    expect(call(R1).prompt).toBe(`M${MAIN_MARKS_READY}`);
+    expect(result.buildBlocked).toBe(null);
+  });
+
+  it("buildBlocked null on a start: restart at fix after a block", async () => {
+    const { result, call } = await run({
+      reviewers: ["M"],
+      start: { pr: 12, branch: "b", stage: "fix", round: 2, findings: ["1. [should-fix] a.ts:1: A"] },
+      canned: { "fix:gr-x:r1": FIX_OK, [R2]: verdict("approved") },
+    });
+    expect(call(R2).prompt).toBe(`M${MAIN_MARKS_READY}`);
+    expect(result.buildBlocked).toBe(null);
+  });
+
+  it("whitespace block goes to review", async () => {
+    const { result, call } = await run({
+      reviewers: ["M"],
+      start: undefined,
+      builder: built("  "),
+      canned: { [R1]: verdict("approved") },
+    });
+    expect(call(R1).prompt).toBe(`M${MAIN_MARKS_READY}${BUILDER_BLOCKED("  ")}`);
+    expect(result.buildBlocked).toBe("  ");
+  });
+
+  it("block note comes before the evidence re-ask note", async () => {
+    const { call } = await run({
+      reviewers: ["M"],
+      start: undefined,
+      builder: built(BLOCK),
+      canned: {
+        [R1]: verdict("changes-requested", [finding("blocker", "a.ts", { line: null, evidence: null })]),
+        [`${R1}:again`]: verdict("approved"),
+      },
+    });
+    expect(call(`${R1}:again`).prompt).toBe(
+      `M${MAIN_MARKS_READY}${BUILDER_BLOCKED(BLOCK)}\n\nThese findings need evidence, the command that shows them: a.ts. Return all your findings again with evidence filled in.`,
+    );
+  });
+
+  it("fix-failed carries buildBlocked", async () => {
+    const empty = { ...FIX_OK, commit: null };
+    const { result } = await run({
+      reviewers: ["M"],
+      start: undefined,
+      builder: built(BLOCK),
+      canned: {
+        [R1]: verdict("changes-requested", [finding("blocker", "a.ts")]),
+        "fix:gr-x:r1": empty,
+        "fix:gr-x:r1:again": empty,
+      },
+    });
+    expect(result.outcome).toBe("fix-failed");
+    expect(result.buildBlocked).toBe(BLOCK);
+    expect(result.shouldFix).toEqual([]);
   });
 });
 
