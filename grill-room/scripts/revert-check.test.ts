@@ -125,7 +125,11 @@ const interrupt = async (signal: "SIGTERM" | "SIGINT") => {
     child.kill(signal);
     const code = await exited;
     const elapsed = Date.now() - sentAt;
-    return { code, elapsed, sleepPid, work };
+    const deadline = Date.now() + 2_000;
+    while (alive(sleepPid) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return { code, elapsed, sleepAlive: alive(sleepPid), work };
   } finally {
     if (existsSync(pidFile)) {
       const pid = Number(readFileSync(pidFile, "utf8").trim());
@@ -219,12 +223,11 @@ describe("scripts/revert-check.sh", () => {
   it(
     "row 8: SIGTERM kills the test's whole process group and re-applies",
     async () => {
-      const { code, elapsed, sleepPid, work } = await interrupt("SIGTERM");
+      const { code, elapsed, sleepAlive, work } = await interrupt("SIGTERM");
       expect(code).toBe(143);
       expect(elapsed).toBeLessThan(10_000);
       expect(read(work, "src/a.ts")).toBe("branch\n");
-      await waitFor(() => !alive(sleepPid), 2_000);
-      expect(alive(sleepPid)).toBe(false);
+      expect(sleepAlive).toBe(false);
     },
     20_000,
   );
@@ -232,12 +235,11 @@ describe("scripts/revert-check.sh", () => {
   it(
     "row 8b: SIGINT kills the test's whole process group and re-applies",
     async () => {
-      const { code, elapsed, sleepPid, work } = await interrupt("SIGINT");
+      const { code, elapsed, sleepAlive, work } = await interrupt("SIGINT");
       expect(code).toBe(130);
       expect(elapsed).toBeLessThan(10_000);
       expect(read(work, "src/a.ts")).toBe("branch\n");
-      await waitFor(() => !alive(sleepPid), 2_000);
-      expect(alive(sleepPid)).toBe(false);
+      expect(sleepAlive).toBe(false);
     },
     20_000,
   );
