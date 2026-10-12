@@ -689,10 +689,11 @@ describe("sessions-last-export-folders migration", () => {
 describe("decisions-proposal-kind-dismissals migration", () => {
   beforeEach(dropSchema);
 
-  const migration = () => appMigrations.find((entry) => entry.name === "decisions-proposal-kind-dismissals")!;
+  // By version rather than by name, so these still run with the entry reverted.
+  const VERSION = 82;
 
   async function atPreviousVersion(): Promise<string> {
-    const before = appMigrations.filter((entry) => entry.version < migration().version);
+    const before = appMigrations.filter((entry) => entry.version < VERSION);
     await applyMigrations(before, MIGRATIONS_TABLE);
     const sessionId = randomUUID();
     const now = new Date().toISOString();
@@ -721,7 +722,7 @@ describe("decisions-proposal-kind-dismissals migration", () => {
 
   async function kinds(): Promise<Record<string, unknown>> {
     const { rows } = await getDbExec().execute(
-      `SELECT id, proposal_kind, dismissed_proposals_json FROM gr_decisions ORDER BY id`,
+      `SELECT * FROM gr_decisions ORDER BY id`,
     );
     return Object.fromEntries(
       rows.map((row) => [String(row.id), { kind: row.proposal_kind, dismissed: row.dismissed_proposals_json }]),
