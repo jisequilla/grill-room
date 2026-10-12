@@ -283,6 +283,46 @@ describe("accept-deferral", () => {
     );
   });
 
+  it("clears every link and supersession column the settled answer carried", async () => {
+    const session = await aPendingDeferral();
+    await insertDecision(session.id, {
+      id: "d-disputes",
+      key: "disputes",
+      questionTitle: "How are disputes handled?",
+      answerKind: "own-answer",
+      currentAnswer: "By the platform, within 48 hours.",
+      settledAt: "2026-09-01T00:00:02.000Z",
+    });
+    await getDb()
+      .update(schema.decisions)
+      .set({
+        supersededById: "d-disputes",
+        supersessionAnswer: "Held for 48 hours.",
+        supersessionReason: "Disputes decide it.",
+        replacedById: "d-disputes",
+        replacedReason: "Disputes changed it.",
+        settledById: "d-disputes",
+      })
+      .where(eq(schema.decisions.id, "d-hold"));
+
+    const view = await acceptDeferral.run({ decisionId: "d-hold" });
+
+    expect(await readDecision("d-hold")).toMatchObject({
+      answerKind: "deferred",
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+      replacedById: null,
+      replacedReason: null,
+      settledById: null,
+    });
+    expect(view).toMatchObject({
+      supersession: null,
+      replacedBy: null,
+      settledBy: null,
+    });
+  });
+
   it("regression: a replacement proposed after a deferral can never settle the decision as an empty answer", async () => {
     // The reviewer's scenario: hold carries a pending deferral, disputes
     // settled later, and the check proposes disputes as replacing hold.
