@@ -16,7 +16,7 @@ Every number below is **measured** unless it is marked *inferred*. The commands 
 
 1. Set `ignoreStatic: true` in `stryker.config.mjs`.
 2. Have `mutate-diff.ts` pass `--testFiles` with the PR's changed non-e2e test files. When the PR changes no test file, keep today's run on related tests.
-3. Leave `app/**/*.tsx` and `app/i18n/**` out of the scope. No vitest test covers them.
+3. Leave out of the scope the `app/**/*.tsx` files that no vitest test reaches, and `app/i18n/**`. A component with a `*.test.tsx` sibling stays in: the repository has 15 such vitest files that render their components, for example `turn-attempt-log.test.tsx`. The rule this spike can support is narrower: a `.tsx` file with no `*.test.tsx` sibling and no test importing it. `app/components/output/tickets-section.tsx` is such a file. In the full run all 14 of its mutants are NoCoverage, so no vitest test executes it.
 4. Raise `CAP` from 100 to 500 mutants and keep the 600 s wall clock.
 
 **Measured effect:**
@@ -24,18 +24,18 @@ Every number below is **measured** unless it is marked *inferred*. The commands 
 | Diff | Today | With the four changes |
 |---|---|---|
 | gr-qpo.2 | `truncated`: 96 of 147 mutants, 323 s, score 84.4; `shared/input-gaps.ts` not mutated | **`ok`**: all 128 in-scope mutants, **101 s** (E8; 71 s with UI lines kept, E6), score **99.2** |
-| gr-qpo.1 | `overrun` at 600 s; the 97 mutants it kept take **1,292 s** uncapped | **`ok`**: all 426 non-static mutants of the full diff, **261 s**, score **90.1** |
+| gr-qpo.1 | `overrun` at 600 s; the 97 mutants it kept take **1,292 s** uncapped | **`ok`**: 426 of the full diff's 446 mutants counted (20 ignored), **261 s**, score **90.1** |
 
-Under the new cap, gr-qpo.1 (446 mutants) and gr-qpo.2 (128) both fit. The largest app PR measured, at 446 mutants, finishes in under half the wall clock.
+Under the new cap, gr-qpo.1 (446 mutants) and gr-qpo.2 (128) both fit. Narrowing recommendation 3 to `.tsx` files without vitest coverage leaves both measurements as they are. On gr-qpo.2 the only `.tsx` file in scope, `tickets-section.tsx`, has no `*.test.tsx` sibling and no test imports it, so E8 excludes exactly what the narrowed rule excludes. gr-qpo.1 changes no `app/` file. The largest app PR measured, at 446 mutants, finishes in under half the wall clock.
 
 **Cost, measured:**
 
 - **`ignoreStatic` costs kills on module-level code.** A static mutant changes something only evaluated at import (a top-level constant, a scenario table in `server/interviewer/fake.ts`). On gr-qpo.2 it ignores 5 mutants: 3 i18n survivors and 2 kills in `shared/input-gaps.ts`. On gr-qpo.1's kept set it ignores 5 and runs 36 hybrid mutants with their covering tests only. Kills fall from 84 to 73 there, and the score from 87.6 to 80.4. That is the price of avoiding a full environment reload plus every related test per static mutant, which is what overran (question 1).
-- **`--testFiles` loses no kill on either diff.**
-  - gr-qpo.2: the 140 non-static mutants have identical outcomes. The 2 static mutants in `input-gaps.ts` go from Killed to Survived, and `ignoreStatic` drops them anyway. The 3 i18n mutants go from Survived to NoCoverage.
-  - gr-qpo.1, both with `ignoreStatic`: identical kills (382 = 382). 7 survivors become Ignored.
+- **`--testFiles` loses no kill on either diff, but only together with `ignoreStatic`.**
+  - **Alone on gr-qpo.2 (E6) it loses 2 kills.** The 140 non-static mutants have identical outcomes. The 2 static mutants in `input-gaps.ts` go from Killed to Survived, and only `ignoreStatic` takes them out of the count. The 3 i18n mutants go from Survived to NoCoverage.
+  - **On gr-qpo.1, with `ignoreStatic`, it hides 7 survivors.** Kills are identical (382 = 382), but those 7 survivors become Ignored: 433 mutants are counted without `--testFiles` and 426 with it. `summarize()` skips Ignored mutants (`mutate-diff.ts:301`), so the reviewer never sees those 7 survivors. They also account for the whole score rise from 88.7 to 90.1: counted as survivors, 384 / 433 is 88.7 again.
   - *Inferred risk*: a PR that changes source without touching the test that covers it would see NoCoverage survivors. That case falls back to related tests, which is today's behaviour.
-- **Leaving out `.tsx` and i18n lines** drops mutants that can only be NoCoverage (14 in `tickets-section.tsx`) or that survive by design (3 i18n strings). The Playwright scenarios remain the guard for those files. The score then reads as a test-strength number: 99.2 instead of 87.8 on the same tests.
+- **Leaving out uncovered `.tsx` files and i18n lines loses no kill on these diffs, but it hides 17 survivors.** In E2, the 14 `tickets-section.tsx` mutants are NoCoverage and the 3 i18n strings are Survived. None was killed, and all 17 disappear from the survivor list the reviewer gets. The Playwright scenarios remain the guard for those files. With them out, the score measures the vitest tests alone: 99.2 instead of 87.8 on the same tests. *Inferred*: a `.tsx` file that some vitest test reaches without a `*.test.tsx` sibling would lose real kills under the sibling rule. Checking NoCoverage in a dry run would be the exact test.
 - **The 500 cap is a guess sized from two diffs.** 446 mutants took 261 s here. A diff heavy in hybrid mutants could still overrun. The wall clock remains the backstop and still reports `overrun`.
 
 **Not recommended:**
@@ -46,7 +46,7 @@ Under the new cap, gr-qpo.1 (446 mutants) and gr-qpo.2 (128) both fit. The large
 
 **Two cheap fixes worth making with it** (*inferred*, not measured as wall time):
 - Have `splitAtCap` skip a line that does not fit instead of stopping at it.
-- Have the coverage-only scope mutate the source files the changed tests are named after, not every line they execute (question 2, gr-0l4).
+- Have the coverage-only scope mutate the source files the changed tests are named after, not every line they execute (question 2, gr-0l4). That reopens decision `test-only-pr-scope`, which prescribes today's behaviour, so it is the owner's call.
 
 ## Question 1: where the time goes
 
@@ -80,9 +80,10 @@ Under the new cap, gr-qpo.1 (446 mutants) and gr-qpo.2 (128) both fit. The large
 - `splitAtCap` walks that list and **stops at the first line that would exceed the cap**. That line and everything after it are dropped, including zero-mutant lines.
 - `status` is `truncated` whenever `dropped` is non-empty (`mutate-diff.ts:317`).
 
-**Why `shared/input-gaps.ts` was dropped on gr-qpo.2** (reproduced exactly: kept 98, the same 11 dropped ranges):
+**Why `shared/input-gaps.ts` was dropped on gr-qpo.2** (reproduced exactly: the plan keeps 98, the same 11 dropped ranges):
 - The Evidence ranges hold 142 of the diff's 147 mutants, so preference alone already exceeds the cap.
 - In path order, `actions/`, `app/`, `server/handoff.ts` and `server/tickets.ts` come first. They use 98 mutants and the cap breaks inside `server/tickets.ts:1095-1145`, at line 1140.
+- **The plan counts 98 but Stryker runs 96.** The plan counts mutants by start line over the whole diff. Two mutants start on kept lines in `server/tickets.ts` but end on dropped lines. Stryker places a mutant only when it falls wholly inside a `--mutate` range, so it leaves those two out. Instrumenting just the kept ranges gives 96, matching Stryker line for line.
 - `shared/` sorts last, so the whole new module and its 40 preferred mutants were dropped. It was not dropped for lack of tests: with nothing dropped, all 42 of its mutants are killed (E2).
 - **"Preferred first" therefore means "alphabetically first among the preferred"** whenever the Evidence alone is over the cap.
 - gr-qpo.1 shows the same effect. Its kept set is `actions/break-into-tickets.ts`, `server/db/*` and `server/interviewer/*`. The PR's main subject, `server/tickets.ts` (331 mutants, 307 of them preferred), is dropped except lines 309-317. Its 18 dropped ranges match the recorded ones exactly.
@@ -105,7 +106,7 @@ Reproduced at `2bc2e0b` with three of its four test files (`actions/ask-consiste
 - the scope is 57 source files, 677 ranges, 6,528 lines and 5,400 mutants;
 - with no `--prefer` that can match, the cap keeps the alphabetically first lines: `actions/add-decision.ts`, `actions/answer-decision.ts`, then the start of `actions/ask-consistency-findings.ts`, the same order as the recorded run.
 
-The PR's own files cannot be mutated at all, so the honest outcome was `no-scope`. The PR's Evidence ranges (`package.json:13-13`, `.oxlintrc.json:1-5`, test lines) could never match, which `preferNotCovered` records.
+**This is the scope decision `test-only-pr-scope` prescribes** (`docs/specs/delivery-loop-gauntlet-stages/decisions.md`): "Mutate the source lines the new or changed tests cover", which it calls "the honest scope for a test-only PR". The decision did not anticipate one consequence: a test that drives a whole action stack covers dozens of files, and the cap then keeps whichever sort first. Changing that reopens the decision, which is the owner's call. The PR's Evidence ranges (`package.json:13-13`, `.oxlintrc.json:1-5`, test lines) could never match, which `preferNotCovered` records.
 
 The recorded summary lists 117 dropped ranges where this reproduction drops 653. The one test file not reproduced does not account for that gap. Its cause is unverified: possibly the reporting agent trimmed the list.
 
@@ -137,7 +138,7 @@ These are gr-qpo.2 runs, each mutating the full 147-mutant scope with no cap unl
 | E2 / E2b | no cap (cap removed or raised) | 591 s / 316 s | 156 / 158 s | 432 / 155 s | 147 | 87.8 |
 | E3 | `--ignoreStatic` | 349 s | 165 s | 180 s | 142 (5 ignored) | 89.4 |
 | E4 / E4b | `--concurrency 4` | 218 s / 200 s | 155 / 148 s | 61 / 50 s | 147 | 87.8 |
-| E5 | no `.tsx` or i18n lines | 322 s | 146 s | 174 s | 130 | 99.2 |
+| E5 | no `tickets-section.tsx` or i18n lines | 322 s | 146 s | 174 s | 130 | 99.2 |
 | E6 | `--testFiles` = the PR's 7 changed test files | **71 s** | **19 s**, 739 tests | 49 s | 147 | 86.4 |
 | E7 | `--incremental`, cold then warm with no change | 324 s / 151 s | 150 / 149 s | 173 / 0 s | 147 | 87.8 |
 | E8 | E3 + E5 + E6 | **101 s** | 19 s | 78 s | 128 (2 ignored) | **99.2** |
@@ -149,7 +150,7 @@ And on gr-qpo.1, from `grill-room/` at `6076f71`:
 | q1-kept | the 97 the gate kept, no wall clock | 1,292 s | 170 s | 1,119 s | 97 (41 static) | 87.6 |
 | q1-kept-is | the same with `--ignoreStatic` | 261 s | 172 s | 86 s | 92 | 80.4 |
 | q1-full-is | full diff, `--ignoreStatic` | 439 s | 172 s | 265 s | 433 | 88.7 |
-| q1-full-combo | full diff, `--ignoreStatic` + `--testFiles` (7 changed tests) | **261 s** | **24 s**, 695 tests | 234 s | 426 | **90.1** |
+| q1-full-combo | full diff, `--ignoreStatic` + `--testFiles` (7 changed tests) | **261 s** | **24 s**, 695 tests | 234 s | 426 (20 ignored, 7 of them survivors in q1-full-is) | **90.1** |
 
 Under the gate's 600 s clock, gr-qpo.1 passes with `ignoreStatic` alone (439 s), but only with about 160 s of headroom on a loaded machine. `--testFiles` takes 148 s off the dry run and is what makes the margin comfortable.
 
@@ -212,7 +213,7 @@ if (scope.kind === "ranges") {
 }
 ```
 
-- On gr-qpo.2 (`29274d7`, with the prefer list above): 147 mutants, of which 142 are preferred, and 98 are kept.
+- On gr-qpo.2 (`29274d7`, with the prefer list above): 147 mutants, of which 142 are preferred, and 98 are kept. Run `countMutantLines` on the kept ranges alone to get Stryker's 96.
 - On gr-qpo.1 (`24d9ada`, with its PR's Evidence ranges): 446 mutants, of which 399 are preferred, 100 are kept, and the same 18 ranges are dropped as recorded.
 
 **The gr-0l4 scope**, at `2bc2e0b`:
