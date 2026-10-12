@@ -26,6 +26,8 @@ The existing code this change should follow, by file and line (for example "the 
 
 Numbered. Each line names the test that proves it. That test must fail when the change is reverted.
 
+An acceptance line that says something never happens, such as a value that never enters a hash, cannot fail when the change is reverted, because the old code never did it either. Such a line names its planted bug: the smallest edit that makes the forbidden thing happen, for example "planted bug: hash `source.unresolvedInputs` in `handoffFingerprint`". Its test must fail with that edit applied.
+
 1. …: proved by `path/to/test.ts` › "test name".
 
 An acceptance line that asks for an exact output compares the whole value (`toBe`, `toEqual`), never a fragment (`toContain`). When the behaviour runs through a loader or wiring layer as well as a pure function, one acceptance line goes through that layer, so emptying what it passes fails a test.

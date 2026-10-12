@@ -23,7 +23,7 @@ A hand-run loop fills them in. A Workflow script receives the filled-in text thr
 A ticket's precision comes from examples, not from length:
 - A behaviour rule goes in an input → expected-output table, and prose only where an example cannot show it.
 - Implementation steps are replaced by a pointer to the existing pattern to copy.
-- Each acceptance line names the test that proves it, and that test must fail with the change reverted.
+- Each acceptance line names the test that proves it, and that test must fail with the change reverted. A line that says something never happens names a planted bug instead, and its test must fail with that bug applied.
 - When a ticket changes both a model prompt and the server check that enforces it, it carries a seam test: every answer shape the prompt describes passes the check.
 
 ## Which loop
