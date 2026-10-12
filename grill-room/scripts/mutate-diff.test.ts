@@ -1,26 +1,40 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
 import { useTempGitRepos } from "../test/git-repos";
+import { repoPath } from "../test/repo-root";
 import {
+  CAP,
   countMutantLines,
+  inMutationScope,
   isEntryPoint,
+  loadTestIndex,
   planStrykerRun,
   preferNotCoveredFor,
   rangesFromCoverage,
   rangesFromDiff,
   scopeFor,
+  strykerArgs,
   summarize,
   trimToCap,
   uncoveredPreferred,
   type LineCount,
   type RunRecord,
   type StrykerReport,
+  type TestIndex,
 } from "./mutate-diff";
 
 function diffOf(file: string, hunks: string[]): string {
@@ -44,7 +58,7 @@ describe("rangesFromDiff", () => {
     ["test file", diffOf("server/b.test.ts", ["@@ -1,0 +2,4 @@"]), []],
     ["under e2e/", diffOf("e2e/flow.ts", ["@@ -1,0 +1,3 @@"]), []],
     ["under test/", diffOf("test/db.ts", ["@@ -1,0 +1,3 @@"]), []],
-    ["tsx", diffOf("app/x.tsx", ["@@ -5,0 +6,1 @@"]), ["app/x.tsx:6-6"]],
+    ["tsx without a test", diffOf("app/x.tsx", ["@@ -5,0 +6,1 @@"]), []],
     ["mjs", diffOf("scripts/tool.mjs", ["@@ -1,0 +1,2 @@"]), ["scripts/tool.mjs:1-2"]],
     ["js", diffOf("shared/old.js", ["@@ -4,0 +5,1 @@"]), ["shared/old.js:5-5"]],
     ["markdown", diffOf("docs/notes.md", ["@@ -1,0 +1,2 @@"]), []],
@@ -127,7 +141,7 @@ describe("rangesFromDiff", () => {
   ];
 
   it("rangesFromDiff: each table row", () => {
-    expect(rows.map(([name, diff]) => [name, rangesFromDiff(diff)])).toEqual(
+    expect(rows.map(([name, diff]) => [name, rangesFromDiff(diff, [])])).toEqual(
       rows.map(([name, , expected]) => [name, expected]),
     );
   });
@@ -200,7 +214,7 @@ describe("rangesFromCoverage", () => {
         ["server/q.ts:4-4", "app/c.ts:2-2"],
       ],
     ];
-    expect(cases.map(([name, coverage]) => [name, rangesFromCoverage(coverage, root)])).toEqual(
+    expect(cases.map(([name, coverage]) => [name, rangesFromCoverage(coverage, root, [])])).toEqual(
       cases.map(([name, , expected]) => [name, expected]),
     );
   });
@@ -565,7 +579,11 @@ describe("scopeFor", () => {
         "server/a.test.ts": "// t\n// more\n",
       },
     });
-    expect(scopeFor(base, root)).toEqual({ kind: "ranges", ranges: ["server/a.ts:2-3"] });
+    expect(scopeFor(base, root, [])).toEqual({
+      kind: "ranges",
+      ranges: ["server/a.ts:2-3"],
+      testFiles: ["server/a.test.ts"],
+    });
   });
 
   it("scopeFor: an app in a subfolder yields paths relative to it and skips files outside it", () => {
@@ -582,7 +600,11 @@ describe("scopeFor", () => {
         "other/b.ts": "export const b = 1;\nexport const d = 4;\n",
       },
     });
-    expect(scopeFor(base, app)).toEqual({ kind: "ranges", ranges: ["server/a.ts:2-2"] });
+    expect(scopeFor(base, app, [])).toEqual({
+      kind: "ranges",
+      ranges: ["server/a.ts:2-2"],
+      testFiles: [],
+    });
   });
 
   it("scopeFor: each test-only row", () => {
@@ -638,9 +660,424 @@ describe("scopeFor", () => {
     const actual = rows.map((row) => {
       const root = repos.create({ files: row.files });
       const base = commitChange(root, row.change);
-      return [row.name, scopeFor(base, root)];
+      return [row.name, scopeFor(base, root, [])];
     });
     expect(actual).toEqual(rows.map((row) => [row.name, row.expected]));
+  });
+
+  it("scopeFor: each scope row", () => {
+    const mutable = (name: string) => `export const ${name} = 1 + 2;\n`;
+    const rows: Array<{
+      name: string;
+      files: Record<string, string>;
+      change: Record<string, string>;
+      expected: ReturnType<typeof scopeFor>;
+    }> = [
+      {
+        name: "S1",
+        files: { "server/a.ts": "export const a = 1;\n", "server/a.test.ts": "// t\n" },
+        change: { "server/a.ts": mutable("a"), "server/a.test.ts": "// t\n// more\n" },
+        expected: { kind: "ranges", ranges: ["server/a.ts:1-1"], testFiles: ["server/a.test.ts"] },
+      },
+      {
+        name: "S2",
+        files: { "server/a.ts": "export const a = 1;\n", "server/x.test.ts": "// t\n" },
+        change: { "server/a.ts": mutable("a"), "server/x.test.ts": "// t\n// more\n" },
+        expected: { kind: "ranges", ranges: ["server/a.ts:1-1"], testFiles: [] },
+      },
+      {
+        name: "S3",
+        files: {
+          "server/a.ts": "export const a = 1;\n",
+          "server/b.ts": "export const b = 1;\n",
+          "server/a.test.ts": "// t\n",
+        },
+        change: {
+          "server/a.ts": mutable("a"),
+          "server/b.ts": mutable("b"),
+          "server/a.test.ts": "// t\n// more\n",
+        },
+        expected: {
+          kind: "ranges",
+          ranges: ["server/a.ts:1-1", "server/b.ts:1-1"],
+          testFiles: [],
+        },
+      },
+      {
+        name: "S4",
+        files: {
+          "server/a.ts": "export const a = 1;\n",
+          "server/a.test.ts": "// t\n",
+          "e2e/x.spec.ts": "// t\n",
+        },
+        change: {
+          "server/a.ts": mutable("a"),
+          "server/a.test.ts": "// t\n// more\n",
+          "e2e/x.spec.ts": "// t\n// more\n",
+        },
+        expected: { kind: "ranges", ranges: ["server/a.ts:1-1"], testFiles: ["server/a.test.ts"] },
+      },
+      {
+        name: "S5",
+        files: { "app/i18n/en-US.ts": "export const t = 1;\n", "server/a.test.ts": "// t\n" },
+        change: { "app/i18n/en-US.ts": mutable("t"), "server/a.test.ts": "// t\n// more\n" },
+        expected: { kind: "none" },
+      },
+      {
+        name: "S6",
+        files: { "server/a.test.ts": "// t\n" },
+        change: { "server/a.test.ts": "// t\n// more\n" },
+        expected: { kind: "coverage", testFiles: ["server/a.test.ts"] },
+      },
+      {
+        name: "S7",
+        files: { "server/a.ts": "export const a = 1;\n" },
+        change: { "server/a.ts": mutable("a") },
+        expected: { kind: "ranges", ranges: ["server/a.ts:1-1"], testFiles: [] },
+      },
+      {
+        name: "S8",
+        files: {
+          "server/a.ts": "export const a = 1;\n",
+          "app/i18n/en-US.ts": "export const t = 1;\n",
+          "server/a.test.ts": "// t\n",
+        },
+        change: {
+          "server/a.ts": mutable("a"),
+          "app/i18n/en-US.ts": mutable("t"),
+          "server/a.test.ts": "// t\n// more\n",
+        },
+        expected: { kind: "ranges", ranges: ["server/a.ts:1-1"], testFiles: ["server/a.test.ts"] },
+      },
+      {
+        name: "S9",
+        files: { "server/a.ts": "export const a = 1;\n", "other/a.test.ts": "// t\n" },
+        change: { "server/a.ts": mutable("a"), "other/a.test.ts": "// t\n// more\n" },
+        expected: { kind: "ranges", ranges: ["server/a.ts:1-1"], testFiles: [] },
+      },
+      {
+        name: "S10",
+        files: { "server/a.ts": "export const a = 1;\n", "server/a.spec.ts": "// t\n" },
+        change: { "server/a.ts": mutable("a"), "server/a.spec.ts": "// t\n// more\n" },
+        expected: { kind: "ranges", ranges: ["server/a.ts:1-1"], testFiles: ["server/a.spec.ts"] },
+      },
+      {
+        name: "S11",
+        files: { "server/foo.bar.ts": "export const a = 1;\n", "server/foo.bar.test.ts": "// t\n" },
+        change: { "server/foo.bar.ts": mutable("a"), "server/foo.bar.test.ts": "// t\n// more\n" },
+        expected: {
+          kind: "ranges",
+          ranges: ["server/foo.bar.ts:1-1"],
+          testFiles: ["server/foo.bar.test.ts"],
+        },
+      },
+      {
+        name: "S12",
+        files: { "server/a.ts": "export const a = 1 + 2;\n// gone\n", "server/a.test.ts": "// t\n" },
+        change: { "server/a.ts": "export const a = 1 + 2;\n", "server/a.test.ts": "// t\n// more\n" },
+        expected: { kind: "coverage", testFiles: ["server/a.test.ts"] },
+      },
+      {
+        name: "S13",
+        files: {
+          "server/a.ts": "export const a = 1;\n",
+          "server/a.test.ts": "// t\n",
+          "server/x.test.ts": "// t\n",
+        },
+        change: {
+          "server/a.ts": mutable("a"),
+          "server/a.test.ts": "// t\n// more\n",
+          "server/x.test.ts": "// t\n// more\n",
+        },
+        expected: {
+          kind: "ranges",
+          ranges: ["server/a.ts:1-1"],
+          testFiles: ["server/a.test.ts", "server/x.test.ts"],
+        },
+      },
+    ];
+    const actual = rows.map((row) => {
+      const root = repos.create({ files: row.files });
+      const base = commitChange(root, { write: row.change });
+      return [row.name, scopeFor(base, root, [])];
+    });
+    expect(actual).toEqual(rows.map((row) => [row.name, row.expected]));
+  });
+
+  it("main: wires testFiles into the Stryker command", () => {
+    const stubs = mkdtempSync(path.join(tmpdir(), "mutate-stub-"));
+    try {
+      const log = path.join(stubs, "argv.log");
+      const stub = path.join(stubs, "pnpm");
+      writeFileSync(
+        stub,
+        '#!/bin/sh\nif [ "$1" = exec ] && [ "$2" = stryker ]; then printf \'%s\\n\' "$*" >> "$STUB_LOG"; exit 1; fi\nexit 0\n',
+        { mode: 0o755 },
+      );
+      const env = { PATH: `${stubs}:${process.env.PATH}`, STUB_LOG: log };
+      const root = repos.create({
+        files: { "server/a.ts": "export const a = 1;\n", "server/a.test.ts": "// t\n" },
+      });
+      const base = commitChange(root, {
+        write: { "server/a.ts": "export const a = 1 + 2;\n", "server/a.test.ts": "// t\n// more\n" },
+      });
+
+      const onDiff = runStubbedCli(["--base", base], root, env);
+      const onDiffLog = readFileSync(log, "utf8").trim().split("\n");
+      rmSync(log);
+      const mutated = runStubbedCli(["--mutate", "server/a.ts:1-1", "--base", base], root, env);
+      const mutatedLog = readFileSync(log, "utf8").trim().split("\n");
+
+      expect({
+        diffArgv: onDiffLog,
+        diffCommand: JSON.parse(onDiff.stdout).command,
+        mutateArgv: mutatedLog,
+        mutateCommand: JSON.parse(mutated.stdout).command,
+      }).toEqual({
+        diffArgv: ["exec stryker run --mutate server/a.ts:1-1 --testFiles server/a.test.ts"],
+        diffCommand: "pnpm exec stryker run --mutate server/a.ts:1-1 --testFiles server/a.test.ts",
+        mutateArgv: ["exec stryker run --mutate server/a.ts:1-1"],
+        mutateCommand: "pnpm exec stryker run --mutate server/a.ts:1-1",
+      });
+    } finally {
+      rmSync(stubs, { recursive: true, force: true });
+    }
+  });
+
+  it("main: a tsx file with a test reaches the Stryker command through the loaded index", () => {
+    const stubs = mkdtempSync(path.join(tmpdir(), "mutate-stub-"));
+    try {
+      const log = path.join(stubs, "argv.log");
+      writeFileSync(
+        path.join(stubs, "pnpm"),
+        '#!/bin/sh\nif [ "$1" = exec ] && [ "$2" = stryker ]; then printf \'%s\\n\' "$*" >> "$STUB_LOG"; exit 1; fi\nexit 0\n',
+        { mode: 0o755 },
+      );
+      const env = { PATH: `${stubs}:${process.env.PATH}`, STUB_LOG: log };
+      const root = repos.create({
+        files: { "app/x/foo.tsx": "export const a = 1;\n", "app/x/foo.test.tsx": "// t\n" },
+      });
+      const base = commitChange(root, {
+        write: { "app/x/foo.tsx": "export const a = 1 + 2;\n", "app/x/foo.test.tsx": "// t\n// more\n" },
+      });
+
+      runStubbedCli(["--base", base], root, env);
+
+      expect(readFileSync(log, "utf8").trim().split("\n")).toEqual([
+        "exec stryker run --mutate app/x/foo.tsx:1-1 --testFiles app/x/foo.test.tsx",
+      ]);
+    } finally {
+      rmSync(stubs, { recursive: true, force: true });
+    }
+  });
+});
+
+function runStubbedCli(args: string[], cwd: string, envOverride: NodeJS.ProcessEnv) {
+  const script = fileURLToPath(new URL("./mutate-diff.ts", import.meta.url));
+  const env: NodeJS.ProcessEnv = { ...process.env, ...envOverride };
+  for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) delete env[name];
+  return spawnSync(path.resolve("node_modules/.bin/tsx"), [script, ...args], {
+    cwd,
+    encoding: "utf8",
+    env,
+  });
+}
+
+describe("inMutationScope", () => {
+  const foo = "app/components/x/foo.tsx";
+  const entry = (testPath: string, text = "// nothing"): TestIndex => [{ path: testPath, text }];
+
+  it("inMutationScope: each table row", () => {
+    const rows: Array<[string, string, TestIndex, boolean]> = [
+      ["1", "app/i18n/en-US.ts", [], false],
+      ["2 server", "server/a.ts", [], true],
+      ["2 route", "app/routes/bar.ts", [], true],
+      ["3", foo, entry("app/components/x/foo.test.tsx"), true],
+      ["4", foo, entry("app/components/x/foo.test.ts"), true],
+      ["5", foo, entry("app/components/x/foo.spec.tsx"), true],
+      ["6", foo, entry("app/a.test.tsx", 'import { Foo } from "./components/x/foo";'), true],
+      ["7", foo, entry("server/b.test.ts", 'vi.mock("@/components/x/foo.js")'), true],
+      ["11", foo, entry("app/a.test.tsx", "from './x/foo'"), true],
+      ["12", foo, entry("app/a.test.tsx", '"./foo/index"'), true],
+      ["13", "app/components/x/a+b.tsx", entry("app/a.test.tsx", '"./aab"'), false],
+      ["14", "app/components/x/a+b.tsx", entry("app/a.test.tsx", '"./x/a+b"'), true],
+      ["9", foo, entry("app/components/y/foo.test.tsx"), false],
+      ["10", foo, [], false],
+    ];
+    expect(rows.map(([name, file, index]) => [name, inMutationScope(file, index)])).toEqual(
+      rows.map(([name, , , expected]) => [name, expected]),
+    );
+  });
+
+  it("inMutationScope: a quote before the name is a reference", () => {
+    const texts = ['vi.mock("foo")', "from 'foo'"];
+    expect(texts.map((text) => inMutationScope(foo, entry("app/a.test.tsx", text)))).toEqual([
+      true,
+      true,
+    ]);
+  });
+
+  it("inMutationScope: the i18n rule wins over a sibling test (1b)", () => {
+    expect(inMutationScope("app/i18n/picker.tsx", entry("app/i18n/picker.test.tsx"))).toBe(false);
+  });
+
+  it("inMutationScope: a text that only contains the name is not a reference (8a-8c)", () => {
+    const texts = ["const foobar = 1;", "barfoo.x", "obj.foo.y", '"./foobar"'];
+    expect(texts.map((text) => inMutationScope(foo, entry("app/a.test.tsx", text)))).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("inMutationScope: a sibling matches the whole base name, not a prefix (10b)", () => {
+    expect(inMutationScope(foo, entry("app/components/x/foo-bar.test.tsx"))).toBe(false);
+  });
+
+  it("rangesFromDiff: drops out-of-scope files", () => {
+    const diff = [
+      diffOf("app/i18n/en-US.ts", ["@@ -1,0 +1,2 @@"]),
+      diffOf("app/components/x/bare.tsx", ["@@ -1,0 +1,2 @@"]),
+      diffOf("server/a.ts", ["@@ -1,0 +1,2 @@"]),
+    ].join("\n");
+    expect(rangesFromDiff(diff, [])).toEqual(["server/a.ts:1-2"]);
+  });
+
+  it("rangesFromCoverage: drops out-of-scope files", () => {
+    const hit = { statementMap: { "0": { start: { line: 1 }, end: { line: 1 } } }, s: { "0": 1 } };
+    const root = "/work/grill-room";
+    const coverage = {
+      [`${root}/app/i18n/en-US.ts`]: hit,
+      [`${root}/app/components/x/bare.tsx`]: hit,
+      [`${root}/server/a.ts`]: hit,
+    };
+    expect(rangesFromCoverage(coverage, root, [])).toEqual(["server/a.ts:1-1"]);
+  });
+});
+
+describe("loadTestIndex", () => {
+  const repos = useTempGitRepos();
+
+  it("loadTestIndex: each table row", () => {
+    const paths = (index: TestIndex) => index.map((entry) => entry.path).sort();
+
+    const l1 = repos.create({
+      files: { "a.test.ts": "// a\n", "b.spec.tsx": "// b\n", "src/c.ts": "// c\n" },
+    });
+    const l2 = repos.create({ files: { "e2e/x.test.ts": "// x\n" } });
+    writeFileSync(path.join(l2, "d.test.ts"), "// d\n");
+    const l3 = repos.create({ files: { "f.test.ts": "// f\n" } });
+    rmSync(path.join(l3, "f.test.ts"));
+    const l4 = repos.create({ files: { "grill-room/a.test.ts": "// a\n" } });
+    const other = repos.create({ files: { "z.test.ts": "// z\n" } });
+
+    const otherGit = {
+      GIT_DIR: path.join(other, ".git"),
+      GIT_WORK_TREE: other,
+      GIT_INDEX_FILE: path.join(other, ".git", "index"),
+    };
+    const previous = Object.fromEntries(Object.keys(otherGit).map((name) => [name, process.env[name]]));
+    Object.assign(process.env, otherGit);
+    let l5: TestIndex;
+    let l5Subfolder: TestIndex;
+    try {
+      l5 = loadTestIndex(l1);
+      l5Subfolder = loadTestIndex(path.join(l4, "grill-room"));
+    } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+    const longName = `${"d".repeat(120)}/${"e".repeat(120)}/${"f".repeat(60)}.test.ts`;
+    const l6 = repos.create({ files: { [longName]: "// long\n" } });
+
+    expect({
+      L1: paths(loadTestIndex(l1)),
+      L2: paths(loadTestIndex(l2)),
+      L3: paths(loadTestIndex(l3)),
+      L4: paths(loadTestIndex(path.join(l4, "grill-room"))),
+      L5: paths(l5),
+      L5Subfolder: paths(l5Subfolder),
+      L6: paths(loadTestIndex(l6)),
+      text: loadTestIndex(l1).find((entry) => entry.path === "a.test.ts")?.text,
+    }).toEqual({
+      L1: ["a.test.ts", "b.spec.tsx"],
+      L2: [],
+      L3: [],
+      L4: ["a.test.ts"],
+      L5: ["a.test.ts", "b.spec.tsx"],
+      L5Subfolder: ["a.test.ts"],
+      L6: [longName],
+      text: "// a\n",
+    });
+  });
+});
+
+describe("loadTestIndex: git and the file system", () => {
+  const repos = useTempGitRepos();
+
+  it("loadTestIndex: a tracked symlink to a non-regular file is skipped (L7)", () => {
+    const root = repos.create({ files: { "a.test.ts": "// a\n" } });
+    symlinkSync("/dev/null", path.join(root, "n.test.ts"));
+    execFileSync("git", ["add", "."], { cwd: root });
+
+    expect(loadTestIndex(root).map((entry) => entry.path)).toEqual(["a.test.ts"]);
+  });
+
+  it("loadTestIndex: git runs with the rest of the parent environment, PATH included (L8)", () => {
+    const root = repos.create({ files: { "a.test.ts": "// a\n" } });
+    writeFileSync(path.join(root, "xyes.test.ts"), "// x\n");
+    const stubs = mkdtempSync(path.join(tmpdir(), "mutate-git-stub-"));
+    writeFileSync(
+      path.join(stubs, "git"),
+      '#!/bin/sh\nprintf "x%s.test.ts\\0" "$PROBE_MARKER"\n',
+      { mode: 0o755 },
+    );
+    const previous = { PATH: process.env.PATH, PROBE_MARKER: process.env.PROBE_MARKER };
+    process.env.PATH = `${stubs}:${previous.PATH}`;
+    process.env.PROBE_MARKER = "yes";
+    try {
+      expect(loadTestIndex(root).map((entry) => entry.path)).toEqual(["xyes.test.ts"]);
+    } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      rmSync(stubs, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("mutation gate settings", () => {
+  it("stryker config ignores static mutants", async () => {
+    const specifier = pathToFileURL(repoPath("grill-room/stryker.config.mjs")).href;
+    const config = (await import(specifier)) as { default: { ignoreStatic?: boolean } };
+    expect(config.default.ignoreStatic).toBe(true);
+  });
+
+  it("CAP is 500", () => {
+    expect(CAP).toBe(500);
+  });
+
+  it("strykerArgs: with and without test files", () => {
+    expect({
+      without: strykerArgs(["a.ts:1-2", "b.ts:3-4"], []),
+      with: strykerArgs(["a.ts:1-2"], ["a.test.ts", "b.test.ts"]),
+    }).toEqual({
+      without: ["pnpm", "exec", "stryker", "run", "--mutate", "a.ts:1-2,b.ts:3-4"],
+      with: [
+        "pnpm",
+        "exec",
+        "stryker",
+        "run",
+        "--mutate",
+        "a.ts:1-2",
+        "--testFiles",
+        "a.test.ts,b.test.ts",
+      ],
+    });
   });
 });
 
@@ -783,7 +1220,7 @@ describe("preferred ranges", () => {
           s: { "0": 1 },
         },
       };
-      const ranges = rangesFromCoverage(coverage, cwd);
+      const ranges = rangesFromCoverage(coverage, cwd, []);
       expect(ranges).toEqual(["a.ts:1-2", "z.ts:1-3"]);
 
       const counted = await countMutantLines(ranges, cwd);
@@ -810,16 +1247,21 @@ describe("test:mutate CLI: --prefer", () => {
   const tsx = path.resolve("node_modules/.bin/tsx");
   const usage =
     "\nUsage: pnpm test:mutate [--base <ref>] [--mutate <file:start-end>[,...]] [--prefer <file:start-end>[,...]]\n";
-  const heavy = `export const total = ${Array.from({ length: 105 }, () => "a").join(" + ")};`;
+  const heavy = `export const total = ${Array.from({ length: 505 }, () => "a").join(" + ")};`;
 
-  function runCli(files: Record<string, string>, args: string[], existingDirectory?: string) {
+  function runCli(
+    files: Record<string, string>,
+    args: string[],
+    existingDirectory?: string,
+    envOverride: NodeJS.ProcessEnv = {},
+  ) {
     const cwd = existingDirectory ?? mkdtempSync(path.join(tmpdir(), "mutate-cli-"));
     try {
       for (const [name, contents] of Object.entries(files)) {
         mkdirSync(path.dirname(path.join(cwd, name)), { recursive: true });
         writeFileSync(path.join(cwd, name), contents);
       }
-      const env: NodeJS.ProcessEnv = { ...process.env };
+      const env: NodeJS.ProcessEnv = { ...process.env, ...envOverride };
       for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) delete env[name];
       const result = spawnSync(tsx, [script, ...args], { cwd, encoding: "utf8", env });
       const summaryFile = path.join(cwd, ".scratch", "mutation", "summary.json");
@@ -996,5 +1438,19 @@ describe("main: every emit takes preferNotCovered from preferNotCoveredFor", () 
       "counted, prefer",
       "null, prefer",
     ]);
+  });
+});
+
+describe("main: the Stryker command comes only from strykerArgs", () => {
+  it("main: the Stryker command comes only from strykerArgs", () => {
+    const source = readFileSync(fileURLToPath(new URL("./mutate-diff.ts", import.meta.url)), "utf8");
+    const main = source.slice(source.indexOf("async function main"));
+    expect({
+      declaration: main.match(/let testFiles: string\[\] = [^;]*\[\][^;]*;/g)?.length ?? 0,
+      assignments: main.split("testFiles = scope.testFiles;").length - 1,
+      calls: main.split("strykerArgs(").length - 1,
+      call: main.split("strykerArgs(kept, testFiles)").length - 1,
+      literal: main.includes('"stryker"'),
+    }).toEqual({ declaration: 1, assignments: 2, calls: 1, call: 1, literal: false });
   });
 });

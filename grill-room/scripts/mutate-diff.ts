@@ -1,5 +1,5 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -7,7 +7,7 @@ import { parseArgs } from "node:util";
 import { Instrumenter } from "@stryker-mutator/instrumenter";
 import { calculateMetrics } from "mutation-testing-metrics";
 
-const CAP = 100;
+export const CAP = 500;
 const OVERRUN_MS = 10 * 60 * 1000;
 const STDERR_TAIL_LINES = 20;
 const DEFAULT_BASE = "origin/main";
@@ -42,7 +42,7 @@ export function isEntryPoint(importMetaUrl: string, argv1: string | undefined): 
 }
 
 export type Scope =
-  | { kind: "ranges"; ranges: string[] }
+  | { kind: "ranges"; ranges: string[]; testFiles: string[] }
   | { kind: "coverage"; testFiles: string[] }
   | { kind: "none" };
 
@@ -73,21 +73,64 @@ function parseDiff(diffText: string): DiffFile[] {
   return files;
 }
 
-export function rangesFromDiff(diffText: string): string[] {
+export type TestIndex = Array<{ path: string; text: string }>;
+
+function gitEnvironment(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) delete env[name];
+  return env;
+}
+
+const isUnitTestFile = (file: string): boolean => TEST_FILE.test(file) && !/(^|\/)e2e\//.test(file);
+
+export function loadTestIndex(root: string): TestIndex {
+  const listing = execFileSync("git", ["ls-files", "-z"], {
+    cwd: root,
+    env: gitEnvironment(),
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  const index: TestIndex = [];
+  for (const file of listing.split("\0").filter(isUnitTestFile)) {
+    const absolute = path.join(root, file);
+    try {
+      if (statSync(absolute).isFile()) index.push({ path: file, text: readFileSync(absolute, "utf8") });
+    } catch {
+      continue;
+    }
+  }
+  return index;
+}
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// A test references `foo.tsx` loosely: "/foo" followed by a quote, dot or slash.
+// It errs toward keeping a file; a false keep costs only NoCoverage survivors.
+export function inMutationScope(file: string, index: TestIndex): boolean {
+  if (file.startsWith("app/i18n/")) return false;
+  if (!file.endsWith(".tsx")) return true;
+  const slash = file.lastIndexOf("/");
+  const directory = file.slice(0, slash + 1);
+  const base = file.slice(slash + 1, -".tsx".length);
+  const sibling = new RegExp(`^${escapeRegExp(directory + base)}\\.(test|spec)\\.[cm]?[jt]sx?$`);
+  const reference = new RegExp(`[/'"]${escapeRegExp(base)}['"./]`);
+  return index.some((test) => sibling.test(test.path) || reference.test(test.text));
+}
+
+export function rangesFromDiff(diffText: string, index: TestIndex): string[] {
   return parseDiff(diffText)
-    .filter((file) => isSourcePath(file.path))
+    .filter((file) => isSourcePath(file.path) && inMutationScope(file.path, index))
     .flatMap((file) => file.added.map((range) => `${file.path}:${range.start}-${range.end}`));
 }
 
 function testFilesFromDiff(diffText: string): string[] {
   return parseDiff(diffText)
     .map((file) => file.path)
-    .filter((file) => TEST_FILE.test(file) && !/(^|\/)e2e\//.test(file));
+    .filter(isUnitTestFile);
 }
 
 function gitDiff(base: string, cwd: string): string {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) delete env[name];
+  const env = gitEnvironment();
   return execFileSync(
     "git",
     ["diff", "--relative", "--no-renames", "--unified=0", `${base}...HEAD`],
@@ -95,12 +138,29 @@ function gitDiff(base: string, cwd: string): string {
   );
 }
 
-export function scopeFor(base: string, cwd: string): Scope {
+function hasOwnTest(file: string, testFiles: string[]): boolean {
+  const slash = file.lastIndexOf("/");
+  const directory = file.slice(0, slash + 1);
+  const name = file.slice(slash + 1);
+  const stem = name.slice(0, name.lastIndexOf("."));
+  const own = new RegExp(`^${escapeRegExp(directory + stem)}\\.(test|spec)\\.[cm]?[jt]sx?$`);
+  return testFiles.some((test) => own.test(test));
+}
+
+export function scopeFor(base: string, cwd: string, index: TestIndex): Scope {
   const diffText = gitDiff(base, cwd);
-  const ranges = rangesFromDiff(diffText);
-  if (ranges.length > 0) return { kind: "ranges", ranges };
-  const testFiles = testFilesFromDiff(diffText);
-  if (testFiles.length > 0) return { kind: "coverage", testFiles };
+  const changedTests = testFilesFromDiff(diffText);
+  const hasSourceChange = parseDiff(diffText).some(
+    (file) => isSourcePath(file.path) && file.added.length > 0,
+  );
+  if (hasSourceChange) {
+    const ranges = rangesFromDiff(diffText, index);
+    if (ranges.length === 0) return { kind: "none" };
+    const keptFiles = [...new Set(ranges.map((range) => parseRange(range).file))];
+    const everyFileHasItsTest = keptFiles.every((file) => hasOwnTest(file, changedTests));
+    return { kind: "ranges", ranges, testFiles: everyFileHasItsTest ? changedTests : [] };
+  }
+  if (changedTests.length > 0) return { kind: "coverage", testFiles: changedTests };
   return { kind: "none" };
 }
 
@@ -112,13 +172,14 @@ interface IstanbulFileCoverage {
 export function rangesFromCoverage(
   coverage: Record<string, IstanbulFileCoverage>,
   root: string,
+  index: TestIndex,
 ): string[] {
   const ranges: string[] = [];
   for (const [absolute, file] of Object.entries(coverage)) {
     const relative = path.relative(root, absolute);
     if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
     const posix = relative.split(path.sep).join("/");
-    if (!isSourcePath(posix)) continue;
+    if (!isSourcePath(posix) || !inMutationScope(posix, index)) continue;
     const covered = new Set<number>();
     for (const [id, span] of Object.entries(file.statementMap)) {
       if ((file.s[id] ?? 0) <= 0) continue;
@@ -135,6 +196,12 @@ export function rangesFromCoverage(
     }
   }
   return ranges;
+}
+
+export function strykerArgs(kept: string[], testFiles: string[]): string[] {
+  const args = ["pnpm", "exec", "stryker", "run", "--mutate", kept.join(",")];
+  if (testFiles.length > 0) args.push("--testFiles", testFiles.join(","));
+  return args;
 }
 
 export interface LineCount {
@@ -473,15 +540,19 @@ async function main(): Promise<void> {
   };
 
   try {
+    const index = values.mutate === undefined ? loadTestIndex(cwd) : [];
     const scope: Scope =
       values.mutate !== undefined
-        ? { kind: "ranges", ranges: values.mutate.split(",") }
-        : scopeFor(base ?? DEFAULT_BASE, cwd);
+        ? { kind: "ranges", ranges: values.mutate.split(","), testFiles: [] }
+        : scopeFor(base ?? DEFAULT_BASE, cwd, index);
 
     let ranges: string[] = [];
+    let testFiles: string[] = [];
     if (scope.kind === "ranges") {
       ranges = scope.ranges;
+      testFiles = scope.testFiles;
     } else if (scope.kind === "coverage") {
+      testFiles = scope.testFiles;
       rmSync(path.join(cwd, COVERAGE_DIR), { recursive: true, force: true });
       const args = [
         "pnpm",
@@ -512,7 +583,7 @@ async function main(): Promise<void> {
         );
         return;
       }
-      ranges = rangesFromCoverage(JSON.parse(readFileSync(coverageFile, "utf8")), cwd);
+      ranges = rangesFromCoverage(JSON.parse(readFileSync(coverageFile, "utf8")), cwd, index);
     }
 
     const counted = ranges.length > 0 ? await countMutantLines(ranges, cwd) : [];
@@ -544,7 +615,7 @@ async function main(): Promise<void> {
     }
 
     rmSync(path.join(cwd, STRYKER_REPORT_FILE), { force: true });
-    const args = ["pnpm", "exec", "stryker", "run", "--mutate", kept.join(",")];
+    const args = strykerArgs(kept, testFiles);
     const started = Date.now();
     const finished = await runInGroup(args, cwd, OVERRUN_MS);
     const reportFile = path.join(cwd, STRYKER_REPORT_FILE);
