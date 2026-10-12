@@ -50,7 +50,7 @@ trap 'forward 130' INT
 trap 'forward 143' TERM
 
 git diff --no-renames --name-only origin/main...HEAD \
-  | grep -v -E '\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|/)(e2e|test|__snapshots__)/' \
+  | grep -v -E '\.(test|spec)\.[cm]?[jt]sx?$|\.snap$|(^|/)(e2e|test|__snapshots__)/|(^|/)test-[^/]*\.sh$' \
   | xargs -r git diff --no-renames --binary origin/main...HEAD -- > "$patch"
 
 if [ ! -s "$patch" ]; then

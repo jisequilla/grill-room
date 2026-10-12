@@ -42,7 +42,12 @@ const write = (path: string, text: string): void => {
 
 type Fixture = { origin: string; work: string };
 
-const makeFixture = (options: { testOnly?: boolean } = {}): Fixture => {
+type ExtraFiles = Record<string, [main: string, branch: string]>;
+
+const makeFixture = (
+  options: { testOnly?: boolean; extra?: ExtraFiles } = {},
+): Fixture => {
+  const extra = Object.entries(options.extra ?? {});
   const root = tempFolder("revert-check-");
   const origin = join(root, "origin.git");
   const work = join(root, "work");
@@ -54,6 +59,7 @@ const makeFixture = (options: { testOnly?: boolean } = {}): Fixture => {
   write(join(work, "src/a.ts"), "main\n");
   write(join(work, "src/a.test.ts"), "test-main\n");
   write(join(work, "grill-room/keep.txt"), "keep\n");
+  for (const [path, [onMain]] of extra) write(join(work, path), onMain);
   git(work, "add", ".");
   git(work, "commit", "-q", "-m", "main");
   git(work, "branch", "-M", "main");
@@ -61,6 +67,7 @@ const makeFixture = (options: { testOnly?: boolean } = {}): Fixture => {
   git(work, "checkout", "-q", "-b", "feature");
   if (!options.testOnly) write(join(work, "src/a.ts"), "branch\n");
   write(join(work, "src/a.test.ts"), "test-branch\n");
+  for (const [path, [, onBranch]] of extra) write(join(work, path), onBranch);
   git(work, "commit", "-q", "-am", "branch");
   return { origin, work };
 };
@@ -306,5 +313,60 @@ describe("scripts/revert-check.sh", () => {
     });
     expect(result.status).toBe(0);
     expect(readdirSync(tmp)).toEqual([]);
+  });
+
+  it("row 13: a test-*.sh file stays in place while the source is reverted", () => {
+    const { work } = makeFixture({ extra: { "scripts/test-check.sh": ["test-main\n", "test-branch\n"] } });
+    const result = run(work, "cat scripts/test-check.sh; cat src/a.ts");
+    expect(result.stdout).toBe("test-branch\nmain\n");
+    expect(result.status).toBe(0);
+    expect(read(work, "src/a.ts")).toBe("branch\n");
+  });
+
+  it("row 14: a PR changing only a test-*.sh file is test-only", () => {
+    const { work } = makeFixture({ testOnly: true, extra: { "scripts/test-check.sh": ["test-main\n", "test-branch\n"] } });
+    const result = run(work, "touch ran");
+    expect(result.stdout).toBe("test-only PR: no source to revert\n");
+    expect(result.status).toBe(0);
+    expect(existsSync(join(work, "ran"))).toBe(false);
+  });
+
+  it("row 15: a test- file that is not a shell script is reverted", () => {
+    const { work } = makeFixture({ extra: { "src/test-helper.ts": ["main\n", "branch\n"] } });
+    const result = run(work, "cat src/test-helper.ts");
+    expect(result.stdout).toBe("main\n");
+    expect(result.status).toBe(0);
+    expect(read(work, "src/test-helper.ts")).toBe("branch\n");
+  });
+
+  it("row 16: test- inside the file name is reverted", () => {
+    const { work } = makeFixture({ extra: { "scripts/latest-check.sh": ["main\n", "branch\n"] } });
+    const result = run(work, "cat scripts/latest-check.sh");
+    expect(result.stdout).toBe("main\n");
+    expect(result.status).toBe(0);
+    expect(read(work, "scripts/latest-check.sh")).toBe("branch\n");
+  });
+
+  it("row 17: a test- folder name does not keep its files", () => {
+    const { work } = makeFixture({ extra: { "scripts/test-dir/check.sh": ["main\n", "branch\n"] } });
+    const result = run(work, "cat scripts/test-dir/check.sh");
+    expect(result.stdout).toBe("main\n");
+    expect(result.status).toBe(0);
+    expect(read(work, "scripts/test-dir/check.sh")).toBe("branch\n");
+  });
+
+  it("row 18: a test-*.sh file at the repository root stays in place", () => {
+    const { work } = makeFixture({ extra: { "test-check.sh": ["test-main\n", "test-branch\n"] } });
+    const result = run(work, "cat test-check.sh");
+    expect(result.stdout).toBe("test-branch\n");
+    expect(result.status).toBe(0);
+  });
+
+  it("row 19: a name that does not end in .sh is reverted", () => {
+    const { work } = makeFixture({ extra: { "scripts/test-check.sh.bak": ["main\n", "branch\n"] } });
+    const result = run(work, "cat scripts/test-check.sh.bak");
+    expect(result.stdout).toBe("main\n");
+    expect(result.status).toBe(0);
+    expect(read(work, "scripts/test-check.sh.bak")).toBe("branch\n");
   });
 });

@@ -26,7 +26,7 @@ scripts/revert-check.sh '<the Evidence entry test command>'
 
 The script reads commits, not the working tree, so commit the change on the worktree branch before running it. Put your own test command in place of the marker, inside the single quotes, and run the line as one plain command from the worktree root. The script moves to the worktree root, reverts every non-test file the branch changes against `origin/main`, runs your command there with `bash -c`, and re-applies the source even when the test fails or the run is interrupted. If the test command needs `grill-room/`, write it as `(cd grill-room && <test command>)`. Inside the command, use only double quotes. The red run is the script's output; the green run is a separate run of the same test command afterwards. A planted-bug line is the exception: its red run is the test with the planted edit applied.
 
-- Test files, snapshots and anything under an `e2e/` or `test/` folder stay in place while the source is reverted, so the new test runs against the old source.
+- Test files, snapshots, shell tests named `test-*.sh` and anything under an `e2e/` or `test/` folder stay in place while the source is reverted, so the new test runs against the old source.
 - If the test still passes with the source reverted, the line is not proved. Fix the test, never the rule it encodes.
 - If the script prints `git apply -R failed` (exit 3) or `git apply failed` (exit 4), stop and report, quoting git's error. Never rebuild the change by hand.
 - If the PR changes only test-side files, the patch is empty and the block prints `test-only PR: no source to revert`. The Evidence entry quotes that line and gives the covered ranges.
