@@ -320,37 +320,51 @@ export const CLEARED_ANSWER_LINKS = {
 
 /**
  * A pending supersession proposal alone: the three columns that name another
- * decision as answering or replacing this one. What Answer change
- * (`server/answer-change.ts`) withdraws from the *other* rows whose proposal
- * names the decision it changes — a deferral names no other decision, so it
- * is not part of this.
+ * decision as answering or replacing this one, and the Proposal kind they
+ * are stored under. What Answer change (`server/answer-change.ts`) withdraws
+ * from the *other* rows whose proposal names the decision it changes — a
+ * deferral names no other decision, so it is not part of this.
  */
 export const CLEARED_SUPERSESSION = {
   supersededById: null,
   supersessionAnswer: null,
   supersessionReason: null,
+  proposalKind: null,
 } as const;
 
 /**
  * A decision's own pending restatement: the clean statement proposed for its
- * own answer, the notes it would take out, and why. Names no other decision.
+ * own answer, the notes it would take out, and why, with the Proposal kind
+ * they are stored under. Names no other decision.
  */
 export const CLEARED_RESTATEMENT = {
   restatementText: null,
   restatementNotes: null,
   restatementReason: null,
+  proposalKind: null,
 } as const;
 
 /**
- * A decision's own pending proposals: a supersession, a deferral and a
- * restatement. Each is a claim about the answer the decision holds, so Answer
- * change (`server/answer-change.ts`) drops them in the same update on every
- * transition, beside {@link CLEARED_ANSWER_LINKS}.
+ * A decision's pending Proposal, whatever its kind: a supersession, a
+ * deferral or a restatement, and the kind column. What accepting a
+ * replacement and dismissing clear (`server/proposal.ts`): neither changes
+ * the answer, so the remembered dismissals stay.
  */
-export const CLEARED_PROPOSAL = {
+export const CLEARED_PENDING_PROPOSAL = {
   ...CLEARED_SUPERSESSION,
   deferralReason: null,
   ...CLEARED_RESTATEMENT,
+} as const;
+
+/**
+ * A decision's own pending Proposal and its remembered dismissals. Each is
+ * about the answer the decision holds, so Answer change
+ * (`server/answer-change.ts`) drops them in the same update on every
+ * transition, a reword included, beside {@link CLEARED_ANSWER_LINKS}.
+ */
+export const CLEARED_PROPOSAL = {
+  ...CLEARED_PENDING_PROPOSAL,
+  dismissedProposalsJson: null,
 } as const;
 
 /** A stored decision, exactly as the table holds it. */

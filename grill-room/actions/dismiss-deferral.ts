@@ -31,7 +31,11 @@ export default defineAction({
 
     const [updated] = await db
       .update(schema.decisions)
-      .set({ deferralReason: null, updatedAt: new Date().toISOString() })
+      .set({
+        deferralReason: null,
+        proposalKind: null,
+        updatedAt: new Date().toISOString(),
+      })
       .where(eq(schema.decisions.id, decisionId))
       .returning();
 

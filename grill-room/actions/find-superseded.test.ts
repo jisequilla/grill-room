@@ -2100,6 +2100,42 @@ describe("find-superseded", () => {
       });
     });
 
+    it("K1: stores each proposal with its kind", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "shape", T1, { answerKind: "accepted-recommendation" });
+      await aSettledDecision(session.id, "later", T2);
+      await aSettledDecision(session.id, "notes", T2, { currentAnswer: "Stirpe. Claude, check fees." });
+      await insertDecision(session.id, {
+        id: "d-storage",
+        key: "storage",
+        questionTitle: "Where does the data live?",
+        answerKind: "unknown",
+        currentAnswer: "Not sure yet",
+      });
+      scriptInterviewer([
+        {
+          kind: "find-superseded",
+          result: {
+            supersessions: [
+              { looseEndKey: "storage", answeredByKey: "later", answer: "On disk", reason: "Later decides it." },
+            ],
+            replacements: [{ replacedKey: "shape", byKey: "later", reason: "Later narrows it." }],
+            deferrals: [{ key: "later", reason: DEFERRAL_REASON }],
+            restatements: [
+              { key: "notes", statement: "Stirpe.", operatorNotes: "Claude, check fees.", reason: "A note to the AI." },
+            ],
+          },
+        },
+      ]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect((await readDecision("d-storage"))?.proposalKind).toBe("answered-by");
+      expect((await readDecision("d-shape"))?.proposalKind).toBe("replacement");
+      expect((await readDecision("d-later"))?.proposalKind).toBe("deferral");
+      expect((await readDecision("d-notes"))?.proposalKind).toBe("restatement");
+    });
+
     it("asks nothing when the session has no loose end it could apply to", async () => {
       const session = await aSession();
       const interviewer = scriptInterviewer([]);
