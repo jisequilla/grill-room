@@ -152,7 +152,7 @@ check: typecheck lint test e2e
 doctor:
     pnpm doctor
 
-# Remove Agent-tool worktrees whose branch is merged into main (dirty, unmerged, locked or fresh ones are kept and reported)
+# Remove merged Agent-tool (agent-*) worktrees and finished Workflow (wf_*) worktrees, whose tip is in main or origin/main (dirty, unmerged, locked or, for agent-*, fresh or detached ones are kept and reported)
 prune-worktrees:
     bash "$(git rev-parse --show-toplevel)/scripts/prune-worktrees.sh" "$(git rev-parse --show-toplevel)"
 
