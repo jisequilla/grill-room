@@ -1,0 +1,38 @@
+# Grill Room knowledge · root manifest. What belongs to the whole bundle; each module's taxonomy lives in its own manifest.
+name: Grill Room knowledge
+question: What does Grill Room do today, for whom, and why?
+language: en
+okf_version: "0.2"
+shape: nworld-doctrine / slu-mw-demands, cut to what this bundle needs now
+owner: Jeremias De Isequilla
+exclude_okf:            # .md without frontmatter that does not count for conformance: material captured as is
+  - _fragments/*/material/
+modules:                # in reading order
+  - product
+  - memory
+common_fields:          # every .md outside _fragments/*/material/
+  type:        {required: true}
+  title:       {required: true}
+  description: {required: true, note: one sentence}
+  tags:        {}
+  status:      {required: true, note: "draft (written by an agent) · stable (verified by the owner)"}
+  generated:   {required: true, note: "{by, at}: who wrote it and when"}
+  sources:     {note: "[{id, resource, title}]: the fragments it rests on; cited in the body as footnotes [^id]"}
+fragment:               # the card at _fragments/<YYYY-MM-DD[-HHmm]>-<slug>/fragment.md; HHmm only when the time is known
+  type: Fragment
+  fields:
+    date:     {type: date, required: true}
+    origin:   {type: string, required: true, note: one of the origins below}
+    tool:     {type: string, note: what captured it (granola, claude-code, git)}
+    ingested: {type: bool, required: true, note: true once its knowledge is distilled into the modules}
+    material: {type: list, required: true, note: "[{file, sha256}]: the verbatim files, never edited"}
+    in_git:   {type: bool, note: false when the material stays local; the card still records its hash}
+origins:
+  document:     a written source taken as is (a spec, a review)
+  meeting:      a meeting between people, captured as a transcript
+  conversation: a session between the owner and an agent, summarised in a record that quotes the owner literally
+not_yet:                # YAGNI: each enters only after the need is debated and grilled
+  - validator, index generator and schemas
+  - pre-commit gate
+  - projections/ (the first one, a current-truth product spec, is the next step after distillation)
+  - modules beyond product and memory
