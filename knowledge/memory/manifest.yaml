@@ -1,0 +1,29 @@
+# Module memory · what was decided about Grill Room and this bundle, and what is still open. Read it before deciding the next thing.
+name: memory
+question: what was decided about Grill Room and this bundle, when, why and by whom, and what is still open
+status: draft
+owner: Jeremias De Isequilla
+depends_on: [product]
+scopes: [product, bundle]   # by what the decision is about; each has decisions/ and questions/
+types:
+  Decision:
+    description: something decided, with its why, who and when, citing where it was decided
+    path: <scope>/decisions/<slug>.md
+    fields:
+      date:          {type: date, required: true}
+      decided_by:    {type: list, of: string, required: true, note: full names}
+      state:         {type: string, required: true, note: "in force · superseded"}
+      superseded_by: {type: string, note: the decision that replaces it}
+      resolves:      {type: string, note: the open question it closes}
+    rules:
+      - A decision that widens or corrects another leaves that one superseded, with superseded_by.
+  Open question:
+    description: something left unresolved, with who holds it
+    path: <scope>/questions/<slug>.md
+    fields:
+      date:        {type: date, required: true}
+      state:       {type: string, required: true, note: "open · resolved"}
+      held_by:     {type: string, required: true, note: who has to answer it}
+      resolved_by: {type: string, note: the decision that closes it}
+    rules:
+      - A question with no holder is not written.
