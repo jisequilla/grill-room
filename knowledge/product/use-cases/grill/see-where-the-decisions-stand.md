@@ -14,6 +14,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: grill
+contexts: [interview]
 state: built
 code:
   - grill-room/server/tree.ts:114

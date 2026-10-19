@@ -1,0 +1,8 @@
+# Context project-knowledge · supporting · what a registered project's repository already says.
+name: project-knowledge
+kind: supporting
+question: what does the target repository already hold that a grill or a delivery must respect
+status: draft
+owner: Jeremias De Isequilla
+depends_on: []
+common: [Term]

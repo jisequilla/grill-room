@@ -1,9 +1,9 @@
-# Module product · who Grill Room serves, the words it uses, and what it lets them do.
+# Module product · who Grill Room serves and what it lets them do, across the bounded contexts.
 name: product
-question: for whom is Grill Room, what does each of them do with it, and in which words
+question: for whom is Grill Room, and what does each of them do with it
 status: draft
 owner: Jeremias De Isequilla
-depends_on: []
+depends_on: [interview, project-knowledge, delivery]
 types:
   Role:
     description: someone Grill Room serves or acts for, by what they do, not by name
@@ -12,21 +12,15 @@ types:
       also_called: {type: list, of: string, note: the other names specs and code use for this role}
     rules:
       - One role per real actor. A name that specs use for the same actor goes in also_called, not in a new role.
-  Concept:
-    description: a term with its meaning in Grill Room
-    path: concepts/<slug>.md
-    fields:
-      also_called: {type: list, of: string, note: synonyms and misspellings}
-    rules:
-      - GLOSSARY.md at the repo root is folded in here as concepts are distilled.
   Use case:
     description: something a role does with Grill Room to reach a goal, at one stage of its journey
     path: use-cases/<stage>/<slug>.md
     fields:
-      role:  {type: string, required: true, note: the Role it serves, by path}
-      stage: {type: string, required: true, note: "idea · readiness · grill · spec · tickets · export · build · follow-up"}
-      state: {type: string, required: true, note: "built · partial · wanted: built only when the code does it today"}
-      code:  {type: list, of: string, note: "where it lives, when built or partial (path:line)"}
+      role:     {type: string, required: true, note: the Role it serves, by path}
+      stage:    {type: string, required: true, note: "idea · readiness · grill · spec · tickets · export · build · follow-up"}
+      contexts: {type: list, of: string, required: true, note: "the bounded contexts it touches, the one that owns it first; two or more mean it crosses the context map"}
+      state:    {type: string, required: true, note: "built · partial · wanted: built only when the code does it today"}
+      code:     {type: list, of: string, note: "where it lives, when built or partial (path:line)"}
     rules:
-      - Written as the role's goal and the outcome they see, not as screens or steps.
+      - Written as the role's goal and the outcome they see, not as screens or steps, in the words of its contexts' languages.
       - "state: built or partial is checked against the code, not taken from a spec."

@@ -1,0 +1,8 @@
+# Context delivery · supporting · turning settled decisions into work an agent can do, and learning how it went.
+name: delivery
+kind: supporting
+question: how do settled decisions become a spec, tickets and a bundle that agents build from, and what came of building them
+status: draft
+owner: Jeremias De Isequilla
+depends_on: [interview, project-knowledge]   # conforms to the decision tree; grounds briefs in the repository
+common: [Term]

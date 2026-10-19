@@ -14,6 +14,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: spec
+contexts: [delivery, interview]
 state: partial
 code:
   - grill-room/server/handoff.ts:1510

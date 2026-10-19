@@ -17,6 +17,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: spec
+contexts: [delivery]
 state: partial
 code:
   - grill-room/app/components/output/spec-section.tsx

@@ -1,0 +1,8 @@
+# Context interview · core · turning a loose idea into settled decisions the Idea owner commits to.
+name: interview
+kind: core
+question: how does an idea become a tree of settled decisions, from judging whether it is ready to confirming a shared understanding
+status: draft
+owner: Jeremias De Isequilla
+depends_on: [project-knowledge]   # repo decisions enter as decisions; readiness is judged with a scout report
+common: [Term]

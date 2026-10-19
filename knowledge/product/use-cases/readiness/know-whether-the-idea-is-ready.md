@@ -14,6 +14,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: readiness
+contexts: [interview, project-knowledge]
 state: partial
 code:
   - grill-room/app/components/workspace/readiness-panel.tsx:61

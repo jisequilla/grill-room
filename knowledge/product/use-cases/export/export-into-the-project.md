@@ -17,6 +17,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: export
+contexts: [delivery, project-knowledge]
 state: built
 code:
   - grill-room/actions/preview-export.ts

@@ -14,6 +14,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: tickets
+contexts: [delivery]
 state: built
 code:
   - grill-room/actions/break-into-tickets.ts:49

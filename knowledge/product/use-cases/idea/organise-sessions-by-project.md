@@ -14,6 +14,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: idea
+contexts: [project-knowledge, interview]
 state: partial
 code:
   - grill-room/app/routes/projects.$projectId.tsx:83

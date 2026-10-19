@@ -14,6 +14,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: readiness
+contexts: [interview]
 state: wanted
 code: []
 ---
