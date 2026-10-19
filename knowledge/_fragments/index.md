@@ -18,5 +18,7 @@ generated:
 | 2026-09-29 | [Meeting with Pipe on Grill Room's user experience](2026-09-29-2130-pipe-meeting/fragment.md) | meeting | no | card only |
 | 2026-10-16 | [Session that chose to step back and adopt OKF](2026-10-16-session-okf-step-back/fragment.md) | conversation | yes | yes |
 | 2026-10-16 | [Session that distilled the roles](2026-10-16-session-roles/fragment.md) | conversation | yes | yes |
+| 2026-10-17 | [Session that chose DDD for the bundle's boundaries](2026-10-17-session-ddd-boundaries/fragment.md) | conversation | yes | yes |
+| 2026-10-19 | [Session that drew the bounded contexts](2026-10-19-session-contexts/fragment.md) | conversation | yes | yes |
 
 [`log.md`](log.md) records every capture and ingestion, append only.

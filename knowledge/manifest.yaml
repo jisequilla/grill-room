@@ -7,9 +7,23 @@ shape: nworld-doctrine / slu-mw-demands, cut to what this bundle needs now
 owner: Jeremias De Isequilla
 exclude_okf:            # .md without frontmatter that does not count for conformance: material captured as is
   - _fragments/*/material/
-modules:                # in reading order
-  - product
+modules:                # in reading order: the three bounded contexts (see context-map.md), then what cuts across them
+  - interview           # core
+  - project-knowledge   # supporting
+  - delivery            # supporting
+  - product             # roles and use cases, across contexts
   - memory
+context_map: context-map.md
+common_types:           # adopted by every context module
+  Term:
+    description: a word of the context's ubiquitous language, with its one meaning in that context
+    path: <context>/language/<slug>.md
+    fields:
+      avoid: {type: list, of: string, note: "words not to use for it in this context: synonyms, and the meanings it has elsewhere"}
+      code:  {type: list, of: string, note: "where it lives in the code (path:line), when it does"}
+    rules:
+      - One meaning per context. A word that means something else in another context is a Term there too, and each names the other in its body.
+      - This language is canonical; GLOSSARY.md and any per-context glossary are generated from it, not edited by hand.
 common_fields:          # every .md outside _fragments/*/material/
   type:        {required: true}
   title:       {required: true}
@@ -35,4 +49,6 @@ not_yet:                # YAGNI: each enters only after the need is debated and 
   - validator, index generator and schemas
   - pre-commit gate
   - projections/ (the first one, a current-truth product spec, is the next step after distillation)
-  - modules beyond product and memory
+  - a generator for GLOSSARY-MAP.md and the per-context glossaries
+  - tactical design (aggregates, entities): it belongs to the code
+  - interviewer turn bookkeeping (turns, runs, attempts): a generic technical subdomain, not product knowledge

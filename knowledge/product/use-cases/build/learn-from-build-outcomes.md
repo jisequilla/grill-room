@@ -14,6 +14,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: build
+contexts: [delivery]
 state: built
 code:
   - grill-room/actions/set-build-record.ts:11

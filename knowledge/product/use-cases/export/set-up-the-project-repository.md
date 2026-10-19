@@ -14,6 +14,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: export
+contexts: [project-knowledge, delivery]
 state: wanted
 code: []
 ---

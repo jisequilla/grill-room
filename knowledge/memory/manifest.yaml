@@ -3,8 +3,8 @@ name: memory
 question: what was decided about Grill Room and this bundle, when, why and by whom, and what is still open
 status: draft
 owner: Jeremias De Isequilla
-depends_on: [product]
-scopes: [product, bundle]   # by what the decision is about; each has decisions/ and questions/
+depends_on: [interview, project-knowledge, delivery, product]
+scopes: [interview, project-knowledge, delivery, product, bundle]   # a bounded context, the cross-cutting product, or the bundle itself; each has decisions/ and questions/
 types:
   Decision:
     description: something decided, with its why, who and when, citing where it was decided

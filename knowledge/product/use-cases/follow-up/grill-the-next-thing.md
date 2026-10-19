@@ -14,6 +14,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: follow-up
+contexts: [interview, project-knowledge, delivery]
 state: partial
 code:
   - grill-room/actions/scout-project.ts:272

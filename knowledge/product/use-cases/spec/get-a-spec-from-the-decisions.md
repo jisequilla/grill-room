@@ -14,6 +14,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: spec
+contexts: [delivery, interview]
 state: built
 code:
   - grill-room/actions/synthesize-spec.ts:25

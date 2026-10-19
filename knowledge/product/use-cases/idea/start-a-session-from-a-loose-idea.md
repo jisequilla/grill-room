@@ -14,6 +14,7 @@ sources:
 # ── product ───────────────────────────
 role: /product/roles/idea-owner.md
 stage: idea
+contexts: [interview]
 state: built
 code:
   - grill-room/actions/create-session.ts:21
