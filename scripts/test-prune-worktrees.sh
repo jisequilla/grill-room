@@ -277,9 +277,352 @@ test_no_main_ref() {
   rm -rf "$d"
 }
 
+# ---------------------------------------------------------------------------
+# Workflow worktrees (wf_*): finished ones go whatever their HEAD looks like;
+# locked, unmerged and dirty ones stay. The helpers read the caller's `work`.
+# ---------------------------------------------------------------------------
+
+assert_file() {
+  # assert_file <worktree-name> <relative path> <should-exist: yes|no>
+  local exists=no
+  [ -e "$work/.claude/worktrees/$1/$2" ] && exists=yes
+  if [ "$exists" != "$3" ]; then
+    echo "FAIL: expected $1/$2 existence=$3, got $exists"
+    fail=1
+  fi
+}
+
+assert_modified() {
+  # assert_modified <worktree-name> <file>
+  local status
+  status="$(git -C "$work/.claude/worktrees/$1" status --porcelain -- "$2")"
+  if [ "$status" != " M $2" ]; then
+    echo "FAIL: expected $1/$2 to be modified, status was '$status'"
+    fail=1
+  fi
+}
+
+wf_merged() {
+  # wf_merged <dir-name> <branch-name>: branch from main, one commit, merged
+  add_worktree "$1" "$2"
+  commit_in_worktree "$1" "$1 work"
+  merge_branch "$2"
+}
+
+wf_detached() {
+  # wf_detached <dir-name>: detached at main's tip
+  git -C "$work" worktree add -q --detach ".claude/worktrees/$1" main
+}
+
+wf_custom_commit() {
+  # wf_custom_commit <dir-name> <relative file>: commit one new tracked file
+  local dir="$work/.claude/worktrees/$1"
+  mkdir -p "$(dirname "$dir/$2")"
+  echo "tracked" >"$dir/$2"
+  git -C "$dir" add "$2"
+  git -C "$dir" commit -q -m "$1 adds $2"
+}
+
+wf_untracked() {
+  # wf_untracked <dir-name> <relative file>
+  local dir="$work/.claude/worktrees/$1"
+  mkdir -p "$(dirname "$dir/$2")"
+  echo "untracked" >"$dir/$2"
+}
+
+wf_lock() {
+  git -C "$work" worktree lock --reason "claude agent test" ".claude/worktrees/$1"
+}
+
+test_workflow_worktrees() {
+  local d work origin clone out rc expected gone kept
+  d="$(mktemp -d "${TMPDIR:-/tmp}/gr pq3 test.XXXXXXXX")"
+  work="$d/work"
+  origin="$d/origin.git"
+  clone="$d/clone"
+
+  git init -q --bare "$origin"
+  git init -q "$work"
+  git -C "$work" config user.email "test@example.com"
+  git -C "$work" config user.name "Test"
+  git -C "$work" remote add origin "$origin"
+  echo "root" >"$work/README.md"
+  git -C "$work" add README.md
+  git -C "$work" commit -q -m "root"
+  git -C "$work" branch -M main
+  git -C "$work" push -q -u origin main
+
+  wf_merged agent-merged agent-merged-branch
+
+  wf_merged wf_a-1 worktree-wf_a-1
+
+  wf_detached wf_a-2
+
+  git -C "$work" worktree add -q ".claude/worktrees/wf_a-3" -b fix-gr-x main
+
+  wf_merged wf_a-4 worktree-wf_a-4
+  wf_untracked wf_a-4 pr-body-gr-x.md
+
+  wf_merged wf_a-5 worktree-wf_a-5
+  wf_untracked wf_a-5 notes.md
+  wf_untracked wf_a-5 pr-body-gr-x.md
+
+  wf_merged wf_a-6 worktree-wf_a-6
+  wf_untracked wf_a-6 pr-body-gr-x.md.orig
+
+  wf_merged wf_a-7 worktree-wf_a-7
+  echo "modified" >>"$work/.claude/worktrees/wf_a-7/note.txt"
+
+  wf_merged wf_a-8 worktree-wf_a-8
+  wf_lock wf_a-8
+
+  add_worktree wf_a-9 worktree-wf_a-9
+  commit_in_worktree wf_a-9 "wf_a-9 work"
+
+  wf_detached wf_b-1
+  commit_in_worktree wf_b-1 "wf_b-1 work"
+
+  add_worktree wf_b-2 worktree-wf_b-2
+  wf_custom_commit wf_b-2 pr-body-d/t
+  merge_branch worktree-wf_b-2
+  wf_untracked wf_b-2 pr-body-d/x.md
+
+  add_worktree wf_b-3 worktree-wf_b-3
+  commit_in_worktree wf_b-3 "wf_b-3 work"
+  wf_untracked wf_b-3 notes.md
+  wf_lock wf_b-3
+
+  add_worktree wf_b-4 worktree-wf_b-4
+  commit_in_worktree wf_b-4 "wf_b-4 work"
+  wf_untracked wf_b-4 notes.md
+  wf_untracked wf_b-4 pr-body-gr-x.md
+
+  wf_merged wf_b-5 worktree-wf_b-5
+  wf_untracked wf_b-5 "pr-body-x y.md"
+
+  wf_detached wf_b-6
+  wf_untracked wf_b-6 pr-body-gr-x.md
+
+  wf_merged wf_b-7 worktree-wf_b-7
+  wf_untracked wf_b-7 newdir/x
+
+  wf_detached wf_b-8
+  wf_untracked wf_b-8 notes.md
+
+  wf_detached wf_b-9
+  wf_lock wf_b-9
+
+  git -C "$work" push -q origin main
+
+  add_worktree wf_c-1 worktree-wf_c-1
+  commit_in_worktree wf_c-1 "wf_c-1 work"
+  git -C "$work/.claude/worktrees/wf_c-1" push -q origin worktree-wf_c-1
+  git clone -q -b main "$origin" "$clone"
+  git -C "$clone" config user.email "test@example.com"
+  git -C "$clone" config user.name "Test"
+  git -C "$clone" fetch -q origin worktree-wf_c-1
+  git -C "$clone" merge -q --no-ff --no-edit FETCH_HEAD
+  git -C "$clone" push -q origin main
+
+  wf_merged wf_c-2 worktree-wf_c-2
+
+  add_worktree wf_d-1 worktree-wf_d-1
+  wf_custom_commit wf_d-1 pr-body-t.md
+  merge_branch worktree-wf_d-1
+  wf_untracked wf_d-1 pr-body-gr-x.md
+
+  add_worktree wf_d-2 worktree-wf_d-2
+  wf_custom_commit wf_d-2 pr-body-u.md
+  merge_branch worktree-wf_d-2
+  echo "modified" >>"$work/.claude/worktrees/wf_d-2/pr-body-u.md"
+
+  out="$(bash "$prune_script" "$work")"
+  rc=$?
+
+  expected="removed .claude/worktrees/agent-merged (agent-merged-branch)
+removed .claude/worktrees/wf_a-1 (worktree-wf_a-1)
+removed .claude/worktrees/wf_a-2 (detached HEAD)
+removed .claude/worktrees/wf_a-3 (fix-gr-x)
+removed .claude/worktrees/wf_a-4 (worktree-wf_a-4)
+kept    .claude/worktrees/wf_a-5 (uncommitted changes)
+kept    .claude/worktrees/wf_a-6 (uncommitted changes)
+kept    .claude/worktrees/wf_a-7 (uncommitted changes)
+kept    .claude/worktrees/wf_a-8 (locked)
+kept    .claude/worktrees/wf_a-9 (worktree-wf_a-9 is not merged)
+kept    .claude/worktrees/wf_b-1 (detached HEAD is not merged)
+kept    .claude/worktrees/wf_b-2 (uncommitted changes)
+kept    .claude/worktrees/wf_b-3 (locked)
+kept    .claude/worktrees/wf_b-4 (worktree-wf_b-4 is not merged)
+kept    .claude/worktrees/wf_b-5 (uncommitted changes)
+removed .claude/worktrees/wf_b-6 (detached HEAD)
+kept    .claude/worktrees/wf_b-7 (uncommitted changes)
+kept    .claude/worktrees/wf_b-8 (uncommitted changes)
+kept    .claude/worktrees/wf_b-9 (locked)
+removed .claude/worktrees/wf_c-1 (worktree-wf_c-1)
+removed .claude/worktrees/wf_c-2 (worktree-wf_c-2)
+removed .claude/worktrees/wf_d-1 (worktree-wf_d-1)
+kept    .claude/worktrees/wf_d-2 (uncommitted changes)"
+
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL: workflow worktrees case exited $rc"
+    fail=1
+  fi
+  if [ "$out" != "$expected" ]; then
+    echo "FAIL: workflow worktrees output mismatch"
+    echo "--- expected ---"
+    echo "$expected"
+    echo "--- actual ---"
+    echo "$out"
+    fail=1
+  fi
+
+  for gone in agent-merged wf_a-1 wf_a-2 wf_a-3 wf_a-4 wf_b-6 wf_c-1 wf_c-2 wf_d-1; do
+    assert_dir "$gone" no
+  done
+  for kept in wf_a-5 wf_a-6 wf_a-7 wf_a-8 wf_a-9 wf_b-1 wf_b-2 wf_b-3 wf_b-4 wf_b-5 wf_b-7 wf_b-8 wf_b-9 wf_d-2; do
+    assert_dir "$kept" yes
+  done
+
+  for gone in agent-merged-branch worktree-wf_a-1 fix-gr-x worktree-wf_a-4 worktree-wf_c-1 worktree-wf_c-2 worktree-wf_d-1; do
+    assert_branch "$gone" no
+  done
+  for kept in worktree-wf_a-5 worktree-wf_a-6 worktree-wf_a-7 worktree-wf_a-8 worktree-wf_a-9 worktree-wf_b-2 worktree-wf_b-3 worktree-wf_b-4 worktree-wf_b-5 worktree-wf_b-7 worktree-wf_d-2; do
+    assert_branch "$kept" yes
+  done
+
+  assert_file wf_a-5 notes.md yes
+  assert_file wf_a-5 pr-body-gr-x.md yes
+  assert_file wf_a-6 pr-body-gr-x.md.orig yes
+  assert_modified wf_a-7 note.txt
+  assert_file wf_b-2 pr-body-d/x.md yes
+  assert_file wf_b-3 notes.md yes
+  assert_file wf_b-4 notes.md yes
+  assert_file wf_b-4 pr-body-gr-x.md yes
+  assert_file wf_b-5 "pr-body-x y.md" yes
+  assert_file wf_b-7 newdir/x yes
+  assert_file wf_b-8 notes.md yes
+  assert_modified wf_d-2 pr-body-u.md
+
+  rm -rf "$d"
+}
+
+# ---------------------------------------------------------------------------
+# Rows 0, 7 and 8: folders that are not worktrees, a removal that fails, a
+# branch delete that fails. Needs a non-root user (chmod a-w must bite).
+# ---------------------------------------------------------------------------
+
+test_wf_remove_failures() {
+  local d work out rc expected
+  if [ "$(id -u)" -eq 0 ]; then
+    echo "SKIP: test_wf_remove_failures needs a non-root user"
+    return 0
+  fi
+
+  d="$(mktemp -d "${TMPDIR:-/tmp}/gr pq3 test.XXXXXXXX")"
+  work="$d/work"
+  restore_wf_failures() {
+    chmod u+w "$work/.claude/worktrees/wf_a-1/d" "$work/.claude/worktrees/wf_a-4/d" 2>/dev/null || true
+    rm -f "$work/.git/refs/heads/worktree-wf_a-3.lock"
+    rm -rf "$d"
+  }
+  trap restore_wf_failures EXIT
+
+  git init -q "$work"
+  git -C "$work" config user.email "test@example.com"
+  git -C "$work" config user.name "Test"
+  echo "root" >"$work/README.md"
+  git -C "$work" add README.md
+  git -C "$work" commit -q -m "root"
+  git -C "$work" branch -M main
+
+  add_worktree wf_a-1 worktree-wf_a-1
+  wf_custom_commit wf_a-1 d/f
+  merge_branch worktree-wf_a-1
+
+  wf_merged wf_a-2 worktree-wf_a-2
+
+  wf_merged wf_a-3 worktree-wf_a-3
+  : >"$work/.git/refs/heads/worktree-wf_a-3.lock"
+
+  wf_detached wf_a-4
+
+  mkdir "$work/.claude/worktrees/wf_e-1"
+  wf_merged wf_e-10 worktree-wf_e-10
+  touch "$work/.claude/worktrees/wf_e-2"
+
+  chmod a-w "$work/.claude/worktrees/wf_a-1/d" "$work/.claude/worktrees/wf_a-4/d"
+
+  out="$(bash "$prune_script" "$work" 2>/dev/null)"
+  rc=$?
+
+  expected="kept    .claude/worktrees/wf_a-1 (remove failed)
+removed .claude/worktrees/wf_a-2 (worktree-wf_a-2)
+removed .claude/worktrees/wf_a-3 (worktree-wf_a-3; branch -D failed)
+kept    .claude/worktrees/wf_a-4 (remove failed)
+kept    .claude/worktrees/wf_e-1 (not a registered worktree)
+removed .claude/worktrees/wf_e-10 (worktree-wf_e-10)
+kept    .claude/worktrees/wf_e-2 (not a registered worktree)"
+
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL: remove-failure case exited $rc"
+    fail=1
+  fi
+  if [ "$out" != "$expected" ]; then
+    echo "FAIL: remove-failure output mismatch"
+    echo "--- expected ---"
+    echo "$expected"
+    echo "--- actual ---"
+    echo "$out"
+    fail=1
+  fi
+
+  assert_dir wf_a-1 yes
+  assert_file wf_a-1 d/f yes
+  assert_branch worktree-wf_a-1 yes
+  assert_dir wf_a-2 no
+  assert_branch worktree-wf_a-2 no
+  assert_dir wf_a-3 no
+  assert_branch worktree-wf_a-3 yes
+  assert_dir wf_a-4 yes
+  assert_file wf_a-4 d/f yes
+  assert_dir wf_e-1 yes
+  assert_dir wf_e-10 no
+  assert_branch worktree-wf_e-10 no
+  if [ ! -f "$work/.claude/worktrees/wf_e-2" ]; then
+    echo "FAIL: expected the plain file wf_e-2 to still exist"
+    fail=1
+  fi
+
+  out="$(bash "$prune_script" "$work" 2>/dev/null)"
+  rc=$?
+
+  expected="kept    .claude/worktrees/wf_a-1 (not a registered worktree)
+kept    .claude/worktrees/wf_a-4 (not a registered worktree)
+kept    .claude/worktrees/wf_e-1 (not a registered worktree)
+kept    .claude/worktrees/wf_e-2 (not a registered worktree)"
+
+  if [ "$rc" -ne 0 ]; then
+    echo "FAIL: remove-failure second run exited $rc"
+    fail=1
+  fi
+  if [ "$out" != "$expected" ]; then
+    echo "FAIL: remove-failure second run output mismatch"
+    echo "--- expected ---"
+    echo "$expected"
+    echo "--- actual ---"
+    echo "$out"
+    fail=1
+  fi
+
+  restore_wf_failures
+  trap - EXIT
+}
+
 test_long_history
 test_no_remote
 test_no_main_ref
+test_workflow_worktrees
+test_wf_remove_failures
 
 if [ "$fail" -ne 0 ]; then
   echo "FAILED"
