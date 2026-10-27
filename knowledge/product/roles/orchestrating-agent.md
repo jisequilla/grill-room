@@ -20,7 +20,7 @@ also_called: [orchestrator]
 
 # Orchestrating agent
 
-Grill Room's part ends when the bundle is delivered; the build runs in the Idea owner's own agent session.[^meeting] That session is the Orchestrating agent. It reads HANDOFF.md, launches each ticket's [Build agent](build-agent.md), sends the result to a [Review agent](review-agent.md), merges what passes, and writes a build record back to Grill Room from the command line or over HTTP, without the browser.[^founding]
+Grill Room's part ends when the bundle is delivered; the build runs in the Idea owner's own agent session.[^meeting] That session is the Orchestrating agent. It reads HANDOFF.md, launches each ticket's [Build agent](build-agent.md), sends the result to a [Review agent](review-agent.md), merges what passes, and [writes a build record](/product/use-cases/build/record-a-build-outcome.md) back to Grill Room from the command line or over HTTP, without the browser.[^founding]
 
 It is the only agent in the founding spec.[^founding]
 

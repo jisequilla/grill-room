@@ -23,9 +23,14 @@ Who Grill Room serves and what each of them does with it, across the [bounded co
   - [One Idea owner, with technical level as a trait](decisions/one-idea-owner-technical-level-is-a-trait.md)
   - [Three agents consume an export](decisions/three-agents-consume-an-export.md)
   - [Grill Room's developers are not a role](decisions/grill-room-developers-are-not-a-role.md)
+  - Founding, from the founding spec:
+    - [Grill Room runs on the owner's Claude subscription](decisions/runs-on-the-claude-subscription.md)
+    - [The interviewer cannot touch the owner's machine](decisions/the-interviewer-cannot-touch-the-machine.md)
+    - [Everything stays on the owner's machine](decisions/everything-stays-on-the-owners-machine.md), broken today by `gr-3u9i`
+    - [The grilling skill is the method, unmodified](decisions/the-grilling-skill-is-the-method.md)
 - **Open questions** (`questions/`):
   - [Is the pre-flight agent a role?](questions/is-the-pre-flight-agent-a-role.md), held by Jeremias De Isequilla
-- **Use cases** (`use-cases/<stage>/`), the Idea owner's, with their state checked against the code: 13 built, 5 partial, 4 wanted.
+- **Use cases** (`use-cases/<stage>/`), with their state checked against the code: the Idea owner's 13 built, 6 partial, 4 wanted, and the Orchestrating agent's one, built.
 
   | Stage | Use case | Contexts | State |
   |---|---|---|---|
@@ -45,11 +50,13 @@ Who Grill Room serves and what each of them does with it, across the [bounded co
   | spec | [Read the spec quickly](use-cases/spec/read-the-spec-quickly.md) | delivery | partial |
   | spec | [Know which choices are left to the builder](use-cases/spec/know-what-the-builder-decides.md) | delivery, interview | partial |
   | tickets | [Get tickets ready to delegate](use-cases/tickets/get-tickets-ready-to-delegate.md) | delivery | built |
+  | tickets | [Get tickets a builder can act on without guessing](use-cases/tickets/get-tickets-a-builder-can-act-on.md) | delivery, project-knowledge | partial |
   | export | [Set up the project repository](use-cases/export/set-up-the-project-repository.md) | project-knowledge, delivery | wanted |
   | export | [Export into the project](use-cases/export/export-into-the-project.md) | delivery, project-knowledge | built |
   | export | [Trust the exported bundle](use-cases/export/trust-the-exported-bundle.md) | delivery | built |
   | build | [Start building from the bundle](use-cases/build/start-building-from-the-bundle.md) | delivery | wanted |
   | build | [Learn from build outcomes](use-cases/build/learn-from-build-outcomes.md) | delivery | built |
+  | build | [Record a build outcome without the browser](use-cases/build/record-a-build-outcome.md) (Orchestrating agent) | delivery | built |
   | follow-up | [Grill the next thing from what was built](use-cases/follow-up/grill-the-next-thing.md) | interview, project-knowledge, delivery | partial |
 
-  Every founding-spec use case is built; every one that comes from Pipe is partial or wanted. The code also does about twenty things no fragment describes yet (the project scout, supersession, consistency checks, grounded briefs, delivery settings, among others); they come from the feature specs, which are not fragments of this bundle.
+  Every founding-spec use case is built. Of Pipe's, only the export fixes from the review are built; the rest are partial or wanted. The code also does about twenty things no fragment describes yet (the project scout, supersession, consistency checks, grounded briefs, delivery settings, among others); they come from the feature specs, which are not fragments of this bundle.

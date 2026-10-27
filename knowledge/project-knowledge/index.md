@@ -30,6 +30,7 @@ Each word has one meaning here. A Term's words to avoid include the meanings it 
 
 ## Use cases that touch it
 
+- [Get tickets a builder can act on without guessing](/product/use-cases/tickets/get-tickets-a-builder-can-act-on.md) (partial)
 - [Export into the project](/product/use-cases/export/export-into-the-project.md) (built)
 - [Set up the project repository](/product/use-cases/export/set-up-the-project-repository.md) (wanted, owned here)
 - [Grill the next thing from what was built](/product/use-cases/follow-up/grill-the-next-thing.md) (partial)
