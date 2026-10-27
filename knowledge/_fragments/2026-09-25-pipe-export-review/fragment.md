@@ -11,7 +11,7 @@ generated:
 date: 2026-09-25
 origin: document
 tool: git
-ingested: false
+ingested: true
 in_git: true
 material:
   - file: material/review.md
@@ -29,3 +29,4 @@ This is the only first-hand account of someone other than the owner using Grill 
 ## Log
 
 * **2026-10-16 · Capture**: Copied verbatim from `docs/reviews/pipe-export-review-original.md`.
+* **2026-10-27 · Ingestion**: Export defects 5-7 into [Trust the exported bundle](/product/use-cases/export/trust-the-exported-bundle.md), the interview-depth gaps into [Get tickets a builder can act on without guessing](/product/use-cases/tickets/get-tickets-a-builder-can-act-on.md). Every finding is now placed.

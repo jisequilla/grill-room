@@ -35,6 +35,7 @@ Each word has one meaning here. A Term's words to avoid include the meanings it 
 ## Use cases that touch it
 
 - [Learn from build outcomes](/product/use-cases/build/learn-from-build-outcomes.md) (built, owned here)
+- [Record a build outcome without the browser](/product/use-cases/build/record-a-build-outcome.md) (built, owned here)
 - [Start building from the bundle](/product/use-cases/build/start-building-from-the-bundle.md) (wanted, owned here)
 - [Export into the project](/product/use-cases/export/export-into-the-project.md) (built, owned here)
 - [Set up the project repository](/product/use-cases/export/set-up-the-project-repository.md) (wanted)
@@ -44,3 +45,4 @@ Each word has one meaning here. A Term's words to avoid include the meanings it 
 - [Know which choices are left to the builder](/product/use-cases/spec/know-what-the-builder-decides.md) (partial, owned here)
 - [Read the spec quickly](/product/use-cases/spec/read-the-spec-quickly.md) (partial, owned here)
 - [Get tickets ready to delegate](/product/use-cases/tickets/get-tickets-ready-to-delegate.md) (built, owned here)
+- [Get tickets a builder can act on without guessing](/product/use-cases/tickets/get-tickets-a-builder-can-act-on.md) (partial, owned here)

@@ -11,7 +11,7 @@ generated:
 date: 2026-10-26
 origin: conversation
 tool: claude-code
-ingested: false
+ingested: true
 in_git: true
 material:
   - file: material/acta.md
@@ -26,3 +26,4 @@ Working bead `gr-ehur`, a sonnet agent checked the founding spec's stories 78 an
 
 * **2026-10-26 · Capture**: Record written by Claude after the owner's answers, quoting them literally.
 * **2026-10-26 · Ingestion**: One bundle [decision](/decisions/decisions-live-in-their-module.md), and every decision and open question moved out of the memory module into the module it decides.
+* **2026-10-27 · Ingestion**: Four founding [decisions](/product/index.md), the Orchestrating agent's build-record use case, and Pipe's review leftovers in two use cases.

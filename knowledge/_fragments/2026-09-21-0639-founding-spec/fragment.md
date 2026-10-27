@@ -11,7 +11,7 @@ generated:
 date: 2026-09-21
 origin: document
 tool: git
-ingested: false
+ingested: true
 in_git: true
 material:
   - file: material/spec.md
@@ -27,3 +27,4 @@ It frames Grill Room as the owner's own tool: the grilling interview works, but 
 ## Log
 
 * **2026-10-16 · Capture**: Copied verbatim from `b33ca30` into the bundle.
+* **2026-10-27 · Ingestion**: Stories 81-86 into four founding [decisions](/product/index.md), story 78 into the Orchestrating agent's [use case](/product/use-cases/build/record-a-build-outcome.md). Every story is now placed.
