@@ -11,7 +11,7 @@ sources:
   - id: roles
     resource: /_fragments/2026-10-16-session-roles/fragment.md
     title: Session that distilled the roles
-# ── memory ───────────────────────────
+# ── decision ─────────────────────────
 date: 2026-10-16
 decided_by: [Jeremias De Isequilla]
 state: in force
@@ -19,7 +19,7 @@ state: in force
 
 # Grill Room's developers are not a role
 
-About 60 stories in the feature specs are written for a "maintainer" or a "developer": one rule in one module, no second copy of a value, a demo kept out of the regular test run. They are requirements on how Grill Room is built, not on what it does for anyone. They are decisions, taken by Grill Room's [Idea owner](/product/roles/idea-owner.md) and recorded here in memory, not use cases.[^roles]
+About 60 stories in the feature specs are written for a "maintainer" or a "developer": one rule in one module, no second copy of a value, a demo kept out of the regular test run. They are requirements on how Grill Room is built, not on what it does for anyone. They are decisions, taken by Grill Room's [Idea owner](/product/roles/idea-owner.md) and recorded here as product decisions, not use cases.[^roles]
 
 Why, in the owner's words: "not aproduct role, this are decissions we take and record, but treat me which is driving this as a product idea owner role".[^roles]
 

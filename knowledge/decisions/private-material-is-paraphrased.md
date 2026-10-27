@@ -11,7 +11,7 @@ sources:
   - id: ddd
     resource: /_fragments/2026-10-17-session-ddd-boundaries/fragment.md
     title: Session that chose DDD for the bundle's boundaries
-# ── memory ───────────────────────────
+# ── decision ─────────────────────────
 date: 2026-10-17
 decided_by: [Jeremias De Isequilla]
 state: in force

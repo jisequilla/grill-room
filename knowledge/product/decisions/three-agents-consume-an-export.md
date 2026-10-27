@@ -14,7 +14,7 @@ sources:
   - id: review
     resource: /_fragments/2026-09-25-pipe-export-review/fragment.md
     title: Pipe's review of an exported bundle
-# ── memory ───────────────────────────
+# ── decision ─────────────────────────
 date: 2026-10-16
 decided_by: [Jeremias De Isequilla]
 state: in force

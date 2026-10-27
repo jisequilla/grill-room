@@ -11,7 +11,7 @@ sources:
   - id: contexts
     resource: /_fragments/2026-10-19-session-contexts/fragment.md
     title: Session that drew the bounded contexts
-# ── memory ───────────────────────────
+# ── question ─────────────────────────
 date: 2026-10-19
 state: open
 held_by: Jeremias De Isequilla

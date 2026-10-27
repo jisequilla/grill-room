@@ -12,9 +12,9 @@ modules:                # in reading order: the three bounded contexts (see cont
   - project-knowledge   # supporting
   - delivery            # supporting
   - product             # roles and use cases, across contexts
-  - memory
 context_map: context-map.md
-common_types:           # adopted by every context module
+decisions: decisions/   # the decisions about the bundle itself, which no module owns
+common_types:           # Term in every context module; Decision and Open question in every module
   Term:
     description: a word of the context's ubiquitous language, with its one meaning in that context
     path: <context>/language/<slug>.md
@@ -24,6 +24,28 @@ common_types:           # adopted by every context module
     rules:
       - One meaning per context. A word that means something else in another context is a Term there too, and each names the other in its body.
       - This language is canonical; GLOSSARY.md and any per-context glossary are generated from it, not edited by hand.
+  Decision:
+    description: something decided, with its why, who and when, citing where it was decided
+    path: <module>/decisions/<slug>.md, or decisions/<slug>.md for the bundle itself
+    fields:
+      date:          {type: date, required: true}
+      decided_by:    {type: list, of: string, required: true, note: full names}
+      state:         {type: string, required: true, note: "in force · superseded"}
+      superseded_by: {type: string, note: the decision that replaces it}
+      resolves:      {type: string, note: the open question it closes}
+    rules:
+      - It lives in the module it decides; a decision about the bundle itself lives at the root.
+      - A decision that widens or corrects another leaves that one superseded, with superseded_by.
+  Open question:
+    description: something left unresolved, with who holds it
+    path: <module>/questions/<slug>.md
+    fields:
+      date:        {type: date, required: true}
+      state:       {type: string, required: true, note: "open · resolved"}
+      held_by:     {type: string, required: true, note: who has to answer it}
+      resolved_by: {type: string, note: the decision that closes it}
+    rules:
+      - A question with no holder is not written.
 common_fields:          # every .md outside _fragments/*/material/
   type:        {required: true}
   title:       {required: true}

@@ -25,4 +25,4 @@ Session of 2026-10-17. The owner reviewed the bundle before its first commit and
 ## Log
 
 * **2026-10-17 · Capture**: Record written by Claude after the owner's answers, quoting them literally.
-* **2026-10-17 · Ingestion**: Three [decisions](/memory/index.md) in the bundle scope.
+* **2026-10-17 · Ingestion**: Three [decisions](/decisions/index.md) in the bundle scope.

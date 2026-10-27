@@ -11,7 +11,7 @@ sources:
   - id: okf
     resource: /_fragments/2026-10-16-session-okf-step-back/fragment.md
     title: Session that chose to step back and adopt OKF
-# ── memory ───────────────────────────
+# ── decision ─────────────────────────
 date: 2026-10-16
 decided_by: [Jeremias De Isequilla]
 state: in force

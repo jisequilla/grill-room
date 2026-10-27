@@ -11,7 +11,7 @@ sources:
   - id: roles
     resource: /_fragments/2026-10-16-session-roles/fragment.md
     title: Session that distilled the roles
-# ── memory ───────────────────────────
+# ── question ─────────────────────────
 date: 2026-10-16
 state: open
 held_by: Jeremias De Isequilla

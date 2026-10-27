@@ -14,7 +14,7 @@ sources:
   - id: meeting
     resource: /_fragments/2026-09-29-2130-pipe-meeting/fragment.md
     title: Meeting with Pipe on Grill Room's user experience
-# ── memory ───────────────────────────
+# ── decision ─────────────────────────
 date: 2026-10-16
 decided_by: [Jeremias De Isequilla]
 state: in force
