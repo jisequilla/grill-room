@@ -23,3 +23,5 @@ generated:
 * **2026-10-17 · Ingestion**: [Session that chose DDD for the bundle's boundaries](2026-10-17-session-ddd-boundaries/fragment.md), into three bundle decisions.
 * **2026-10-19 · Capture**: [Session that drew the bounded contexts](2026-10-19-session-contexts/fragment.md).
 * **2026-10-19 · Ingestion**: [Session that drew the bounded contexts](2026-10-19-session-contexts/fragment.md), into the context map, the interview, project-knowledge and delivery modules with 34 Terms, the contexts of all 22 use cases, two decisions and one open question.
+* **2026-10-26 · Capture**: [Session on the founding decisions and where decisions live](2026-10-26-session-founding-decisions/fragment.md).
+* **2026-10-26 · Ingestion**: [Session on the founding decisions and where decisions live](2026-10-26-session-founding-decisions/fragment.md), into one bundle decision; the memory module is removed and each decision and open question moves to the module it decides. The session stays not ingested until the founding decisions and Pipe's review leftovers are distilled.

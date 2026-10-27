@@ -27,7 +27,7 @@ The Idea owner brings a loose idea and wants to leave with decisions they can co
 
 Their technical level varies, and it changes what they need. The founding spec's owner is technical and wrote it for himself.[^founding] Pipe is not technical, will not tell the interviewer what to build, and asks to be asked his technical level up front.[^meeting] A use case says when the level changes the outcome.
 
-Jeremias De Isequilla is the Idea owner of the ideas he grills, and of Grill Room itself: the decisions about how Grill Room is built are his, recorded in [memory](/memory/index.md).[^roles]
+Jeremias De Isequilla is the Idea owner of the ideas he grills, and of Grill Room itself: the decisions about how Grill Room is built are his, recorded as [product decisions](/product/index.md).[^roles]
 
 Specs have called this role by five other names. "Reader" is this role reading its own bundle; a build agent reading the same files is the [Build agent](build-agent.md).[^roles]
 

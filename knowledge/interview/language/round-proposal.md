@@ -20,6 +20,6 @@ code:
 
 # Round proposal
 
-A second meaning of "proposal" inside this context, beside the [Proposal](proposal.md) on a decision's answer. Whether it gets a word of its own is [open](/memory/interview/questions/two-proposals-in-the-interview.md).[^contexts]
+A second meaning of "proposal" inside this context, beside the [Proposal](proposal.md) on a decision's answer. Whether it gets a word of its own is [open](/interview/questions/two-proposals-in-the-interview.md).[^contexts]
 
 [^contexts]: Placed in this context by the session that drew the bounded contexts, from the vocabulary inventory it records ([fragment](/_fragments/2026-10-19-session-contexts/fragment.md)).

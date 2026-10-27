@@ -11,7 +11,7 @@ generated:
 
 # Project knowledge
 
-**Supporting context.** What a registered project's repository already says: its decisions, its rules, how it delegates work. How it relates to the others is in the [context map](/context-map.md); its decisions and open questions are in [memory](/memory/index.md).
+**Supporting context.** What a registered project's repository already says: its decisions, its rules, how it delegates work. How it relates to the others is in the [context map](/context-map.md). It has no decisions or open questions of its own yet.
 
 ## Language
 

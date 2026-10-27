@@ -11,7 +11,7 @@ generated:
 
 # Delivery
 
-**Supporting context.** Turning settled decisions into a spec, tickets and a bundle agents build from, and recording how building went. How it relates to the others is in the [context map](/context-map.md); its decisions and open questions are in [memory](/memory/index.md).
+**Supporting context.** Turning settled decisions into a spec, tickets and a bundle agents build from, and recording how building went. How it relates to the others is in the [context map](/context-map.md). It has no decisions or open questions of its own yet.
 
 ## Language
 

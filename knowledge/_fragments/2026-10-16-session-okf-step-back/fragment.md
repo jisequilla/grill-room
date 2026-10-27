@@ -25,4 +25,4 @@ Claude Code session of 2026-10-16 in which this bundle was born. Asked what in `
 ## Log
 
 * **2026-10-16 · Capture**: Record written by Claude at the end of the skeleton step, quoting the owner literally.
-* **2026-10-16 · Ingestion**: One [decision](/memory/bundle/decisions/capture-grill-room-in-a-minimal-okf-bundle.md) in the bundle scope.
+* **2026-10-16 · Ingestion**: One [decision](/decisions/capture-grill-room-in-a-minimal-okf-bundle.md) in the bundle scope.

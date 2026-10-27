@@ -25,4 +25,4 @@ Second part of the 2026-10-16 session. Claude collapsed the ten actor names in t
 ## Log
 
 * **2026-10-16 · Capture**: Record written by Claude after the owner's answers, quoting them literally.
-* **2026-10-16 · Ingestion**: Four [roles](/product/index.md) and three [decisions](/memory/index.md) in the product scope, plus one open question.
+* **2026-10-16 · Ingestion**: Four [roles](/product/index.md) and three [decisions](/product/index.md) in the product scope, plus one open question.

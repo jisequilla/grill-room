@@ -11,7 +11,7 @@ generated:
 
 # Interview
 
-**Core context.** Turning a loose idea into settled decisions the Idea owner commits to, from readiness to a confirmed shared understanding. How it relates to the others is in the [context map](/context-map.md); its decisions and open questions are in [memory](/memory/index.md).
+**Core context.** Turning a loose idea into settled decisions the Idea owner commits to, from readiness to a confirmed shared understanding. How it relates to the others is in the [context map](/context-map.md); its decisions and open questions are listed below.
 
 ## Language
 
@@ -33,6 +33,14 @@ Each word has one meaning here. A Term's words to avoid include the meanings it 
 | [Session](language/session.md) | One grilling interview of one idea, from the idea to a confirmed shared understanding, with everything decided in it. |
 | [Shared understanding](language/shared-understanding.md) | What the Idea owner confirms to end a session: the interviewer proposed being done, every loose end is resolved, and the owner agrees. |
 | [Stale review](language/stale-review.md) | The interviewer's pass over the decisions downstream of a reopened one, reconfirming what still holds and re-asking the rest. |
+
+## Decisions
+
+- [Readiness opens the interview](decisions/readiness-opens-the-interview.md)
+
+## Open questions
+
+- [Two proposals in the Interview](questions/two-proposals-in-the-interview.md), held by Jeremias De Isequilla
 
 ## Use cases that touch it
 

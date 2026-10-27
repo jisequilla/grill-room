@@ -25,4 +25,4 @@ Continuation of the session that chose domain-driven design. A research agent in
 ## Log
 
 * **2026-10-19 · Capture**: Record written by Claude after the owner's answers, quoting them literally.
-* **2026-10-19 · Ingestion**: The [context map](/context-map.md), three context modules with 34 Terms, the contexts of every use case, two decisions and one open question in [memory](/memory/index.md).
+* **2026-10-19 · Ingestion**: The [context map](/context-map.md), three context modules with 34 Terms, the contexts of every use case, two decisions and one open question in the [interview](/interview/index.md) and [product](/product/index.md) modules.

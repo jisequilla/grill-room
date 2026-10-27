@@ -18,6 +18,13 @@ Who Grill Room serves and what each of them does with it, across the [bounded co
   - [Orchestrating agent](roles/orchestrating-agent.md): the Idea owner's agent session that runs the build from HANDOFF.md.
   - [Build agent](roles/build-agent.md): implements one ticket inside its brief.
   - [Review agent](roles/review-agent.md): tries to break one change against the spec, without the builder's report.
+- **Decisions** (`decisions/`):
+  - [Grill Room has three bounded contexts](decisions/three-bounded-contexts.md)
+  - [One Idea owner, with technical level as a trait](decisions/one-idea-owner-technical-level-is-a-trait.md)
+  - [Three agents consume an export](decisions/three-agents-consume-an-export.md)
+  - [Grill Room's developers are not a role](decisions/grill-room-developers-are-not-a-role.md)
+- **Open questions** (`questions/`):
+  - [Is the pre-flight agent a role?](questions/is-the-pre-flight-agent-a-role.md), held by Jeremias De Isequilla
 - **Use cases** (`use-cases/<stage>/`), the Idea owner's, with their state checked against the code: 13 built, 5 partial, 4 wanted.
 
   | Stage | Use case | Contexts | State |
