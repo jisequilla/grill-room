@@ -42,6 +42,14 @@ type Ticket = ResultFor<"break-into-tickets">["tickets"][number];
  * `break-into-tickets.test.ts`'s own, which is private to that file.
  */
 const GOOD_SPEC_MARKDOWN = [
+  "## Summary",
+  "",
+  "- Summary point 1.",
+  "- Summary point 2.",
+  "- Summary point 3.",
+  "- Summary point 4.",
+  "- Summary point 5.",
+  "",
   "## Problem Statement",
   "",
   "A settled idea.",

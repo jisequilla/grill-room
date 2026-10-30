@@ -5,7 +5,9 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
+import { specSections } from "../server/consistency.js";
 import { getInterviewer } from "../server/interviewer/index.js";
+import { SUMMARY_MAX_BULLETS, SUMMARY_MIN_BULLETS } from "../server/interviewer/prompt.js";
 import type {
   ReopenedRepoDecision,
   SynthesizeSpecResult,
@@ -23,8 +25,7 @@ import {
 
 /**
  * The template's seven sections, each expected as its own level-2 heading
- * line. The only app-side check of the synthesized markdown: everything else
- * about following the template is the interviewer's to get right.
+ * line. The app adds a leading `## Summary`, checked separately.
  */
 const REQUIRED_SPEC_HEADINGS = [
   "## Problem Statement",
@@ -36,14 +37,56 @@ const REQUIRED_SPEC_HEADINGS = [
   "## Further Notes",
 ] as const;
 
-function missingSpecHeadings(markdown: string): string[] {
+const SUMMARY_HEADING = "## Summary";
+const TOP_LEVEL_BULLET = /^[-*] /;
+
+function missingSpecHeadings(markdown: string, hasSummary: boolean): string[] {
   const present = new Set(
     markdown
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line.startsWith("## ")),
   );
-  return REQUIRED_SPEC_HEADINGS.filter((heading) => !present.has(heading));
+  const missing: string[] = REQUIRED_SPEC_HEADINGS.filter(
+    (heading) => !present.has(heading),
+  );
+  return hasSummary ? missing : [SUMMARY_HEADING, ...missing];
+}
+
+/**
+ * Why a synthesized spec is refused; an empty list accepts it. The template's
+ * seven sections must be present, the Summary must exist and open the spec,
+ * and the first Summary must hold the bounded number of top-level bullets.
+ */
+export function specRefusalReasons(markdown: string): string[] {
+  const sections = specSections(markdown);
+  const summary = sections.find((section) => section.name === "Summary");
+  const reasons: string[] = [];
+
+  const missing = missingSpecHeadings(markdown, summary !== undefined);
+  if (missing.length > 0) {
+    reasons.push(
+      `The spec is missing the following required section${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.`,
+    );
+  }
+  if (!summary) return reasons;
+
+  const first = sections[0]!;
+  if (first.name !== "Summary") {
+    reasons.push(
+      `The spec must open with ${SUMMARY_HEADING}; it opens with ## ${first.name}.`,
+    );
+  }
+
+  const bullets = summary.text
+    .split(/\r?\n/)
+    .filter((line) => TOP_LEVEL_BULLET.test(line)).length;
+  if (bullets < SUMMARY_MIN_BULLETS || bullets > SUMMARY_MAX_BULLETS) {
+    reasons.push(
+      `The Summary section has ${bullets} top-level ${bullets === 1 ? "bullet" : "bullets"}; it needs ${SUMMARY_MIN_BULLETS} to ${SUMMARY_MAX_BULLETS}.`,
+    );
+  }
+  return reasons;
 }
 
 /** One dispositioned decision, as it belongs in the spec: title, then body, then the user's note. */
@@ -171,18 +214,11 @@ export default defineAction({
               },
               observer,
             ),
-          reasonsToRefuse: (result) => {
-            const missing = missingSpecHeadings(result.markdown);
-            return missing.length === 0
-              ? []
-              : [
-                  `The spec is missing the following required section${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.`,
-                ];
-          },
+          reasonsToRefuse: (result) => specRefusalReasons(result.markdown),
           exhausted: (lastReason) =>
             new TurnRejected(
               "invalid-spec",
-              `The interviewer produced a spec missing required sections ${MAX_TURN_RETRIES + 1} times. Last reason: ${lastReason}`,
+              `The interviewer produced a spec that failed its section check ${MAX_TURN_RETRIES + 1} times. Last reason: ${lastReason}`,
             ),
         });
 

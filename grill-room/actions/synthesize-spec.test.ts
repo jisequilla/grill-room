@@ -1,6 +1,8 @@
 import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { buildPrompt } from "../server/interviewer/prompt.js";
+import { aSynthesizeSpecRequest } from "../server/interviewer/test-fixtures.js";
 import {
   resetInterviewer,
   scriptInterviewer,
@@ -13,7 +15,7 @@ import createSession from "./create-session.js";
 import getSession from "./get-session.js";
 import getSpec from "./get-spec.js";
 import getTurn from "./get-turn.js";
-import synthesizeSpec from "./synthesize-spec.js";
+import synthesizeSpec, { specRefusalReasons } from "./synthesize-spec.js";
 
 function aSession() {
   return createSession.run({
@@ -32,6 +34,14 @@ async function confirm(sessionId: string) {
 /** A markdown document carrying every heading the app requires, in order. */
 function goodSpecMarkdown(problem = "A settled idea."): string {
   return [
+    "## Summary",
+    "",
+    "- Summary point 1.",
+    "- Summary point 2.",
+    "- Summary point 3.",
+    "- Summary point 4.",
+    "- Summary point 5.",
+    "",
     "## Problem Statement",
     "",
     problem,
@@ -105,6 +115,159 @@ const oneUnblockedTicket: ScriptedTurn = {
     ],
   },
 };
+
+const TEMPLATE_SECTIONS = [
+  "Problem Statement",
+  "Solution",
+  "User Stories",
+  "Implementation Decisions",
+  "Testing Decisions",
+  "Out of Scope",
+  "Further Notes",
+];
+
+function bullets(count: number, marker = "-"): string[] {
+  return Array.from({ length: count }, (_, i) => `${marker} point ${i + 1}`);
+}
+
+function block(heading: string, body: string[]): string[] {
+  return [heading, ...body, ""];
+}
+
+/** The eight sections in order, each template section followed by one plain line. */
+function baseSections(summaryBody: string[], summaryHeading = "## Summary") {
+  return [
+    block(summaryHeading, summaryBody),
+    ...TEMPLATE_SECTIONS.map((name) => block(`## ${name}`, ["", "Plain text."])),
+  ];
+}
+
+function join(sections: string[][]): string {
+  return sections.flat().join("\n");
+}
+
+function base(summaryBody: string[]): string {
+  return join(baseSections(summaryBody));
+}
+
+const needs = (count: number) =>
+  `The Summary section has ${count} top-level ${count === 1 ? "bullet" : "bullets"}; it needs 5 to 10.`;
+
+describe("specRefusalReasons", () => {
+  it("row 1: accepts 6 bullets", () => {
+    expect(specRefusalReasons(base(bullets(6)))).toEqual([]);
+  });
+  it("row 2: accepts 5 bullets", () => {
+    expect(specRefusalReasons(base(bullets(5)))).toEqual([]);
+  });
+  it("row 3: accepts 10 bullets", () => {
+    expect(specRefusalReasons(base(bullets(10)))).toEqual([]);
+  });
+  it("row 4: refuses 4 bullets", () => {
+    expect(specRefusalReasons(base(bullets(4)))).toEqual([needs(4)]);
+  });
+  it("row 5: refuses 11 bullets", () => {
+    expect(specRefusalReasons(base(bullets(11)))).toEqual([needs(11)]);
+  });
+  it("row 6: says bullet for a count of 1", () => {
+    expect(specRefusalReasons(base(bullets(1)))).toEqual([
+      "The Summary section has 1 top-level bullet; it needs 5 to 10.",
+    ]);
+  });
+  it("row 7: counts an empty Summary as 0 bullets", () => {
+    expect(specRefusalReasons(base([]))).toEqual([needs(0)]);
+  });
+  it("row 8: counts - and * bullets alike", () => {
+    const mixed = [0, 1, 2, 3, 4, 5].map((i) => `${i % 2 === 0 ? "-" : "*"} point ${i}`);
+    expect(specRefusalReasons(base(mixed))).toEqual([]);
+  });
+  it("row 9: does not count indented bullets", () => {
+    const nested = bullets(4).flatMap((line) => [line, "  - nested"]);
+    expect(specRefusalReasons(base(nested))).toEqual([needs(4)]);
+  });
+  it("row 10: does not count numbered lines", () => {
+    expect(
+      specRefusalReasons(base([...bullets(4), "1. a", "2. b", "3. c"])),
+    ).toEqual([needs(4)]);
+  });
+  it("row 11: counts bullets only inside the Summary section", () => {
+    const sections = baseSections(bullets(4));
+    sections[1] = block("## Problem Statement", ["", ...bullets(3)]);
+    expect(specRefusalReasons(join(sections))).toEqual([needs(4)]);
+  });
+  it("row 12: requires a Summary section", () => {
+    const sections = baseSections(bullets(6)).slice(1);
+    expect(specRefusalReasons(join(sections))).toEqual([
+      "The spec is missing the following required section: ## Summary.",
+    ]);
+  });
+  it("row 13: refuses a Summary that does not open the spec", () => {
+    const sections = baseSections(bullets(6));
+    const [summary] = sections.splice(0, 1);
+    sections.splice(2, 0, summary!);
+    expect(specRefusalReasons(join(sections))).toEqual([
+      "The spec must open with ## Summary; it opens with ## Problem Statement.",
+    ]);
+  });
+  it("row 14: gives the position reason before the count reason", () => {
+    const sections = baseSections(bullets(4));
+    const [summary] = sections.splice(0, 1);
+    sections.splice(2, 0, summary!);
+    expect(specRefusalReasons(join(sections))).toEqual([
+      "The spec must open with ## Summary; it opens with ## Problem Statement.",
+      needs(4),
+    ]);
+  });
+  it("row 15: keeps today's wording for one missing template section", () => {
+    const sections = baseSections(bullets(6)).filter(
+      (section) => section[0] !== "## Solution",
+    );
+    expect(specRefusalReasons(join(sections))).toEqual([
+      "The spec is missing the following required section: ## Solution.",
+    ]);
+  });
+  it("row 16: joins every missing heading in one reason, Summary first", () => {
+    const sections = baseSections(bullets(6))
+      .slice(1)
+      .filter((section) => section[0] !== "## Solution");
+    expect(specRefusalReasons(join(sections))).toEqual([
+      "The spec is missing the following required sections: ## Summary, ## Solution.",
+    ]);
+  });
+  it("row 17: does not take an indented heading for the Summary section", () => {
+    expect(
+      specRefusalReasons(join(baseSections(bullets(6), "  ## Summary"))),
+    ).toEqual(["The spec is missing the following required section: ## Summary."]);
+  });
+  it("row 18: judges the first Summary section", () => {
+    const sections = [...baseSections(bullets(4)), block("## Summary", bullets(6))];
+    expect(specRefusalReasons(join(sections))).toEqual([needs(4)]);
+  });
+  it("row 19: names the section, not the raw heading line", () => {
+    expect(
+      specRefusalReasons(join(baseSections(bullets(6), "##  Summary"))),
+    ).toEqual([]);
+  });
+});
+
+describe("the bounds the prompt states are the bounds the check enforces", () => {
+  it("accepts the stated minimum and maximum and refuses one outside each", () => {
+    const prompt = buildPrompt(aSynthesizeSpecRequest());
+    const match = /(\d+) to (\d+) top-level/.exec(prompt);
+    expect(match).not.toBeNull();
+    const min = Number(match![1]);
+    const max = Number(match![2]);
+
+    expect(specRefusalReasons(base(bullets(min)))).toEqual([]);
+    expect(specRefusalReasons(base(bullets(max)))).toEqual([]);
+    expect(specRefusalReasons(base(bullets(min - 1)))).toEqual([
+      expect.stringContaining(`${min - 1} top-level`),
+    ]);
+    expect(specRefusalReasons(base(bullets(max + 1)))).toEqual([
+      expect.stringContaining(`${max + 1} top-level`),
+    ]);
+  });
+});
 
 describe("synthesize-spec", () => {
   useTestDatabase();
@@ -197,6 +360,24 @@ describe("synthesize-spec", () => {
     expect(result.markdown).toContain("The corrected spec.");
   });
 
+  it("rejects a Summary with too few bullets and stores the corrected retry", async () => {
+    const session = await aSession();
+    await confirm(session.id);
+    const shortSummary = goodSpecMarkdown().replace("- Summary point 5.\n", "");
+    const interviewer = scriptInterviewer([
+      specTurn(shortSummary),
+      specTurn(goodSpecMarkdown("The corrected spec.")),
+    ]);
+
+    const result = await synthesizeSpec.run({ sessionId: session.id });
+
+    expect(interviewer.requests).toHaveLength(2);
+    expect(interviewer.requests[1]).toMatchObject({
+      rejectionReason: expect.stringContaining("4 top-level bullets"),
+    });
+    expect(result.markdown).toContain("The corrected spec.");
+  });
+
   it("gives up after exhausting retries, stores nothing, and records a failed turn", async () => {
     const session = await aSession();
     await confirm(session.id);
@@ -205,7 +386,7 @@ describe("synthesize-spec", () => {
 
     await expect(
       synthesizeSpec.run({ sessionId: session.id }),
-    ).rejects.toThrow(/missing required sections 3 times/);
+    ).rejects.toThrow(/failed its section check 3 times/);
 
     expect(interviewer.requests).toHaveLength(3);
     expect((await getSpec.run({ sessionId: session.id })).spec).toBeNull();
@@ -275,7 +456,7 @@ describe("synthesize-spec", () => {
 
       await expect(
         synthesizeSpec.run({ sessionId: session.id }),
-      ).rejects.toThrow(/missing required sections 3 times/);
+      ).rejects.toThrow(/failed its section check 3 times/);
 
       const latest = await findLatestTurn({
         sessionId: session.id,

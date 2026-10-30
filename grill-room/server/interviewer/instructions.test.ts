@@ -11,7 +11,11 @@ import {
   loadGrillingSkill,
   loadSpecTemplate,
 } from "./instructions.js";
-import { buildPrompt } from "./prompt.js";
+import {
+  buildPrompt,
+  SUMMARY_MAX_BULLETS,
+  SUMMARY_MIN_BULLETS,
+} from "./prompt.js";
 import {
   aFindSupersededRequest,
   aProposeRoundRequest,
@@ -102,6 +106,21 @@ describe("the docs-folder addendum", () => {
     expect(DOCS_FOLDER_ADDENDUM).toContain("Never modify anything");
     expect(DOCS_FOLDER_ADDENDUM).toContain("Never read outside the folder");
     expect(DOCS_FOLDER_ADDENDUM).toContain("never quote a secret");
+  });
+});
+
+describe("the synthesize-spec prompt", () => {
+  it("asks for a Summary first, in plain bullets", () => {
+    const prompt = buildPrompt(aSynthesizeSpecRequest());
+
+    expect(prompt).toContain(
+      "One addition this app makes to the template: the spec opens with a `## Summary` section, which the template does not have, followed by the template's sections in the template's order.",
+    );
+    expect(prompt).toContain(
+      `- The \`## Summary\` section holds ${SUMMARY_MIN_BULLETS} to ${SUMMARY_MAX_BULLETS} top-level \`- \` bullets, in plain words a non-technical owner can read: who can do what, the platform, the payment or money model if there is one, and what is out of scope. No headings, no nested bullets, no file paths and no code inside it.`,
+    );
+    expect(prompt).toContain("starting at the `## Summary` heading");
+    expect(prompt).toContain(loadSpecTemplate().trimEnd());
   });
 });
 

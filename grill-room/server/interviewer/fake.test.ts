@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { specRefusalReasons } from "../../actions/synthesize-spec.js";
 import { validateProposal, type KeyedTreeDecision } from "../tree.js";
 import { InterviewerError } from "./errors.js";
 import {
   cannedInterviewTurns,
   createFakeInterviewer,
+  consistencySpecMarkdown,
   createScenarioInterviewer,
   FAKE_CLI_METRICS,
   handoffScoutTurns,
@@ -407,6 +409,20 @@ describe("the scripted fake interviewer", () => {
     expect(done.result.done?.summary).toContain("Settled");
     expect(superseded.result.supersessions).toEqual([]);
     expect(spec.result.markdown).toContain("## Problem Statement");
+  });
+});
+
+describe("the fake interviewer's specs", () => {
+  it("pass the spec check, the consistency fixture and the canned turn alike", () => {
+    const canned = cannedInterviewTurns().find(
+      (turn) => turn.kind === "synthesize-spec",
+    );
+
+    expect(specRefusalReasons(consistencySpecMarkdown())).toEqual([]);
+    expect(
+      canned !== undefined && "result" in canned && "markdown" in canned.result &&
+        specRefusalReasons(canned.result.markdown),
+    ).toEqual([]);
   });
 });
 
