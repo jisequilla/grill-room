@@ -12,7 +12,8 @@ import { useNavigate } from "react-router";
 import { CreateSessionDialog } from "@/components/sessions/create-session-dialog";
 
 interface NewSession {
-  open: () => void;
+  /** Opens the dialog; with a `projectId` it opens pre-filled with that project. */
+  open: (options?: { projectId?: string }) => void;
 }
 
 const NewSessionContext = createContext<NewSession | null>(null);
@@ -21,7 +22,11 @@ export function NewSessionProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const { data: defaultModelData } = useActionQuery("get-default-model", {});
-  const open = useCallback(() => setDialogOpen(true), []);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const open = useCallback((options?: { projectId?: string }) => {
+    setProjectId(options?.projectId ?? null);
+    setDialogOpen(true);
+  }, []);
   const value = useMemo(() => ({ open }), [open]);
 
   return (
@@ -30,6 +35,7 @@ export function NewSessionProvider({ children }: { children: ReactNode }) {
       <CreateSessionDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
+        projectId={projectId}
         defaultModel={defaultModelData?.model}
         onCreated={(sessionId) => navigate(`/sessions/${sessionId}`)}
       />

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router";
 
 import { ProjectFormDialog } from "@/components/projects/project-form-dialog";
+import { useNewSession } from "@/components/sessions/new-session-context";
 import { SessionList, filterSessions } from "@/components/sessions/session-list";
 import { SessionListSkeleton } from "@/components/sessions/session-list-skeleton";
 import { Button } from "@/components/ui/button";
@@ -118,22 +119,44 @@ export default function ProjectRoute() {
 
 function ProjectSessions({ projectId }: { projectId: string }) {
   const t = useT();
+  const { open } = useNewSession();
   const { data: sessions, isLoading } = useActionQuery("list-sessions", {});
 
-  if (isLoading) return <SessionListSkeleton />;
+  const newSessionButton = (
+    <Button
+      type="button"
+      size="sm"
+      onClick={() => open({ projectId })}
+      data-testid="project-new-session"
+    >
+      {t("projects.newSessionInProject")}
+    </Button>
+  );
 
-  const inProject = filterSessions(sessions ?? [], projectId);
-  if (inProject.length === 0) {
+  if (isLoading) {
     return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyTitle>{t("projects.noSessions")}</EmptyTitle>
-        </EmptyHeader>
-      </Empty>
+      <div className="space-y-4">
+        {newSessionButton}
+        <SessionListSkeleton />
+      </div>
     );
   }
 
-  return <SessionList sessions={inProject} hideProject />;
+  const inProject = filterSessions(sessions ?? [], projectId);
+  return (
+    <div className="space-y-4">
+      {newSessionButton}
+      {inProject.length === 0 ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>{t("projects.noSessions")}</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <SessionList sessions={inProject} hideProject />
+      )}
+    </div>
+  );
 }
 
 function ProjectFields({ project }: { project: Project }) {

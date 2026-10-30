@@ -65,6 +65,15 @@ export function withKnownProject(
   return { ...draft, projectId: null };
 }
 
+/** The form "New session in this project" opens with: the stored text, in the clicked project. */
+export function draftInProject(
+  draft: SessionDraft | null,
+  projectId: string,
+): SessionDraft | null {
+  if (draft === null) return null;
+  return { ...draft, projectId };
+}
+
 export function readSessionDraft(
   storage: Pick<Storage, "getItem"> | undefined,
 ): SessionDraft | null {
