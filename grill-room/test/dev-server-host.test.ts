@@ -30,8 +30,15 @@ describe("dev server host", () => {
   }, 60_000);
 
   it("resolving the config leaves process.env as it found it", async () => {
-    const snapshot = { ...process.env };
-    await resolveDevConfig();
-    expect(process.env).toEqual(snapshot);
+    const original = process.env.IS_RR_BUILD_REQUEST;
+    delete process.env.IS_RR_BUILD_REQUEST;
+    try {
+      const snapshot = { ...process.env };
+      await resolveDevConfig();
+      expect(process.env).toEqual(snapshot);
+    } finally {
+      if (original === undefined) delete process.env.IS_RR_BUILD_REQUEST;
+      else process.env.IS_RR_BUILD_REQUEST = original;
+    }
   }, 60_000);
 });
