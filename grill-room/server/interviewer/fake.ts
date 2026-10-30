@@ -1165,6 +1165,14 @@ export function unproducedInputsTurns(): ScriptedTurn[] {
  */
 export function consistencySpecMarkdown(): string {
   return [
+    "## Summary",
+    "",
+    "- One person can run a grilling session on their own computer.",
+    "- The app works as a local web page.",
+    "- There is no payment or money model.",
+    "- Sessions turn an idea into settled decisions.",
+    "- Anything not listed here is out of scope.",
+    "",
     "## Problem Statement",
     "",
     "Benchmark runs lose their data before anyone reads the results.",
@@ -1674,6 +1682,14 @@ export function cannedInterviewTurns(): ScriptedTurn[] {
       kind: "synthesize-spec",
       result: {
         markdown: [
+          "## Summary",
+          "",
+          "- One person can run a grilling session on their own computer.",
+          "- The app works as a local web page.",
+          "- There is no payment or money model.",
+          "- Sessions turn an idea into settled decisions.",
+          "- Anything not listed here is out of scope.",
+          "",
           "## Problem Statement",
           "",
           "A canned spec, produced by the fake interviewer.",

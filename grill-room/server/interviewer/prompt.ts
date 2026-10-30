@@ -41,6 +41,9 @@ import type {
  * prompt as an unknown option and the turn fails before it starts, so the
  * prompt always opens with this framing line.
  */
+export const SUMMARY_MIN_BULLETS = 5;
+export const SUMMARY_MAX_BULLETS = 10;
+
 const OPENING_LINE =
   "You are conducting a grilling interview inside the Grill Room app. Your instructions follow verbatim, then the state of the interview, then your task for this turn.";
 
@@ -462,10 +465,13 @@ function renderTask(
         "",
         "Follow this template exactly: its sections, its order, and its rules.",
         "",
+        "One addition this app makes to the template: the spec opens with a `## Summary` section, which the template does not have, followed by the template's sections in the template's order.",
+        "",
         loadSpecTemplate().trimEnd(),
         "",
         "Further rules for this app:",
         "",
+        `- The \`## Summary\` section holds ${SUMMARY_MIN_BULLETS} to ${SUMMARY_MAX_BULLETS} top-level \`- \` bullets, in plain words a non-technical owner can read: who can do what, the platform, the payment or money model if there is one, and what is out of scope. No headings, no nested bullets, no file paths and no code inside it.`,
         "- There is no codebase to explore and no test seams to negotiate. Base",
         "  the spec only on the decisions above.",
         "- The user stories list must be extremely extensive.",
@@ -479,8 +485,7 @@ function renderTask(
         openQuestions,
         "",
         ...reopenedRepo,
-        "Return the whole spec as markdown in `markdown`, starting at the",
-        "`## Problem Statement` heading. Do not wrap it in a code fence.",
+        "Return the whole spec as markdown in `markdown`, starting at the `## Summary` heading. Do not wrap it in a code fence.",
       ].join("\n");
     }
 

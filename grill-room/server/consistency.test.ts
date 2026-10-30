@@ -93,8 +93,9 @@ const MISQUOTE = (quote: string, where: string) =>
   `Finding 1 quotes "${quote}", which is not in ${where}. Copy the words exactly as they are written there.`;
 
 describe("specSections", () => {
-  it("names the fixture spec's seven sections in order", () => {
+  it("names the fixture spec's eight sections in order", () => {
     expect(specSections(consistencySpecMarkdown()).map((section) => section.name)).toEqual([
+      "Summary",
       "Problem Statement",
       "Solution",
       "User Stories",
@@ -205,7 +206,7 @@ describe("consistencyReasons", () => {
       FIXTURE_FACTS,
       [
         [
-          'Finding 1 names the spec section "Implementation decisions", which the spec does not have. Its sections are: Problem Statement, Solution, User Stories, Implementation Decisions, Testing Decisions, Out of Scope, Further Notes.',
+          'Finding 1 names the spec section "Implementation decisions", which the spec does not have. Its sections are: Summary, Problem Statement, Solution, User Stories, Implementation Decisions, Testing Decisions, Out of Scope, Further Notes.',
         ],
       ],
     ],

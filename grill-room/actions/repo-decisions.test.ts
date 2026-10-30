@@ -609,6 +609,14 @@ describe("project context on every turn", () => {
         kind: "synthesize-spec",
         result: {
           markdown: [
+            "## Summary",
+            "",
+            "- Summary point 1.",
+            "- Summary point 2.",
+            "- Summary point 3.",
+            "- Summary point 4.",
+            "- Summary point 5.",
+            "",
             "## Problem Statement",
             "## Solution",
             "## User Stories",
@@ -722,6 +730,14 @@ describe("project context on every turn", () => {
         kind: "synthesize-spec",
         result: {
           markdown: [
+            "## Summary",
+            "",
+            "- Summary point 1.",
+            "- Summary point 2.",
+            "- Summary point 3.",
+            "- Summary point 4.",
+            "- Summary point 5.",
+            "",
             "## Problem Statement",
             "## Solution",
             "## User Stories",

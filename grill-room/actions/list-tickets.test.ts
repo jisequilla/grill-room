@@ -10,6 +10,14 @@ import listTickets from "./list-tickets.js";
 import synthesizeSpec from "./synthesize-spec.js";
 
 const SPEC_MARKDOWN = [
+  "## Summary",
+  "",
+  "- Summary point 1.",
+  "- Summary point 2.",
+  "- Summary point 3.",
+  "- Summary point 4.",
+  "- Summary point 5.",
+  "",
   "## Problem Statement",
   "",
   "A settled idea.",
