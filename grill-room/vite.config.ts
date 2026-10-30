@@ -14,6 +14,7 @@ const coreRequire = createRequire(
 );
 
 export default defineConfig({
+  server: { host: "127.0.0.1" },
   optimizeDeps: {
     // React Router discovers route modules outside Vite's default HTML crawl.
     // Scan the shell and Chat route before accepting requests so a cold
