@@ -346,6 +346,41 @@ describe("reasonsToRefuseSharpenRewrite", () => {
       unknownUse("who"),
     ]);
   });
+
+  it("reasons 5 and 6 name each key once, in the order of first use", () => {
+    const answers: { key: string; kind: SharpeningAnswerKind }[] = [
+      { key: "what", kind: "accepted-recommendation" },
+      { key: "who", kind: "unknown" },
+      { key: "budget", kind: "unknown" },
+      { key: "cost", kind: "unknown" },
+    ];
+    expect(
+      reasonsToRefuseSharpenRewrite(
+        rewriteOf(
+          NEW_IDEA,
+          "what",
+          "cost",
+          "zeta",
+          "who",
+          "budget",
+          "cost",
+          "alpha",
+          "zeta",
+          "who",
+        ),
+        { currentIdea: CURRENT_IDEA, answers },
+      ),
+    ).toEqual([
+      repeatedUse("cost"),
+      repeatedUse("zeta"),
+      repeatedUse("who"),
+      unknownUse("cost"),
+      unknownUse("who"),
+      unknownUse("budget"),
+      foreignUse("zeta"),
+      foreignUse("alpha"),
+    ]);
+  });
 });
 
 /** The single line of `prompt` that starts with `prefix`, or a failure naming it. */

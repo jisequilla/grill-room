@@ -46,6 +46,7 @@ import {
   aSharpenRewriteRequest,
   aSharpenRewriteResult,
   aContext,
+  aDecision,
   anAssessReadinessRequest,
   anAssessReadinessResult,
   aFindSupersededRequest,
@@ -3908,4 +3909,278 @@ describe("what the adapter sends for sharpening", () => {
       );
     },
   );
+});
+
+/** The direction cards' task text every round carries, ahead of its round-specific lines. */
+const CARDS_TASK_INTRO = [
+  "## Your task: direction cards",
+  "",
+  "Ask the owner a few direction cards. Each card is one question whose",
+  "answer steers how the idea is rewritten, so that readiness can judge it",
+  "ready.",
+  "",
+  "Return between 1 and 4 cards.",
+];
+
+const DIRECTION_MEANINGS = [
+  "Each card's `direction` says what it asks: `what`, the thing to build;",
+  "`who`, who it is for; `outcome`, what exists when it is done; `constraint`,",
+  "a limit the idea must hold to.",
+];
+
+const CARD_FIELDS = [
+  "Each card has a `title` (the question), a `body` (why it matters), and",
+  "`choices`, each with a `label` and a `rationale` saying what it buys and",
+  "what it costs. `recommendedChoice` is the index of the choice you",
+  "recommend, or null when you recommend none of them, and",
+  "`recommendedAnswer` is the reasoning behind the recommendation.",
+];
+
+const MISSING_NOW =
+  "Missing now: A single buildable thing, not a method; Who the result is for";
+
+describe("the whole sharpening prompt", () => {
+  it("a first round with no title, no tree, no unknowns, and the idea as first written", async () => {
+    const idea = "Decide how to evaluate eight repos.";
+    const request = aSharpenCardsRequest({
+      context: aContext({ idea, title: null, decisions: [] }),
+      originalIdea: idea,
+      readiness: aNotReadyVerdict({ unknowns: [] }),
+      rounds: [],
+      usedKeys: [],
+    });
+    const { prompt } = await sentForSharpening(request);
+    expect(prompt).toBe(
+      [
+        SHARPEN_CARDS_OPENING_LINE,
+        "",
+        "## The idea, in the owner's words",
+        "",
+        "Title: (untitled)",
+        "",
+        idea,
+        "",
+        "## The verdict this round answers",
+        "",
+        "Objective: none stated",
+        "Current readiness: not-ready",
+        MISSING_NOW,
+        "",
+        "## The design tree",
+        "",
+        "(none)",
+        "",
+        ...CARDS_TASK_INTRO,
+        ROUND_ONE_LINE,
+        ...DIRECTION_MEANINGS,
+        "",
+        "Give each card its own key.",
+        "",
+        ...CARD_FIELDS,
+      ].join("\n"),
+    );
+  });
+
+  it("a later round after an accepted round and one that settled nothing", async () => {
+    const request = aSharpenCardsRequest({
+      context: aContext({
+        idea: "Build something to compare eight repos.",
+        title: "Repo comparison",
+        docsFolder: "docs/",
+        decisions: [
+          aDecision({
+            key: "repo-db",
+            state: "settled",
+            title: "Where do the repos live?",
+            body: "",
+            recommendedAnswer: "",
+          }),
+        ],
+      }),
+      originalIdea: "Decide how to evaluate eight repos.",
+      readiness: aNotReadyVerdict({ objective: "Pick one repo to adopt" }),
+      rounds: [
+        aSharpeningRound({
+          number: 1,
+          cards: [
+            {
+              key: "sharpen-what",
+              direction: "what",
+              title: "What gets built?",
+              answerKind: "own-answer",
+              answer: "A scoring sheet",
+            },
+            {
+              key: "sharpen-who",
+              direction: "who",
+              title: "Who uses it?",
+              answerKind: "unknown",
+              answer: "",
+            },
+          ],
+          edited: true,
+          verdict: "not-ready",
+          missing: ["M1", "M2"],
+        }),
+        aSharpeningRound({
+          number: 2,
+          cards: [
+            {
+              key: "sharpen-scope",
+              direction: "constraint",
+              title: "How big is the first version?",
+              answerKind: "unknown",
+              answer: "",
+            },
+          ],
+          acceptedIdea: null,
+          verdict: null,
+          missing: [],
+        }),
+      ],
+      usedKeys: ["repo-db", "sharpen-what", "sharpen-who", "sharpen-scope"],
+    });
+    const { prompt } = await sentForSharpening(request);
+    expect(prompt).toBe(
+      [
+        SHARPEN_CARDS_OPENING_LINE,
+        "",
+        "## The idea, in the owner's words",
+        "",
+        "Title: Repo comparison",
+        "",
+        "Build something to compare eight repos.",
+        "",
+        "## The idea as first written",
+        "",
+        "Decide how to evaluate eight repos.",
+        "",
+        "## The verdict this round answers",
+        "",
+        "Objective: Pick one repo to adopt",
+        "Unknowns: What would actually get built; Who the comparison is for",
+        "Current readiness: not-ready",
+        MISSING_NOW,
+        "",
+        "## Earlier rounds",
+        "",
+        "### Round 1",
+        "",
+        "What gets built?",
+        "Answer: A scoring sheet",
+        "",
+        "Who uses it?",
+        "Answer: I don't know",
+        "",
+        "Accepted idea: Build a scoring sheet to compare eight repos.",
+        "Edited by the owner: yes",
+        "Readiness: not-ready",
+        "Still missing: M1; M2",
+        "",
+        "### Round 2",
+        "",
+        "How big is the first version?",
+        "Answer: I don't know",
+        "",
+        NOTHING_SETTLED_IN_ROUND,
+        "",
+        "## The design tree",
+        "",
+        SETTLED_DECISION_LINE,
+        "- [repo-db] (settled, added by interviewer) Where do the repos live?",
+        "  depends on: nothing",
+        "  answer: none yet",
+        "",
+        "## The docs folder",
+        "",
+        "The project's docs live in docs/. Use them to judge what the idea leaves out; do not quote them as the owner's words.",
+        "",
+        ...CARDS_TASK_INTRO,
+        AIM_LINE,
+        "The cards follow readiness's latest missing items and the earlier",
+        "answers: never re-ask what a settling answer already gave.",
+        NOTHING_SETTLED_LAST_ROUND,
+        ...DIRECTION_MEANINGS,
+        "",
+        "Give each card its own key, and use none of these: repo-db, sharpen-what, sharpen-who, sharpen-scope.",
+        "",
+        ...CARD_FIELDS,
+      ].join("\n"),
+    );
+  });
+
+  it("a rewrite after a round readiness never judged, with this round's answers in card order", async () => {
+    const request = aSharpenRewriteRequest({
+      context: aContext({
+        idea: "Decide how to evaluate eight repos.",
+        title: "Repo comparison",
+        decisions: [],
+      }),
+      rounds: [aSharpeningRound({ verdict: null, missing: [] })],
+    });
+    const { prompt } = await sentForSharpening(request);
+    expect(prompt).toBe(
+      [
+        SHARPEN_REWRITE_OPENING_LINE,
+        "",
+        "## The idea, in the owner's words",
+        "",
+        "Title: Repo comparison",
+        "",
+        "Decide how to evaluate eight repos.",
+        "",
+        "## The idea as first written",
+        "",
+        "Decide how to evaluate repos.",
+        "",
+        "## The verdict this round answers",
+        "",
+        "Objective: none stated",
+        "Unknowns: What would actually get built; Who the comparison is for",
+        "Current readiness: not-ready",
+        MISSING_NOW,
+        "",
+        "## Earlier rounds",
+        "",
+        "### Round 1",
+        "",
+        "What gets built?",
+        "Answer: A scoring sheet for the repos",
+        "",
+        "Who uses it?",
+        "Answer: I don't know",
+        "",
+        "Accepted idea: Build a scoring sheet to compare eight repos.",
+        "Edited by the owner: no",
+        "Readiness: not judged",
+        "",
+        "## This round's answers",
+        "",
+        "What gets built?",
+        "Answer: A training plan tracker",
+        "",
+        "Who uses it?",
+        "Answer: I don't know",
+        "",
+        "What exists when it is done?",
+        "Answer: My club follows its plans week by week",
+        "",
+        "## The design tree",
+        "",
+        "(none)",
+        "",
+        "## Your task: rewrite the idea",
+        "",
+        "Return:",
+        "",
+        "- `idea`: the idea rewritten in the owner's own voice, from this round's",
+        "  answers and the earlier rounds. It must differ from the current idea.",
+        "The idea must be at most 2000 characters.",
+        "- `uses`: one entry per settling card, `{ cardKey, how }`, saying how the",
+        "  idea uses its answer. A card answered `I don't know` gets no entry.",
+        "Name each of these keys exactly once in uses: what, outcome.",
+        "- `note`: one line for the owner on what changed.",
+      ].join("\n"),
+    );
+  });
 });
