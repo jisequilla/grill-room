@@ -16,7 +16,16 @@ import {
   treeRuleViolation,
   withResumeFallback,
 } from "./fake.js";
-import type { ProposeRoundResult } from "./schemas.js";
+import {
+  reasonsToRefuseSharpenCards,
+  reasonsToRefuseSharpenRewrite,
+} from "../sharpening.js";
+import type {
+  AssessReadinessResult,
+  ProposeRoundResult,
+  SharpenCardsResult,
+  SharpenRewriteResult,
+} from "./schemas.js";
 import type {
   CheckConsistencyRequest,
   ModelCallEnd,
@@ -29,6 +38,10 @@ import {
   scriptInterviewer,
 } from "./index.js";
 import {
+  aSharpenCardsRequest,
+  aSharpenCardsResult,
+  aSharpenRewriteRequest,
+  aSharpenRewriteResult,
   anAssessReadinessRequest,
   anAssessReadinessResult,
   aFindSupersededRequest,
@@ -437,6 +450,120 @@ describe("the fake interviewer's specs", () => {
     expect(markdown).toContain(
       "- A single buildable thing, not a method for deciding one",
     );
+  });
+
+  it("serves scripted sharpening turns", async () => {
+    const interviewer = createFakeInterviewer([
+      { kind: "sharpen-cards", result: aSharpenCardsResult() },
+      { kind: "sharpen-rewrite", result: aSharpenRewriteResult() },
+    ]);
+
+    const cards = await interviewer.sharpenCards(aSharpenCardsRequest());
+    const rewrite = await interviewer.sharpenRewrite(aSharpenRewriteRequest());
+
+    expect(cards.result).toEqual(aSharpenCardsResult());
+    expect(rewrite.result).toEqual(aSharpenRewriteResult());
+    expect(interviewer.requests.map((request) => request.kind)).toEqual([
+      "sharpen-cards",
+      "sharpen-rewrite",
+    ]);
+  });
+
+  it("the sharpening scenarios script their turns in order", () => {
+    const kinds = (name: string) =>
+      fakeScenarios[name]!.turns.map((turn) => turn.kind);
+
+    expect(kinds("sharpening")).toEqual([
+      "assess-readiness",
+      "sharpen-cards",
+      "sharpen-rewrite",
+      "assess-readiness",
+      "sharpen-cards",
+      "sharpen-rewrite",
+      "assess-readiness",
+      "propose-round",
+    ]);
+    expect(kinds("sharpening-stop")).toEqual(["assess-readiness", "sharpen-cards"]);
+
+    const turns = fakeScenarios.sharpening!.turns;
+    const resultAt = (index: number): unknown =>
+      (turns[index] as { result: unknown }).result;
+    const judgment = (index: number) => {
+      const result = resultAt(index) as AssessReadinessResult;
+      return { verdict: result.verdict, missing: result.missing };
+    };
+    const cardShapes = (index: number) =>
+      (resultAt(index) as SharpenCardsResult).cards.map((card) => ({
+        key: card.key,
+        direction: card.direction,
+        recommendedChoice: card.recommendedChoice,
+      }));
+
+    expect(judgment(0).verdict).toBe("not-ready");
+    expect(judgment(3)).toEqual({
+      verdict: "not-ready",
+      missing: ["What a finished first version contains"],
+    });
+    expect(judgment(6).verdict).toBe("ready");
+    expect(cardShapes(1)).toEqual([
+      { key: "sharpen-what", direction: "what", recommendedChoice: 0 },
+      { key: "sharpen-who", direction: "who", recommendedChoice: 0 },
+      { key: "sharpen-outcome", direction: "outcome", recommendedChoice: 0 },
+    ]);
+    expect(cardShapes(4)).toEqual([
+      { key: "sharpen-scope", direction: "constraint", recommendedChoice: 0 },
+    ]);
+    expect(
+      (fakeScenarios["sharpening-stop"]!.turns[0] as { result: AssessReadinessResult })
+        .result.verdict,
+    ).toBe("not-ready");
+
+    const round = fakeScenarios.sharpening!.turns[7]!;
+    expect(round.kind === "propose-round" && "result" in round).toBe(true);
+    const decisions = (round as { result: ProposeRoundResult }).result
+      .proposedDecisions;
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]!.dependsOn).toEqual(["sharpen-what"]);
+  });
+
+  it("the sharpening scenario's results pass the sharpening checks", () => {
+    const turns = fakeScenarios.sharpening!.turns;
+    const resultOf = (index: number): unknown => {
+      const turn = turns[index]!;
+      expect("result" in turn).toBe(true);
+      return (turn as { result: unknown }).result;
+    };
+    const firstCards = resultOf(1) as SharpenCardsResult;
+    const firstRewrite = resultOf(2) as SharpenRewriteResult;
+    const secondCards = resultOf(4) as SharpenCardsResult;
+    const secondRewrite = resultOf(5) as SharpenRewriteResult;
+    const startingIdea = "Decide how to evaluate eight repos.";
+
+    expect(
+      reasonsToRefuseSharpenCards(firstCards, { usedKeys: [], firstRound: true }),
+    ).toEqual([]);
+    expect(
+      reasonsToRefuseSharpenCards(secondCards, {
+        usedKeys: firstCards.cards.map((card) => card.key),
+        firstRound: false,
+      }),
+    ).toEqual([]);
+    expect(
+      reasonsToRefuseSharpenRewrite(firstRewrite, {
+        currentIdea: startingIdea,
+        answers: [
+          { key: "sharpen-what", kind: "accepted-recommendation" },
+          { key: "sharpen-who", kind: "accepted-recommendation" },
+          { key: "sharpen-outcome", kind: "unknown" },
+        ],
+      }),
+    ).toEqual([]);
+    expect(
+      reasonsToRefuseSharpenRewrite(secondRewrite, {
+        currentIdea: firstRewrite.idea,
+        answers: [{ key: "sharpen-scope", kind: "accepted-recommendation" }],
+      }),
+    ).toEqual([]);
   });
 });
 

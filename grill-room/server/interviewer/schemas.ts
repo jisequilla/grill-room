@@ -330,6 +330,51 @@ export const assessReadinessResultSchema = z.strictObject({
 /** A ready verdict tolerates at most this many unknowns. */
 export const MAX_READY_UNKNOWNS = 5;
 
+/** A sharpening round asks at most this many direction cards. */
+export const MAX_SHARPENING_CARDS = 4;
+
+/** A sharpened idea, trimmed, is at most this many characters. */
+export const MAX_SHARPENED_IDEA_LENGTH = 2000;
+
+/** What a direction card steers: the thing to build, who it is for, what exists when done, or a limit. */
+export const SHARPENING_DIRECTIONS = [
+  "what",
+  "who",
+  "outcome",
+  "constraint",
+] as const;
+
+export type SharpeningDirection = (typeof SHARPENING_DIRECTIONS)[number];
+
+/** The directions the first sharpening round must each ask at least one card for, in the order they are named. */
+export const FIRST_ROUND_SHARPENING_DIRECTIONS: readonly SharpeningDirection[] =
+  ["what", "who", "outcome"];
+
+/** One direction card of a sharpening round: a question whose answer steers the rewrite. */
+const sharpeningCard = z.strictObject({
+  key: decisionKey,
+  direction: z.enum(SHARPENING_DIRECTIONS),
+  title: z.string().min(1),
+  body: z.string(),
+  choices: z.array(offeredChoice),
+  recommendedChoice,
+  recommendedAnswer: z.string(),
+});
+
+/** A sharpening round's direction cards. */
+export const sharpenCardsResultSchema = z.strictObject({
+  cards: z.array(sharpeningCard).min(1).max(MAX_SHARPENING_CARDS),
+});
+
+/** The idea rewritten from a sharpening round's answers, and how it uses each settling answer. */
+export const sharpenRewriteResultSchema = z.strictObject({
+  idea: z.string().min(1),
+  uses: z.array(
+    z.strictObject({ cardKey: decisionKey, how: z.string().min(1) }),
+  ),
+  note: z.string(),
+});
+
 /** A scout report lists at most this many current-state items. */
 export const MAX_SCOUT_CURRENT_STATE = 25;
 
@@ -724,6 +769,8 @@ export const resultSchemas = {
   "scout-project": scoutProjectResultSchema,
   "handoff-scout": handoffScoutResultSchema,
   "check-consistency": checkConsistencyResultSchema,
+  "sharpen-cards": sharpenCardsResultSchema,
+  "sharpen-rewrite": sharpenRewriteResultSchema,
 } as const;
 
 export type RequestKind = keyof typeof resultSchemas;
@@ -746,6 +793,8 @@ export type AssessReadinessResult = ResultFor<"assess-readiness">;
 export type ScoutProjectResult = ResultFor<"scout-project">;
 export type HandoffScoutResult = ResultFor<"handoff-scout">;
 export type CheckConsistencyResult = ResultFor<"check-consistency">;
+export type SharpenCardsResult = ResultFor<"sharpen-cards">;
+export type SharpenRewriteResult = ResultFor<"sharpen-rewrite">;
 export type ConsistencyFinding = CheckConsistencyResult["findings"][number];
 export type ConsistencyPlace = ConsistencyFinding["at"];
 

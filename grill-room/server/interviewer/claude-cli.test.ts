@@ -31,9 +31,22 @@ import type {
   CheckConsistencyRequest,
   ModelCallEnd,
   ModelCallObserver,
+  SharpenCardsRequest,
+  SharpenRewriteRequest,
 } from "./types.js";
 import {
+  SHARPEN_CARDS_OPENING_LINE,
+  SHARPEN_REWRITE_OPENING_LINE,
+} from "./prompt.js";
+import {
+  aNotReadyVerdict,
+  aSharpenCardsRequest,
+  aSharpenCardsResult,
+  aSharpeningRound,
+  aSharpenRewriteRequest,
+  aSharpenRewriteResult,
   aContext,
+  aDecision,
   anAssessReadinessRequest,
   anAssessReadinessResult,
   aFindSupersededRequest,
@@ -3508,5 +3521,735 @@ describe("the citation rule the scouts are told", () => {
     for (const prompt of [projectScout, handoffScout, readiness]) {
       expect(prompt).not.toContain("if any one is wrong");
     }
+  });
+});
+
+type SharpeningRequest = SharpenCardsRequest | SharpenRewriteRequest;
+
+/** What the adapter spawns for one sharpening request: its arguments and prompt. */
+async function sentForSharpening(request: SharpeningRequest) {
+  const result =
+    request.kind === "sharpen-cards" ? aSharpenCardsResult() : aSharpenRewriteResult();
+  const runner = recordingRunner([ok(anEnvelope({ structured_output: result }))]);
+  const interviewer = createClaudeCliInterviewer({ runCli: runner.runCli });
+  const turn =
+    request.kind === "sharpen-cards"
+      ? await interviewer.sharpenCards(request)
+      : await interviewer.sharpenRewrite(request);
+  const { args } = runner.invocations[0];
+  return { args, prompt: valueOf(args, "-p") as string, turn, result };
+}
+
+/** Both sharpening kinds' default requests, each with `overrides` applied. */
+function bothKinds(
+  overrides: Partial<Omit<SharpenCardsRequest, "kind" | "usedKeys" | "previousResult">> = {},
+): SharpeningRequest[] {
+  return [aSharpenCardsRequest(overrides), aSharpenRewriteRequest(overrides)];
+}
+
+const ROUND_ONE_LINE =
+  "In the first round, ask at least one card for each of these directions: what, who, outcome.";
+const AIM_LINE = "Aim the cards at what is still missing.";
+const NOTHING_SETTLED_LAST_ROUND =
+  "Nothing was settled last round, so the same missing items still stand: ask them differently.";
+const NOTHING_SETTLED_IN_ROUND =
+  "Nothing was settled in this round: the idea was not rewritten, and readiness did not judge it again.";
+const SETTLED_DECISION_LINE = "A settled decision is never asked again.";
+
+describe("what the adapter sends for sharpening", () => {
+  it.each(["sharpen-cards", "sharpen-rewrite"] as const)(
+    "constrains each kind to its own schema, with every tool disabled (%s)",
+    async (kind) => {
+      const request =
+        kind === "sharpen-cards" ? aSharpenCardsRequest() : aSharpenRewriteRequest();
+      const { args, turn, result } = await sentForSharpening(request);
+      expect(valueOf(args, "--allowed-tools")).toBe("");
+      expect(JSON.parse(valueOf(args, "--json-schema") as string)).toEqual(
+        jsonSchemaFor(kind),
+      );
+      expect(turn.result).toEqual(result);
+    },
+  );
+
+  it("asks for direction cards without the grilling method", async () => {
+    for (const request of bothKinds()) {
+      const { prompt } = await sentForSharpening(request);
+      expect(prompt).not.toContain(loadGrillingSkill().trimEnd());
+    }
+  });
+
+  it("opens with the ticket's exact lines", () => {
+    expect(SHARPEN_CARDS_OPENING_LINE).toBe(
+      "You are sharpening, inside the Grill Room app, an idea that readiness judged not ready for a grilling interview. You are not interviewing: you ask a few direction cards whose answers will steer how the idea is rewritten.",
+    );
+    expect(SHARPEN_REWRITE_OPENING_LINE).toBe(
+      "You are sharpening, inside the Grill Room app, an idea that readiness judged not ready for a grilling interview. You are not interviewing: you write the rewrite of the idea from the owner's answers to this round's direction cards.",
+    );
+  });
+
+  it.each([
+    ["sharpen-cards", SHARPEN_CARDS_OPENING_LINE],
+    ["sharpen-rewrite", SHARPEN_REWRITE_OPENING_LINE],
+  ] as const)("opens with its own line (%s)", async (kind, line) => {
+    const request =
+      kind === "sharpen-cards" ? aSharpenCardsRequest() : aSharpenRewriteRequest();
+    const { prompt } = await sentForSharpening(request);
+    expect(prompt.startsWith(`${line}\n`)).toBe(true);
+  });
+
+  it("keeps its sections in order (sharpen-cards)", async () => {
+    const request = aSharpenCardsRequest({ rounds: [aSharpeningRound()] });
+    expect(request.context.decisions).toHaveLength(1);
+    const { prompt } = await sentForSharpening(request);
+    const positions = [
+      request.context.idea,
+      "## The idea as first written",
+      "Current readiness:",
+      "### Round 1",
+      SETTLED_DECISION_LINE,
+      "## Your task: direction cards",
+    ].map((marker) => prompt.indexOf(marker));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+
+  it("keeps its sections in order (sharpen-rewrite)", async () => {
+    const request = aSharpenRewriteRequest({ rounds: [aSharpeningRound()] });
+    expect(request.context.decisions).toHaveLength(1);
+    const { prompt } = await sentForSharpening(request);
+    const positions = [
+      request.context.idea,
+      "## The idea as first written",
+      "Current readiness:",
+      "### Round 1",
+      "## This round's answers",
+      SETTLED_DECISION_LINE,
+      "## Your task: rewrite the idea",
+    ].map((marker) => prompt.indexOf(marker));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+
+  it("lists this round's answers", async () => {
+    const { prompt } = await sentForSharpening(aSharpenRewriteRequest());
+    expect(prompt).toContain("## This round's answers");
+    expect(prompt).toContain("What gets built?\nAnswer: A training plan tracker\n");
+    expect(prompt).toContain("Who uses it?\nAnswer: I don't know\n");
+    expect(prompt).toContain(
+      "What exists when it is done?\nAnswer: My club follows its plans week by week\n",
+    );
+  });
+
+  it("a first round asks for what, who and outcome; a later round aims at what is missing", async () => {
+    const first = await sentForSharpening(aSharpenCardsRequest({ rounds: [] }));
+    expect(first.prompt.split("\n")).toContain(ROUND_ONE_LINE);
+    expect(first.prompt).not.toContain(AIM_LINE);
+
+    const later = await sentForSharpening(
+      aSharpenCardsRequest({ rounds: [aSharpeningRound()] }),
+    );
+    expect(later.prompt).toContain(AIM_LINE);
+    expect(later.prompt).not.toContain(ROUND_ONE_LINE);
+  });
+
+  it.each(["sharpen-cards", "sharpen-rewrite"] as const)(
+    "the current verdict uses its own labels (%s)",
+    async (kind) => {
+      const make = kind === "sharpen-cards" ? aSharpenCardsRequest : aSharpenRewriteRequest;
+      const request = make();
+      const { readiness } = request;
+      expect(readiness.objective).toBeNull();
+      expect(readiness.unknowns.length).toBeGreaterThan(1);
+      expect(readiness.missing.length).toBeGreaterThan(1);
+
+      const { prompt } = await sentForSharpening(request);
+      expect(prompt).toContain("Objective: none stated");
+      expect(prompt).toContain(`Unknowns: ${readiness.unknowns.join("; ")}`);
+      expect(prompt).toContain("Current readiness: not-ready");
+      expect(prompt).toContain(`Missing now: ${readiness.missing.join("; ")}`);
+      expect(prompt).not.toContain("Readiness:");
+      expect(prompt).not.toContain("Still missing:");
+
+      const withObjective = make({
+        readiness: aNotReadyVerdict({ objective: "A scoring sheet", unknowns: [] }),
+      });
+      const second = await sentForSharpening(withObjective);
+      expect(second.prompt).toContain("Objective: A scoring sheet");
+      expect(second.prompt).not.toContain("Unknowns:");
+    },
+  );
+
+  it("the rewrite lists the keys to name in uses, and only the settling ones", async () => {
+    const { prompt } = await sentForSharpening(aSharpenRewriteRequest());
+    expect(prompt.split("\n")).toContain(
+      "Name each of these keys exactly once in uses: what, outcome.",
+    );
+  });
+
+  const outcomeRows = [
+    {
+      row: "24",
+      round: aSharpeningRound({
+        acceptedIdea: "Idea twenty-four.",
+        edited: true,
+        verdict: "not-ready",
+        missing: ["M"],
+      }),
+      lines: [
+        "Accepted idea: Idea twenty-four.",
+        "Edited by the owner: yes",
+        "Readiness: not-ready",
+        "Still missing: M",
+      ],
+      noStillMissing: false,
+    },
+    {
+      row: "24b",
+      round: aSharpeningRound({
+        acceptedIdea: "Idea twenty-four b.",
+        edited: false,
+        verdict: "not-ready",
+        missing: ["M1", "M2"],
+      }),
+      lines: [
+        "Accepted idea: Idea twenty-four b.",
+        "Edited by the owner: no",
+        "Readiness: not-ready",
+        "Still missing: M1; M2",
+      ],
+      noStillMissing: false,
+    },
+    {
+      row: "24c",
+      round: aSharpeningRound({
+        acceptedIdea: "Idea twenty-four c.",
+        edited: false,
+        verdict: "ready",
+        missing: [],
+      }),
+      lines: [
+        "Accepted idea: Idea twenty-four c.",
+        "Edited by the owner: no",
+        "Readiness: ready",
+      ],
+      noStillMissing: true,
+    },
+    {
+      row: "24d",
+      round: aSharpeningRound({
+        acceptedIdea: "Idea twenty-four d.",
+        edited: false,
+        verdict: "not-ready",
+        missing: [],
+      }),
+      lines: [
+        "Accepted idea: Idea twenty-four d.",
+        "Edited by the owner: no",
+        "Readiness: not-ready",
+      ],
+      noStillMissing: true,
+    },
+    {
+      row: "25",
+      round: aSharpeningRound({
+        acceptedIdea: "Idea twenty-five.",
+        edited: false,
+        verdict: null,
+        missing: [],
+      }),
+      lines: [
+        "Accepted idea: Idea twenty-five.",
+        "Edited by the owner: no",
+        "Readiness: not judged",
+      ],
+      noStillMissing: false,
+    },
+  ];
+
+  describe.each(["sharpen-cards", "sharpen-rewrite"] as const)(
+    "an earlier round renders its outcome (%s)",
+    (kind) => {
+      const make = kind === "sharpen-cards" ? aSharpenCardsRequest : aSharpenRewriteRequest;
+
+      for (const { row, round, lines, noStillMissing } of outcomeRows) {
+        it(`row ${row}`, async () => {
+          const { prompt } = await sentForSharpening(make({ rounds: [round] }));
+          const promptLines = prompt.split("\n");
+          for (const line of lines) expect(promptLines).toContain(line);
+          if (noStillMissing) expect(prompt).not.toContain("Still missing:");
+        });
+      }
+
+      it("renders an unknown earlier answer as I don't know", async () => {
+        const round = aSharpeningRound({
+          cards: [
+            {
+              key: "sharpen-who",
+              direction: "who",
+              title: "Who reads the sheet?",
+              answerKind: "unknown",
+              answer: "",
+            },
+          ],
+        });
+        const { prompt } = await sentForSharpening(make({ rounds: [round] }));
+        expect(prompt).toContain("Who reads the sheet?\nAnswer: I don't know\n");
+      });
+
+      it("row 26: a round that settled nothing says so, and nothing else", async () => {
+        const { prompt } = await sentForSharpening(
+          make({ rounds: [aSharpeningRound({ acceptedIdea: null, verdict: null, missing: [] })] }),
+        );
+        expect(prompt).toContain("### Round 1");
+        expect(prompt).toContain(NOTHING_SETTLED_IN_ROUND);
+        for (const label of [
+          "Accepted idea:",
+          "Edited by the owner:",
+          "Readiness:",
+          "Still missing:",
+        ]) {
+          expect(prompt).not.toContain(label);
+        }
+      });
+    },
+  );
+
+  it.each(["sharpen-cards", "sharpen-rewrite"] as const)(
+    "the original idea shows only when it differs (%s)",
+    async (kind) => {
+      const make = kind === "sharpen-cards" ? aSharpenCardsRequest : aSharpenRewriteRequest;
+      const same = make();
+      const { prompt: samePrompt } = await sentForSharpening(
+        make({ originalIdea: same.context.idea }),
+      );
+      expect(samePrompt).not.toContain("## The idea as first written");
+
+      const different = make({ originalIdea: "An idea from long ago." });
+      const { prompt } = await sentForSharpening(different);
+      expect(prompt).toContain("## The idea as first written\n\nAn idea from long ago.\n");
+    },
+  );
+
+  it.each(["sharpen-cards", "sharpen-rewrite"] as const)(
+    "the docs folder paragraph follows the docs folder (%s)",
+    async (kind) => {
+      const make = kind === "sharpen-cards" ? aSharpenCardsRequest : aSharpenRewriteRequest;
+      const withFolder = make();
+      withFolder.context = { ...withFolder.context, docsFolder: "/tmp/the-docs" };
+      const { prompt } = await sentForSharpening(withFolder);
+      expect(prompt).toContain("## The docs folder");
+      expect(prompt).toContain(
+        "The project's docs live in /tmp/the-docs. Use them to judge what the idea leaves out; do not quote them as the owner's words.",
+      );
+
+      const { prompt: without } = await sentForSharpening(make());
+      expect(without).not.toContain("## The docs folder");
+      expect(without).not.toContain("The project's docs live in");
+    },
+  );
+
+  it.each(["sharpen-cards", "sharpen-rewrite"] as const)(
+    "the tree carries the settled-decision line (%s)",
+    async (kind) => {
+      const make = kind === "sharpen-cards" ? aSharpenCardsRequest : aSharpenRewriteRequest;
+      const { prompt } = await sentForSharpening(make());
+      expect(prompt).toContain(`${SETTLED_DECISION_LINE}\n- [`);
+
+      const empty = make({ context: aContext({ decisions: [] }) });
+      const { prompt: emptyPrompt } = await sentForSharpening(empty);
+      expect(emptyPrompt).not.toContain(SETTLED_DECISION_LINE);
+    },
+  );
+
+  it.each([
+    { row: 27, rounds: ["accepted"], present: false },
+    { row: 28, rounds: ["accepted", "nothing"], present: true },
+    { row: 29, rounds: ["nothing", "accepted"], present: false },
+  ] as const)(
+    "after a round that settled nothing, the same missing items are asked differently (row $row)",
+    async ({ rounds, present }) => {
+      const request = aSharpenCardsRequest({
+        rounds: rounds.map((shape, index) =>
+          aSharpeningRound({
+            number: index + 1,
+            ...(shape === "nothing"
+              ? { acceptedIdea: null, verdict: null, missing: [] }
+              : {}),
+          }),
+        ),
+      });
+      const { prompt } = await sentForSharpening(request);
+      if (present) {
+        expect(prompt.split("\n")).toContain(NOTHING_SETTLED_LAST_ROUND);
+      } else {
+        expect(prompt).not.toContain(NOTHING_SETTLED_LAST_ROUND);
+      }
+    },
+  );
+
+  it.each(["sharpen-cards", "sharpen-rewrite"] as const)(
+    "hands a retry its previous answer (%s)",
+    async (kind) => {
+      const reason = "Card key \"sharpen-what\" is used twice in this round.";
+      const request =
+        kind === "sharpen-cards"
+          ? aSharpenCardsRequest({
+              rejectionReason: reason,
+              previousResult: aSharpenCardsResult(),
+            })
+          : aSharpenRewriteRequest({
+              rejectionReason: reason,
+              previousResult: aSharpenRewriteResult(),
+            });
+      const { args, prompt } = await sentForSharpening(request);
+      expect(args).not.toContain("--resume");
+      expect(prompt).toContain(
+        [
+          "## Your previous answer was rejected",
+          "",
+          reason,
+          "",
+          "Your previous answer, exactly as the app received it:",
+          "",
+          "```json",
+          JSON.stringify(request.previousResult, null, 2),
+          "```",
+        ].join("\n"),
+      );
+    },
+  );
+});
+
+/** The direction cards' task text every round carries, ahead of its round-specific lines. */
+const CARDS_TASK_INTRO = [
+  "## Your task: direction cards",
+  "",
+  "Ask the owner a few direction cards. Each card is one question whose",
+  "answer steers how the idea is rewritten, so that readiness can judge it",
+  "ready.",
+  "",
+  "Return between 1 and 4 cards.",
+];
+
+const DIRECTION_MEANINGS = [
+  "Each card's `direction` says what it asks: `what`, the thing to build;",
+  "`who`, who it is for; `outcome`, what exists when it is done; `constraint`,",
+  "a limit the idea must hold to.",
+];
+
+const CARD_FIELDS = [
+  "Each card has a `title` (the question), a `body` (why it matters), and",
+  "`choices`, each with a `label` and a `rationale` saying what it buys and",
+  "what it costs. `recommendedChoice` is the index of the choice you",
+  "recommend, or null when you recommend none of them, and",
+  "`recommendedAnswer` is the reasoning behind the recommendation.",
+];
+
+const MISSING_NOW =
+  "Missing now: A single buildable thing, not a method; Who the result is for";
+
+describe("the whole sharpening prompt", () => {
+  it("a first round with no title, no tree, no unknowns, and the idea as first written", async () => {
+    const idea = "Decide how to evaluate eight repos.";
+    const request = aSharpenCardsRequest({
+      context: aContext({ idea, title: null, decisions: [] }),
+      originalIdea: idea,
+      readiness: aNotReadyVerdict({ unknowns: [] }),
+      rounds: [],
+      usedKeys: [],
+    });
+    const { prompt } = await sentForSharpening(request);
+    expect(prompt).toBe(
+      [
+        SHARPEN_CARDS_OPENING_LINE,
+        "",
+        "## The idea, in the owner's words",
+        "",
+        "Title: (untitled)",
+        "",
+        idea,
+        "",
+        "## The verdict this round answers",
+        "",
+        "Objective: none stated",
+        "Current readiness: not-ready",
+        MISSING_NOW,
+        "",
+        "## The design tree",
+        "",
+        "(none)",
+        "",
+        ...CARDS_TASK_INTRO,
+        ROUND_ONE_LINE,
+        ...DIRECTION_MEANINGS,
+        "",
+        "Give each card its own key.",
+        "",
+        ...CARD_FIELDS,
+      ].join("\n"),
+    );
+  });
+
+  it("a later round after an accepted round and one that settled nothing", async () => {
+    const request = aSharpenCardsRequest({
+      context: aContext({
+        idea: "Build something to compare eight repos.",
+        title: "Repo comparison",
+        docsFolder: "docs/",
+        decisions: [
+          aDecision({
+            key: "repo-db",
+            state: "settled",
+            title: "Where do the repos live?",
+            body: "",
+            recommendedAnswer: "",
+          }),
+        ],
+      }),
+      originalIdea: "Decide how to evaluate eight repos.",
+      readiness: aNotReadyVerdict({ objective: "Pick one repo to adopt" }),
+      rounds: [
+        aSharpeningRound({
+          number: 1,
+          cards: [
+            {
+              key: "sharpen-what",
+              direction: "what",
+              title: "What gets built?",
+              answerKind: "own-answer",
+              answer: "A scoring sheet",
+            },
+            {
+              key: "sharpen-who",
+              direction: "who",
+              title: "Who uses it?",
+              answerKind: "unknown",
+              answer: "",
+            },
+          ],
+          edited: true,
+          verdict: "not-ready",
+          missing: ["M1", "M2"],
+        }),
+        aSharpeningRound({
+          number: 2,
+          cards: [
+            {
+              key: "sharpen-scope",
+              direction: "constraint",
+              title: "How big is the first version?",
+              answerKind: "unknown",
+              answer: "",
+            },
+          ],
+          acceptedIdea: null,
+          verdict: null,
+          missing: [],
+        }),
+      ],
+      usedKeys: ["repo-db", "sharpen-what", "sharpen-who", "sharpen-scope"],
+    });
+    const { prompt } = await sentForSharpening(request);
+    expect(prompt).toBe(
+      [
+        SHARPEN_CARDS_OPENING_LINE,
+        "",
+        "## The idea, in the owner's words",
+        "",
+        "Title: Repo comparison",
+        "",
+        "Build something to compare eight repos.",
+        "",
+        "## The idea as first written",
+        "",
+        "Decide how to evaluate eight repos.",
+        "",
+        "## The verdict this round answers",
+        "",
+        "Objective: Pick one repo to adopt",
+        "Unknowns: What would actually get built; Who the comparison is for",
+        "Current readiness: not-ready",
+        MISSING_NOW,
+        "",
+        "## Earlier rounds",
+        "",
+        "### Round 1",
+        "",
+        "What gets built?",
+        "Answer: A scoring sheet",
+        "",
+        "Who uses it?",
+        "Answer: I don't know",
+        "",
+        "Accepted idea: Build a scoring sheet to compare eight repos.",
+        "Edited by the owner: yes",
+        "Readiness: not-ready",
+        "Still missing: M1; M2",
+        "",
+        "### Round 2",
+        "",
+        "How big is the first version?",
+        "Answer: I don't know",
+        "",
+        NOTHING_SETTLED_IN_ROUND,
+        "",
+        "## The design tree",
+        "",
+        SETTLED_DECISION_LINE,
+        "- [repo-db] (settled, added by interviewer) Where do the repos live?",
+        "  depends on: nothing",
+        "  answer: none yet",
+        "",
+        "## The docs folder",
+        "",
+        "The project's docs live in docs/. Use them to judge what the idea leaves out; do not quote them as the owner's words.",
+        "",
+        ...CARDS_TASK_INTRO,
+        AIM_LINE,
+        "The cards follow readiness's latest missing items and the earlier",
+        "answers: never re-ask what a settling answer already gave.",
+        NOTHING_SETTLED_LAST_ROUND,
+        ...DIRECTION_MEANINGS,
+        "",
+        "Give each card its own key, and use none of these: repo-db, sharpen-what, sharpen-who, sharpen-scope.",
+        "",
+        ...CARD_FIELDS,
+      ].join("\n"),
+    );
+  });
+
+  it("a later round whose last round was accepted, and readiness judged it ready", async () => {
+    const request = aSharpenCardsRequest({
+      context: aContext({
+        idea: "Build a scoring sheet to compare eight repos.",
+        title: "Repo comparison",
+        decisions: [],
+      }),
+      originalIdea: "Build a scoring sheet to compare eight repos.",
+      readiness: aNotReadyVerdict({ unknowns: [] }),
+      rounds: [aSharpeningRound({ verdict: "ready", missing: [] })],
+      usedKeys: ["sharpen-what", "sharpen-who"],
+    });
+    const { prompt } = await sentForSharpening(request);
+    expect(prompt).toBe(
+      [
+        SHARPEN_CARDS_OPENING_LINE,
+        "",
+        "## The idea, in the owner's words",
+        "",
+        "Title: Repo comparison",
+        "",
+        "Build a scoring sheet to compare eight repos.",
+        "",
+        "## The verdict this round answers",
+        "",
+        "Objective: none stated",
+        "Current readiness: not-ready",
+        MISSING_NOW,
+        "",
+        "## Earlier rounds",
+        "",
+        "### Round 1",
+        "",
+        "What gets built?",
+        "Answer: A scoring sheet for the repos",
+        "",
+        "Who uses it?",
+        "Answer: I don't know",
+        "",
+        "Accepted idea: Build a scoring sheet to compare eight repos.",
+        "Edited by the owner: no",
+        "Readiness: ready",
+        "",
+        "## The design tree",
+        "",
+        "(none)",
+        "",
+        ...CARDS_TASK_INTRO,
+        AIM_LINE,
+        "The cards follow readiness's latest missing items and the earlier",
+        "answers: never re-ask what a settling answer already gave.",
+        ...DIRECTION_MEANINGS,
+        "",
+        "Give each card its own key, and use none of these: sharpen-what, sharpen-who.",
+        "",
+        ...CARD_FIELDS,
+      ].join("\n"),
+    );
+  });
+
+  it("a rewrite after a round readiness never judged, with this round's answers in card order", async () => {
+    const request = aSharpenRewriteRequest({
+      context: aContext({
+        idea: "Decide how to evaluate eight repos.",
+        title: "Repo comparison",
+        decisions: [],
+      }),
+      rounds: [aSharpeningRound({ verdict: null, missing: [] })],
+    });
+    const { prompt } = await sentForSharpening(request);
+    expect(prompt).toBe(
+      [
+        SHARPEN_REWRITE_OPENING_LINE,
+        "",
+        "## The idea, in the owner's words",
+        "",
+        "Title: Repo comparison",
+        "",
+        "Decide how to evaluate eight repos.",
+        "",
+        "## The idea as first written",
+        "",
+        "Decide how to evaluate repos.",
+        "",
+        "## The verdict this round answers",
+        "",
+        "Objective: none stated",
+        "Unknowns: What would actually get built; Who the comparison is for",
+        "Current readiness: not-ready",
+        MISSING_NOW,
+        "",
+        "## Earlier rounds",
+        "",
+        "### Round 1",
+        "",
+        "What gets built?",
+        "Answer: A scoring sheet for the repos",
+        "",
+        "Who uses it?",
+        "Answer: I don't know",
+        "",
+        "Accepted idea: Build a scoring sheet to compare eight repos.",
+        "Edited by the owner: no",
+        "Readiness: not judged",
+        "",
+        "## This round's answers",
+        "",
+        "What gets built?",
+        "Answer: A training plan tracker",
+        "",
+        "Who uses it?",
+        "Answer: I don't know",
+        "",
+        "What exists when it is done?",
+        "Answer: My club follows its plans week by week",
+        "",
+        "## The design tree",
+        "",
+        "(none)",
+        "",
+        "## Your task: rewrite the idea",
+        "",
+        "Return:",
+        "",
+        "- `idea`: the idea rewritten in the owner's own voice, from this round's",
+        "  answers and the earlier rounds. It must differ from the current idea.",
+        "The idea must be at most 2000 characters.",
+        "- `uses`: one entry per settling card, `{ cardKey, how }`, saying how the",
+        "  idea uses its answer. A card answered `I don't know` gets no entry.",
+        "Name each of these keys exactly once in uses: what, outcome.",
+        "- `note`: one line for the owner on what changed.",
+      ].join("\n"),
+    );
   });
 });
