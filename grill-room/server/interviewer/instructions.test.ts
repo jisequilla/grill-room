@@ -13,6 +13,7 @@ import {
 } from "./instructions.js";
 import {
   buildPrompt,
+  READINESS_OVERRIDE_SENTENCE,
   SUMMARY_MAX_BULLETS,
   SUMMARY_MIN_BULLETS,
 } from "./prompt.js";
@@ -121,6 +122,50 @@ describe("the synthesize-spec prompt", () => {
     );
     expect(prompt).toContain("starting at the `## Summary` heading");
     expect(prompt).toContain(loadSpecTemplate().trimEnd());
+  });
+
+  it("says nothing about readiness without an override", () => {
+    const absent = buildPrompt(aSynthesizeSpecRequest());
+    const none = buildPrompt(aSynthesizeSpecRequest({ readinessOverride: null }));
+
+    expect(absent).not.toContain(READINESS_OVERRIDE_SENTENCE);
+    expect(none).not.toContain(READINESS_OVERRIDE_SENTENCE);
+    expect(none).toBe(absent);
+  });
+
+  it("asks Further Notes for the sentence and what readiness found missing, after the open questions", () => {
+    const prompt = buildPrompt(
+      aSynthesizeSpecRequest({
+        openQuestions: ["Which auth provider?"],
+        readinessOverride: { missing: ["A buildable objective", "A user"] },
+      }),
+    );
+
+    expect(prompt).toContain(
+      [
+        "- These were kept as named open questions; they belong in Further Notes:",
+        "",
+        "- Which auth provider?",
+        "",
+        `- Further Notes must include this sentence exactly: "${READINESS_OVERRIDE_SENTENCE}"`,
+        "Follow it with what readiness found missing, one `- ` bullet each:",
+        "",
+        "- A buildable objective",
+        "- A user",
+        "",
+        "Return the whole spec as markdown",
+      ].join("\n"),
+    );
+  });
+
+  it("asks for the sentence alone when readiness found nothing missing", () => {
+    const prompt = buildPrompt(
+      aSynthesizeSpecRequest({ readinessOverride: { missing: [] } }),
+    );
+
+    expect(prompt).toContain(
+      `- Further Notes must include this sentence exactly: "${READINESS_OVERRIDE_SENTENCE}"\n\nReturn the whole spec`,
+    );
   });
 });
 

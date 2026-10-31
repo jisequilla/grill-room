@@ -131,6 +131,7 @@ export default defineAction({
               report?.id ?? null,
             ),
             readinessTurnId: recorder?.turnId ?? null,
+            readinessOverrideJson: null,
             updatedAt: now,
           })
           .where(eq(schema.sessions.id, sessionId));

@@ -70,6 +70,7 @@ import {
   sanitizeTicketSlug,
 } from "./export.js";
 import type { AdrConvention } from "./project-facts.js";
+import { readinessOverride } from "./readiness.js";
 import { latestScoutReport } from "./scout-report.js";
 import { describeDecisions } from "./tree.js";
 // Type-only: erased at compile time, so this never becomes a runtime import.
@@ -231,6 +232,13 @@ export interface HandoffSource {
    * {@link handoffFingerprint}.
    */
   ruleWaivers?: readonly HandoffRuleWaiver[];
+  /**
+   * The not-ready verdict the owner started the interview past, with what
+   * readiness found missing; null or absent when there was none. Fixed once a
+   * round exists, and a session needs rounds before it has a spec, so it never
+   * enters {@link handoffFingerprint}.
+   */
+  readinessOverride?: { missing: readonly string[] } | null;
 }
 
 /** An owner's acceptance of a rule conflict on one ticket, with the reason. */
@@ -1399,6 +1407,21 @@ function buildRecordSection(source: HandoffSource): string | null {
   return lines.join("\n");
 }
 
+function readinessOverrideSection(missing: readonly string[]): string {
+  const intro =
+    "The owner started the interview although readiness judged the idea not ready.";
+  if (missing.length === 0) {
+    return ["## Grilled past a not-ready verdict", "", intro].join("\n");
+  }
+  return [
+    "## Grilled past a not-ready verdict",
+    "",
+    `${intro} Readiness found this missing:`,
+    "",
+    ...missing.map((item) => `- ${item}`),
+  ].join("\n");
+}
+
 function uncoveredStoriesSection(stories: readonly UserStory[]): string {
   return [
     "## Stories no ticket implements",
@@ -1615,6 +1638,9 @@ export function renderHandoffMarkdown(
   const sections = [
     `# Handoff: ${source.session.title}`,
     ...openingSections(source.spec.markdown, source.session.idea),
+    ...(source.readinessOverride
+      ? [readinessOverrideSection(source.readinessOverride.missing)]
+      : []),
     [
       "## Where things are",
       "",
@@ -2289,8 +2315,17 @@ export async function loadHandoffSource(
       adrTicket,
       consistencyNotCurrent,
       ruleWaivers,
+      readinessOverride: overrideMissing(session),
     },
   };
+}
+
+/** What readiness found missing when the owner grilled past it, or null when they did not. */
+function overrideMissing(
+  session: typeof schema.sessions.$inferSelect,
+): { missing: readonly string[] } | null {
+  const override = readinessOverride(session);
+  return override ? { missing: override.missing } : null;
 }
 
 export type HandoffRow = typeof schema.handoffs.$inferSelect;

@@ -2628,6 +2628,210 @@ describe("idea readiness", () => {
       expect(await canEdit()).toBe(false);
     });
   });
+
+  describe("starting past a not-ready verdict", () => {
+    const M = ["A single buildable thing, not a method for deciding one"];
+    const T0 = new Date("2026-10-31T09:00:00.000Z");
+    const T1 = new Date("2026-10-31T10:00:00.000Z");
+    const T2 = new Date("2026-10-31T11:00:00.000Z");
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function at(time: Date) {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(time);
+    }
+
+    async function storedOverride(sessionId: string): Promise<unknown> {
+      const [row] = await getDb()
+        .select({ json: schema.sessions.readinessOverrideJson })
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, sessionId));
+      return row?.json == null ? null : JSON.parse(row.json);
+    }
+
+    /** A session judged not ready, missing `M`, at T0, with no rounds. */
+    async function judgedNotReady() {
+      const session = await aSession();
+      at(T0);
+      scriptInterviewer([judged({ verdict: "not-ready", missing: M })]);
+      await assessReadiness.run({ sessionId: session.id });
+      return session;
+    }
+
+    async function startedWithFailingTurn() {
+      const session = await judgedNotReady();
+      at(T1);
+      scriptInterviewer([
+        {
+          kind: "propose-round",
+          error: new InterviewerError("failed", "The turn died."),
+        },
+      ]);
+      await expect(
+        requestNextRound.run({ sessionId: session.id }),
+      ).rejects.toThrow("The turn died.");
+      return session;
+    }
+
+    const rowOneOverride = {
+      missing: M,
+      verdictJudgedAt: T0.toISOString(),
+      at: T1.toISOString(),
+    };
+
+    it("row 1: records the not-ready verdict and opens the first round", async () => {
+      const session = await judgedNotReady();
+      at(T1);
+      scriptInterviewer([round(proposed())]);
+
+      const opened = await requestNextRound.run({ sessionId: session.id });
+
+      expect(opened.round?.decisions).toHaveLength(1);
+      expect(await storedOverride(session.id)).toEqual(rowOneOverride);
+    });
+
+    it("row 2: records nothing past a ready verdict", async () => {
+      const session = await aSession();
+      scriptInterviewer([judged({ verdict: "ready" })]);
+      await assessReadiness.run({ sessionId: session.id });
+      scriptInterviewer([round(proposed())]);
+
+      const opened = await requestNextRound.run({ sessionId: session.id });
+
+      expect(opened.round?.decisions).toHaveLength(1);
+      expect(await storedOverride(session.id)).toBeNull();
+    });
+
+    it("row 3: records nothing without a verdict", async () => {
+      const session = await aSession();
+      scriptInterviewer([round(proposed())]);
+
+      const opened = await requestNextRound.run({ sessionId: session.id });
+
+      expect(opened.round?.decisions).toHaveLength(1);
+      expect(await storedOverride(session.id)).toBeNull();
+    });
+
+    it("row 4: records nothing past a not-ready verdict of an earlier idea", async () => {
+      const session = await aSession();
+      await getDb()
+        .update(schema.sessions)
+        .set({
+          readinessJson: JSON.stringify({
+            ideaJudged: "An earlier idea, since replaced.",
+            result: anAssessReadinessResult({ verdict: "not-ready", missing: M }),
+            judgedAt: T0.toISOString(),
+            scoutReportId: null,
+          }),
+        })
+        .where(eq(schema.sessions.id, session.id));
+      scriptInterviewer([round(proposed())]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(await storedOverride(session.id)).toBeNull();
+    });
+
+    it("row 5: records nothing past a verdict whose scout report has gone stale", async () => {
+      const { session } = await aSessionWithProject();
+      scriptInterviewer([
+        { kind: "scout-project", result: aScoutProjectResult() },
+        judged({ verdict: "not-ready", missing: M }),
+      ]);
+      await assessReadiness.run({ sessionId: session.id });
+      scriptInterviewer([
+        {
+          kind: "scout-project",
+          result: aScoutProjectResult({
+            previousDecisions: [
+              { key: "no-message-broker", change: "unchanged", statement: null },
+            ],
+          }),
+        },
+      ]);
+      await scoutProject.run({ sessionId: session.id });
+      scriptInterviewer([round(proposed())]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(await storedOverride(session.id)).toBeNull();
+    });
+
+    it("row 6: leaves the override as it was once a round exists", async () => {
+      const session = await judgedNotReady();
+      at(T1);
+      scriptInterviewer([
+        round(proposed()),
+        round(proposed({ key: "tone", title: "How blunt should it be?" })),
+      ]);
+      const first = await requestNextRound.run({ sessionId: session.id });
+      await saveDraftAnswer.run({
+        decisionId: first.round!.decisions[0]!.id,
+        answerKind: "accepted-recommendation",
+      });
+
+      at(T2);
+      await submitRound.run({ id: first.round!.id });
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(await storedOverride(session.id)).toEqual(rowOneOverride);
+    });
+
+    it("row 7: records nothing when a working turn refuses the request", async () => {
+      const session = await judgedNotReady();
+      await setTurnWorking(session.id);
+
+      await expect(
+        requestNextRound.run({ sessionId: session.id }),
+      ).rejects.toMatchObject({ errorCode: "turn-in-progress" });
+
+      expect(await storedOverride(session.id)).toBeNull();
+    });
+
+    it("row 8: keeps the override when the first round's turn fails", async () => {
+      const session = await startedWithFailingTurn();
+
+      expect(await storedOverride(session.id)).toEqual(rowOneOverride);
+    });
+
+    it("row 8b: a second start overwrites the override, changing only when", async () => {
+      const session = await startedWithFailingTurn();
+      at(T2);
+      scriptInterviewer([round(proposed())]);
+
+      await requestNextRound.run({ sessionId: session.id });
+
+      expect(await storedOverride(session.id)).toEqual({
+        missing: M,
+        verdictJudgedAt: T0.toISOString(),
+        at: T2.toISOString(),
+      });
+    });
+
+    it("row 9: editing the idea clears the override", async () => {
+      const session = await startedWithFailingTurn();
+
+      const updated = await updateSessionIdea.run({
+        sessionId: session.id,
+        idea: "Build a readiness judge for ideas.",
+      });
+
+      expect(updated?.readinessJson).toBeNull();
+      expect(await storedOverride(session.id)).toBeNull();
+    });
+
+    it("row 10: judging the idea again clears the override", async () => {
+      const session = await startedWithFailingTurn();
+      scriptInterviewer([judged({ verdict: "not-ready", missing: M })]);
+
+      await assessReadiness.run({ sessionId: session.id });
+
+      expect(await storedOverride(session.id)).toBeNull();
+    });
+  });
 });
 
 describe("propose-round turn records", () => {

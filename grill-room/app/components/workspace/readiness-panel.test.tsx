@@ -39,6 +39,8 @@ function render(
       working={working}
       isAssessing={isAssessing}
       onAssess={() => {}}
+      onEditIdea={() => {}}
+      onGrillAsIs={() => {}}
       canAssess={canAssess}
     />,
   );
@@ -182,6 +184,63 @@ describe("ReadinessPanel", () => {
     expect(html).toContain('data-testid="readiness-panel"');
     expect(html).not.toContain('data-testid="readiness-assess"');
     expect(html).not.toContain('data-testid="readiness-reassess"');
+  });
+});
+
+describe("ways forward", () => {
+  const notReady = () =>
+    judged({ verdict: "not-ready", missing: ["A buildable objective"] });
+
+  /** The opening tag of the element carrying `testId`. */
+  function tag(html: string, testId: string): string {
+    const at = html.indexOf(`data-testid="${testId}"`);
+    expect(at, `${testId} is rendered`).toBeGreaterThan(-1);
+    return html.slice(html.lastIndexOf("<", at), html.indexOf(">", at) + 1);
+  }
+
+  it("row 19: offers both ways past a not-ready verdict", () => {
+    const html = render(notReady());
+
+    expect(html).toContain('data-testid="readiness-ways"');
+    expect(tag(html, "readiness-edit-idea")).not.toContain(DISABLED);
+    expect(tag(html, "readiness-grill-as-is")).not.toContain(DISABLED);
+  });
+
+  it("row 20: offers none past a ready verdict", () => {
+    expect(render(judged())).not.toContain('data-testid="readiness-ways"');
+  });
+
+  it("row 21: offers none before a verdict", () => {
+    expect(render(null)).not.toContain('data-testid="readiness-ways"');
+  });
+
+  it("row 22: offers none once a round exists", () => {
+    expect(render(notReady(), { canAssess: false })).not.toContain(
+      'data-testid="readiness-ways"',
+    );
+  });
+
+  it("both buttons are disabled while working", () => {
+    const html = render(notReady(), { working: true });
+
+    expect(tag(html, "readiness-edit-idea")).toContain(DISABLED);
+    expect(tag(html, "readiness-grill-as-is")).toContain(DISABLED);
+  });
+
+  it("both buttons are disabled while assessing", () => {
+    const html = render(notReady(), { isAssessing: true });
+
+    expect(tag(html, "readiness-edit-idea")).toContain(DISABLED);
+    expect(tag(html, "readiness-grill-as-is")).toContain(DISABLED);
+  });
+
+  it("Edit the idea comes before Grill it as is", () => {
+    const html = render(notReady());
+    const edit = html.indexOf('data-testid="readiness-edit-idea"');
+    const grill = html.indexOf('data-testid="readiness-grill-as-is"');
+
+    expect(edit).toBeGreaterThan(-1);
+    expect(grill).toBeGreaterThan(edit);
   });
 });
 

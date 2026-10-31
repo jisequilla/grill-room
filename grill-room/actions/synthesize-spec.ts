@@ -5,9 +5,14 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { specSections } from "../server/consistency.js";
+import { normaliseQuote, specSections } from "../server/consistency.js";
 import { getInterviewer } from "../server/interviewer/index.js";
-import { SUMMARY_MAX_BULLETS, SUMMARY_MIN_BULLETS } from "../server/interviewer/prompt.js";
+import {
+  READINESS_OVERRIDE_SENTENCE,
+  SUMMARY_MAX_BULLETS,
+  SUMMARY_MIN_BULLETS,
+} from "../server/interviewer/prompt.js";
+import { readinessOverride } from "../server/readiness.js";
 import type {
   ReopenedRepoDecision,
   SynthesizeSpecResult,
@@ -54,14 +59,35 @@ function missingSpecHeadings(markdown: string, hasSummary: boolean): string[] {
 }
 
 /**
+ * Why a spec's Further Notes do not say the owner grilled the idea past a
+ * not-ready verdict; empty when they do, or when there is no Further Notes
+ * section, which the missing-section reason already names.
+ */
+function readinessOverrideReasons(
+  sections: { name: string; text: string }[],
+): string[] {
+  const furtherNotes = sections.find((section) => section.name === "Further Notes");
+  if (!furtherNotes) return [];
+  const sentence = normaliseQuote(READINESS_OVERRIDE_SENTENCE);
+  if (normaliseQuote(furtherNotes.text).includes(sentence)) return [];
+  return [`## Further Notes must include this sentence: ${READINESS_OVERRIDE_SENTENCE}`];
+}
+
+/**
  * Why a synthesized spec is refused; an empty list accepts it. The template's
  * seven sections must be present, the Summary must exist and open the spec,
  * and the first Summary must hold the bounded number of top-level bullets.
+ * With `readinessOverride`, Further Notes must also say the owner grilled the
+ * idea although readiness judged it not ready; that reason comes last.
  */
-export function specRefusalReasons(markdown: string): string[] {
+export function specRefusalReasons(
+  markdown: string,
+  { readinessOverride = false }: { readinessOverride?: boolean } = {},
+): string[] {
   const sections = specSections(markdown);
   const summary = sections.find((section) => section.name === "Summary");
   const reasons: string[] = [];
+  const overrideReasons = readinessOverride ? readinessOverrideReasons(sections) : [];
 
   const missing = missingSpecHeadings(markdown, summary !== undefined);
   if (missing.length > 0) {
@@ -69,7 +95,7 @@ export function specRefusalReasons(markdown: string): string[] {
       `The spec is missing the following required section${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}.`,
     );
   }
-  if (!summary) return reasons;
+  if (!summary) return [...reasons, ...overrideReasons];
 
   const first = sections[0]!;
   if (first.name !== "Summary") {
@@ -86,7 +112,7 @@ export function specRefusalReasons(markdown: string): string[] {
       `The Summary section has ${bullets} top-level ${bullets === 1 ? "bullet" : "bullets"}; it needs ${SUMMARY_MIN_BULLETS} to ${SUMMARY_MAX_BULLETS}.`,
     );
   }
-  return reasons;
+  return [...reasons, ...overrideReasons];
 }
 
 /** One dispositioned decision, as it belongs in the spec: title, then body, then the user's note. */
@@ -186,6 +212,7 @@ export default defineAction({
           )
           .map(formatDisposition);
         const reopenedRepoDecisions = rows.flatMap(reopenedRepoDecision);
+        const override = readinessOverride(session!);
 
         const interviewer = getInterviewer();
 
@@ -210,11 +237,15 @@ export default defineAction({
                 outOfScope,
                 openQuestions,
                 reopenedRepoDecisions,
+                readinessOverride: override ? { missing: override.missing } : null,
                 rejectionReason,
               },
               observer,
             ),
-          reasonsToRefuse: (result) => specRefusalReasons(result.markdown),
+          reasonsToRefuse: (result) =>
+            specRefusalReasons(result.markdown, {
+              readinessOverride: override !== null,
+            }),
           exhausted: (lastReason) =>
             new TurnRejected(
               "invalid-spec",

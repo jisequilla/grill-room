@@ -28,14 +28,28 @@ export function SessionIdea({
   idea,
   canEdit = false,
   onSave,
+  editRequest = 0,
 }: {
   idea: string;
   /** No round yet and no turn working: the only time the idea may change. */
   canEdit?: boolean;
   onSave?: (idea: string) => Promise<unknown>;
+  /**
+   * A counter another control increments to open the editor, such as the
+   * readiness panel's "Edit the idea". Each increase opens it once.
+   */
+  editRequest?: number;
 }) {
   const [edit, setEdit] = useState<IdeaEditState>(READING);
   const [saving, setSaving] = useState(false);
+  const [handledRequest, setHandledRequest] = useState(0);
+
+  // Handled while rendering rather than in an effect, so the editor is in the
+  // very render that follows the request; its textarea takes focus on mount.
+  if (canEdit && onSave && editRequest > handledRequest) {
+    setHandledRequest(editRequest);
+    setEdit(startEditing(idea));
+  }
 
   // A round opening or a turn starting elsewhere ends the chance to edit; the
   // open editor goes with it rather than offering a save that would be refused.

@@ -55,6 +55,8 @@ export function ReadinessPanel({
   working,
   isAssessing,
   onAssess,
+  onEditIdea,
+  onGrillAsIs,
   turn = null,
   canAssess = true,
 }: {
@@ -64,6 +66,13 @@ export function ReadinessPanel({
   /** This tab's assess request is in flight. */
   isAssessing: boolean;
   onAssess: () => void;
+  /** A not-ready verdict's first way forward: open the idea editor. */
+  onEditIdea: () => void;
+  /**
+   * A not-ready verdict's other way forward: start the interview anyway. The
+   * server records that it started past the verdict, whatever control asks.
+   */
+  onGrillAsIs: () => void;
   /**
    * The turn that produced the current judgment (the session's
    * `readinessTurnId`), collapsed beside the verdict. The live attempt log
@@ -202,7 +211,39 @@ export function ReadinessPanel({
             </Section>
           ) : null}
         </dl>
-      ) : (
+      ) : null}
+
+      {result?.verdict === "not-ready" && canAssess ? (
+        <div
+          className="flex flex-col gap-3 border-t pt-4"
+          data-testid="readiness-ways"
+        >
+          <p className="text-sm">{t("workspace.readinessWaysIntro")}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={onEditIdea}
+              data-testid="readiness-edit-idea"
+            >
+              {t("workspace.readinessEditIdea")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy}
+              onClick={onGrillAsIs}
+              data-testid="readiness-grill-as-is"
+            >
+              {t("workspace.readinessGrillAsIs")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {result ? null : (
         <p className="text-sm text-muted-foreground">
           {t("workspace.readinessDescription")}
         </p>

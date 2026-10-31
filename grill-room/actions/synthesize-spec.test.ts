@@ -269,6 +269,92 @@ describe("the bounds the prompt states are the bounds the check enforces", () =>
   });
 });
 
+const SENTENCE =
+  "The owner chose to grill this idea although readiness judged it not ready.";
+const OVERRIDE_REASON = `## Further Notes must include this sentence: ${SENTENCE}`;
+const M = ["A single buildable thing, not a method for deciding one"];
+
+/** `base` with 6 Summary bullets, its section `name` holding `body` instead of its plain line. */
+function baseWith(name: string, body: string[], summary = bullets(6)): string {
+  const sections = baseSections(summary);
+  const index = sections.findIndex((section) => section[0] === `## ${name}`);
+  sections[index] = block(`## ${name}`, ["", ...body]);
+  return join(sections);
+}
+
+describe("specRefusalReasons with a readiness override", () => {
+  const override = { readinessOverride: true };
+
+  it("row 11: accepts the sentence as Further Notes' line", () => {
+    expect(specRefusalReasons(baseWith("Further Notes", [SENTENCE]), override)).toEqual([]);
+  });
+  it("row 12: refuses Further Notes without the sentence", () => {
+    expect(specRefusalReasons(base(bullets(6)), override)).toEqual([OVERRIDE_REASON]);
+  });
+  it("row 13: refuses the sentence in another section only", () => {
+    expect(
+      specRefusalReasons(baseWith("Problem Statement", [SENTENCE]), override),
+    ).toEqual([OVERRIDE_REASON]);
+  });
+  it("row 14: accepts the sentence broken over two lines", () => {
+    const broken = [
+      "The owner chose to grill this idea although",
+      "readiness judged it not ready.",
+    ];
+    expect(specRefusalReasons(baseWith("Further Notes", broken), override)).toEqual([]);
+  });
+  it("row 15: asks for nothing without an override", () => {
+    expect(specRefusalReasons(base(bullets(6)), { readinessOverride: false })).toEqual([]);
+  });
+  it("row 16: gives only the missing-section reason without Further Notes", () => {
+    const sections = baseSections(bullets(6)).filter(
+      (section) => section[0] !== "## Further Notes",
+    );
+    expect(specRefusalReasons(join(sections), override)).toEqual([
+      "The spec is missing the following required section: ## Further Notes.",
+    ]);
+  });
+  it("row 17: gives the override reason after the Summary count reason", () => {
+    expect(specRefusalReasons(base(bullets(4)), override)).toEqual([
+      "The Summary section has 4 top-level bullets; it needs 5 to 10.",
+      OVERRIDE_REASON,
+    ]);
+  });
+  it("row 17b: refuses a sentence that says the idea was judged ready", () => {
+    expect(
+      specRefusalReasons(
+        baseWith("Further Notes", [
+          "The owner chose to grill this idea although readiness judged it ready.",
+        ]),
+        override,
+      ),
+    ).toEqual([OVERRIDE_REASON]);
+  });
+  it("row 18: gives the override reason after the missing Summary", () => {
+    const sections = baseSections(bullets(6)).slice(1);
+    expect(specRefusalReasons(join(sections), override)).toEqual([
+      "The spec is missing the following required section: ## Summary.",
+      OVERRIDE_REASON,
+    ]);
+  });
+});
+
+describe("the sentence the prompt asks for passes the check", () => {
+  it("the sentence the prompt asks for passes the check", () => {
+    const prompt = buildPrompt(
+      aSynthesizeSpecRequest({ readinessOverride: { missing: M } }),
+    );
+    const match = /Further Notes must include this sentence exactly: "([^"]+)"/.exec(prompt);
+    expect(match).not.toBeNull();
+
+    expect(
+      specRefusalReasons(baseWith("Further Notes", [match![1]!]), {
+        readinessOverride: true,
+      }),
+    ).toEqual([]);
+  });
+});
+
 describe("synthesize-spec", () => {
   useTestDatabase();
   afterEach(resetInterviewer);
@@ -466,6 +552,50 @@ describe("synthesize-spec", () => {
       expect(latest!.outcome).toBe("invalid-spec");
       expect((await getSpec.run({ sessionId: session.id })).spec).toBeNull();
     });
+  });
+
+  it("a grilled-as-is session's spec must say so", async () => {
+    const session = await aSession();
+    await confirm(session.id);
+    await getDb()
+      .update(schema.sessions)
+      .set({
+        readinessOverrideJson: JSON.stringify({
+          missing: M,
+          verdictJudgedAt: "2026-10-31T09:00:00.000Z",
+          at: "2026-10-31T10:00:00.000Z",
+        }),
+      })
+      .where(eq(schema.sessions.id, session.id));
+    const retry = goodSpecMarkdown().replace(
+      "## Further Notes\n\n- None.",
+      `## Further Notes\n\n${SENTENCE}\n\n- ${M[0]}`,
+    );
+    const interviewer = scriptInterviewer([
+      specTurn(goodSpecMarkdown()),
+      specTurn(retry),
+    ]);
+
+    const stored = await synthesizeSpec.run({ sessionId: session.id });
+
+    expect(interviewer.requests[0]!.kind).toBe("synthesize-spec");
+    expect(
+      (interviewer.requests[0] as { readinessOverride?: unknown }).readinessOverride,
+    ).toEqual({ missing: M });
+    expect(interviewer.requests[1]?.rejectionReason).toContain(OVERRIDE_REASON);
+    expect(stored.markdown).toBe(retry);
+  });
+
+  it("a session started without an override sends none", async () => {
+    const session = await aSession();
+    await confirm(session.id);
+    const interviewer = scriptInterviewer([specTurn(goodSpecMarkdown())]);
+
+    await synthesizeSpec.run({ sessionId: session.id });
+
+    expect(
+      (interviewer.requests[0] as { readinessOverride?: unknown }).readinessOverride,
+    ).toBeNull();
   });
 });
 

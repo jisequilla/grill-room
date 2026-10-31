@@ -137,6 +137,52 @@ export function storeReadiness(
   return JSON.stringify(stored);
 }
 
+const readinessOverrideSchema = z.object({
+  missing: z.array(z.string()),
+  verdictJudgedAt: z.string(),
+  at: z.string(),
+});
+
+/**
+ * What `gr_sessions.readiness_override_json` holds: the not-ready verdict the
+ * owner started the interview past, as it stood then (what it found missing,
+ * when it was judged), and when the interview started.
+ */
+export type ReadinessOverride = z.infer<typeof readinessOverrideSchema>;
+
+/** Serializes an override of `verdict`, recorded at `at`, for storage. */
+export function storeReadinessOverride(
+  verdict: StoredReadiness,
+  at: string,
+): string {
+  const stored: ReadinessOverride = {
+    missing: verdict.result.missing,
+    verdictJudgedAt: verdict.judgedAt,
+    at,
+  };
+  return JSON.stringify(stored);
+}
+
+/**
+ * The session's recorded override, parsed, or null when it has none or when
+ * what is stored cannot be read.
+ */
+export function readinessOverride(
+  session: Pick<typeof schema.sessions.$inferSelect, "readinessOverrideJson">,
+): ReadinessOverride | null {
+  if (!session.readinessOverrideJson) return null;
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(session.readinessOverrideJson);
+  } catch {
+    return null;
+  }
+
+  const parsed = readinessOverrideSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
 /**
  * Case, whitespace and trailing-punctuation insensitive form, for comparing an
  * evidence item against the objective or the idea it was drawn from.

@@ -1,6 +1,7 @@
 import { DEMO_SCENARIO, loadDemoScenario } from "./demo-scenario.js";
 import { InterviewerError } from "./errors.js";
 import { observeCall, schemaIssuesReason, type CallResult } from "./observe.js";
+import { READINESS_OVERRIDE_SENTENCE } from "./prompt.js";
 import { resultSchemas } from "./schemas.js";
 import type { RequestKind, ResultFor, ResultInputFor } from "./schemas.js";
 import type {
@@ -252,6 +253,7 @@ export const fakeScenarios: Record<string, Scenario> = {
   [DEFAULT_SCENARIO]: { turns: cannedInterviewTurns() },
   "readiness-ready": { turns: readinessReadyTurns() },
   "readiness-not-ready": { turns: readinessNotReadyTurns() },
+  "readiness-not-ready-grill": { turns: readinessNotReadyGrillTurns() },
   "reopen-stale-review": { turns: reopenStaleReviewTurns() },
   supersession: { turns: supersessionTurns() },
   replacement: { turns: replacementTurns() },
@@ -675,6 +677,38 @@ export function readinessNotReadyTurns(): ScriptedTurn[] {
         missing: ["A single buildable thing, not a method for deciding one"],
       },
     },
+  ];
+}
+
+/**
+ * {@link readinessNotReadyTurns}, then the owner grills the idea anyway:
+ * {@link cannedInterviewTurns}, its spec's Further Notes saying the idea was
+ * grilled past the verdict, with what readiness found missing. What
+ * `readiness-not-ready-grill` schedules.
+ */
+export function readinessNotReadyGrillTurns(): ScriptedTurn[] {
+  const [judged] = readinessNotReadyTurns();
+  const missing =
+    judged && "result" in judged && "missing" in judged.result
+      ? judged.result.missing
+      : [];
+  return [
+    ...readinessNotReadyTurns(),
+    ...cannedInterviewTurns().map((turn): ScriptedTurn => {
+      if (turn.kind !== "synthesize-spec" || !("result" in turn)) return turn;
+      const markdown = turn.result.markdown.replace(
+        "## Further Notes\n",
+        [
+          "## Further Notes",
+          "",
+          READINESS_OVERRIDE_SENTENCE,
+          "",
+          ...missing.map((item) => `- ${item}`),
+          "",
+        ].join("\n"),
+      );
+      return { kind: "synthesize-spec", result: { markdown } };
+    }),
   ];
 }
 

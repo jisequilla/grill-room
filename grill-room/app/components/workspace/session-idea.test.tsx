@@ -28,4 +28,30 @@ describe("SessionIdea", () => {
     expect(html).toContain("A PWA for marathon training");
     expect(html).not.toContain('data-testid="idea-edit"');
   });
+
+  it("opens the editor when an edit is requested", () => {
+    const html = renderToStaticMarkup(
+      <SessionIdea
+        idea="A PWA for marathon training"
+        canEdit
+        onSave={save}
+        editRequest={1}
+      />,
+    );
+
+    expect(html).toContain('data-testid="idea-textarea"');
+  });
+
+  it("stays closed on a request while the idea is locked", () => {
+    const html = renderToStaticMarkup(
+      <SessionIdea
+        idea="A PWA for marathon training"
+        canEdit={false}
+        onSave={save}
+        editRequest={1}
+      />,
+    );
+
+    expect(html).not.toContain('data-testid="idea-textarea"');
+  });
 });

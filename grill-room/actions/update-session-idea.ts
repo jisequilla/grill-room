@@ -42,6 +42,7 @@ export default defineAction({
       .set({
         idea: trimmed,
         readinessJson: null,
+        readinessOverrideJson: null,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.sessions.id, sessionId))
