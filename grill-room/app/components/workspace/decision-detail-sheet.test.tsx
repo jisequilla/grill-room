@@ -1,8 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-const { mutate, onSelects, mutationOptions, toastError, errorMessage } = vi.hoisted(() => ({
+const { mutate, onSelects, mutationActions, mutationOptions, toastError, errorMessage } = vi.hoisted(() => ({
   mutate: vi.fn(),
+  mutationActions: [] as string[],
   onSelects: {} as Record<string, () => void>,
   mutationOptions: {} as { onError?: (error: unknown) => void },
   toastError: vi.fn(),
@@ -12,7 +13,8 @@ const { mutate, onSelects, mutationOptions, toastError, errorMessage } = vi.hois
 vi.mock("sonner", () => ({ toast: { error: toastError } }));
 
 vi.mock("@agent-native/core/client/hooks", () => ({
-  useActionMutation: (_name: string, options: { onError?: (error: unknown) => void }) => {
+  useActionMutation: (name: string, options: { onError?: (error: unknown) => void }) => {
+    mutationActions.push(name);
     mutationOptions.onError = options.onError;
     return { mutate, isPending: false };
   },
@@ -207,7 +209,10 @@ describe("DecisionDetailSheet set-aside decisions", () => {
 
   it("the Move to menu offers the other two targets, in order, and moves on select", () => {
     mutate.mockClear();
+    mutationActions.length = 0;
     const html = render(setAside());
+
+    expect(mutationActions).toContain("move-set-aside-decision");
 
     expect(html).toMatch(/data-testid="move-set-aside"[^>]*>(<svg.*?<\/svg>)?Move to…</);
     const items = [...html.matchAll(/data-testid="(move-to-[a-z-]+)"[^>]*>([^<]*)</g)].map(
