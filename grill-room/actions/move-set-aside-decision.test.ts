@@ -79,7 +79,7 @@ async function setTurnWorking(sessionId: string) {
 
 async function expectRefusal(
   input: { decisionId: string; target: Target },
-  refusal: { errorCode: string; statusCode: number },
+  refusal: { errorCode: string; statusCode: number; message: string },
 ) {
   const before = await getDb().select().from(schema.decisions);
   await expect(moveSetAsideDecision.run(input)).rejects.toMatchObject(refusal);
@@ -129,7 +129,7 @@ describe("move-set-aside-decision", () => {
   it("row 9: refuses an id that does not exist", async () => {
     await expectRefusal(
       { decisionId: "missing", target: "open-question" },
-      { errorCode: "not-found", statusCode: 404 },
+      { errorCode: "not-found", statusCode: 404 , message: "Decision not found: missing" },
     );
   });
 
@@ -146,7 +146,7 @@ describe("move-set-aside-decision", () => {
 
     await expectRefusal(
       { decisionId: "d-own", target: "builders-call" },
-      { errorCode: "not-set-aside", statusCode: 409 },
+      { errorCode: "not-set-aside", statusCode: 409 , message: `"Own" is not a settled set-aside decision, so there is no target to move.` },
     );
   });
 
@@ -162,7 +162,7 @@ describe("move-set-aside-decision", () => {
 
     await expectRefusal(
       { decisionId: "d-unknown", target: "builders-call" },
-      { errorCode: "not-set-aside", statusCode: 409 },
+      { errorCode: "not-set-aside", statusCode: 409 , message: `"Unknown" is not a settled set-aside decision, so there is no target to move.` },
     );
   });
 
@@ -172,7 +172,7 @@ describe("move-set-aside-decision", () => {
 
     await expectRefusal(
       { decisionId: "d-x", target: "open-question" },
-      { errorCode: "not-set-aside", statusCode: 409 },
+      { errorCode: "not-set-aside", statusCode: 409 , message: `"Where does the data live?" is not a settled set-aside decision, so there is no target to move.` },
     );
   });
 
@@ -182,7 +182,7 @@ describe("move-set-aside-decision", () => {
 
     await expectRefusal(
       { decisionId: "d-x", target: "open-question" },
-      { errorCode: "decision-unplaced", statusCode: 409 },
+      { errorCode: "decision-unplaced", statusCode: 409 , message: `"Where does the data live?" is a user-added decision awaiting the interviewer's placement, so it cannot be moved yet.` },
     );
   });
 
@@ -198,7 +198,7 @@ describe("move-set-aside-decision", () => {
 
     await expectRefusal(
       { decisionId: "d-x", target: "open-question" },
-      { errorCode: "decision-stale", statusCode: 409 },
+      { errorCode: "decision-stale", statusCode: 409 , message: `"Where does the data live?" is stale: the stale review that runs on the next turn resolves it before it can be moved.` },
     );
   });
 
@@ -222,7 +222,7 @@ describe("move-set-aside-decision", () => {
 
     await expectRefusal(
       { decisionId: "d-own", target: "builders-call" },
-      { errorCode: "decision-stale", statusCode: 409 },
+      { errorCode: "decision-stale", statusCode: 409 , message: `"Own" is stale: the stale review that runs on the next turn resolves it before it can be moved.` },
     );
   });
 
@@ -232,7 +232,7 @@ describe("move-set-aside-decision", () => {
 
     await expectRefusal(
       { decisionId: "d-x", target: "builders-call" },
-      { errorCode: "same-target", statusCode: 409 },
+      { errorCode: "same-target", statusCode: 409 , message: `"Where does the data live?" is already set aside as builders-call.` },
     );
   });
 
@@ -243,7 +243,7 @@ describe("move-set-aside-decision", () => {
 
     await expectRefusal(
       { decisionId: "d-x", target: "builders-call" },
-      { errorCode: "same-target", statusCode: 409 },
+      { errorCode: "same-target", statusCode: 409 , message: `"Where does the data live?" is already set aside as builders-call.` },
     );
   });
 
@@ -254,7 +254,7 @@ describe("move-set-aside-decision", () => {
 
     await expectRefusal(
       { decisionId: "d-x", target: "open-question" },
-      { errorCode: "turn-in-progress", statusCode: 409 },
+      { errorCode: "turn-in-progress", statusCode: 409 , message: "The interviewer is working on this session. Wait for the turn to finish before moving a decision." },
     );
   });
 
@@ -272,7 +272,7 @@ describe("move-set-aside-decision", () => {
 
     await expectRefusal(
       { decisionId: "d-own", target: "builders-call" },
-      { errorCode: "not-set-aside", statusCode: 409 },
+      { errorCode: "not-set-aside", statusCode: 409 , message: `"Own" is not a settled set-aside decision, so there is no target to move.` },
     );
   });
 

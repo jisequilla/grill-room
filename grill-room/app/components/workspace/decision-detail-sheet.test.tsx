@@ -1,8 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+const { mutate, onSelects } = vi.hoisted(() => ({
+  mutate: vi.fn(),
+  onSelects: {} as Record<string, () => void>,
+}));
+
 vi.mock("@agent-native/core/client/hooks", () => ({
-  useActionMutation: () => ({ mutate: vi.fn(), isPending: false }),
+  useActionMutation: () => ({ mutate, isPending: false }),
   actionErrorMessage: () => null,
 }));
 
@@ -16,7 +21,7 @@ vi.mock("@agent-native/core/client/i18n", async (importOriginal) => {
     useT: () => {
       const frameworkT = original.useT();
       return ((key: string, ...rest: unknown[]) =>
-        key.startsWith("workspace.setAsideKind")
+        key.startsWith("workspace.setAsideKind") || key === "workspace.moveSetAside"
           ? (messages.workspace as Record<string, string>)[key.slice("workspace.".length)]
           : (frameworkT as (...args: unknown[]) => string)(key, ...rest)) as typeof frameworkT;
     },
@@ -35,6 +40,31 @@ vi.mock("@/components/ui/sheet", () => {
     SheetHeader: Plain,
     SheetTitle: Plain,
     SheetDescription: Plain,
+  };
+});
+
+// A closed Radix menu renders nothing in static markup: show its items inline
+// and keep each item's onSelect so a test can fire it.
+vi.mock("@/components/ui/dropdown-menu", () => {
+  const Plain = ({ children }: { children?: React.ReactNode }) => (
+    <div>{children}</div>
+  );
+  return {
+    DropdownMenu: Plain,
+    DropdownMenuTrigger: Plain,
+    DropdownMenuContent: Plain,
+    DropdownMenuItem: ({
+      children,
+      onSelect,
+      "data-testid": testId,
+    }: {
+      children?: React.ReactNode;
+      onSelect?: () => void;
+      "data-testid"?: string;
+    }) => {
+      onSelects[testId!] = onSelect!;
+      return <button data-testid={testId}>{children}</button>;
+    },
   };
 });
 
@@ -164,5 +194,23 @@ describe("DecisionDetailSheet set-aside decisions", () => {
       expect(html).not.toContain('data-testid="move-set-aside"');
       expect(html).not.toContain('data-testid="set-aside-kind"');
     }
+  });
+
+  it("the Move to menu offers the other two targets, in order, and moves on select", () => {
+    mutate.mockClear();
+    const html = render(setAside());
+
+    expect(html).toMatch(/data-testid="move-set-aside"[^>]*>(<svg.*?<\/svg>)?Move to…</);
+    const items = [...html.matchAll(/data-testid="(move-to-[a-z-]+)"[^>]*>([^<]*)</g)].map(
+      (m) => [m[1], m[2]],
+    );
+    expect(items).toEqual([
+      ["move-to-out-of-scope", "Out of scope"],
+      ["move-to-open-question", "Open question"],
+    ]);
+
+    onSelects["move-to-open-question"]();
+    expect(mutate).toHaveBeenCalledTimes(1);
+    expect(mutate).toHaveBeenCalledWith({ decisionId: "decision-1", target: "open-question" });
   });
 });
