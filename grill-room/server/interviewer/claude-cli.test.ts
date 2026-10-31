@@ -3761,12 +3761,14 @@ describe("what the adapter sends for sharpening", () => {
     (kind) => {
       const make = kind === "sharpen-cards" ? aSharpenCardsRequest : aSharpenRewriteRequest;
 
-      it.each(outcomeRows)("row $row", async ({ round, lines, noStillMissing }) => {
-        const { prompt } = await sentForSharpening(make({ rounds: [round] }));
-        const promptLines = prompt.split("\n");
-        for (const line of lines) expect(promptLines).toContain(line);
-        if (noStillMissing) expect(prompt).not.toContain("Still missing:");
-      });
+      for (const { row, round, lines, noStillMissing } of outcomeRows) {
+        it(`row ${row}`, async () => {
+          const { prompt } = await sentForSharpening(make({ rounds: [round] }));
+          const promptLines = prompt.split("\n");
+          for (const line of lines) expect(promptLines).toContain(line);
+          if (noStillMissing) expect(prompt).not.toContain("Still missing:");
+        });
+      }
 
       it("renders an unknown earlier answer as I don't know", async () => {
         const round = aSharpeningRound({
@@ -3850,9 +3852,9 @@ describe("what the adapter sends for sharpening", () => {
   );
 
   it.each([
-    { row: "27", rounds: ["accepted"], present: false },
-    { row: "28", rounds: ["accepted", "nothing"], present: true },
-    { row: "29", rounds: ["nothing", "accepted"], present: false },
+    { row: 27, rounds: ["accepted"], present: false },
+    { row: 28, rounds: ["accepted", "nothing"], present: true },
+    { row: 29, rounds: ["nothing", "accepted"], present: false },
   ] as const)(
     "after a round that settled nothing, the same missing items are asked differently (row $row)",
     async ({ rounds, present }) => {
