@@ -238,7 +238,9 @@ test.describe("project scout", () => {
       page.waitForResponse("**/_agent-native/actions/get-current-round*"),
       page.reload(),
     ]);
-    await expect(page.getByTestId("round-panel-loading")).toHaveCount(0);
+    // The no-round panel is mounted, so a missing control is a decision of
+    // the panel, not a panel that has not rendered yet.
+    await expect(page.getByTestId("round-panel-no-round")).toBeVisible();
 
     await expect(
       page.getByRole("button", { name: "Start the interview", exact: true }),

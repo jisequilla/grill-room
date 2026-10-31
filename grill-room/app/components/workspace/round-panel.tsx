@@ -202,7 +202,7 @@ export function RoundPanel({
   if (!round.round) {
     const startKind = startPanelKind(hasRounds);
     return (
-      <div>
+      <div data-testid="round-panel-no-round">
         {batch}
         {digest}
         {startKind === "next" && (
