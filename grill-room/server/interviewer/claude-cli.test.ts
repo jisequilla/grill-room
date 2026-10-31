@@ -4109,6 +4109,66 @@ describe("the whole sharpening prompt", () => {
     );
   });
 
+  it("a later round whose last round was accepted, and readiness judged it ready", async () => {
+    const request = aSharpenCardsRequest({
+      context: aContext({
+        idea: "Build a scoring sheet to compare eight repos.",
+        title: "Repo comparison",
+        decisions: [],
+      }),
+      originalIdea: "Build a scoring sheet to compare eight repos.",
+      readiness: aNotReadyVerdict({ unknowns: [] }),
+      rounds: [aSharpeningRound({ verdict: "ready", missing: [] })],
+      usedKeys: ["sharpen-what", "sharpen-who"],
+    });
+    const { prompt } = await sentForSharpening(request);
+    expect(prompt).toBe(
+      [
+        SHARPEN_CARDS_OPENING_LINE,
+        "",
+        "## The idea, in the owner's words",
+        "",
+        "Title: Repo comparison",
+        "",
+        "Build a scoring sheet to compare eight repos.",
+        "",
+        "## The verdict this round answers",
+        "",
+        "Objective: none stated",
+        "Current readiness: not-ready",
+        MISSING_NOW,
+        "",
+        "## Earlier rounds",
+        "",
+        "### Round 1",
+        "",
+        "What gets built?",
+        "Answer: A scoring sheet for the repos",
+        "",
+        "Who uses it?",
+        "Answer: I don't know",
+        "",
+        "Accepted idea: Build a scoring sheet to compare eight repos.",
+        "Edited by the owner: no",
+        "Readiness: ready",
+        "",
+        "## The design tree",
+        "",
+        "(none)",
+        "",
+        ...CARDS_TASK_INTRO,
+        AIM_LINE,
+        "The cards follow readiness's latest missing items and the earlier",
+        "answers: never re-ask what a settling answer already gave.",
+        ...DIRECTION_MEANINGS,
+        "",
+        "Give each card its own key, and use none of these: sharpen-what, sharpen-who.",
+        "",
+        ...CARD_FIELDS,
+      ].join("\n"),
+    );
+  });
+
   it("a rewrite after a round readiness never judged, with this round's answers in card order", async () => {
     const request = aSharpenRewriteRequest({
       context: aContext({
