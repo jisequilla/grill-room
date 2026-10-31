@@ -21,6 +21,7 @@ import {
   reasonsToRefuseSharpenRewrite,
 } from "../sharpening.js";
 import type {
+  AssessReadinessResult,
   ProposeRoundResult,
   SharpenCardsResult,
   SharpenRewriteResult,
@@ -483,6 +484,39 @@ describe("the fake interviewer's specs", () => {
       "propose-round",
     ]);
     expect(kinds("sharpening-stop")).toEqual(["assess-readiness", "sharpen-cards"]);
+
+    const turns = fakeScenarios.sharpening!.turns;
+    const resultAt = (index: number): unknown =>
+      (turns[index] as { result: unknown }).result;
+    const judgment = (index: number) => {
+      const result = resultAt(index) as AssessReadinessResult;
+      return { verdict: result.verdict, missing: result.missing };
+    };
+    const cardShapes = (index: number) =>
+      (resultAt(index) as SharpenCardsResult).cards.map((card) => ({
+        key: card.key,
+        direction: card.direction,
+        recommendedChoice: card.recommendedChoice,
+      }));
+
+    expect(judgment(0).verdict).toBe("not-ready");
+    expect(judgment(3)).toEqual({
+      verdict: "not-ready",
+      missing: ["What a finished first version contains"],
+    });
+    expect(judgment(6).verdict).toBe("ready");
+    expect(cardShapes(1)).toEqual([
+      { key: "sharpen-what", direction: "what", recommendedChoice: 0 },
+      { key: "sharpen-who", direction: "who", recommendedChoice: 0 },
+      { key: "sharpen-outcome", direction: "outcome", recommendedChoice: 0 },
+    ]);
+    expect(cardShapes(4)).toEqual([
+      { key: "sharpen-scope", direction: "constraint", recommendedChoice: 0 },
+    ]);
+    expect(
+      (fakeScenarios["sharpening-stop"]!.turns[0] as { result: AssessReadinessResult })
+        .result.verdict,
+    ).toBe("not-ready");
 
     const round = fakeScenarios.sharpening!.turns[7]!;
     expect(round.kind === "propose-round" && "result" in round).toBe(true);

@@ -3578,6 +3578,15 @@ describe("what the adapter sends for sharpening", () => {
     }
   });
 
+  it("opens with the ticket's exact lines", () => {
+    expect(SHARPEN_CARDS_OPENING_LINE).toBe(
+      "You are sharpening, inside the Grill Room app, an idea that readiness judged not ready for a grilling interview. You are not interviewing: you ask a few direction cards whose answers will steer how the idea is rewritten.",
+    );
+    expect(SHARPEN_REWRITE_OPENING_LINE).toBe(
+      "You are sharpening, inside the Grill Room app, an idea that readiness judged not ready for a grilling interview. You are not interviewing: you write the rewrite of the idea from the owner's answers to this round's direction cards.",
+    );
+  });
+
   it.each([
     ["sharpen-cards", SHARPEN_CARDS_OPENING_LINE],
     ["sharpen-rewrite", SHARPEN_REWRITE_OPENING_LINE],
