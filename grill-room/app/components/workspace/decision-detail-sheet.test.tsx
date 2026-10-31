@@ -205,6 +205,10 @@ describe("DecisionDetailSheet set-aside decisions", () => {
       expect(html).not.toContain('data-testid="move-set-aside"');
       expect(html).not.toContain('data-testid="set-aside-kind"');
     }
+
+    const ownWithTarget = render(aDecision({ dispositionTarget: "out-of-scope" }));
+    expect(ownWithTarget).not.toContain('data-testid="set-aside-kind"');
+    expect(ownWithTarget).not.toContain('data-testid="move-set-aside"');
   });
 
   it("the Move to menu offers the other two targets, in order, and moves on select", () => {
