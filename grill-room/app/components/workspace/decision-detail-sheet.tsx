@@ -3,7 +3,7 @@ import {
   useActionMutation,
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
-import { IconArrowBackUp } from "@tabler/icons-react";
+import { IconArrowBackUp, IconArrowsExchange } from "@tabler/icons-react";
 import { useState, type RefObject } from "react";
 import { toast } from "sonner";
 
@@ -16,6 +16,12 @@ import { Markdown } from "@/components/workspace/markdown";
 import { ReopenDecisionAlert } from "@/components/workspace/reopen-decision-alert";
 import { VerdictTag } from "@/components/workspace/review-digest";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -31,6 +37,52 @@ import {
   type TreeDecision,
 } from "@/lib/decisions";
 import { classifyHistoryEntry } from "@/lib/review-digest";
+import { moveTargets, SET_ASIDE_KIND_LABEL_KEY } from "@/lib/set-aside";
+
+import type { DecisionDispositionTarget } from "@shared/session-constants";
+
+function MoveSetAsideMenu({
+  decisionId,
+  current,
+}: {
+  decisionId: string;
+  current: DecisionDispositionTarget;
+}) {
+  const t = useT();
+  const { mutate, isPending } = useActionMutation("move-set-aside-decision", {
+    onError: (error: unknown) => {
+      toast.error(actionErrorMessage(error) ?? t("workspace.moveSetAsideFailed"));
+    },
+  });
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={isPending}
+          data-testid="move-set-aside"
+        >
+          <IconArrowsExchange className="size-4" />
+          {t("workspace.moveSetAside")}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        {moveTargets(current).map((target) => (
+          <DropdownMenuItem
+            key={target}
+            data-testid={`move-to-${target}`}
+            onSelect={() => mutate({ decisionId, target })}
+          >
+            {t(SET_ASIDE_KIND_LABEL_KEY[target])}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 function Section({
   title,
@@ -175,6 +227,9 @@ export function DecisionDetailSheet({
   });
   const canReopen = decision.state === "settled" || decision.state === "stale";
   const loose = isLooseEnd(decision);
+  const setAsideTarget =
+    decision.answer?.kind === "dispositioned" ? decision.dispositionTarget : null;
+  const canMove = decision.state === "settled" && setAsideTarget != null;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -215,6 +270,14 @@ export function DecisionDetailSheet({
                 <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                   {t(ANSWER_KIND_LABEL_KEY[decision.answer.kind])}
                 </p>
+                {setAsideTarget ? (
+                  <p
+                    className="mt-0.5 text-sm font-medium"
+                    data-testid="set-aside-kind"
+                  >
+                    {t(SET_ASIDE_KIND_LABEL_KEY[setAsideTarget])}
+                  </p>
+                ) : null}
                 {decision.answer.text ? (
                   <p className="mt-1 text-sm break-words whitespace-pre-wrap">
                     {decision.answer.text}
@@ -317,7 +380,7 @@ export function DecisionDetailSheet({
           </Section>
         </div>
 
-        {canReopen || loose ? (
+        {canReopen || loose || canMove ? (
           <div className="mt-auto flex flex-wrap items-center gap-2 border-t pt-4">
             {canReopen ? (
               <ReopenDecisionAlert decision={decision} decisions={decisions}>
@@ -326,6 +389,12 @@ export function DecisionDetailSheet({
                   {t("workspace.reopen")}
                 </Button>
               </ReopenDecisionAlert>
+            ) : null}
+            {canMove && setAsideTarget ? (
+              <MoveSetAsideMenu
+                decisionId={decision.id}
+                current={setAsideTarget}
+              />
             ) : null}
             {loose ? <AnswerNow decisionId={decision.id} /> : null}
           </div>

@@ -58,6 +58,7 @@ export type DecisionAnswerKind = (typeof DECISION_ANSWER_KINDS)[number];
 export const DECISION_DISPOSITION_TARGETS = [
   "out-of-scope",
   "open-question",
+  "builders-call",
 ] as const;
 export type DecisionDispositionTarget =
   (typeof DECISION_DISPOSITION_TARGETS)[number];

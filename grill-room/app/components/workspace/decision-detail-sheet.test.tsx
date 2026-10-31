@@ -6,6 +6,23 @@ vi.mock("@agent-native/core/client/hooks", () => ({
   actionErrorMessage: () => null,
 }));
 
+// The set-aside kind labels read from the app's real English strings; every
+// other key keeps the framework's default rendering the tests above rely on.
+vi.mock("@agent-native/core/client/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@agent-native/core/client/i18n")>();
+  const { default: messages } = await import("@/i18n/en-US");
+  return {
+    ...original,
+    useT: () => {
+      const frameworkT = original.useT();
+      return ((key: string, ...rest: unknown[]) =>
+        key.startsWith("workspace.setAsideKind")
+          ? (messages.workspace as Record<string, string>)[key.slice("workspace.".length)]
+          : (frameworkT as (...args: unknown[]) => string)(key, ...rest)) as typeof frameworkT;
+    },
+  };
+});
+
 // Radix portals render nothing in static markup; the sheet's own content is
 // what these tests read.
 vi.mock("@/components/ui/sheet", () => {
@@ -110,5 +127,42 @@ describe("DecisionDetailSheet ADR section", () => {
     );
     expect(html).not.toContain("Adr locked not settled");
     expect(html).not.toContain('data-testid="adr-worthy-toggle"');
+  });
+});
+
+describe("DecisionDetailSheet set-aside decisions", () => {
+  const setAside = (overrides: Partial<TreeDecision> = {}) =>
+    aDecision({
+      answer: { text: "The builder picks it.", kind: "dispositioned" },
+      dispositionTarget: "builders-call",
+      ...overrides,
+    });
+
+  it("a settled set-aside decision shows its kind and the Move to menu", () => {
+    const html = render(setAside());
+
+    expect(html).toMatch(/data-testid="set-aside-kind"[^>]*>Builder(&#x27;|')s call</);
+    expect(html).toContain('data-testid="move-set-aside"');
+  });
+
+  it("a stale or withdrawn set-aside decision shows its kind but no Move to menu", () => {
+    for (const state of ["stale", "withdrawn"] as const) {
+      const html = render(setAside({ state }));
+
+      expect(html).toContain('data-testid="set-aside-kind"');
+      expect(html).not.toContain('data-testid="move-set-aside"');
+    }
+  });
+
+  it("no other decision shows the Move to menu", () => {
+    const own = render(aDecision());
+    const looseEnd = render(
+      aDecision({ state: "frontier", answer: { text: "", kind: "unknown" } }),
+    );
+
+    for (const html of [own, looseEnd]) {
+      expect(html).not.toContain('data-testid="move-set-aside"');
+      expect(html).not.toContain('data-testid="set-aside-kind"');
+    }
   });
 });

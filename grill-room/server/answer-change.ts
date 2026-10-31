@@ -1,6 +1,6 @@
 /**
  * Answer change: the one module that owns every write giving a decision a new
- * answer state. Five transitions share one rule, applied in one transaction:
+ * answer state. Five transitions share one rule, applied in one transaction; a sixth, moveSetAside, applies only step 4:
  *
  * 1. the prior answer, when there was one, goes to the decision's history;
  * 2. the decision takes its new answer state, and its own proposals lapse —
@@ -18,6 +18,7 @@
  * | reword     | given    | kept       | kept           | kept              | kept                    | kept        |
  * | unsettle   | null     | null       | null           | null              | now if prior kind settled, else kept | kept |
  * | withdraw   | kept     | kept       | kept           | kept              | kept                    | now         |
+ * | moveSetAside | kept | kept | given | kept | kept | kept |
  *
  * Preconditions — a withdrawn decision, the session's state, a turn in
  * progress — stay with the callers. Returning the session to interviewing and
@@ -229,6 +230,35 @@ export function unsettle(id: string, opts: AnswerChangeOptions): Promise<Decisio
     },
     opts,
   );
+}
+
+/**
+ * Move a set-aside decision to another disposition target. Only the target and
+ * `updatedAt` change: the answer is the same, so nothing goes to history, no
+ * link or claim is touched and no dependent goes stale. The spec places the
+ * three kinds in different sections, so it is marked not current.
+ */
+export async function moveSetAside(
+  id: string,
+  target: DecisionDispositionTarget,
+  opts: AnswerChangeOptions,
+): Promise<DecisionRow> {
+  const run = async (db: DbHandle): Promise<DecisionRow> => {
+    const [written] = await db
+      .update(schema.decisions)
+      .set({ dispositionTarget: target, updatedAt: opts.now })
+      .where(eq(schema.decisions.id, id))
+      .returning();
+
+    if (!written) throw new Error(`Decision not found: ${id}`);
+
+    await markSpecNotCurrent(written.sessionId, opts.now, db);
+
+    return written;
+  };
+
+  if (opts.db) return run(opts.db);
+  return getDb().transaction((tx) => run(tx));
 }
 
 /** Withdraw the decision from the tree, keeping its answer as it stood. */

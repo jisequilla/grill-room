@@ -92,6 +92,28 @@ describe("disposition-decision", () => {
     });
   });
 
+  it("dispositions a loose end as a builder's call, keeping its note", async () => {
+    const session = await aSession();
+    await insertDecision(session.id, {
+      id: "d-unknown",
+      key: "unknown-key",
+      questionTitle: "Where does the data live?",
+      answerKind: "unknown",
+      currentAnswer: "Not sure",
+    });
+
+    const result = await dispositionDecision.run({
+      decisionId: "d-unknown",
+      target: "builders-call",
+      note: "N",
+    });
+
+    expect(result).toMatchObject({
+      answer: { kind: "dispositioned", text: "N" },
+      dispositionTarget: "builders-call",
+    });
+  });
+
   it("unblocks a dependent once its blocking decision is dispositioned", async () => {
     const session = await aSession();
     await insertDecision(session.id, {
