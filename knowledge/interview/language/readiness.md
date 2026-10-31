@@ -22,6 +22,6 @@ code:
 
 # Readiness
 
-The interview's opening move. It warns and never blocks. It is judged with the project's scout report when the session has a project, and goes stale when the idea changes. "Preflight" is a word to avoid for it: in [Delivery](/delivery/language/pre-flight.md) a pre-flight is the check before a ticket launches.[^contexts]
+The interview's opening move. It warns and never blocks. It is judged with the project's scout report when the session has a project, and goes stale when the idea changes. A not-ready verdict leads to [three ways forward](/interview/decisions/a-not-ready-idea-has-three-ways-forward.md). "Preflight" is a word to avoid for it: in [Delivery](/delivery/language/pre-flight.md) a pre-flight is the check before a ticket launches.[^contexts]
 
 [^contexts]: Placed in this context by the session that drew the bounded contexts, from the vocabulary inventory it records ([fragment](/_fragments/2026-10-19-session-contexts/fragment.md)).

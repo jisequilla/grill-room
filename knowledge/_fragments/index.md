@@ -21,5 +21,6 @@ generated:
 | 2026-10-17 | [Session that chose DDD for the bundle's boundaries](2026-10-17-session-ddd-boundaries/fragment.md) | conversation | yes | yes |
 | 2026-10-19 | [Session that drew the bounded contexts](2026-10-19-session-contexts/fragment.md) | conversation | yes | yes |
 | 2026-10-26 | [Session on the founding decisions and where decisions live](2026-10-26-session-founding-decisions/fragment.md) | conversation | yes | yes |
+| 2026-10-31 | [Session on the ways forward for Pipe's two points](2026-10-31-session-pipe-ways-forward/fragment.md) | conversation | yes | yes |
 
 [`log.md`](log.md) records every capture and ingestion, append only.

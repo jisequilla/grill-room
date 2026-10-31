@@ -11,7 +11,7 @@ generated:
 
 # Delivery
 
-**Supporting context.** Turning settled decisions into a spec, tickets and a bundle agents build from, and recording how building went. How it relates to the others is in the [context map](/context-map.md). It has no decisions or open questions of its own yet.
+**Supporting context.** Turning settled decisions into a spec, tickets and a bundle agents build from, and recording how building went. How it relates to the others is in the [context map](/context-map.md). Its decisions are listed below; it has no open questions of its own yet.
 
 ## Language
 
@@ -31,6 +31,10 @@ Each word has one meaning here. A Term's words to avoid include the meanings it 
 | [Spec](language/spec.md) | The document synthesized from a confirmed session's settled decisions, in the to-spec template's sections. |
 | [Ticket](language/ticket.md) | A unit of work broken out of the spec, sized for one agent, saying what blocks it, which stories it implements, and what it consumes and produces. |
 | [User story](language/user-story.md) | A numbered statement in the spec of what a role wants and why, which tickets say they implement. |
+
+## Decisions
+
+- [Builder's calls have their own spec section and reach the tickets they concern](decisions/builders-calls-have-their-own-spec-section.md)
 
 ## Use cases that touch it
 

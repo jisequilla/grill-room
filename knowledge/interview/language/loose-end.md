@@ -21,6 +21,6 @@ code:
 
 # Loose end
 
-The owner resolves each one by answering it or setting it aside, as out of scope or as a named open question. What the spec calls open questions start here.[^contexts]
+The owner resolves each one by answering it or setting it aside, as out of scope, as a named open question the owner still owes an answer to, or as a [builder's call](builders-call.md) left to whoever builds it. What the spec calls open questions start here.[^contexts]
 
 [^contexts]: Placed in this context by the session that drew the bounded contexts, from the vocabulary inventory it records ([fragment](/_fragments/2026-10-19-session-contexts/fragment.md)).
