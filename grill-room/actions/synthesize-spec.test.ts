@@ -425,6 +425,42 @@ describe("synthesize-spec", () => {
     });
   });
 
+  it("a builder's call is in neither the out-of-scope nor the open-questions list", async () => {
+    const session = await aSession();
+    await confirm(session.id);
+    await insertDecision(session.id, {
+      id: "d-scope",
+      key: "scope-key",
+      questionTitle: "Offline mode?",
+      answerKind: "dispositioned",
+      dispositionTarget: "out-of-scope",
+      currentAnswer: "Later.",
+    });
+    await insertDecision(session.id, {
+      id: "d-open",
+      key: "open-key",
+      questionTitle: "Which auth provider?",
+      answerKind: "dispositioned",
+      dispositionTarget: "open-question",
+      currentAnswer: "Depends on the platform.",
+    });
+    await insertDecision(session.id, {
+      id: "d-builder",
+      key: "builder-key",
+      questionTitle: "Where does the data live?",
+      answerKind: "dispositioned",
+      dispositionTarget: "builders-call",
+      currentAnswer: "The builder picks the storage.",
+    });
+    const interviewer = scriptInterviewer([specTurn(goodSpecMarkdown())]);
+
+    await synthesizeSpec.run({ sessionId: session.id });
+
+    const request = interviewer.requests[0] as { outOfScope: string[]; openQuestions: string[] };
+    expect(request.outOfScope).toEqual(["Offline mode? — Later."]);
+    expect(request.openQuestions).toEqual(["Which auth provider? — Depends on the platform."]);
+  });
+
   it("rejects a spec missing a required heading and stores the corrected retry", async () => {
     const session = await aSession();
     await confirm(session.id);

@@ -10,12 +10,12 @@ import { failIfTurnInProgress } from "../server/turn.js";
 
 export default defineAction({
   description:
-    "Resolve a loose end by moving it out of scope or into the notes as a named open question, instead of giving it a real answer. Records the previous state as history when it had one, settles the decision as dispositioned (which unblocks its dependents), withdraws the claims other decisions make about it, and marks the session's spec not current. Never calls the interviewer. Refuses a decision that is not a loose end at all, one that is stale (settled again by the stale review instead), or one that is unplaced (settled by the next proposal instead), and refuses while an interviewer turn is working.",
+    "Resolve a loose end by moving it out of scope, into the notes as a named open question, or leaving it to the builder, instead of giving it a real answer. Records the previous state as history when it had one, settles the decision as dispositioned (which unblocks its dependents), withdraws the claims other decisions make about it, and marks the session's spec not current. Never calls the interviewer. Refuses a decision that is not a loose end at all, one that is stale (settled again by the stale review instead), or one that is unplaced (settled by the next proposal instead), and refuses while an interviewer turn is working.",
   schema: z.object({
     decisionId: z.string().min(1).describe("Decision id"),
     target: z
       .enum(DECISION_DISPOSITION_TARGETS)
-      .describe("Where the decision is resolved to: out-of-scope or open-question"),
+      .describe("Where the decision is resolved to: out-of-scope, open-question or builders-call"),
     note: z
       .string()
       .default("")

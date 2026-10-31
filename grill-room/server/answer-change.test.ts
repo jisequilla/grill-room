@@ -2,7 +2,7 @@ import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getDb, schema, useTestDatabase } from "../test/db.js";
-import { defer, reword, settle, unsettle, withdraw } from "./answer-change.js";
+import { defer, moveSetAside, reword, settle, unsettle, withdraw } from "./answer-change.js";
 
 /**
  * While `active`, every `getDb()` handle records the queries made through it
@@ -643,5 +643,26 @@ describe("answer change", () => {
     );
 
     expect(await everything()).toEqual(before);
+  });
+
+  it("moveSetAside throws for a decision id that does not exist", async () => {
+    await fixture();
+    await expect(moveSetAside("missing", "builders-call", { now: T2 })).rejects.toThrow(
+      "Decision not found: missing",
+    );
+  });
+
+  it("moveSetAside opens one transaction without a handle, and none of its own inside a caller's", async () => {
+    await fixture();
+    spy.active = true;
+
+    await moveSetAside(X, "builders-call", { now: T2 });
+    expect(spy.transactions).toBe(1);
+    expect(spy.outside).toEqual([]);
+
+    spy.transactions = 0;
+    await getDb().transaction((tx) => moveSetAside(X, "open-question", { now: T2, db: tx }));
+    spy.active = false;
+    expect(spy.transactions).toBe(1);
   });
 });

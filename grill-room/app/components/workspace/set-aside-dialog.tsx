@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 
 import type { DecisionDispositionTarget } from "@shared/session-constants";
 
-const TARGETS: readonly {
+export const SET_ASIDE_TARGETS: readonly {
   value: DecisionDispositionTarget;
   labelKey: string;
   hintKey: string;
@@ -39,13 +39,18 @@ const TARGETS: readonly {
     labelKey: "workspace.targetOpenQuestion",
     hintKey: "workspace.targetOpenQuestionHint",
   },
+  {
+    value: "builders-call",
+    labelKey: "workspace.targetBuildersCall",
+    hintKey: "workspace.targetBuildersCallHint",
+  },
 ];
 
 /**
  * Resolves a loose end without answering it: the decision leaves the tree's
- * open business either as something the spec says it does not cover, or as a
- * named open question the spec carries in its notes. Which of the two it is
- * changes where it ends up, so the choice is the dialog rather than a default.
+ * open business as something the spec says it does not cover, as a named open
+ * question the spec carries in its notes, or as the builder's call. Which it
+ * is changes where it ends up, so the choice is the dialog rather than a default.
  */
 export function SetAsideDialog({
   decisionId,
@@ -96,8 +101,8 @@ export function SetAsideDialog({
             <legend className="pb-2 text-xs font-medium">
               {t("workspace.setAsideWhere")}
             </legend>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {TARGETS.map((choice) => (
+            <div className="grid gap-2 sm:grid-cols-3">
+              {SET_ASIDE_TARGETS.map((choice) => (
                 <button
                   key={choice.value}
                   type="button"

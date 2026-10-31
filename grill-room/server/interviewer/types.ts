@@ -38,6 +38,7 @@ export type AnswerKind =
   | "prototype-flagged"
   | "out-of-scope"
   | "open-question"
+  | "builders-call"
   | "repo-established";
 
 /** Computed by the app, never by the interviewer. Sent so the model can see the tree. */

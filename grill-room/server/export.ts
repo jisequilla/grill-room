@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 
-import type { TicketKind } from "../shared/session-constants.js";
+import type { DecisionDispositionTarget, TicketKind } from "../shared/session-constants.js";
 import type { AdrConvention } from "./project-facts.js";
 import type { StoredReadiness } from "./readiness.js";
 import type { ScoutReportWithStaleness } from "./scout-report.js";
@@ -565,7 +565,7 @@ function isEntry(decision: DecisionView): boolean {
   return isSettledAs(decision, ["accepted-recommendation", "own-answer"]);
 }
 
-function isDispositionedTo(decision: DecisionView, target: "out-of-scope" | "open-question"): boolean {
+function isDispositionedTo(decision: DecisionView, target: DecisionDispositionTarget): boolean {
   return isSettledAs(decision, ["dispositioned"]) && decision.dispositionTarget === target;
 }
 
@@ -596,6 +596,9 @@ function dependencyReference(dependency: DecisionView): string | null {
   }
   if (isDispositionedTo(dependency, "open-question")) {
     return `${oneLine(dependency.questionTitle)} (open question, see spec)`;
+  }
+  if (isDispositionedTo(dependency, "builders-call")) {
+    return `${oneLine(dependency.questionTitle)} (builder's call, see spec)`;
   }
   if (isDispositionedTo(dependency, "out-of-scope")) {
     return `${oneLine(dependency.questionTitle)} (out of scope)`;
@@ -764,8 +767,9 @@ function renderEntry(
  * - **Out of scope**: every loose end dispositioned out of scope, with its note.
  * - **Built under**: every kept repo decision, as key and citation only.
  *
- * Anything not settled, set aside as an open question, withdrawn or unplaced
- * appears nowhere, except that a dependency on an open question is named as one.
+ * Anything not settled, set aside as an open question or a builder's call,
+ * withdrawn or unplaced appears nowhere, except that a dependency on an open
+ * question or a builder's call is named as one.
  */
 export function renderDecisionsFile(
   sessionTitle: string,
