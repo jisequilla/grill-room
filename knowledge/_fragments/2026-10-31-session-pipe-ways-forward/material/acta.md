@@ -26,3 +26,16 @@ Option labels are quoted as chosen.
 12. On how Sharpening relates to cards, the owner answered: "ok what if we pop-up like a helper agent, chat box, with suggestions, where the user can ask questions to this helper agent and this helper agent can suggest the sharpen the idea option, what do you think?" Claude noted that the framework ships an unused chat surface (`AgentChatSurface`, `grill-room/app/lib/agent-page.tsx`) while the interviewer is `claude -p` with no tools. It argued that structured choices serve a non-technical owner better than an empty chat box, while a helper that explains the verdict is useful. The owner chose "Ways now, helper later": the three ways ship as cards and buttons; the helper chat is its own item (bead `gr-ekbr`), starting with a spike.
 13. About Pipe's pending verdicts on another page, the owner said: "let's keep going we are not wainting for pIPE".
 14. The owner confirmed Claude's summary of all of the above: "Matches, go ahead".
+
+## Choices after the code was mapped
+
+A sonnet agent then mapped the code. The only way to change a set-aside decision today is Reopen, which clears its answer, makes its dependents stale and puts it back on a round. Nothing in the code records a start past a not-ready verdict. An opus agent drafted Sharpening's design (storage, turn shape, rounds before round 1), and the owner chose among its open points.
+
+15. Switching a set-aside decision between its kinds is a direct "Move to…" control on its detail sheet: only the kind changes, the note is kept and nothing goes stale, because the answer did not change: "Direct switch". This replaces choice 4's path through Reopen.
+16. Sharpening gets a design pass before it is ticketed, while the builder's call and the not-ready panel are ticketed first: "Design pass first".
+17. Any start of round 1 while the current readiness verdict is not ready records the override, whatever starts it; "Grill it as is" is the panel's button for that start: "Any start records it".
+18. After a not-ready verdict, the next Sharpening round opens on its own, with Stop beside it: "Opens on its own".
+19. Stopping a Sharpening round before accepting its rewrite discards that round's answers: "Discarded".
+20. Sharpening has no cap. After three not-ready rounds the panel says so and puts "Grill it as is" first: "Nudge after 3".
+21. The export keeps the idea as first written and adds the Sharpening history, each accepted rewrite with its edits and verdict; the spec works from the final idea: "Original plus history".
+22. After the first round, the direction cards are one to four, aimed at readiness's latest missing items and the earlier answers: "Aimed at what's missing".

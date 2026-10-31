@@ -19,7 +19,7 @@ state: in force
 
 # A not-ready idea has three ways forward
 
-When [readiness](/interview/language/readiness.md) judges the idea not ready, the panel offers three ways forward: edit the idea, [Sharpen](/interview/language/sharpening.md) it with the button "Sharpen the idea", or "Grill it as is". Grill it as is starts the interview and records that the owner went past a not-ready verdict. The [spec](/delivery/language/spec.md)'s Further Notes and the [handoff](/delivery/language/handoff.md) state it, with what readiness found missing.[^ways]
+When [readiness](/interview/language/readiness.md) judges the idea not ready, the panel offers three ways forward: edit the idea, [Sharpen](/interview/language/sharpening.md) it with the button "Sharpen the idea", or "Grill it as is". Grill it as is starts the interview. Any start of round 1 while the current verdict is not ready records that the owner went past it, whatever starts it. The [spec](/delivery/language/spec.md)'s Further Notes and the [handoff](/delivery/language/handoff.md) state it, with what readiness found missing.[^ways]
 
 Why: a not-ready verdict leaves Pipe stuck without knowing that editing is the way out. The owner replaced Pipe's third way, a few fixed targeted questions, with Sharpening, which can follow up on answers, and kept the confirm-and-proceed way as an explicit, recorded override.[^ways]
 
