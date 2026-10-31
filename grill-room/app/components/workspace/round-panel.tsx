@@ -43,10 +43,25 @@ function dotColour(draft: Card["draft"]): string {
     : "bg-settled";
 }
 
+/** Whether a round exists, or undefined while the rounds are still unknown. */
+export function roundsExist(
+  rounds: { rounds: readonly unknown[] } | undefined,
+): boolean | undefined {
+  return rounds === undefined ? undefined : rounds.rounds.length > 0;
+}
+
+/** Which control starts the next round: none while it is unknown whether a round exists. */
+export function startPanelKind(
+  hasRounds: boolean | undefined,
+): "start" | "next" | null {
+  if (hasRounds === undefined) return null;
+  return hasRounds ? "next" : "start";
+}
+
 export function RoundPanel({
   round,
   isLoading,
-  hasDecisions,
+  hasRounds,
   decisions,
   lastSubmittedAt,
   activeTurn,
@@ -60,8 +75,8 @@ export function RoundPanel({
 }: {
   round: RoundResult | undefined;
   isLoading: boolean;
-  /** Whether the session's tree holds anything yet, which decides the empty copy. */
-  hasDecisions: boolean;
+  /** Whether the session has any round, open or submitted. */
+  hasRounds: boolean | undefined;
   /** The whole tree, history included — what the "what changed" digest reads. */
   decisions: readonly TreeDecision[];
   /** The most recently submitted round's timestamp, or null when none yet. */
@@ -93,7 +108,7 @@ export function RoundPanel({
 
   if (isLoading || !round) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-3" data-testid="round-panel-loading">
         <Skeleton className="h-40 w-full rounded-xl" />
         <Skeleton className="h-40 w-full rounded-xl" />
       </div>
@@ -185,13 +200,15 @@ export function RoundPanel({
   }
 
   if (!round.round) {
+    const startKind = startPanelKind(hasRounds);
     return (
-      <div>
+      <div data-testid="round-panel-no-round">
         {batch}
         {digest}
-        {hasDecisions ? (
+        {startKind === "next" && (
           <NextRoundPanel onRequest={onRequestNextRound} isPending={isRequesting} />
-        ) : (
+        )}
+        {startKind === "start" && (
           <StartInterviewPanel onStart={onRequestNextRound} isPending={isRequesting} />
         )}
       </div>

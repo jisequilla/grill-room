@@ -77,8 +77,10 @@ test.describe("project scout", () => {
     repoRoot = createFixtureRepo();
   });
 
+  const extraRepos: string[] = [];
+
   test.afterAll(() => {
-    rmSync(repoRoot, { recursive: true, force: true });
+    for (const root of [repoRoot, ...extraRepos]) rmSync(root, { recursive: true, force: true });
   });
 
   /**
@@ -169,14 +171,8 @@ test.describe("project scout", () => {
     ).toHaveCount(0);
 
     // ---- Start the interview: the first round never re-asks the kept one --
-    // Keeping a decision already put one in the tree, so the start panel now
-    // reads "Ask for the next round" rather than "Start the interview" (see
-    // `app/components/workspace/round-panel.tsx`'s `hasDecisions` switch) —
-    // both call the same `request-next-round` action, which is the turn this
-    // scenario's script serves next.
-    await page
-      .getByRole("button", { name: /^(Start the interview|Ask for the next round)$/ })
-      .click();
+    await expect(readinessPanel.getByTestId("readiness-reassess")).toBeVisible();
+    await page.getByRole("button", { name: "Start the interview", exact: true }).click();
 
     const cards = page.getByTestId("round-card");
     await expect(cards).toHaveCount(1);
@@ -185,5 +181,73 @@ test.describe("project scout", () => {
     await expect(cards.first()).not.toContainText(
       "The repo already documents agent conventions",
     );
+  });
+
+  test("keeping a repo decision before readiness leaves the invitation and the start control", async ({
+    page,
+    request,
+  }) => {
+    const ownRepo = createFixtureRepo();
+    extraRepos.push(ownRepo);
+    const project = await registerProject(request, {
+      root: ownRepo,
+      verifyCommand: "pnpm test",
+      workingExportFolder: ".scratch",
+    });
+    const sessionId = await createSession(page, {
+      title: "Ingest Alerting",
+      idea: "Alert when ingest lag crosses a threshold.",
+    });
+    await setSessionProject(request, sessionId, project.id);
+    await chooseScenario(request, sessionId, "scout-project");
+    await page.reload();
+
+    const scoutPanel = page.getByTestId("scout-panel");
+    await scoutPanel.getByTestId("scout-run").click();
+    const keep = scoutPanel.locator(
+      '[data-testid="scout-decision"][data-key="no-message-broker"]',
+    );
+    await keep.getByTestId("scout-decision-keep").click();
+    await expect(keep).toHaveAttribute("data-disposition", "kept");
+    await expect(
+      page.getByTestId("tree-row").filter({ hasText: "No message broker" }),
+    ).toHaveCount(1);
+
+    await expect(
+      page.getByTestId("readiness-panel").getByTestId("readiness-assess"),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Start the interview", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Ask for the next round", exact: true }),
+    ).toHaveCount(0);
+  });
+
+  test("the start control waits for the rounds", async ({ page, request }) => {
+    const sessionId = await createSession(page, {
+      title: "Ingest Alerting",
+      idea: "Alert when ingest lag crosses a threshold.",
+    });
+    await chooseScenario(request, sessionId, "scout-project");
+
+    await page.route("**/_agent-native/actions/list-rounds*", () => {
+      // Held unfulfilled: the rounds never load.
+    });
+    await Promise.all([
+      page.waitForResponse("**/_agent-native/actions/get-current-round*"),
+      page.reload(),
+    ]);
+    // The no-round panel is mounted, so a missing control is a decision of
+    // the panel, not a panel that has not rendered yet.
+    await expect(page.getByTestId("round-panel-no-round")).toBeAttached();
+    await expect(page.getByTestId("round-panel-loading")).toHaveCount(0);
+
+    await expect(
+      page.getByRole("button", { name: "Start the interview", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Ask for the next round", exact: true }),
+    ).toHaveCount(0);
   });
 });
