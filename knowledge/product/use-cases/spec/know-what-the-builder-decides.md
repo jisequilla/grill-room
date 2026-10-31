@@ -25,6 +25,8 @@ code:
 
 Pipe reads "Open questions" as questions for him to answer, when many are decisions left to the builder.[^meeting]
 
-**Missing.** The spec puts kept open questions under further notes, and the handoff titles them "Questions the spec and tickets leave open" and asks for the owner's answer before delegating. No label marks a choice as deliberately left to the builder.
+Setting a loose end aside offers two kinds, an open question the owner owes and a [builder's call](/interview/language/builders-call.md) ([decision](/interview/decisions/setting-aside-offers-two-kinds.md)). The builder's calls get their own spec section and reach the tickets they concern, and the handoff asks only for the owner-owed ones ([decision](/delivery/decisions/builders-calls-have-their-own-spec-section.md)).
+
+**Missing.** The spec puts every kept open question under further notes, and the handoff titles them "Questions the spec and tickets leave open" and asks for the owner's answer before delegating. There is no builder's call kind, no `## Left to the builder` section, no "Your call" in the briefs, and no way to switch an item between the two kinds after finishing.
 
 [^meeting]: Pipe in the meeting of 2026-09-29: "'Open questions' misleads" ([fragment](/_fragments/2026-09-29-2130-pipe-meeting/fragment.md)).

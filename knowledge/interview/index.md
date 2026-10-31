@@ -20,6 +20,7 @@ Each word has one meaning here. A Term's words to avoid include the meanings it 
 | Term | Meaning |
 |---|---|
 | [Answer change](language/answer-change.md) | Any write that gives a decision a new answer state: settling, deferring, rewording, unsettling or withdrawing it. |
+| [Builder's call](language/builders-call.md) | A loose end the owner sets aside on purpose because the choice belongs to whoever builds it, so the owner owes no answer. |
 | [Card](language/card.md) | One question of a round as the Idea owner answers it, with the interviewer's recommended answer and any offered choices. |
 | [Claim](language/claim.md) | Another decision's link to this decision's answer: a pending supersession by it, or a record of having been replaced by it. |
 | [Decision](language/decision.md) | A node of the design tree: one thing to settle, with what it depends on and, once answered, its answer and history. |
@@ -32,11 +33,16 @@ Each word has one meaning here. A Term's words to avoid include the meanings it 
 | [Round](language/round.md) | The set of questions the interviewer asks together, each on its own card, answered and submitted as a whole or one at a time. |
 | [Session](language/session.md) | One grilling interview of one idea, from the idea to a confirmed shared understanding, with everything decided in it. |
 | [Shared understanding](language/shared-understanding.md) | What the Idea owner confirms to end a session: the interviewer proposed being done, every loose end is resolved, and the owner agrees. |
+| [Sharpening](language/sharpening.md) | A short grill of a not-ready idea, inside the session and before round 1, that rewrites the idea and leaves seed decisions until readiness judges it ready. |
 | [Stale review](language/stale-review.md) | The interviewer's pass over the decisions downstream of a reopened one, reconfirming what still holds and re-asking the rest. |
 
 ## Decisions
 
+- [A not-ready idea has three ways forward](decisions/a-not-ready-idea-has-three-ways-forward.md)
 - [Readiness opens the interview](decisions/readiness-opens-the-interview.md)
+- [Setting a loose end aside offers two kinds](decisions/setting-aside-offers-two-kinds.md)
+- [Sharpening rewrites the idea and seeds decisions until it is ready](decisions/sharpening-rewrites-the-idea-until-ready.md)
+- [The helper chat waits for its own grill and spike](decisions/the-helper-chat-waits-for-its-own-grill.md)
 
 ## Open questions
 
