@@ -310,6 +310,42 @@ describe("handoff generation", () => {
     expect("source" in loaded && loaded.source.uncoveredStories).toBeNull();
   });
 
+  it("a grilled-as-is session's handoff says so", async () => {
+    const { session } = await aReadySession();
+    await getDb()
+      .update(schema.sessions)
+      .set({
+        readinessOverrideJson: JSON.stringify({
+          missing: ["A single buildable thing, not a method for deciding one"],
+          verdictJudgedAt: "2026-10-31T09:00:00.000Z",
+          at: "2026-10-31T10:00:00.000Z",
+        }),
+      })
+      .where(eq(schema.sessions.id, session.id));
+
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+
+    expect(markdown).toContain(
+      [
+        "## Grilled past a not-ready verdict",
+        "",
+        "The owner started the interview although readiness judged the idea not ready. Readiness found this missing:",
+        "",
+        "- A single buildable thing, not a method for deciding one",
+        "",
+        "## Where things are",
+      ].join("\n"),
+    );
+  });
+
+  it("a session started without an override has no such section", async () => {
+    const { session } = await aReadySession();
+
+    const { markdown } = await generateHandoff.run({ sessionId: session.id });
+
+    expect(markdown).not.toContain("## Grilled past a not-ready verdict");
+  });
+
   it("goes stale on a blocker edit, and regenerating clears it with the new waves", async () => {
     const { session } = await aReadySession();
     await generateHandoff.run({ sessionId: session.id });

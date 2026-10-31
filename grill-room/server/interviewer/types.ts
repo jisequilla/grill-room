@@ -224,6 +224,12 @@ export interface SynthesizeSpecRequest extends RequestBase {
    * change to the project.
    */
   reopenedRepoDecisions: ReopenedRepoDecision[];
+  /**
+   * The not-ready verdict the owner started the interview past, with what
+   * readiness found missing; the spec's Further Notes must say so. Absent or
+   * null when the interview started without one.
+   */
+  readinessOverride?: { missing: string[] } | null;
 }
 
 /** A repo decision the interview changed: what the project held, and what it holds now. */

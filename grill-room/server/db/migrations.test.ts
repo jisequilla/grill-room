@@ -428,6 +428,42 @@ describe("tickets-implements-column migration", () => {
   });
 });
 
+describe("sessions-readiness-override migration", () => {
+  beforeEach(dropSchema);
+
+  it("reads an existing session's readiness_override_json as NULL, and round-trips a value, on a database at the previous version", async () => {
+    const migration = appMigrations.find((entry) => entry.name === "sessions-readiness-override")!;
+    const before = appMigrations.filter((entry) => entry.version < migration.version);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [sessionId, "Grill Room", "An idea.", now, now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const existing = await getDbExec().execute({
+      sql: `SELECT readiness_override_json FROM gr_sessions WHERE id = ?`,
+      args: [sessionId],
+    });
+    expect(existing.rows).toEqual([{ readiness_override_json: null }]);
+
+    const value = JSON.stringify({ missing: ["A thing"], verdictJudgedAt: now, at: now });
+    await getDbExec().execute({
+      sql: `UPDATE gr_sessions SET readiness_override_json = ? WHERE id = ?`,
+      args: [value, sessionId],
+    });
+    const updated = await getDbExec().execute({
+      sql: `SELECT readiness_override_json FROM gr_sessions WHERE id = ?`,
+      args: [sessionId],
+    });
+    expect(updated.rows).toEqual([{ readiness_override_json: value }]);
+  });
+});
+
 describe("projects-max-tickets-in-flight-column migration", () => {
   beforeEach(dropSchema);
 

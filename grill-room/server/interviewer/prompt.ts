@@ -44,6 +44,10 @@ import type {
 export const SUMMARY_MIN_BULLETS = 5;
 export const SUMMARY_MAX_BULLETS = 10;
 
+/** What a spec's Further Notes must say when the owner grilled an idea readiness judged not ready. */
+export const READINESS_OVERRIDE_SENTENCE =
+  "The owner chose to grill this idea although readiness judged it not ready.";
+
 const OPENING_LINE =
   "You are conducting a grilling interview inside the Grill Room app. Your instructions follow verbatim, then the state of the interview, then your task for this turn.";
 
@@ -456,6 +460,20 @@ function renderTask(
               "",
             ]
           : [];
+      const override = request.readinessOverride ?? null;
+      const readinessOverrideRule = override
+        ? [
+            `- Further Notes must include this sentence exactly: "${READINESS_OVERRIDE_SENTENCE}"`,
+            ...(override.missing.length > 0
+              ? [
+                  "Follow it with what readiness found missing, one `- ` bullet each:",
+                  "",
+                  ...override.missing.map((item) => `- ${item}`),
+                ]
+              : []),
+            "",
+          ]
+        : [];
 
       return [
         "## Your task: synthesize the spec",
@@ -484,6 +502,7 @@ function renderTask(
         "",
         openQuestions,
         "",
+        ...readinessOverrideRule,
         ...reopenedRepo,
         "Return the whole spec as markdown in `markdown`, starting at the `## Summary` heading. Do not wrap it in a code fence.",
       ].join("\n");

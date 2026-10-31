@@ -9,6 +9,7 @@ import {
   consistencySpecMarkdown,
   createScenarioInterviewer,
   FAKE_CLI_METRICS,
+  fakeScenarios,
   handoffScoutTurns,
   rateLimitedTurn,
   schemaInvalidTurn,
@@ -423,6 +424,19 @@ describe("the fake interviewer's specs", () => {
       canned !== undefined && "result" in canned && "markdown" in canned.result &&
         specRefusalReasons(canned.result.markdown),
     ).toEqual([]);
+  });
+
+  it("the readiness-not-ready-grill scenario's spec passes the check with an override", () => {
+    const turns = fakeScenarios["readiness-not-ready-grill"]!.turns;
+    const spec = turns.find((turn) => turn.kind === "synthesize-spec");
+
+    expect(turns[0]?.kind).toBe("assess-readiness");
+    expect(spec !== undefined && "result" in spec && "markdown" in spec.result).toBe(true);
+    const markdown = (spec as { result: { markdown: string } }).result.markdown;
+    expect(specRefusalReasons(markdown, { readinessOverride: true })).toEqual([]);
+    expect(markdown).toContain(
+      "- A single buildable thing, not a method for deciding one",
+    );
   });
 });
 

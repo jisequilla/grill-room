@@ -210,6 +210,14 @@ export const sessions = table("gr_sessions", {
    * still exists at the database level; see `server/db/migrations.ts`.
    */
   readinessTurnId: text("readiness_turn_id"),
+  /**
+   * The not-ready verdict the owner started the interview past, as JSON: what
+   * readiness found missing, when that verdict was judged, and when the
+   * interview started. Null when the first round opened without one, and
+   * cleared with the judgment whenever the idea is edited or judged again.
+   * See {@link import("../readiness.js").ReadinessOverride}.
+   */
+  readinessOverrideJson: text("readiness_override_json"),
   /** The turn of the most recent stale review, or null when none is linked. See `readinessTurnId`. */
   staleReviewTurnId: text("stale_review_turn_id"),
   /** The turn of the most recent supersession check, or null when none is linked. See `readinessTurnId`. */

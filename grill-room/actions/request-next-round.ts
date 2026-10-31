@@ -13,6 +13,11 @@ import type {
   UserAddedDecision,
 } from "../server/interviewer/index.js";
 import { increasingTimestamps } from "../server/ordering.js";
+import {
+  currentReadiness,
+  sessionHasRounds,
+  storeReadinessOverride,
+} from "../server/readiness.js";
 import { returnSessionToInterviewing } from "../server/session-state.js";
 import { runDueStaleReviews } from "../server/stale-review.js";
 import {
@@ -85,6 +90,24 @@ export default defineAction({
       session,
       "The interviewer is already working on this session. Wait for the turn to finish.",
     );
+
+    // Starting the interview past a not-ready verdict is recorded, whichever
+    // control asked for the first round, so the spec and the handoff can say
+    // so. A failed turn below leaves the record in place.
+    if (!(await sessionHasRounds(sessionId))) {
+      const readiness = await currentReadiness(session);
+      if (readiness?.result.verdict === "not-ready") {
+        await db
+          .update(schema.sessions)
+          .set({
+            readinessOverrideJson: storeReadinessOverride(
+              readiness,
+              new Date().toISOString(),
+            ),
+          })
+          .where(eq(schema.sessions.id, sessionId));
+      }
+    }
 
     // Whatever a reopened answer put in doubt is judged first, so the tree is
     // true before anything reads it: the cards of an open round, and any

@@ -691,4 +691,9 @@ UPDATE gr_decisions SET proposal_kind = 'restatement' WHERE restatement_text IS 
 UPDATE gr_decisions SET proposal_kind = 'deferral' WHERE deferral_reason IS NOT NULL AND deferral_reason <> '';
 UPDATE gr_decisions SET proposal_kind = CASE WHEN answer_kind IN (${SETTLING_ANSWER_KINDS.map((kind) => `'${kind}'`).join(", ")}) THEN 'replacement' ELSE 'answered-by' END WHERE superseded_by_id IS NOT NULL AND superseded_by_id <> ''`,
   },
+  {
+    version: 83,
+    name: "sessions-readiness-override",
+    sql: "ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS readiness_override_json TEXT",
+  },
 ];

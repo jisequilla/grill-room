@@ -2292,6 +2292,54 @@ describe("stories no ticket implements", () => {
   });
 });
 
+describe("grilled past a not-ready verdict", () => {
+  const MISSING = "A single buildable thing, not a method for deciding one";
+  const SECTION = [
+    "## Grilled past a not-ready verdict",
+    "",
+    "The owner started the interview although readiness judged the idea not ready. Readiness found this missing:",
+    "",
+    `- ${MISSING}`,
+  ].join("\n");
+
+  it("states it right after the opening sections", () => {
+    const without = renderHandoffMarkdown(aSource());
+    const markdown = renderHandoffMarkdown({
+      ...aSource(),
+      readinessOverride: { missing: [MISSING] },
+    });
+
+    expect(markdown).toBe(
+      without.replace("\n\n## Where things are", `\n\n${SECTION}\n\n## Where things are`),
+    );
+    expect(markdown).not.toBe(without);
+  });
+
+  it("has no list when nothing was missing", () => {
+    const markdown = renderHandoffMarkdown({ ...aSource(), readinessOverride: { missing: [] } });
+
+    expect(markdown).toContain(
+      "## Grilled past a not-ready verdict\n\nThe owner started the interview although readiness judged the idea not ready.\n\n## Where things are",
+    );
+  });
+
+  it.each([
+    ["absent", undefined],
+    ["null", null],
+  ] as const)("renders no section without an override (%s)", (_, readinessOverride) => {
+    const markdown = renderHandoffMarkdown({ ...aSource(), readinessOverride });
+
+    expect(markdown).toBe(renderHandoffMarkdown(aSource()));
+    expect(markdown).not.toContain("## Grilled past a not-ready verdict");
+  });
+
+  it("leaves the fingerprint alone", () => {
+    expect(
+      handoffFingerprint({ ...aSource(), readinessOverride: { missing: [MISSING] } }),
+    ).toBe(handoffFingerprint(aSource()));
+  });
+});
+
 describe("execution plan", () => {
   const plain = { visibility: "tracked" as const, greenfield: false };
   const WHY =

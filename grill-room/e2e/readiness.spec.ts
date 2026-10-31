@@ -61,6 +61,7 @@ test("readiness shows a not-ready idea's verdict and a ready idea's evidence", a
   await expect(readyPanel.getByTestId("readiness-process-warning")).toHaveCount(
     0,
   );
+  await expect(readyPanel.getByTestId("readiness-ways")).toHaveCount(0);
   await expect(readyPanel.getByTestId("readiness-objective")).toContainText(
     "A tracker for a 16-week marathon training plan.",
   );

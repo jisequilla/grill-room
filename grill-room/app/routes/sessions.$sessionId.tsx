@@ -115,6 +115,9 @@ export default function SessionWorkspaceRoute() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [treeSheetOpen, setTreeSheetOpen] = useState(false);
+  // Incremented by the readiness panel's "Edit the idea"; the idea block opens
+  // its editor once per increase.
+  const [ideaEditRequest, setIdeaEditRequest] = useState(0);
   const treeTriggerRef = useRef<HTMLButtonElement>(null);
   const detailReturnFocusRef = useRef<HTMLElement | null>(null);
 
@@ -503,6 +506,7 @@ export default function SessionWorkspaceRoute() {
             idea={session.idea}
             canEdit={round?.canEditIdea ?? false}
             onSave={(idea) => updateIdea.mutateAsync({ sessionId: id, idea })}
+            editRequest={ideaEditRequest}
           />
         </header>
 
@@ -544,6 +548,8 @@ export default function SessionWorkspaceRoute() {
                   working={working}
                   isAssessing={assessReadiness.isPending}
                   onAssess={() => assessReadiness.mutate({ sessionId: id })}
+                  onEditIdea={() => setIdeaEditRequest((count) => count + 1)}
+                  onGrillAsIs={() => nextRound.mutate({ sessionId: id })}
                   turn={readinessTurn ?? null}
                   canAssess={canAssessReadiness}
                 />
