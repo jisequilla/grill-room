@@ -171,11 +171,7 @@ test("demo: the whole app, from idea to export", async ({ page, request }) => {
   void decisionRow; // kept for readability of the two loops above
 
   // ---- Start the interview: round 1 (6 cards) -----------------------------
-  // The two kept repo decisions already populate the tree, so the workspace
-  // shows "Ask for the next round" (`NextRoundPanel`) rather than "Start the
-  // interview" (`StartInterviewPanel`, only shown with an empty tree) — both
-  // call the same `request-next-round` action.
-  await page.getByRole("button", { name: "Ask for the next round" }).click();
+  await page.getByRole("button", { name: "Start the interview" }).click();
 
   let cards = page.getByTestId("round-card");
   await expect(cards).toHaveCount(6, { timeout: 30_000 });

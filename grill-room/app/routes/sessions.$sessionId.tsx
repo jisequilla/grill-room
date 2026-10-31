@@ -29,7 +29,7 @@ import { DocsFolderChip } from "@/components/workspace/docs-folder-chip";
 import { HeaderOverflowMenu } from "@/components/workspace/header-overflow-menu";
 import { ReadinessPanel, ScoutReportPanel } from "@/components/workspace/readiness-panel";
 import { RoundHistory } from "@/components/workspace/round-history";
-import { RoundPanel } from "@/components/workspace/round-panel";
+import { RoundPanel, roundsExist } from "@/components/workspace/round-panel";
 import { SessionIdea } from "@/components/workspace/session-idea";
 import { SessionModelControl } from "@/components/workspace/session-model-control";
 import { TreeFooter } from "@/components/workspace/tree-footer";
@@ -345,7 +345,6 @@ export default function SessionWorkspaceRoute() {
     round !== undefined &&
     round.state === "interviewing" &&
     round.round === null &&
-    decisions.length === 0 &&
     rounds !== undefined &&
     rounds.rounds.length === 0;
 
@@ -563,7 +562,7 @@ export default function SessionWorkspaceRoute() {
               <RoundPanel
                 round={round}
                 isLoading={roundLoading}
-                hasDecisions={decisions.length > 0}
+                hasRounds={roundsExist(rounds)}
                 decisions={decisions}
                 lastSubmittedAt={lastSubmittedAt}
                 activeTurn={activeTurn ?? null}
