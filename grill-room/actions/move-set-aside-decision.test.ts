@@ -44,7 +44,9 @@ async function insertDecision(
 async function setAside(
   sessionId: string,
   target: Target,
-  overrides: Partial<typeof schema.decisions.$inferInsert> = {},
+  overrides: Partial<
+    Omit<typeof schema.decisions.$inferInsert, "id" | "key" | "questionTitle">
+  > = {},
 ) {
   await insertDecision(sessionId, {
     id: "d-x",
