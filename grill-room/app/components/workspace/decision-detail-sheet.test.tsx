@@ -1,14 +1,22 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-const { mutate, onSelects } = vi.hoisted(() => ({
+const { mutate, onSelects, mutationOptions, toastError, errorMessage } = vi.hoisted(() => ({
   mutate: vi.fn(),
   onSelects: {} as Record<string, () => void>,
+  mutationOptions: {} as { onError?: (error: unknown) => void },
+  toastError: vi.fn(),
+  errorMessage: { value: null as string | null },
 }));
 
+vi.mock("sonner", () => ({ toast: { error: toastError } }));
+
 vi.mock("@agent-native/core/client/hooks", () => ({
-  useActionMutation: () => ({ mutate, isPending: false }),
-  actionErrorMessage: () => null,
+  useActionMutation: (_name: string, options: { onError?: (error: unknown) => void }) => {
+    mutationOptions.onError = options.onError;
+    return { mutate, isPending: false };
+  },
+  actionErrorMessage: () => errorMessage.value,
 }));
 
 // The set-aside kind labels read from the app's real English strings; every
@@ -21,7 +29,8 @@ vi.mock("@agent-native/core/client/i18n", async (importOriginal) => {
     useT: () => {
       const frameworkT = original.useT();
       return ((key: string, ...rest: unknown[]) =>
-        key.startsWith("workspace.setAsideKind") || key === "workspace.moveSetAside"
+        key.startsWith("workspace.setAsideKind") || key === "workspace.moveSetAside" ||
+        key === "workspace.moveSetAsideFailed"
           ? (messages.workspace as Record<string, string>)[key.slice("workspace.".length)]
           : (frameworkT as (...args: unknown[]) => string)(key, ...rest)) as typeof frameworkT;
     },
@@ -212,5 +221,20 @@ describe("DecisionDetailSheet set-aside decisions", () => {
     onSelects["move-to-open-question"]();
     expect(mutate).toHaveBeenCalledTimes(1);
     expect(mutate).toHaveBeenCalledWith({ decisionId: "decision-1", target: "open-question" });
+  });
+
+  it("a failed move shows the server's message, or the fallback when it has none", () => {
+    toastError.mockClear();
+    render(setAside());
+
+    errorMessage.value = "The interviewer is working on this session.";
+    mutationOptions.onError!(new Error("x"));
+    errorMessage.value = null;
+    mutationOptions.onError!(new Error("x"));
+
+    expect(toastError.mock.calls).toEqual([
+      ["The interviewer is working on this session."],
+      ["Could not move that decision."],
+    ]);
   });
 });
