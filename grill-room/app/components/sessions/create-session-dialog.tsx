@@ -131,7 +131,7 @@ export function CreateSessionDialog({
   }
 
   // Every open starts from the stored draft, or from a clean form when there is
-  // none. Only edits write the draft, so this never touches storage.
+  // none. Edits write the draft, and so does an open that names a project.
   useEffect(() => {
     if (!open) return;
     const stored = readSessionDraft(draftStorage());

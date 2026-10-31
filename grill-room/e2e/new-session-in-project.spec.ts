@@ -103,7 +103,7 @@ test.describe("new session in a project", () => {
     await cancel();
     await openFromSidebar();
     await expect(page.getByLabel("Title")).toHaveValue("");
-    await expect(projectField).not.toHaveText(nameY);
+    await expect(projectField).toHaveText("No project");
     expect(await storedDraft(page)).toBeNull();
     await cancel();
 
@@ -124,9 +124,8 @@ test.describe("new session in a project", () => {
     await expect(projectField).toHaveText(nameY);
     await cancel();
 
-    // Row 9: a sidebar open leaves a stored draft in X alone.
+    // Row 9: from /projects/Y, same page, a sidebar open leaves a stored draft in X alone.
     await storeDraftIn(projectX.id);
-    await page.goto("/");
     await openFromSidebar();
     await expect(page.getByLabel("Title")).toHaveValue("T");
     await expect(page.getByLabel("Idea")).toHaveValue("I");
