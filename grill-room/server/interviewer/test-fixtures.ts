@@ -6,6 +6,8 @@ import type {
   HandoffScoutResult,
   ProposeRoundResult,
   ScoutProjectResult,
+  SharpenCardsResult,
+  SharpenRewriteResult,
 } from "./schemas.js";
 import type {
   AssessReadinessRequest,
@@ -17,6 +19,9 @@ import type {
   ProjectServerFacts,
   ScoutProjectRequest,
   ScoutReportForReadiness,
+  SharpenCardsRequest,
+  SharpeningRoundForPrompt,
+  SharpenRewriteRequest,
   SynthesizeSpecRequest,
 } from "./types.js";
 
@@ -400,6 +405,163 @@ export function aHandoffScoutResult(
       },
     ],
     delegationProposals: NO_DELEGATION_PROPOSALS,
+    ...overrides,
+  };
+}
+
+/** An earlier sharpening round: one card accepted on its recommendation, one answered `I don't know`, then an accepted idea readiness still judged not ready. */
+export function aSharpeningRound(
+  overrides: Partial<SharpeningRoundForPrompt> = {},
+): SharpeningRoundForPrompt {
+  return {
+    number: 1,
+    cards: [
+      {
+        key: "sharpen-what",
+        direction: "what",
+        title: "What gets built?",
+        answerKind: "accepted-recommendation",
+        answer: "A scoring sheet for the repos",
+      },
+      {
+        key: "sharpen-who",
+        direction: "who",
+        title: "Who uses it?",
+        answerKind: "unknown",
+        answer: "",
+      },
+    ],
+    acceptedIdea: "Build a scoring sheet to compare eight repos.",
+    edited: false,
+    verdict: "not-ready",
+    missing: ["What the sheet scores"],
+    ...overrides,
+  };
+}
+
+/** The not-ready verdict a sharpening round answers: its two missing items match no earlier round's. */
+export function aNotReadyVerdict(
+  overrides: Partial<AssessReadinessResult> = {},
+): AssessReadinessResult {
+  return anAssessReadinessResult({
+    evidence: [],
+    objective: null,
+    objectiveIsProcess: true,
+    expectedOutcome: null,
+    unknowns: ["What would actually get built", "Who the comparison is for"],
+    verdict: "not-ready",
+    missing: ["A single buildable thing, not a method", "Who the result is for"],
+    ...overrides,
+  });
+}
+
+/**
+ * A first-round request for direction cards. The current idea differs from
+ * the idea as first written, and `usedKeys` holds the tree's one key.
+ */
+export function aSharpenCardsRequest(
+  overrides: Partial<Omit<SharpenCardsRequest, "kind">> = {},
+): SharpenCardsRequest {
+  return {
+    kind: "sharpen-cards",
+    context: aContext({
+      idea: "Build something to compare eight repos.",
+      title: "Repo comparison",
+      decisions: [aDecision({ key: "repo-db", state: "settled" })],
+    }),
+    originalIdea: "Decide how to evaluate eight repos.",
+    readiness: aNotReadyVerdict(),
+    rounds: [],
+    usedKeys: ["repo-db"],
+    rejectionReason: null,
+    previousResult: null,
+    ...overrides,
+  };
+}
+
+/**
+ * A rewrite request for a round whose cards are `what` (accepted on its
+ * recommendation), `who` (`I don't know`) and `outcome` (an own answer).
+ */
+export function aSharpenRewriteRequest(
+  overrides: Partial<Omit<SharpenRewriteRequest, "kind">> = {},
+): SharpenRewriteRequest {
+  return {
+    kind: "sharpen-rewrite",
+    context: aContext({
+      idea: "Decide how to evaluate eight repos.",
+      title: "Repo comparison",
+      decisions: [aDecision({ key: "repo-db", state: "settled" })],
+    }),
+    originalIdea: "Decide how to evaluate repos.",
+    readiness: aNotReadyVerdict(),
+    rounds: [],
+    answers: [
+      {
+        key: "what",
+        title: "What gets built?",
+        kind: "accepted-recommendation",
+        text: "A training plan tracker",
+      },
+      { key: "who", title: "Who uses it?", kind: "unknown", text: "" },
+      {
+        key: "outcome",
+        title: "What exists when it is done?",
+        kind: "own-answer",
+        text: "My club follows its plans week by week",
+      },
+    ],
+    rejectionReason: null,
+    previousResult: null,
+    ...overrides,
+  };
+}
+
+/** One direction card, with two choices and the first recommended. */
+export function aSharpeningCard(
+  key: string,
+  overrides: Partial<SharpenCardsResult["cards"][number]> = {},
+): SharpenCardsResult["cards"][number] {
+  return {
+    key,
+    direction: "constraint",
+    title: `Question ${key}?`,
+    body: `Why ${key} matters.`,
+    choices: [
+      { label: "One", rationale: "The first option." },
+      { label: "Two", rationale: "The second option." },
+    ],
+    recommendedChoice: 0,
+    recommendedAnswer: "The first option is smaller.",
+    ...overrides,
+  };
+}
+
+/** A first round's cards, one per direction it must ask. */
+export function aSharpenCardsResult(
+  overrides: Partial<SharpenCardsResult> = {},
+): SharpenCardsResult {
+  return {
+    cards: [
+      aSharpeningCard("sharpen-what", { direction: "what" }),
+      aSharpeningCard("sharpen-who", { direction: "who" }),
+      aSharpeningCard("sharpen-outcome", { direction: "outcome" }),
+    ],
+    ...overrides,
+  };
+}
+
+/** A rewrite of {@link aSharpenRewriteRequest}'s round, using its two settling answers. */
+export function aSharpenRewriteResult(
+  overrides: Partial<SharpenRewriteResult> = {},
+): SharpenRewriteResult {
+  return {
+    idea: "A tracker for my club's training plans.",
+    uses: [
+      { cardKey: "what", how: "Names the tracker as the thing to build." },
+      { cardKey: "outcome", how: "Says the club follows its plans with it." },
+    ],
+    note: "Named the tracker and what it is for.",
     ...overrides,
   };
 }

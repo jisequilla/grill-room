@@ -439,7 +439,7 @@ below. They are advisory: a card never blocks export.
 
 `use-fake-scenario` offers `consistency-findings` (seven cards after a
 breakdown) and `consistency-check-rate-limited` (the same breakdown, its
-check rate limited, leaving the note). `use-fake-scenario` also offers `unproduced-inputs` (a breakdown whose ticket 2 consumes an item nothing provides, sent back once and then accepted with the gap stored and noted).
+check rate limited, leaving the note). `use-fake-scenario` also offers `unproduced-inputs` (a breakdown whose ticket 2 consumes an item nothing provides, sent back once and then accepted with the gap stored and noted). It also offers `sharpening` (a not-ready judgment, two rounds of sharpening cards and rewrites, a ready judgment, then a first round hanging off `sharpen-what`) and `sharpening-stop` (the not-ready judgment and round 1's cards, then nothing).
 
 ### Exporting a session
 

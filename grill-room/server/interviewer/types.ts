@@ -12,6 +12,9 @@ import type {
   RequestKind,
   ReviewStaleResult,
   ScoutProjectResult,
+  SharpenCardsResult,
+  SharpeningDirection,
+  SharpenRewriteResult,
   SynthesizeSpecResult,
 } from "./schemas.js";
 
@@ -319,6 +322,72 @@ export interface AssessReadinessRequest extends RequestBase {
   previousResult: AssessReadinessResult | null;
 }
 
+/** How the owner answered a sharpening card. Only the first two settle it. */
+export type SharpeningAnswerKind =
+  | "accepted-recommendation"
+  | "own-answer"
+  | "unknown";
+
+/** One card of an earlier round, with the owner's answer. */
+export interface SharpeningCardForPrompt {
+  key: string;
+  direction: SharpeningDirection;
+  title: string;
+  answerKind: SharpeningAnswerKind;
+  /** The answer's text; empty for `unknown`. */
+  answer: string;
+}
+
+/** An earlier, ended round, as the next turns read it. */
+export interface SharpeningRoundForPrompt {
+  number: number;
+  cards: SharpeningCardForPrompt[];
+  /**
+   * The idea the owner accepted, or null when every answer was `unknown`:
+   * nothing was settled, so no rewrite ran and readiness did not judge again.
+   */
+  acceptedIdea: string | null;
+  edited: boolean;
+  /** Null when the judgment after acceptance never landed. */
+  verdict: "ready" | "not-ready" | null;
+  missing: string[];
+}
+
+/**
+ * Ask a sharpening round's direction cards for a not-ready idea, before round
+ * 1. `context.idea` is the current idea, `context.conversationId` is always
+ * null, and `context.decisions` is the tree.
+ */
+export interface SharpenCardsRequest extends RequestBase {
+  kind: "sharpen-cards";
+  originalIdea: string;
+  /** The not-ready verdict this round answers. */
+  readiness: AssessReadinessResult;
+  rounds: SharpeningRoundForPrompt[];
+  /** Every key the tree or an earlier card already uses; a new card must not reuse one. */
+  usedKeys: string[];
+  previousResult: SharpenCardsResult | null;
+}
+
+/**
+ * Rewrite a not-ready idea from a sharpening round's answers. `context` reads
+ * as for {@link SharpenCardsRequest}.
+ */
+export interface SharpenRewriteRequest extends RequestBase {
+  kind: "sharpen-rewrite";
+  originalIdea: string;
+  readiness: AssessReadinessResult;
+  rounds: SharpeningRoundForPrompt[];
+  /** This round's cards and answers, in card order. At least one is settling: a round answered all `unknown` never asks for a rewrite (gr-3jt9.2). */
+  answers: {
+    key: string;
+    title: string;
+    kind: SharpeningAnswerKind;
+    text: string;
+  }[];
+  previousResult: SharpenRewriteResult | null;
+}
+
 export type { ProjectServerFacts };
 
 /** A repo decision from the previous scout report, as the user left it. */
@@ -435,7 +504,9 @@ export type InterviewerRequest =
   | AssessReadinessRequest
   | ScoutProjectRequest
   | HandoffScoutRequest
-  | CheckConsistencyRequest;
+  | CheckConsistencyRequest
+  | SharpenCardsRequest
+  | SharpenRewriteRequest;
 
 /** Whether a request reads a whole project, as the project and handoff scouts do. */
 export function isProjectScoutRequest(
@@ -597,4 +668,12 @@ export interface Interviewer {
     request: CheckConsistencyRequest,
     observer?: ModelCallObserver,
   ): Promise<InterviewerTurn<CheckConsistencyResult>>;
+  sharpenCards(
+    request: SharpenCardsRequest,
+    observer?: ModelCallObserver,
+  ): Promise<InterviewerTurn<SharpenCardsResult>>;
+  sharpenRewrite(
+    request: SharpenRewriteRequest,
+    observer?: ModelCallObserver,
+  ): Promise<InterviewerTurn<SharpenRewriteResult>>;
 }

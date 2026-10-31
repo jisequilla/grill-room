@@ -13,6 +13,9 @@ import {
   MAX_READY_UNKNOWNS,
   MAX_SCOUT_CURRENT_STATE,
   MAX_SCOUT_PROPOSED_DECISIONS,
+  MAX_SHARPENED_IDEA_LENGTH,
+  MAX_SHARPENING_CARDS,
+  FIRST_ROUND_SHARPENING_DIRECTIONS,
 } from "./schemas.js";
 import type {
   AssessReadinessRequest,
@@ -26,6 +29,10 @@ import type {
   ProjectServerFacts,
   ScoutProjectRequest,
   ScoutReportForReadiness,
+  SharpenCardsRequest,
+  SharpeningAnswerKind,
+  SharpeningRoundForPrompt,
+  SharpenRewriteRequest,
 } from "./types.js";
 
 /**
@@ -253,6 +260,8 @@ function renderTask(
     | ScoutProjectRequest
     | HandoffScoutRequest
     | CheckConsistencyRequest
+    | SharpenCardsRequest
+    | SharpenRewriteRequest
   >,
 ): string {
   switch (request.kind) {
@@ -800,6 +809,190 @@ function buildReadinessPrompt(request: AssessReadinessRequest): string {
     "  naming one gap the user could fill by editing the idea. Empty when the",
     "  verdict is `ready` and nothing is missing. Name gaps only; do not",
     "  rewrite the idea.",
+    renderRetryWithPreviousResult(request.rejectionReason, request.previousResult),
+  ]
+    .join("\n")
+    .trimEnd();
+}
+
+/** The direction cards' opening line. Like {@link OPENING_LINE}, it cannot be read as an option. */
+export const SHARPEN_CARDS_OPENING_LINE =
+  "You are sharpening, inside the Grill Room app, an idea that readiness judged not ready for a grilling interview. You are not interviewing: you ask a few direction cards whose answers will steer how the idea is rewritten.";
+
+/** The rewrite's opening line. Like {@link OPENING_LINE}, it cannot be read as an option. */
+export const SHARPEN_REWRITE_OPENING_LINE =
+  "You are sharpening, inside the Grill Room app, an idea that readiness judged not ready for a grilling interview. You are not interviewing: you write the rewrite of the idea from the owner's answers to this round's direction cards.";
+
+/** A sharpening card's title on its own line, then the owner's answer. */
+function renderSharpeningAnswer(
+  title: string,
+  kind: SharpeningAnswerKind,
+  text: string,
+): string[] {
+  return [title, kind === "unknown" ? "Answer: I don't know" : `Answer: ${text}`];
+}
+
+function renderSharpeningRound(round: SharpeningRoundForPrompt): string[] {
+  const cards = round.cards.flatMap((card) => [
+    ...renderSharpeningAnswer(card.title, card.answerKind, card.answer),
+    "",
+  ]);
+  const outcome =
+    round.acceptedIdea === null
+      ? [
+          "Nothing was settled in this round: the idea was not rewritten, and readiness did not judge it again.",
+        ]
+      : [
+          `Accepted idea: ${round.acceptedIdea}`,
+          `Edited by the owner: ${round.edited ? "yes" : "no"}`,
+          `Readiness: ${round.verdict ?? "not judged"}`,
+          ...(round.missing.length > 0
+            ? [`Still missing: ${round.missing.join("; ")}`]
+            : []),
+        ];
+  return [`### Round ${round.number}`, "", ...cards, ...outcome, ""];
+}
+
+/**
+ * What both sharpening prompts carry ahead of their own sections: the idea,
+ * the not-ready verdict being answered, and the earlier rounds.
+ */
+function renderSharpeningState(
+  request: SharpenCardsRequest | SharpenRewriteRequest,
+): string[] {
+  const { context, readiness } = request;
+  return [
+    "## The idea, in the owner's words",
+    "",
+    `Title: ${context.title ?? "(untitled)"}`,
+    "",
+    context.idea,
+    "",
+    ...(request.originalIdea !== context.idea
+      ? ["## The idea as first written", "", request.originalIdea, ""]
+      : []),
+    "## The verdict this round answers",
+    "",
+    `Objective: ${readiness.objective ?? "none stated"}`,
+    ...(readiness.unknowns.length > 0
+      ? [`Unknowns: ${readiness.unknowns.join("; ")}`]
+      : []),
+    "Current readiness: not-ready",
+    `Missing now: ${readiness.missing.join("; ")}`,
+    "",
+    ...(request.rounds.length > 0
+      ? ["## Earlier rounds", "", ...request.rounds.flatMap(renderSharpeningRound)]
+      : []),
+  ];
+}
+
+/** What both sharpening prompts carry after their own state: the tree and the docs folder. */
+function renderSharpeningTreeAndDocs(context: InterviewContext): string[] {
+  return [
+    "## The design tree",
+    "",
+    ...(context.decisions.length > 0
+      ? [
+          "A settled decision is never asked again.",
+          ...context.decisions.map(renderDecision),
+        ]
+      : ["(none)"]),
+    "",
+    ...(context.docsFolder
+      ? [
+          "## The docs folder",
+          "",
+          `The project's docs live in ${context.docsFolder}. Use them to judge what the idea leaves out; do not quote them as the owner's words.`,
+          "",
+        ]
+      : []),
+  ];
+}
+
+/**
+ * Direction cards are not an interview turn, so the prompt carries none of
+ * the grilling method: the idea, the verdict, the earlier rounds, the tree,
+ * and the rules the app checks the cards against.
+ */
+function buildSharpenCardsPrompt(request: SharpenCardsRequest): string {
+  const firstRound = request.rounds.length === 0;
+  const lastRound = request.rounds[request.rounds.length - 1];
+  return [
+    SHARPEN_CARDS_OPENING_LINE,
+    "",
+    ...renderSharpeningState(request),
+    ...renderSharpeningTreeAndDocs(request.context),
+    "## Your task: direction cards",
+    "",
+    "Ask the owner a few direction cards. Each card is one question whose",
+    "answer steers how the idea is rewritten, so that readiness can judge it",
+    "ready.",
+    "",
+    `Return between 1 and ${MAX_SHARPENING_CARDS} cards.`,
+    ...(firstRound
+      ? [
+          `In the first round, ask at least one card for each of these directions: ${FIRST_ROUND_SHARPENING_DIRECTIONS.join(", ")}.`,
+        ]
+      : [
+          "Aim the cards at what is still missing.",
+          "The cards follow readiness's latest missing items and the earlier",
+          "answers: never re-ask what a settling answer already gave.",
+          ...(lastRound?.acceptedIdea === null
+            ? [
+                "Nothing was settled last round, so the same missing items still stand: ask them differently.",
+              ]
+            : []),
+        ]),
+    "Each card's `direction` says what it asks: `what`, the thing to build;",
+    "`who`, who it is for; `outcome`, what exists when it is done; `constraint`,",
+    "a limit the idea must hold to.",
+    "",
+    request.usedKeys.length > 0
+      ? `Give each card its own key, and use none of these: ${request.usedKeys.join(", ")}.`
+      : "Give each card its own key.",
+    "",
+    "Each card has a `title` (the question), a `body` (why it matters), and",
+    "`choices`, each with a `label` and a `rationale` saying what it buys and",
+    "what it costs. `recommendedChoice` is the index of the choice you",
+    "recommend, or null when you recommend none of them, and",
+    "`recommendedAnswer` is the reasoning behind the recommendation.",
+    renderRetryWithPreviousResult(request.rejectionReason, request.previousResult),
+  ]
+    .join("\n")
+    .trimEnd();
+}
+
+/**
+ * The rewrite is not an interview turn either: the idea, the verdict, the
+ * earlier rounds, this round's answers and the tree, then the rules the app
+ * checks the rewrite against.
+ */
+function buildSharpenRewritePrompt(request: SharpenRewriteRequest): string {
+  const settlingKeys = request.answers
+    .filter((answer) => answer.kind !== "unknown")
+    .map((answer) => answer.key);
+  return [
+    SHARPEN_REWRITE_OPENING_LINE,
+    "",
+    ...renderSharpeningState(request),
+    "## This round's answers",
+    "",
+    ...request.answers.flatMap((answer) => [
+      ...renderSharpeningAnswer(answer.title, answer.kind, answer.text),
+      "",
+    ]),
+    ...renderSharpeningTreeAndDocs(request.context),
+    "## Your task: rewrite the idea",
+    "",
+    "Return:",
+    "",
+    "- `idea`: the idea rewritten in the owner's own voice, from this round's",
+    "  answers and the earlier rounds. It must differ from the current idea.",
+    `The idea must be at most ${MAX_SHARPENED_IDEA_LENGTH} characters.`,
+    "- `uses`: one entry per settling card, `{ cardKey, how }`, saying how the",
+    "  idea uses its answer. A card answered `I don't know` gets no entry.",
+    `Name each of these keys exactly once in uses: ${settlingKeys.join(", ")}.`,
+    "- `note`: one line for the owner on what changed.",
     renderRetryWithPreviousResult(request.rejectionReason, request.previousResult),
   ]
     .join("\n")
@@ -1461,6 +1654,8 @@ export function buildPrompt(
   { primed = false }: { primed?: boolean } = {},
 ): string {
   if (request.kind === "assess-readiness") return buildReadinessPrompt(request);
+  if (request.kind === "sharpen-cards") return buildSharpenCardsPrompt(request);
+  if (request.kind === "sharpen-rewrite") return buildSharpenRewritePrompt(request);
   if (request.kind === "scout-project") return buildScoutPrompt(request);
   if (request.kind === "handoff-scout") return buildHandoffScoutPrompt(request);
   if (request.kind === "check-consistency") return buildConsistencyPrompt(request);

@@ -187,7 +187,7 @@ export function readinessOverride(
  * Case, whitespace and trailing-punctuation insensitive form, for comparing an
  * evidence item against the objective or the idea it was drawn from.
  */
-function normalizeForComparison(text: string): string {
+export function normalizeForComparison(text: string): string {
   return text
     .trim()
     .toLowerCase()

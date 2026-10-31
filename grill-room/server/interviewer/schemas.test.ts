@@ -17,12 +17,21 @@ import {
   MAX_HANDOFF_SCOUT_TICKETS,
   MAX_SCOUT_CURRENT_STATE,
   MAX_SCOUT_PROPOSED_DECISIONS,
+  MAX_SHARPENING_CARDS,
   proposeRoundResultSchema,
+  resultSchemas,
   type ResultInputFor,
   scoutProjectResultSchema,
   staysInsideRepo,
 } from "./schemas.js";
-import { aHandoffScoutResult, aScoutProjectResult, NO_DELEGATION_PROPOSALS } from "./test-fixtures.js";
+import {
+  aHandoffScoutResult,
+  aScoutProjectResult,
+  aSharpenCardsResult,
+  aSharpeningCard,
+  aSharpenRewriteResult,
+  NO_DELEGATION_PROPOSALS,
+} from "./test-fixtures.js";
 
 const aStateItem = aScoutProjectResult().currentState[0];
 const aProposal = aScoutProjectResult().proposedDecisions[0];
@@ -813,5 +822,66 @@ describe("break-into-tickets: consumes and produces", () => {
         ],
       }),
     ).toThrow();
+  });
+});
+
+describe("sharpening result schemas", () => {
+  const cards = (payload: unknown) => resultSchemas["sharpen-cards"].safeParse(payload).success;
+  const rewrite = (payload: unknown) => resultSchemas["sharpen-rewrite"].safeParse(payload).success;
+
+  it("row 1: accepts one valid card", () => {
+    expect(cards({ cards: [aSharpeningCard("what", { direction: "what" })] })).toBe(true);
+  });
+
+  it("row 2: refuses no cards", () => {
+    expect(cards({ cards: [] })).toBe(false);
+  });
+
+  it("row 3: refuses one card more than the maximum", () => {
+    expect(MAX_SHARPENING_CARDS).toBe(4);
+    const five = ["a", "b", "c", "d", "e"].map((key) => aSharpeningCard(key));
+    expect(cards({ cards: five })).toBe(false);
+    expect(cards({ cards: five.slice(0, 4) })).toBe(true);
+  });
+
+  it("row 4: refuses a direction outside the four", () => {
+    expect(cards({ cards: [{ ...aSharpeningCard("why"), direction: "why" }] })).toBe(false);
+  });
+
+  it("row 5: refuses an empty rewritten idea", () => {
+    expect(rewrite(aSharpenRewriteResult({ idea: "" }))).toBe(false);
+  });
+
+  it("row 6: refuses an extra field on the rewrite and on a use", () => {
+    expect(rewrite(aSharpenRewriteResult())).toBe(true);
+    expect(rewrite({ ...aSharpenRewriteResult(), extra: 1 })).toBe(false);
+    expect(
+      rewrite(aSharpenRewriteResult({ uses: [{ cardKey: "what", how: "Names it.", extra: 1 } as never] })),
+    ).toBe(false);
+  });
+
+  it("row 6b: refuses a card with an empty title", () => {
+    expect(cards({ cards: [aSharpeningCard("what", { title: "" })] })).toBe(false);
+  });
+
+  it("row 6c: refuses a use with an empty how", () => {
+    expect(rewrite(aSharpenRewriteResult({ uses: [{ cardKey: "what", how: "" }] }))).toBe(false);
+  });
+
+  it("row 6d: refuses a use with an empty card key", () => {
+    expect(rewrite(aSharpenRewriteResult({ uses: [{ cardKey: "", how: "Names it." }] }))).toBe(false);
+  });
+
+  it("row 6e: refuses an extra field on a card", () => {
+    expect(cards({ cards: [{ ...aSharpeningCard("what"), extra: 1 }] })).toBe(false);
+  });
+
+  it("row 6f: refuses a card with an empty key", () => {
+    expect(cards({ cards: [aSharpeningCard("")] })).toBe(false);
+  });
+
+  it("row 6g: refuses an extra field on the cards result", () => {
+    expect(cards(aSharpenCardsResult())).toBe(true);
+    expect(cards({ ...aSharpenCardsResult(), extra: 1 })).toBe(false);
   });
 });

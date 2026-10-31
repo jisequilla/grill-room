@@ -18,6 +18,8 @@ import type {
   ProposeRoundRequest,
   ReviewStaleRequest,
   ScoutProjectRequest,
+  SharpenCardsRequest,
+  SharpenRewriteRequest,
   SynthesizeSpecRequest,
 } from "./types.js";
 import { isProjectScoutRequest } from "./types.js";
@@ -254,6 +256,8 @@ export const fakeScenarios: Record<string, Scenario> = {
   "readiness-ready": { turns: readinessReadyTurns() },
   "readiness-not-ready": { turns: readinessNotReadyTurns() },
   "readiness-not-ready-grill": { turns: readinessNotReadyGrillTurns() },
+  sharpening: { turns: sharpeningTurns() },
+  "sharpening-stop": { turns: sharpeningStopTurns() },
   "reopen-stale-review": { turns: reopenStaleReviewTurns() },
   supersession: { turns: supersessionTurns() },
   replacement: { turns: replacementTurns() },
@@ -622,6 +626,17 @@ function createScriptedInterviewer(
       turn(request, observer) as Promise<
         InterviewerTurn<ResultFor<"check-consistency">>
       >,
+    sharpenCards: (request: SharpenCardsRequest, observer?: ModelCallObserver) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"sharpen-cards">>
+      >,
+    sharpenRewrite: (
+      request: SharpenRewriteRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"sharpen-rewrite">>
+      >,
   };
 }
 
@@ -678,6 +693,190 @@ export function readinessNotReadyTurns(): ScriptedTurn[] {
       },
     },
   ];
+}
+
+/** The first sharpening round's cards: one per direction the first round must ask. */
+function firstSharpeningCards(): ScriptedTurn {
+  return {
+    kind: "sharpen-cards",
+    result: {
+      cards: [
+        {
+          key: "sharpen-what",
+          direction: "what",
+          title: "What gets built?",
+          body: "The idea names a method, not a thing.",
+          choices: [
+            {
+              label: "A scoring sheet for the repos",
+              rationale: "Concrete and small; leaves the method to the sheet.",
+            },
+            {
+              label: "A written evaluation method",
+              rationale: "Keeps it a process, which readiness refused.",
+            },
+          ],
+          recommendedChoice: 0,
+          recommendedAnswer: "A sheet is a thing that can be built and grilled.",
+        },
+        {
+          key: "sharpen-who",
+          direction: "who",
+          title: "Who uses it?",
+          body: "The idea does not say who reads the result.",
+          choices: [
+            {
+              label: "The owner alone",
+              rationale: "One reader, so the sheet can stay plain.",
+            },
+            {
+              label: "The whole team",
+              rationale: "Needs agreement on the scoring first.",
+            },
+          ],
+          recommendedChoice: 0,
+          recommendedAnswer: "The owner is the one deciding.",
+        },
+        {
+          key: "sharpen-outcome",
+          direction: "outcome",
+          title: "What exists when it is done?",
+          body: "The idea names no result.",
+          choices: [
+            {
+              label: "A ranked list of the eight repos",
+              rationale: "A clear end, but it ranks on one axis.",
+            },
+            {
+              label: "A shortlist of three",
+              rationale: "Less work, loses the order of the rest.",
+            },
+          ],
+          recommendedChoice: 0,
+          recommendedAnswer: "A ranking is what the owner can act on.",
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * A not-ready idea sharpened over two rounds until readiness judges it ready,
+ * then the first round of the interview. What `sharpening` schedules, for a
+ * session whose idea is `Decide how to evaluate eight repos.`:
+ *
+ * 1. {@link readinessNotReadyTurns}' judgment;
+ * 2. round 1's cards, `sharpen-what`, `sharpen-who` and `sharpen-outcome`;
+ * 3. round 1's rewrite. The owner accepts the recommendation on
+ *    `sharpen-what` and `sharpen-who` and answers `I don't know` on
+ *    `sharpen-outcome`, so `uses` names the first two only;
+ * 4. a judgment that is still not ready;
+ * 5. round 2's card, `sharpen-scope`;
+ * 6. round 2's rewrite. The owner accepts the recommendation on
+ *    `sharpen-scope`, so `uses` names it;
+ * 7. {@link readinessReadyTurns}' judgment;
+ * 8. the interview's first round, one decision hanging off `sharpen-what`.
+ */
+export function sharpeningTurns(): ScriptedTurn[] {
+  return [
+    ...readinessNotReadyTurns(),
+    firstSharpeningCards(),
+    {
+      kind: "sharpen-rewrite",
+      result: {
+        idea: "Build a scoring sheet I fill in myself to compare eight repos.",
+        uses: [
+          {
+            cardKey: "sharpen-what",
+            how: "The idea now names a scoring sheet as the thing to build.",
+          },
+          {
+            cardKey: "sharpen-who",
+            how: "The idea says the owner fills it in alone.",
+          },
+        ],
+        note: "Named a scoring sheet and who fills it in.",
+      },
+    },
+    {
+      kind: "assess-readiness",
+      result: {
+        evidence: [
+          {
+            text: "a scoring sheet I fill in myself",
+            source: "idea",
+            citation: null,
+          },
+        ],
+        objective: "A scoring sheet for eight repos.",
+        objectiveIsProcess: false,
+        expectedOutcome: null,
+        unknowns: ["What the sheet scores"],
+        verdict: "not-ready",
+        missing: ["What a finished first version contains"],
+      },
+    },
+    {
+      kind: "sharpen-cards",
+      result: {
+        cards: [
+          {
+            key: "sharpen-scope",
+            direction: "constraint",
+            title: "What does the first version hold?",
+            body: "Readiness still misses what a finished first version contains.",
+            choices: [
+              {
+                label: "Five criteria scored one to five",
+                rationale: "Small enough to finish; may miss a criterion.",
+              },
+              {
+                label: "Open-ended notes per repo",
+                rationale: "Flexible, but nothing to rank on.",
+              },
+            ],
+            recommendedChoice: 0,
+            recommendedAnswer: "Fixed criteria make the sheet finishable.",
+          },
+        ],
+      },
+    },
+    {
+      kind: "sharpen-rewrite",
+      result: {
+        idea: "Build a scoring sheet I fill in myself that scores eight repos on five criteria, one to five each.",
+        uses: [
+          {
+            cardKey: "sharpen-scope",
+            how: "The idea now says the first version scores five criteria.",
+          },
+        ],
+        note: "Said what the first version scores.",
+      },
+    },
+    ...readinessReadyTurns(),
+    {
+      kind: "propose-round",
+      result: aRound([
+        aProposedDecision("sheet-format", {
+          title: "Where does the sheet live?",
+          body: "The scoring sheet needs a home.",
+          dependsOn: ["sharpen-what"],
+        }),
+      ]),
+    },
+  ];
+}
+
+/**
+ * A not-ready idea whose owner stops sharpening after round 1's cards are
+ * asked. What `sharpening-stop` schedules, for the same idea as
+ * {@link sharpeningTurns}: {@link readinessNotReadyTurns}' judgment, then
+ * round 1's cards (`sharpen-what`, `sharpen-who`, `sharpen-outcome`), and
+ * nothing after: it expects no answers, since no rewrite is asked for.
+ */
+export function sharpeningStopTurns(): ScriptedTurn[] {
+  return [...readinessNotReadyTurns(), firstSharpeningCards()];
 }
 
 /**

@@ -28,6 +28,8 @@ import type {
   ProposeRoundRequest,
   ReviewStaleRequest,
   ScoutProjectRequest,
+  SharpenCardsRequest,
+  SharpenRewriteRequest,
   SynthesizeSpecRequest,
 } from "./types.js";
 import { isProjectScoutRequest, SCOUT_MODEL } from "./types.js";
@@ -644,6 +646,17 @@ export function createClaudeCliInterviewer(
     ) =>
       turn(request, observer) as Promise<
         InterviewerTurn<ResultFor<"check-consistency">>
+      >,
+    sharpenCards: (request: SharpenCardsRequest, observer?: ModelCallObserver) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"sharpen-cards">>
+      >,
+    sharpenRewrite: (
+      request: SharpenRewriteRequest,
+      observer?: ModelCallObserver,
+    ) =>
+      turn(request, observer) as Promise<
+        InterviewerTurn<ResultFor<"sharpen-rewrite">>
       >,
   };
 }
