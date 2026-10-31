@@ -136,7 +136,8 @@ export function reasonsToRefuseSharpenRewrite(
   const firstUses = [...named];
 
   for (const key of firstUses) {
-    if (kindByKey.get(key) === "unknown") {
+    const kind = kindByKey.get(key);
+    if (kind !== undefined && !isSettling(kind)) {
       reasons.push(`"${key}" was answered "I don't know"; leave it out of uses.`);
     }
   }
