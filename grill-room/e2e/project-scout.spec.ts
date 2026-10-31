@@ -241,6 +241,7 @@ test.describe("project scout", () => {
     // The no-round panel is mounted, so a missing control is a decision of
     // the panel, not a panel that has not rendered yet.
     await expect(page.getByTestId("round-panel-no-round")).toBeAttached();
+    await expect(page.getByTestId("round-panel-loading")).toHaveCount(0);
 
     await expect(
       page.getByRole("button", { name: "Start the interview", exact: true }),
