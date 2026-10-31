@@ -380,7 +380,7 @@ export function DecisionDetailSheet({
           </Section>
         </div>
 
-        {canReopen || loose || canMove ? (
+        {canReopen || loose ? (
           <div className="mt-auto flex flex-wrap items-center gap-2 border-t pt-4">
             {canReopen ? (
               <ReopenDecisionAlert decision={decision} decisions={decisions}>

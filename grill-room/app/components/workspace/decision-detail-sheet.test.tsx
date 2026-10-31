@@ -228,6 +228,15 @@ describe("DecisionDetailSheet set-aside decisions", () => {
     expect(mutate).toHaveBeenCalledWith({ decisionId: "decision-1", target: "open-question" });
   });
 
+  it("the footer holds Reopen beside the Move to menu when settled, and is absent when withdrawn", () => {
+    const settled = render(setAside());
+    const withdrawn = render(setAside({ state: "withdrawn" }));
+
+    expect(settled).toContain("mt-auto");
+    expect(settled).toContain("Reopen");
+    expect(withdrawn).not.toContain("mt-auto");
+  });
+
   it("a failed move shows the server's message, or the fallback when it has none", () => {
     toastError.mockClear();
     render(setAside());
