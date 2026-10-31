@@ -93,6 +93,7 @@ const messages = {
     backToProjects: "Back to projects",
     tabSessions: "Sessions",
     tabSettings: "Settings",
+    newSessionInProject: "New session in this project",
     noSessions: "No sessions in this project yet.",
     movedDescription: "Projects moved to their own page.",
     filterAll: "All",

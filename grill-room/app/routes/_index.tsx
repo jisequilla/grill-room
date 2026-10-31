@@ -26,7 +26,7 @@ export default function SessionListRoute() {
     <Button
       size="sm"
       data-testid="header-new-session"
-      onClick={newSession.open}
+      onClick={() => newSession.open()}
     >
       <IconPlus className="size-4" />
       {t("sessions.newSession")}
@@ -45,7 +45,7 @@ export default function SessionListRoute() {
             <EmptyTitle>{t("pages.sessionsEmpty")}</EmptyTitle>
           </EmptyHeader>
           <EmptyContent>
-            <Button onClick={newSession.open}>
+            <Button onClick={() => newSession.open()}>
               <IconPlus className="size-4" />
               {t("sessions.emptyAction")}
             </Button>

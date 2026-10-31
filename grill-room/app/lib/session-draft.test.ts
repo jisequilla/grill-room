@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   SESSION_DRAFT_KEY,
   clearSessionDraft,
+  draftInProject,
   hasDraftText,
   parseSessionDraft,
   readSessionDraft,
@@ -98,6 +99,34 @@ describe("withKnownProject", () => {
       ...FULL,
       projectId: expected,
     });
+  });
+});
+
+describe("draftInProject", () => {
+  const draftIn = (projectId: string | null): SessionDraft => ({
+    title: "T",
+    idea: "I",
+    model: "opus",
+    answeringMode: "one-at-a-time",
+    docsFolder: "docs/x",
+    projectId,
+  });
+
+  it("row 1: no stored draft stays null", () => {
+    expect(draftInProject(null, "Y")).toEqual(null);
+  });
+
+  it("row 2: a draft in another project moves to the clicked one", () => {
+    expect(draftInProject(draftIn("X"), "Y")).toEqual(draftIn("Y"));
+  });
+
+  it("row 3: a draft in no project gets the clicked one", () => {
+    expect(draftInProject(draftIn(null), "Y")).toEqual(draftIn("Y"));
+  });
+
+  it("row 4: a draft already in the clicked project is unchanged", () => {
+    const input = draftIn("Y");
+    expect(draftInProject(input, "Y")).toEqual(input);
   });
 });
 

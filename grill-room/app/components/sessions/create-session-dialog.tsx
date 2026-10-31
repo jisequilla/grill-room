@@ -32,6 +32,7 @@ import { actionErrorCode } from "@/lib/decisions";
 import { DOCS_FOLDER_ERROR_KEY } from "@/lib/docs-folder";
 import {
   clearSessionDraft,
+  draftInProject,
   hasDraftText,
   readSessionDraft,
   withKnownProject,
@@ -55,6 +56,8 @@ interface CreateSessionDialogProps {
   onOpenChange: (open: boolean) => void;
   /** The global default model, pre-filling the picker once it has loaded. */
   defaultModel: SessionModel | undefined;
+  /** The project this open was started from, or null for a global open. */
+  projectId?: string | null;
   onCreated: (sessionId: string) => void;
 }
 
@@ -84,6 +87,7 @@ export function CreateSessionDialog({
   open,
   onOpenChange,
   defaultModel,
+  projectId = null,
   onCreated,
 }: CreateSessionDialogProps) {
   const t = useT();
@@ -127,12 +131,18 @@ export function CreateSessionDialog({
   }
 
   // Every open starts from the stored draft, or from a clean form when there is
-  // none. Only edits write the draft, so this never touches storage.
+  // none. Edits write the draft, and so does an open that names a project.
   useEffect(() => {
     if (!open) return;
-    const draft = readSessionDraft(draftStorage());
+    const stored = readSessionDraft(draftStorage());
+    const draft =
+      projectId === null ? stored : draftInProject(stored, projectId);
+    if (draft && projectId !== null) writeSessionDraft(draftStorage(), draft);
     if (!draft) {
       resetForm();
+      if (projectId !== null) {
+        apply({ ...formRef.current, projectId });
+      }
       return;
     }
     modelIsUsersRef.current = draft.model !== null;
