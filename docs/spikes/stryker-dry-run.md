@@ -2,7 +2,7 @@
 
 **Verdict: none of the three failures is a real failure on its branch.** gr-x6w (`4f05d1d`) fails only in Stryker's threads pool, an already-fixed sandbox case. gr-ejh (`4d5291c`) is a load-only flake: `test:mutate CLI: --prefer` runs 8 CLI spawns inside vitest's default 5 s test timeout. gr-3jt9.1 (`84bb286`) did not reproduce in 4 runs; its recorded signature and its 307 s match Stryker's default 5-minute `dryRunTimeoutMinutes`, which is a config limit this repository never sets. In every case the mutation summary throws the cause away before a reviewer sees it.
 
-Bead gr-218o. Every number below is **measured** unless it is marked *inferred*. Stryker 10.0.0, vitest 4.1.11, vitest-runner 10.0.0. The machine was shared with other agents throughout, at load averages of 5 to 28 on 14 cores. 12 Stryker runs were used, the limit: 5 on `84bb286`, 5 on `4f05d1d` (one invalidated by a system sleep) and 2 on `4d5291c`. No run was cut off by the Bash timeout.
+Bead gr-218o. Every number below is **measured** unless it is marked *inferred*. Stryker 10.0.0, vitest 4.1.11, vitest-runner 10.0.0. The machine was shared with other agents throughout, at load averages of 5 to 28 on 14 cores. 12 Stryker runs were used, the limit: 5 on `84bb286`, 5 on `4f05d1d` (one invalidated by a system sleep) and 2 on `4d5291c`. No run was cut off by the Bash timeout. Run 12 (986 s) ran longer than the 600 s foreground limit because the tool moved it to the background after 180 s, so that limit no longer applied, and the run ended on its own.
 
 The three cases:
 
@@ -102,7 +102,7 @@ ERROR DryRunExecutor One or more tests failed in the initial test run:
 		Test timed out in 5000ms.
 ```
 
-The test is `scripts/mutate-diff.test.ts`, `it("test:mutate CLI: --prefer", …)`. It calls `runCli` 8 times, and each call is a `spawnSync` of `tsx scripts/mutate-diff.ts`. It sets no timeout of its own, so vitest's default of 5000 ms applies (`vitest.config.ts` raises only `hookTimeout`). It has existed since `5c796e1` (gr-g4v.9) and is unchanged on today's `main` (`mutate-diff.test.ts:1291`). gr-ejh's new budget test is not the one that failed: it passed the dry run within its explicit 180000 ms.
+The test is `scripts/mutate-diff.test.ts`, `it("test:mutate CLI: --prefer", …)`. It calls `runCli` 8 times, and each call is a `spawnSync` of `tsx scripts/mutate-diff.ts`. It sets no timeout of its own, so vitest's default of 5000 ms applies (`vitest.config.ts` raises only `hookTimeout`). It has existed since `5c796e1` (gr-g4v.9) and is unchanged on today's `main`, where gr-ejh's merge moved it to `mutate-diff.test.ts:1404`. gr-ejh's new budget test is not the one that failed: it passed the dry run within its explicit 180000 ms.
 
 ### A
 
@@ -118,7 +118,7 @@ exit=1 elapsed=64s
 
 This is the recorded error and stack, word for word. In `3-dry-run-executor.js`, `validateResultCompleted` throws `ConfigError('There were failed tests …')` for failed tests. It throws the generic `Error('Something went wrong in the initial test run')` only for `DryRunStatus.Error` (an error outside a test, logged as `One or more tests resulted in an error`) and for `DryRunStatus.Timeout`. The timeout is `dryRunTimeoutMinutes`, whose default in `stryker-schema.json` is `5`.
 
-**The arithmetic:** a 60 s dry-run timeout gave 64 s from start to exit, so about 4 s of overhead. A 300 s timeout plus about 4 to 7 s of overhead (Stryker starts and instruments in about 6 s in runs 1 to 3) gives about 304 to 307 s. The recorded run took 307181 ms, counted from the Stryker spawn. Round 1 of the same ticket took 268270 ms in all, dry run included. *Inferred*: round 2's dry run, on a machine shared with PR #247's agents and other sessions, passed the 300 s default and was cut off. An `Error`-status run would end whenever the suite ended, not at about 300 s plus overhead.
+**The arithmetic:** the logs show 1 to 3 s from launch to `Starting initial test run` (run 2: started 17:20:46, dry run at 17:20:48; run 3: 17:26:16 and 17:26:19). Run 4's 60 s dry-run timeout gave 64 s from launch to exit, so about 4 s of overhead in all, startup and teardown together. With the 300 s default that predicts about 304 s. The recorded run took 307181 ms, counted from the Stryker spawn, 3 s more than predicted. *Inferred*: a slower start on a loaded machine covers those 3 s. Round 1 of the same ticket took 268270 ms in all, dry run included. *Inferred*: round 2's dry run, on a machine shared with PR #247's agents and other sessions, passed the 300 s default and was cut off. An `Error`-status run would end whenever the suite ended, not at about 300 s plus overhead.
 
 **A second way to get the same signature, measured by accident:** run 12, `pnpm test:mutate --base ef8f26426` at `4f05d1d`, which was meant to read `stderrTail` for case B. It took 986 s and ended `overrun`. Its log shows `Starting initial test run` at 18:25:56 and `Initial test run timed out!` / `Something went wrong in the initial test run` at 18:42:19. `pmset -g log` shows `Entering Sleep state` at 18:26:29 and `DarkWake` at 18:42:20, after a `caffeinate` assertion this spike did not start ended at 18:25:43. Both timers fired on wake. The run is void as a measurement of case B. It does show that a laptop sleep during the dry run produces case A's message too.
 
@@ -165,7 +165,7 @@ There is no failing test to rerun. The dry run passed 2683 of 2683 tests in all 
 
 | Case | Class | Evidence |
 |---|---|---|
-| A, `84bb286` | **Stryker config limit: `dryRunTimeoutMinutes`** (not `timeoutMS` or `concurrency`), reached under load. *Not reproduced naturally.* | The dry run passed 4 of 4, taking 155 to 201 s. The default 5-minute dry-run timeout produces exactly the recorded error and stack (run 4). The recorded 307181 ms equals 300 s plus the measured overhead. A system sleep produces the same message (run 12), so that cause cannot be ruled out for the original round. |
+| A, `84bb286` | **Not reproduced.** *Inferred* cause: Stryker's `dryRunTimeoutMinutes` (default 5 min, not `timeoutMS` or `concurrency`), reached under load. A system sleep is not excluded. | The dry run passed 4 of 4, taking 155 to 201 s. The default 5-minute dry-run timeout produces exactly the recorded error and stack (run 4). The recorded 307181 ms is within 3 s of 300 s plus the measured overhead. A system sleep during the dry run produces the same message (run 12). |
 | B, `4f05d1d` | **Sandbox-only**, the threads pool Stryker forces. Already fixed. | It fails 4 of 4 under Stryker and 1 of 1 under `--pool threads`, and passes 6 of 6 under plain vitest, loaded or not. `d6ff288` fixed `os.homedir()` in worker threads after the branch was cut. |
 | C, `4d5291c` round 2 | **Load-only (flaky)**: a 5 s default test timeout on a test that spawns `tsx` 8 times. Not a real failure: it passes unloaded. | It fails under load in Stryker's dry run (run 11, 46 s compared with the recorded 43 s), in 2 of 3 loaded plain runs and in 5 of 6 loaded background suites. It passes 3 of 3 unloaded. |
 | C, round 1 | **Wall-clock budget**: `overrun`, not a dry-run failure | Run 10: 570 s, matching the recorded 569959 ms. *Inferred*: its 101 mutants run against a file whose budget test alone takes about 22 s, so 2 workers cannot finish them in the time left. |
@@ -177,27 +177,32 @@ There is no failing test to rerun. The dry run passed 2683 of 2683 tests in all 
 
 ## Question 5: proposed fix (outline, not implemented)
 
-Three tickets, independent of each other. Each goes through the workflow with one lens, except the third, which touches the workflow prompt and its schema and so gets two lenses.
+There are three tickets. None waits on another, but they are not independent of earlier work: tickets 1 and 2 build on gr-ejh (PR #249, now merged into `main`). Each goes through the workflow with one lens, except the third, which touches the workflow prompt and its schema and so gets two lenses.
 
 ### 1. Give the CLI-spawning tests a timeout that load cannot reach (fixes C round 2; the test is on `main` today)
 
+- **Builds on:** gr-ejh (PR #249, merged), which added the `main: one budget covers coverage and Stryker` test with its explicit `180000`.
 - **Files:** `grill-room/scripts/mutate-diff.test.ts` only.
 - **Change:** give every `it` that spawns the CLI (`runCli` / `runStubbedCli` / `spawnSync`) an explicit timeout, copying the budget test's `180000` pattern.
 - **Behaviour rows:**
 
-| Test | Spawns | Timeout today | After |
+| Test | CLI spawns | Timeout today | After |
 |---|---|---|---|
-| `test:mutate CLI: --prefer` | 8 | 5000 (default) | 60000 |
-| `test:mutate CLI: bad input > *` | 1 each | 5000 | 30000 |
-| `loadTestIndex … PATH included (L8)` | git + CLI | 5000 | 30000 |
-| `main: one budget covers coverage and Stryker` | 14 | 180000 | unchanged |
+| `test:mutate CLI: --prefer` | 8 (`runCli`) | 5000 (default) | 60000 |
+| `test:mutate CLI: bad input > *` | 1 each (`runCli`) | 5000 | 30000 |
+| `main: one budget covers coverage and Stryker` | 14 (`runStubbedCli`) | 180000 | unchanged |
 
-- **Acceptance:** a planted bug, a `sleep 6` in a stub on the `--prefer` path, fails today and passes after the change. A structural test lists every `it` in the file that calls `runCli(`, `runStubbedCli(` or `spawnSync(` and requires each to carry a numeric timeout argument.
+`loadTestIndex … PATH included (L8)` also failed under load (background suite PID 10049). It spawns no CLI: it calls `loadTestIndex` in-process, with a `git` stub on `PATH`. The spawn rule does not cover it. The ticket should either leave it out or add a second row for in-process tests with a stubbed `git` on `PATH`; that is the ticket author's call.
+
+- **Acceptance:**
+  - **Structural test:** it lists every `it` in the file that calls `runCli(`, `runStubbedCli(` or `spawnSync(` and requires each to carry a numeric timeout argument. Its planted bug is removing the `60000` from `--prefer`, which makes it fail.
+  - **Behavioural proof:** the `--prefer` test spawns the real `tsx scripts/mutate-diff.ts` with no stub, so a delay has to come from the spawn. Point `runCli`'s `tsx` at a wrapper script, a `sh` script that runs `sleep 1` and then `exec`s the real `node_modules/.bin/tsx "$@"`. With the wrapper, 8 spawns take at least 8 s: the test fails at today's default 5000 ms and passes at 60000. The wrapper is a temporary planted bug for the revert check, not a committed change.
 
 ### 2. Name the dry-run timeout in `stryker.config.mjs` (fixes A's limit)
 
+- **Builds on:** gr-ejh (PR #249, merged), which added `export const RUN_BUDGET_MS = 570000` to `grill-room/scripts/mutate-diff.ts` in place of `OVERRUN_MS`.
 - **Files:** `grill-room/stryker.config.mjs`, plus a test next to `scripts/mutate-diff.test.ts` that reads the config.
-- **Change:** set `dryRunTimeoutMinutes` to `Math.ceil(RUN_BUDGET_MS / 60000)` (10 with gr-ejh's 570000), so the gate's own wall clock is the only limit, and a slow dry run ends `overrun` (which the workflow already treats as "skipped, say so") instead of a misleading `runner-failed`.
+- **Change:** set `dryRunTimeoutMinutes` to `Math.ceil(RUN_BUDGET_MS / 60000)`, which is 10 for 570000, so the gate's own wall clock is the only limit, and a slow dry run ends `overrun` (which the workflow already treats as "skipped, say so") instead of a misleading `runner-failed`.
 - **Behaviour rows:**
 
 | Dry run takes | Today | After |
@@ -223,7 +228,10 @@ Three tickets, independent of each other. Each goes through the workflow with on
 | `One or more tests resulted in an error:` then `\t<message>` | `error outside a test: <message>` |
 | a finished run | `null` |
 
-- **Seam test:** every shape `mutationText` prints for `runner-failed` is accepted by the workflow schema. A planted bug that drops the field from the schema fails the seam test.
+- **Seam test:**
+  - Every summary shape `mutate-diff.ts` emits passes the workflow's `MUTATION` schema in `ticket-build-review-loop.js`. That covers each status and each `dryRunFailure` row above.
+  - `mutationText` prints the `dryRunFailure` of each such summary.
+  - A planted bug that drops `dryRunFailure` from the schema fails the seam test.
 - **Optional**, owner's call: on `dryRunFailure` = `failed tests`, the workflow could rerun the gate once, because 2 of the 3 recorded cases were environmental. This spike would not recommend a retry before tickets 1 and 2 land: with them, a remaining failure is more likely to be real.
 
 ### Not proposed
