@@ -1,7 +1,7 @@
 """Build a wave script: the saved workflow with WAVE_ARGS filled from the delegation templates.
 
 usage: gen-wave.py <spec.json> <out.js> [--root <repo>]
-spec: [{"bead", "ticket" (path), "title", "lenses": [str, ...], "model" (optional: "sonnet" or "opus")}]
+spec: [{"bead", "ticket" (path), "title", "lenses": [str, ...], "model" (optional: "sonnet" or "opus"), "start" (optional: {"pr", "branch", "stage", "round" (optional), "findings"})}]
 """
 import json
 import os
@@ -11,6 +11,11 @@ import sys
 USAGE = "usage: gen-wave.py <spec.json> <out.js> [--root <repo>]"
 SPEC_ENTRY_ERROR = "spec entry {} needs bead, ticket, title and lenses"
 MODEL_ERROR = "spec entry {} model must be sonnet or opus"
+START_ERROR = (
+    "spec entry {} start needs pr, branch, stage (review or fix), "
+    "round (1-2, or 3 with fix) and findings (required with fix)"
+)
+START_KEYS = ("pr", "branch", "stage", "round", "findings")
 MODELS = ("sonnet", "opus")
 
 
@@ -60,6 +65,35 @@ def non_empty_string(value):
     return isinstance(value, str) and value != ""
 
 
+def whole_number(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def valid_start(start):
+    if not isinstance(start, dict) or any(k not in START_KEYS for k in start):
+        return False
+    if not (whole_number(start.get("pr")) and start["pr"] > 0):
+        return False
+    if not non_empty_string(start.get("branch")):
+        return False
+    stage = start.get("stage")
+    if not isinstance(stage, str) or stage not in ("review", "fix"):
+        return False
+    if "round" in start:
+        r = start["round"]
+        if not (whole_number(r) and (r in (1, 2) or (r == 3 and stage == "fix"))):
+            return False
+    if "findings" in start:
+        f = start["findings"]
+        if not (isinstance(f, list) and all(non_empty_string(x) for x in f)):
+            return False
+        if stage == "fix" and not f:
+            return False
+    elif stage == "fix":
+        return False
+    return True
+
+
 def load_spec(path):
     text = read(path)
     try:
@@ -82,6 +116,8 @@ def load_spec(path):
             die(SPEC_ENTRY_ERROR.format(i))
         if "model" in entry and entry["model"] not in MODELS:
             die(MODEL_ERROR.format(i))
+        if "start" in entry and not valid_start(entry["start"]):
+            die(START_ERROR.format(i))
     return spec
 
 
@@ -122,6 +158,8 @@ def main(argv):
         }
         if "model" in t:
             entry["model"] = t["model"]
+        if "start" in t:
+            entry["start"] = t["start"]
         wave.append(entry)
 
     script = rewrite_workflow(workflow_lines, workflow_path, anchor, wave)

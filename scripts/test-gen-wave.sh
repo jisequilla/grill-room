@@ -198,6 +198,72 @@ fx3="$tmp/fx-order3"; mkfx "$fx3"; rm "$fx3/$wfile"
 run "$spec" "$out_js" --root "$fx3"
 fails "gen-wave.py: cannot read $fx3/$wfile" "read order: workflow before ticket"
 
+# start: optional, copied unchanged as the wave entry's last key
+start_err() { echo "gen-wave.py: spec entry $1 start needs pr, branch, stage (review or fix), round (1-2, or 3 with fix) and findings (required with fix)"; }
+S='{"pr":7,"branch":"b","stage":"fix","round":2,"findings":["1. x"]}'
+start_spec() { # <start json> [model fragment]
+  printf '[{"bead":"gr-a","ticket":"%s","title":"Title A","lenses":["lensX"]%s,"start":%s}]' "$t1" "${2:-}" "$1" >"$spec"
+  run "$spec" "$out_js" --root "$fx"
+}
+start_json() { # <start json as dumped> [model fragment]
+  printf '[{"bead": "gr-a", "builder": "B gr-a|Title A|T1", "reviewers": ["R lensX|T1|{{pr}}"], "fix": "F gr-a|T1|{{branch}}"%s, "start": %s}]' "${2:-}" "$1"
+}
+start_ok() { # <name> <start json> <start as dumped> [model json fragment] [model dumped]
+  start_spec "$2" "${4:-}"
+  check_out "$1" "$(wave_text "$(start_json "$3" "${5:-}")")"
+}
+start_ok "start fix" "$S" '{"pr": 7, "branch": "b", "stage": "fix", "round": 2, "findings": ["1. x"]}'
+start_ok "start with model" "$S" '{"pr": 7, "branch": "b", "stage": "fix", "round": 2, "findings": ["1. x"]}' ',"model":"opus"' ', "model": "opus"'
+start_ok "start review" '{"pr":7,"branch":"b","stage":"review"}' '{"pr": 7, "branch": "b", "stage": "review"}'
+start_ok "start review round 2" '{"pr":7,"branch":"b","stage":"review","round":2}' '{"pr": 7, "branch": "b", "stage": "review", "round": 2}'
+start_ok "start key order kept" '{"stage":"review","branch":"b","pr":7}' '{"stage": "review", "branch": "b", "pr": 7}'
+start_ok "start review round 1 findings" '{"pr":7,"branch":"b","stage":"review","round":1,"findings":["1. x"]}' '{"pr": 7, "branch": "b", "stage": "review", "round": 1, "findings": ["1. x"]}'
+start_ok "start review empty findings" '{"pr":7,"branch":"b","stage":"review","findings":[]}' '{"pr": 7, "branch": "b", "stage": "review", "findings": []}'
+start_ok "start fix round 3" '{"pr":7,"branch":"b","stage":"fix","round":3,"findings":["1. x"]}' '{"pr": 7, "branch": "b", "stage": "fix", "round": 3, "findings": ["1. x"]}'
+start_ok "start fix round 1" '{"pr":7,"branch":"b","stage":"fix","round":1,"findings":["1. x"]}' '{"pr": 7, "branch": "b", "stage": "fix", "round": 1, "findings": ["1. x"]}'
+start_row() { # <name> <start json>
+  start_spec "$2"
+  fails "$(start_err 0)" "$1"
+}
+start_row "start review round 3" '{"pr":7,"branch":"b","stage":"review","round":3,"findings":["1. x"]}'
+start_row "start no pr" '{"branch":"b","stage":"fix","round":2,"findings":["1. x"]}'
+start_row "start pr 0" '{"pr":0,"branch":"b","stage":"fix","round":2,"findings":["1. x"]}'
+start_row "start pr -1" '{"pr":-1,"branch":"b","stage":"fix","round":2,"findings":["1. x"]}'
+start_row "start pr string" '{"pr":"7","branch":"b","stage":"fix","round":2,"findings":["1. x"]}'
+start_row "start pr float" '{"pr":7.0,"branch":"b","stage":"fix","round":2,"findings":["1. x"]}'
+start_row "start pr true" '{"pr":true,"branch":"b","stage":"fix","round":2,"findings":["1. x"]}'
+start_row "start no branch" '{"pr":7,"stage":"fix","round":2,"findings":["1. x"]}'
+start_row "start empty branch" '{"pr":7,"branch":"","stage":"fix","round":2,"findings":["1. x"]}'
+start_row "start branch number" '{"pr":7,"branch":5,"stage":"fix","round":2,"findings":["1. x"]}'
+start_row "start no stage" '{"pr":7,"branch":"b","round":2,"findings":["1. x"]}'
+start_row "start stage build" '{"pr":7,"branch":"b","stage":"build","round":2,"findings":["1. x"]}'
+start_row "start stage number" '{"pr":7,"branch":"b","stage":5,"round":2,"findings":["1. x"]}'
+start_row "start stage list" '{"pr":7,"branch":"b","stage":[],"round":2,"findings":["1. x"]}'
+start_row "start round 0" '{"pr":7,"branch":"b","stage":"fix","round":0,"findings":["1. x"]}'
+start_row "start round 4" '{"pr":7,"branch":"b","stage":"fix","round":4,"findings":["1. x"]}'
+start_row "start round true" '{"pr":7,"branch":"b","stage":"fix","round":true,"findings":["1. x"]}'
+start_row "start round null" '{"pr":7,"branch":"b","stage":"fix","round":null,"findings":["1. x"]}'
+start_row "start round float" '{"pr":7,"branch":"b","stage":"fix","round":2.0,"findings":["1. x"]}'
+start_row "start fix empty findings" '{"pr":7,"branch":"b","stage":"fix","round":2,"findings":[]}'
+start_row "start findings with number" '{"pr":7,"branch":"b","stage":"fix","round":2,"findings":["1. x",2]}'
+start_row "start findings empty string" '{"pr":7,"branch":"b","stage":"fix","round":2,"findings":[""]}'
+start_row "start findings string" '{"pr":7,"branch":"b","stage":"fix","round":2,"findings":"x"}'
+start_row "start findings object" '{"pr":7,"branch":"b","stage":"fix","round":2,"findings":{}}'
+start_row "start fix no findings" '{"pr":7,"branch":"b","stage":"fix","round":2}'
+start_row "start review findings null" '{"pr":7,"branch":"b","stage":"review","findings":null}'
+start_row "start extra key" '{"pr":7,"branch":"b","stage":"fix","round":2,"findings":["1. x"],"extra":1}'
+start_row "start string" '"fix"'
+start_row "start null" 'null'
+BAD='{"pr":0,"branch":"b","stage":"fix","round":2,"findings":["1. x"]}'
+spec_row "start error index" "[{\"bead\":\"gr-a\",\"ticket\":\"$t1\",\"title\":\"A\",\"lenses\":[\"L\"]},{\"bead\":\"gr-b\",\"ticket\":\"$t1\",\"title\":\"B\",\"lenses\":[\"L\"],\"start\":$BAD}]" "$(start_err 1)"
+spec_row "start check after entry check" "[{\"bead\":\"gr-a\",\"ticket\":\"$t1\",\"title\":\"A\",\"start\":$BAD}]" "$(entry_err 0)"
+spec_row "start check after model check" "[{\"bead\":\"gr-a\",\"ticket\":\"$t1\",\"title\":\"A\",\"lenses\":[\"L\"],\"model\":\"x\",\"start\":$BAD}]" "$(model_err 0)"
+spec_row "start order across entries" "[{\"bead\":\"gr-a\",\"ticket\":\"$t1\",\"title\":\"A\",\"lenses\":[\"L\"],\"start\":$BAD},{\"bead\":\"gr-b\",\"ticket\":\"$t1\",\"title\":\"B\"}]" "$(start_err 0)"
+
+# docstring
+[ "$(grep -m1 '^spec:' "$gen")" = 'spec: [{"bead", "ticket" (path), "title", "lenses": [str, ...], "model" (optional: "sonnet" or "opus"), "start" (optional: {"pr", "branch", "stage", "round" (optional), "findings"})}]' ]
+report $? "docstring names start"
+
 # roots used as given
 printf '[{"bead":"gr-a","ticket":"%s","title":"A","lenses":["L"]}]' "$t1" >"$spec"
 fx3="$tmp/fx-slash"; mkfx "$fx3"; rm "$fx3/$tdir/builder.md"
