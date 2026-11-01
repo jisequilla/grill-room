@@ -234,6 +234,12 @@ describe("fix.md", () => {
 describe("reviewer.md", () => {
   const lines = REVIEWER.split("\n");
 
+  it("reviewer.md: the mutation step runs in the foreground", () => {
+    expect(lines[99]).toBe(
+      "2. `(cd grill-room && pnpm test:mutate --base origin/main)`, adding `--prefer` with the PR body's Evidence ranges (written as in the Mutate prompt of the workflow) when there are any, in the foreground with the Bash tool's timeout of 600000. The run stops itself within 9.5 minutes, so it always finishes inside that call.",
+    );
+  });
+
   it("the git apply failure bullets", () => {
     const branch = "origin/{" + "{branch}}";
     expect(
