@@ -18,6 +18,7 @@ import { useTempGitRepos } from "../test/git-repos";
 import { repoPath } from "../test/repo-root";
 import {
   CAP,
+  RUN_BUDGET_MS,
   countMutantLines,
   inMutationScope,
   isEntryPoint,
@@ -870,11 +871,119 @@ describe("scopeFor", () => {
       rmSync(stubs, { recursive: true, force: true });
     }
   });
+
+  it(
+    "main: one budget covers coverage and Stryker",
+    () => {
+      const stubs = mkdtempSync(path.join(tmpdir(), "mutate-stub-"));
+      try {
+        const log = path.join(stubs, "argv.log");
+        writeFileSync(
+          path.join(stubs, "pnpm"),
+          [
+            "#!/bin/sh",
+            'if [ "$1" = exec ] && [ "$2" = vitest ]; then',
+            '  echo vitest >> "$STUB_LOG"',
+            '  for a in "$@"; do case "$a" in --coverage.reportsDirectory=*) d="${a#*=}";; esac; done',
+            '  mkdir -p "$d"',
+            `  printf '{"%s/server/a.ts":{"statementMap":{"0":{"start":{"line":1},"end":{"line":1}}},"s":{"0":1}}}' "$(pwd -P)" > "$d/coverage-final.json"`,
+            '  sleep "$STUB_C"; exit 0',
+            "fi",
+            'if [ "$1" = exec ] && [ "$2" = stryker ]; then echo stryker >> "$STUB_LOG"; sleep "$STUB_S"; exit 0; fi',
+            "exit 0",
+            "",
+          ].join("\n"),
+          { mode: 0o755 },
+        );
+        const root = repos.create({
+          files: { "server/a.ts": "export const a = 1 + 2;\n", "server/a.test.ts": "// t\n" },
+        });
+        const base = commitChange(root, { write: { "server/a.test.ts": "// t\n// more\n" } });
+        const heavy = `export const total = ${Array.from({ length: 505 }, () => "a").join(" + ")};`;
+        writeFileSync(path.join(root, "server/b.ts"), "// only a comment\n");
+        writeFileSync(path.join(root, "f.ts"), `// comment\n${heavy}\n`);
+
+        const onCoverage = ["--base", base];
+        const unset = { status: "runner-failed", log: ["vitest", "stryker"] };
+        const rows: Array<{
+          name: string;
+          args: string[];
+          budget: string | undefined;
+          c: number;
+          s: number;
+          status: string;
+          log: string[];
+          maxMs?: number;
+          shape?: { scope: string[]; dropped: string[]; preferNotCovered: string[] | null };
+        }> = [
+          { name: "stryker gets what is left", args: onCoverage, budget: "15000", c: 5, s: 60, status: "overrun", log: ["vitest", "stryker"], maxMs: 18500 },
+          { name: "coverage gets the budget", args: onCoverage, budget: "1500", c: 10, s: 1, status: "overrun", log: ["vitest"], maxMs: 4500 },
+          { name: "no time for coverage", args: onCoverage, budget: "1", c: 0, s: 0, status: "overrun", log: [], shape: { scope: [], dropped: [], preferNotCovered: null } },
+          { name: "no time for stryker", args: ["--mutate", "server/a.ts:1-1"], budget: "1", c: 0, s: 0, status: "overrun", log: [], shape: { scope: ["server/a.ts:1-1"], dropped: [], preferNotCovered: [] } },
+          { name: "unset", args: onCoverage, budget: undefined, c: 0, s: 0, ...unset },
+          { name: "abc", args: onCoverage, budget: "abc", c: 0, s: 0, ...unset },
+          { name: "0", args: onCoverage, budget: "0", c: 0, s: 0, ...unset },
+          { name: "-5", args: onCoverage, budget: "-5", c: 0, s: 0, ...unset },
+          { name: "1.5", args: onCoverage, budget: "1.5", c: 0, s: 0, ...unset },
+          { name: "1ms", args: onCoverage, budget: "1ms", c: 0, s: 0, ...unset },
+          { name: "99999999999", args: onCoverage, budget: "99999999999", c: 0, s: 0, ...unset },
+          { name: "no-scope", args: ["--mutate", "server/b.ts:1-1"], budget: "1", c: 0, s: 0, status: "no-scope", log: [] },
+          { name: "nothing-kept", args: ["--mutate", "f.ts:2-2"], budget: "1", c: 0, s: 0, status: "truncated", log: [] },
+          { name: "570000", args: onCoverage, budget: "570000", c: 0, s: 0, ...unset },
+        ];
+
+        const actual = rows.map((row) => {
+          rmSync(log, { force: true });
+          const started = Date.now();
+          const result = runStubbedCli(row.args, root, {
+            PATH: `${stubs}:${process.env.PATH}`,
+            STUB_LOG: log,
+            STUB_C: String(row.c),
+            STUB_S: String(row.s),
+            MUTATE_BUDGET_MS: row.budget,
+          });
+          const elapsed = Date.now() - started;
+          const summary = JSON.parse(result.stdout);
+          const skipped = row.shape !== undefined;
+          return [
+            row.name,
+            result.status,
+            summary.status,
+            skipped ? [summary.command, summary.elapsedMs, summary.exitCode, summary.stderrTail] : null,
+            skipped ? summary.scope : null,
+            skipped ? summary.dropped : null,
+            skipped ? summary.preferNotCovered : null,
+            existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [],
+            row.maxMs === undefined || elapsed < row.maxMs,
+          ];
+        });
+
+        expect(actual).toEqual(
+          rows.map((row) => [
+            row.name,
+            0,
+            row.status,
+            row.shape ? [null, null, null, null] : null,
+            row.shape ? row.shape.scope : null,
+            row.shape ? row.shape.dropped : null,
+            row.shape ? row.shape.preferNotCovered : null,
+            row.log,
+            true,
+          ]),
+        );
+      } finally {
+        rmSync(stubs, { recursive: true, force: true });
+      }
+    },
+    180000,
+  );
 });
 
 function runStubbedCli(args: string[], cwd: string, envOverride: NodeJS.ProcessEnv) {
   const script = fileURLToPath(new URL("./mutate-diff.ts", import.meta.url));
-  const env: NodeJS.ProcessEnv = { ...process.env, ...envOverride };
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.MUTATE_BUDGET_MS;
+  Object.assign(env, envOverride);
   for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) delete env[name];
   return spawnSync(path.resolve("node_modules/.bin/tsx"), [script, ...args], {
     cwd,
@@ -1059,6 +1168,10 @@ describe("mutation gate settings", () => {
 
   it("CAP is 500", () => {
     expect(CAP).toBe(500);
+  });
+
+  it("RUN_BUDGET_MS is 570000", () => {
+    expect(RUN_BUDGET_MS).toBe(570000);
   });
 
   it("strykerArgs: with and without test files", () => {

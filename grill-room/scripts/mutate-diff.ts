@@ -8,7 +8,7 @@ import { Instrumenter } from "@stryker-mutator/instrumenter";
 import { calculateMetrics } from "mutation-testing-metrics";
 
 export const CAP = 500;
-const OVERRUN_MS = 10 * 60 * 1000;
+export const RUN_BUDGET_MS = 570000;
 const STDERR_TAIL_LINES = 20;
 const DEFAULT_BASE = "origin/main";
 const OUTPUT_DIR = path.join(".scratch", "mutation");
@@ -505,7 +505,18 @@ function emit(summary: Summary, cwd: string): void {
   process.stdout.write(`${json}\n`);
 }
 
+function runBudget(): number {
+  const override = process.env.MUTATE_BUDGET_MS;
+  if (override !== undefined && /^[1-9][0-9]*$/.test(override) && Number(override) <= RUN_BUDGET_MS) {
+    return Number(override);
+  }
+  return RUN_BUDGET_MS;
+}
+
 async function main(): Promise<void> {
+  const budgetStart = Date.now();
+  const budget = runBudget();
+  const timeLeft = () => budget - (Date.now() - budgetStart);
   const cwd = process.cwd();
   rmSync(path.join(cwd, SUMMARY_FILE), { force: true });
   const { values } = parseArgs({
@@ -565,18 +576,20 @@ async function main(): Promise<void> {
         `--coverage.reportsDirectory=${COVERAGE_DIR}`,
         ...scope.testFiles,
       ];
+      const coverageTimeLeft = timeLeft();
       const started = Date.now();
-      const finished = await runInGroup(args, cwd, OVERRUN_MS);
+      const finished =
+        coverageTimeLeft > 0 ? await runInGroup(args, cwd, coverageTimeLeft) : null;
       const coverageFile = path.join(cwd, COVERAGE_DIR, "coverage-final.json");
-      if (finished.exitCode !== 0 || !existsSync(coverageFile)) {
+      if (finished === null || finished.exitCode !== 0 || !existsSync(coverageFile)) {
         emit(
           summarize(null, {
             ...empty,
-            outcome: finished.timedOut ? "overrun" : "runner-failed",
-            command: args.join(" "),
-            elapsedMs: Date.now() - started,
-            exitCode: finished.exitCode,
-            stderrTail: finished.stderrTail,
+            outcome: finished === null || finished.timedOut ? "overrun" : "runner-failed",
+            command: finished === null ? null : args.join(" "),
+            elapsedMs: finished === null ? null : Date.now() - started,
+            exitCode: finished === null ? null : finished.exitCode,
+            stderrTail: finished === null ? null : finished.stderrTail,
             preferNotCovered: preferNotCoveredFor(null, prefer),
           }),
           cwd,
@@ -614,26 +627,28 @@ async function main(): Promise<void> {
       return;
     }
 
+    const strykerTimeLeft = timeLeft();
     rmSync(path.join(cwd, STRYKER_REPORT_FILE), { force: true });
     const args = strykerArgs(kept, testFiles);
     const started = Date.now();
-    const finished = await runInGroup(args, cwd, OVERRUN_MS);
+    const finished = strykerTimeLeft > 0 ? await runInGroup(args, cwd, strykerTimeLeft) : null;
     const reportFile = path.join(cwd, STRYKER_REPORT_FILE);
     const report: StrykerReport | null =
-      !finished.timedOut && finished.exitCode === 0 && existsSync(reportFile)
+      finished !== null && !finished.timedOut && finished.exitCode === 0 && existsSync(reportFile)
         ? JSON.parse(readFileSync(reportFile, "utf8"))
         : null;
-    const outcome = finished.timedOut ? "overrun" : report === null ? "runner-failed" : "finished";
+    const outcome =
+      finished === null || finished.timedOut ? "overrun" : report === null ? "runner-failed" : "finished";
     emit(
       summarize(report, {
         outcome,
         base,
         scope: ranges,
         dropped,
-        command: args.join(" "),
-        elapsedMs: Date.now() - started,
-        exitCode: finished.exitCode,
-        stderrTail: outcome === "finished" ? null : finished.stderrTail,
+        command: finished === null ? null : args.join(" "),
+        elapsedMs: finished === null ? null : Date.now() - started,
+        exitCode: finished === null ? null : finished.exitCode,
+        stderrTail: outcome === "finished" || finished === null ? null : finished.stderrTail,
         preferNotCovered: preferNotCoveredFor(counted, prefer),
       }),
       cwd,

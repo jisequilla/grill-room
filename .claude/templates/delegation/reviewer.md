@@ -97,7 +97,7 @@ A line is covered when it falls inside any Evidence range on the same path, from
 When the Mutation section has no line starting `Mutation run (round`, the main session filled this template by hand and you run the step yourself in your scratch worktree:
 
 1. `(cd grill-room && pnpm install --frozen-lockfile --prefer-offline)`.
-2. `(cd grill-room && pnpm test:mutate --base origin/main)`, adding `--prefer` with the PR body's Evidence ranges (written as in the Mutate prompt of the workflow) when there are any, with the Bash tool's `run_in_background`, waiting for its completion notice. The run can take longer than a foreground call allows.
+2. `(cd grill-room && pnpm test:mutate --base origin/main)`, adding `--prefer` with the PR body's Evidence ranges (written as in the Mutate prompt of the workflow) when there are any, in the foreground with the Bash tool's timeout of 600000. The run stops itself within 9.5 minutes, so it always finishes inside that call.
 3. Read `grill-room/.scratch/mutation/summary.json`. A `status` of `overrun` or `runner-failed` means the gate was skipped. A non-empty `dropped` array is the dropped-range case. A non-empty `preferNotCovered` array is the case above.
    A `status` of `no-scope` means nothing was mutated (the no-scope row above).
 
