@@ -843,7 +843,7 @@ describe("scopeFor", () => {
     } finally {
       rmSync(stubs, { recursive: true, force: true });
     }
-  });
+  }, 30000);
 
   it("main: a tsx file with a test reaches the Stryker command through the loaded index", () => {
     const stubs = mkdtempSync(path.join(tmpdir(), "mutate-stub-"));
@@ -870,7 +870,7 @@ describe("scopeFor", () => {
     } finally {
       rmSync(stubs, { recursive: true, force: true });
     }
-  });
+  }, 30000);
 
   it(
     "main: one budget covers coverage and Stryker",
@@ -1121,7 +1121,7 @@ describe("loadTestIndex", () => {
       L6: [longName],
       text: "// a\n",
     });
-  });
+  }, 30000);
 });
 
 describe("loadTestIndex: git and the file system", () => {
@@ -1133,7 +1133,7 @@ describe("loadTestIndex: git and the file system", () => {
     execFileSync("git", ["add", "."], { cwd: root });
 
     expect(loadTestIndex(root).map((entry) => entry.path)).toEqual(["a.test.ts"]);
-  });
+  }, 30000);
 
   it("loadTestIndex: git runs with the rest of the parent environment, PATH included (L8)", () => {
     const root = repos.create({ files: { "a.test.ts": "// a\n" } });
@@ -1156,7 +1156,7 @@ describe("loadTestIndex: git and the file system", () => {
       }
       rmSync(stubs, { recursive: true, force: true });
     }
-  });
+  }, 30000);
 });
 
 describe("mutation gate settings", () => {
@@ -1449,7 +1449,7 @@ describe("test:mutate CLI: --prefer", () => {
       badBoth: [1, "", `--mutate takes comma-separated file:start-end ranges.${usage}`],
       emptyPrefer: [1, "", `--prefer takes comma-separated file:start-end ranges.${usage}`],
     });
-  });
+  }, 80000);
 
   describe("test:mutate CLI: bad input", () => {
     const repos = useTempGitRepos();
@@ -1484,7 +1484,7 @@ describe("test:mutate CLI: --prefer", () => {
         expect(stderrTail).toMatch(/^ENOENT: no such file or directory, open '.*nope\.ts'$/);
         expect(file).toEqual({ ...rest, stderrTail });
       }
-    });
+    }, 30000);
 
     it("unknown --base", () => {
       for (const files of [{}, stale]) {
@@ -1496,7 +1496,7 @@ describe("test:mutate CLI: --prefer", () => {
         expect(stderrTail).toMatch(/no-such-ref\.\.\.HEAD/);
         expect(file).toEqual({ ...rest, stderrTail });
       }
-    });
+    }, 30000);
 
     it("a stale summary is deleted when the run emits nothing", () => {
       const badRange = runCli(
@@ -1511,7 +1511,7 @@ describe("test:mutate CLI: --prefer", () => {
         badRange: [1, "", `--prefer takes comma-separated file:start-end ranges.${usage}`, null],
         bogus: [false, null],
       });
-    });
+    }, 30000);
 
     it("a valid run after a stale summary", () => {
       const result = runCli({ ...stale, "f.ts": "// only a comment\n" }, ["--mutate", "f.ts:1-1"]);
@@ -1519,7 +1519,7 @@ describe("test:mutate CLI: --prefer", () => {
       const summary = JSON.parse(result.stdout);
       expect(summary).toMatchObject({ status: "no-scope", mutants: 0, scope: ["f.ts:1-1"], preferNotCovered: [] });
       expect(JSON.parse(result.summary ?? "null")).toEqual(summary);
-    });
+    }, 30000);
   });
 });
 
@@ -1565,5 +1565,46 @@ describe("main: the Stryker command comes only from strykerArgs", () => {
       call: main.split("strykerArgs(kept, testFiles)").length - 1,
       literal: main.includes('"stryker"'),
     }).toEqual({ declaration: 1, assignments: 2, calls: 1, call: 1, literal: false });
+  });
+});
+
+function readTimeout(blockLines: string[]): number | null {
+  const last = blockLines[blockLines.length - 1];
+  const inline = last.match(/^\s*\},\s*(\d+)\);$/);
+  if (inline) return Number(inline[1]);
+  const closing = last.match(/^\s*\)/);
+  const before = blockLines[blockLines.length - 2];
+  const separate = before?.match(/^\s*(\d+),$/);
+  return closing && separate ? Number(separate[1]) : null;
+}
+
+describe("mutate-diff.test.ts: timeouts", () => {
+  it("mutate-diff.test.ts: the timeout parser reads only a block's end", () => {
+    const inline = ['  it("x", () => {', "    work();", "  }, 30000);"];
+    const separate = ["  it(", '    "x",', "    () => {", "      work();", "    },", "    180000,", "  );"];
+    const none = ['  it("x", () => {', "    work();", "  });"];
+    const dataLine = ['  it("x", () => {', "    const rows = [", "    100,", "    ];", "  });"];
+    expect([inline, separate, none, dataLine].map(readTimeout)).toEqual([30000, 180000, null, null]);
+  });
+
+  it("mutate-diff.test.ts: every test that starts the CLI or loads the test index has a timeout", () => {
+    const lines = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n");
+    const offenders: string[] = [];
+    lines.forEach((line, start) => {
+      const opening = line.match(/^(\s*)it\(/);
+      if (!opening) return;
+      let end = start + 1;
+      while (!(lines[end].startsWith(opening[1]) && /^[})]/.test(lines[end].slice(opening[1].length)))) end++;
+      const block = lines.slice(start, end + 1);
+      const text = block.join("\n");
+      const name = (text.match(/"([^"]+)"/) ?? [])[1] ?? "";
+      if (name === "mutate-diff.test.ts: every test that starts the CLI or loads the test index has a timeout") return;
+      if (!/\b(runCli|runStubbedCli|loadTestIndex)\(/.test(text)) return;
+      const runs = text.split(/\b(?:runCli|runStubbedCli)\(/).length - 1;
+      const floor = Math.max(30000, 10000 * runs);
+      const timeout = readTimeout(block);
+      if (timeout === null || timeout < floor) offenders.push(`${name}: ${timeout ?? "none"} < ${floor}`);
+    });
+    expect(offenders).toEqual([]);
   });
 });
