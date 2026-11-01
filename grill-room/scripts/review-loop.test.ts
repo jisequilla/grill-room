@@ -1139,8 +1139,8 @@ describe("builder block", () => {
       builder: built("  "),
       canned: { [R1]: verdict("approved") },
     });
-    expect(call(R1).prompt).toBe(`M${MAIN_MARKS_READY}${BUILDER_BLOCKED("  ")}`);
-    expect(result.buildBlocked).toBe("  ");
+    expect(call(R1).prompt).toBe(`M${MAIN_MARKS_READY}`);
+    expect(result.buildBlocked).toBe(null);
   });
 
   it("block note comes before the evidence re-ask note", async () => {
@@ -1203,5 +1203,110 @@ describe("schemas", () => {
       "note",
       "blocked",
     ]);
+  });
+});
+
+describe("placeholder nulls", () => {
+  const BL = verdict("changes-requested", [finding("blocker", "a.ts", { line: 2, claim: "A", evidence: "ea" })]);
+  const FIX_PROMPT = "FIX 1. [blocker] a.ts:2: A (evidence: ea)";
+  const fixCase = (fix: unknown, extra: Record<string, Canned> = {}) =>
+    run({ reviewers: ["M"], canned: { [R1]: BL, [R2]: verdict("approved"), "fix:gr-x:r1": fix, ...extra } });
+  const fixCalls = (labels: string[]) => labels.filter((l) => l.startsWith("fix:")).length;
+  const built = (blocked: unknown) => ({ pr: 7, branch: "b", verification: "all passed", blocked, notes: "" });
+
+  it("placeholder nulls: row 1", async () => {
+    const { result, labels } = await fixCase({
+      ...FIX_OK,
+      commit: "<null>",
+      bodyEdited: true,
+      blocked: "<null>",
+      note: "<null>",
+    });
+    expect(fixCalls(labels)).toBe(1);
+    expect(labels.includes(R2)).toBe(true);
+    expect(result.outcome).toBe("approved-mark-ready");
+    const fix = result.rounds.find((r: any) => r.fix).fix;
+    expect(fix.commit).toBe(null);
+    expect(fix.blocked).toBe(null);
+    expect(fix.note).toBe(null);
+  });
+
+  it("placeholder nulls: row 2", async () => {
+    const { result, labels, call } = await fixCase(
+      { ...FIX_OK, commit: "<null>", blocked: "<null>" },
+      { "fix:gr-x:r1:again": FIX_OK },
+    );
+    expect(result.outcome).toBe("approved-mark-ready");
+    expect(fixCalls(labels)).toBe(2);
+    expect(call("fix:gr-x:r1:again").prompt).toBe(FIX_PROMPT + FIX_NOT_SETTLED);
+  });
+
+  for (const [row, blocked] of [
+    [3, "  NULL "],
+    [4, "None"],
+    [5, ""],
+  ] as const) {
+    it(`placeholder nulls: row ${row}`, async () => {
+      const { result, labels } = await fixCase({ ...FIX_OK, blocked });
+      expect(labels.includes(R2)).toBe(true);
+      expect(result.outcome).toBe("approved-mark-ready");
+    });
+  }
+
+  it("placeholder nulls: row 6", async () => {
+    const { result, labels } = await fixCase({ ...FIX_OK, blocked: "null check fails in a.ts" });
+    expect(result.outcome).toBe("fix-failed");
+    expect(labels.includes(R2)).toBe(false);
+    expect(result.rounds.find((r: any) => r.fix).fix.blocked).toBe("null check fails in a.ts");
+  });
+
+  it("placeholder nulls: row 7", async () => {
+    const { result, call } = await run({
+      reviewers: ["M"],
+      start: undefined,
+      builder: built("<null>"),
+      canned: { [R1]: verdict("approved") },
+    });
+    expect(result.buildBlocked).toBe(null);
+    expect(call(R1).prompt).toBe(`M${MAIN_MARKS_READY}`);
+  });
+
+  it("placeholder nulls: row 8", async () => {
+    const { call } = await run({
+      reviewers: ["M:{{mutation}}"],
+      mutation: { ...OK_MUTATION, blocked: "<null>" },
+      canned: { [R1]: verdict("approved") },
+    });
+    expect(call(R1).prompt).toBe(`M:${OK_MUTATION_TEXT(1)}${MAIN_MARKS_READY}`);
+  });
+
+  it("placeholder nulls: row 9", async () => {
+    const { labels } = await run({
+      reviewers: ["M"],
+      canned: {
+        [R1]: verdict("changes-requested", [finding("blocker", "a.ts", { evidence: "<null>" })]),
+        [`${R1}:again`]: verdict("approved"),
+      },
+    });
+    expect(labels.includes(`${R1}:again`)).toBe(true);
+  });
+
+  it("placeholder nulls: row 10", async () => {
+    const { result } = await run({
+      reviewers: ["M"],
+      canned: { [R1]: verdict("approved", [finding("nit", "a.ts", { claim: "null" })]) },
+    });
+    expect(result.nonBlocking[0].claim).toBe("null");
+  });
+
+  it("placeholder nulls: row 11", async () => {
+    const { labels } = await run({
+      reviewers: ["M"],
+      canned: {
+        [R1]: verdict("changes-requested", [finding("blocker", "a.ts", { evidence: " None " })]),
+        [`${R1}:again`]: verdict("approved"),
+      },
+    });
+    expect(labels.includes(`${R1}:again`)).toBe(true);
   });
 });

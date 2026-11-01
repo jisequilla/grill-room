@@ -113,11 +113,31 @@ const MUTATE = [
 const NOT_SETTLED = `\n\nYour previous result was not final: it had no commit, or its verification said a command was still running. Run every verify command in the foreground, wait for each to finish, and report only then.`
 const FIX_NOT_SETTLED = `\n\nYour previous result was not final: it had no commit and no PR-body edit, or its verification said a command was still running. Run every verify command in the foreground, wait for each to finish, and report only then.`
 
+const PLACEHOLDERS = new Set(['', 'null', '<null>', 'none'])
+const isPlaceholder = (v) => typeof v === 'string' && PLACEHOLDERS.has(v.trim().toLowerCase())
+const nullable = (spec) => Array.isArray(spec?.type) && spec.type.includes('string') && spec.type.includes('null')
+
+// A placeholder string in a field typed ['string', 'null'] means null; routing tests these fields for truthiness.
+function normalizeNulls(value, schema) {
+  if (!value || typeof value !== 'object' || !schema?.properties) return value
+  const out = { ...value }
+  for (const [key, spec] of Object.entries(schema.properties)) {
+    if (nullable(spec) && isPlaceholder(out[key])) out[key] = null
+    else if (spec.type === 'array' && Array.isArray(out[key]) && spec.items?.properties)
+      out[key] = out[key].map((item) => normalizeNulls(item, spec.items))
+  }
+  return out
+}
+
+async function ask(prompt, opts) {
+  return normalizeNulls(await agent(prompt, opts), opts.schema)
+}
+
 async function askUntilSettled(prompt, opts, done, note = NOT_SETTLED) {
-  const first = await agent(prompt, opts)
+  const first = await ask(prompt, opts)
   if (!first || first.blocked || done(first)) return first
   log(`${opts.label}: result not final, asking once more`)
-  return agent(prompt + note, { ...opts, label: `${opts.label}:again` })
+  return ask(prompt + note, { ...opts, label: `${opts.label}:again` })
 }
 
 const multiLens = (t) => t.reviewers.length > 1
@@ -154,16 +174,16 @@ const fixLine = (f, n) => `${n}. [${f.level}] ${where(f)}: ${f.claim}${hasEviden
 
 async function askLens(prompt, label) {
   const opts = { phase: 'Review', model: 'opus', schema: REVIEW }
-  const first = await agent(prompt, { ...opts, label })
+  const first = await ask(prompt, { ...opts, label })
   if (!first || first.verdict === 'blocked') return first
   const missing = first.findings.filter(lacksEvidence)
   if (!missing.length) return first
   const note = `\n\nThese findings need evidence, the command that shows them: ${missing.map(where).join(', ')}. Return all your findings again with evidence filled in.`
-  return agent(prompt + note, { ...opts, label: `${label}:again` })
+  return ask(prompt + note, { ...opts, label: `${label}:again` })
 }
 
 function mutate(t, branch, round) {
-  return agent(fill(MUTATE, { branch }), {
+  return ask(fill(MUTATE, { branch }), {
     label: `mutate:${t.bead}:r${round}`,
     phase: 'Mutate',
     model: 'sonnet',
