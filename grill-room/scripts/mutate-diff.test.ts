@@ -981,7 +981,9 @@ describe("scopeFor", () => {
 
 function runStubbedCli(args: string[], cwd: string, envOverride: NodeJS.ProcessEnv) {
   const script = fileURLToPath(new URL("./mutate-diff.ts", import.meta.url));
-  const env: NodeJS.ProcessEnv = { ...process.env, ...envOverride };
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.MUTATE_BUDGET_MS;
+  Object.assign(env, envOverride);
   for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) delete env[name];
   return spawnSync(path.resolve("node_modules/.bin/tsx"), [script, ...args], {
     cwd,

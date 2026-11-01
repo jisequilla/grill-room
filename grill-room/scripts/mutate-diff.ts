@@ -631,26 +631,24 @@ async function main(): Promise<void> {
     rmSync(path.join(cwd, STRYKER_REPORT_FILE), { force: true });
     const args = strykerArgs(kept, testFiles);
     const started = Date.now();
-    const finished =
-      strykerTimeLeft > 0
-        ? await runInGroup(args, cwd, strykerTimeLeft)
-        : { timedOut: true, exitCode: null, stderrTail: null };
+    const finished = strykerTimeLeft > 0 ? await runInGroup(args, cwd, strykerTimeLeft) : null;
     const reportFile = path.join(cwd, STRYKER_REPORT_FILE);
     const report: StrykerReport | null =
-      !finished.timedOut && finished.exitCode === 0 && existsSync(reportFile)
+      finished !== null && !finished.timedOut && finished.exitCode === 0 && existsSync(reportFile)
         ? JSON.parse(readFileSync(reportFile, "utf8"))
         : null;
-    const outcome = finished.timedOut ? "overrun" : report === null ? "runner-failed" : "finished";
+    const outcome =
+      finished === null || finished.timedOut ? "overrun" : report === null ? "runner-failed" : "finished";
     emit(
       summarize(report, {
         outcome,
         base,
         scope: ranges,
         dropped,
-        command: strykerTimeLeft > 0 ? args.join(" ") : null,
-        elapsedMs: strykerTimeLeft > 0 ? Date.now() - started : null,
-        exitCode: finished.exitCode,
-        stderrTail: outcome === "finished" ? null : finished.stderrTail,
+        command: finished === null ? null : args.join(" "),
+        elapsedMs: finished === null ? null : Date.now() - started,
+        exitCode: finished === null ? null : finished.exitCode,
+        stderrTail: outcome === "finished" || finished === null ? null : finished.stderrTail,
         preferNotCovered: preferNotCoveredFor(counted, prefer),
       }),
       cwd,
