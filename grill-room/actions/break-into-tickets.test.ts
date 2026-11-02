@@ -2440,7 +2440,7 @@ describe("unresolved consumed inputs", () => {
       { number: 1, slug: "one", consumes: [{ item: "spans writer", from: null }] },
       { number: 2, slug: "two", blockedBy: [1] },
     ]);
-    const interviewer = scriptInterviewer([first, second]);
+    const interviewer = scriptInterviewer([first, second, second]);
 
     await breakIntoTickets.run({ sessionId });
 
@@ -2542,7 +2542,11 @@ describe("unresolved consumed inputs", () => {
     const sessionId = await aConfirmedSessionWithSpec();
     scriptInterviewer([ticketsTurn(withGap), ticketsTurn(withGap)]);
     const fresh = await breakIntoTickets.run({ sessionId });
-    expect(fresh.tickets[1]).toMatchObject({
+    expect({
+      consumes: fresh.tickets[1]!.consumes,
+      produces: fresh.tickets[1]!.produces,
+      unproduced: fresh.tickets[1]!.unproduced,
+    }).toEqual({
       consumes: [{ item: "spans writer", from: null }],
       produces: [],
       unproduced: [{ item: "spans writer", from: null, reason: "no-source" }],
