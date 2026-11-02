@@ -97,8 +97,13 @@ const MUTATION = {
     dropped: { type: 'array', items: { type: 'string' } },
     blocked: { type: ['string', 'null'] },
     preferNotCovered: { type: ['array', 'null'], items: { type: 'string' } },
+    dryRunFailure: {
+      type: ['object', 'null'],
+      properties: { kind: { type: 'string', enum: ['failed-tests', 'timeout', 'error'] }, detail: { type: 'string' } },
+      required: ['kind', 'detail'],
+    },
   },
-  required: ['status', 'mutants', 'score', 'survivors', 'elapsedMs', 'dropped', 'blocked', 'preferNotCovered'],
+  required: ['status', 'mutants', 'score', 'survivors', 'elapsedMs', 'dropped', 'blocked', 'preferNotCovered', 'dryRunFailure'],
 }
 
 const MUTATE = [
@@ -106,7 +111,7 @@ const MUTATE = [
   '1. Run `git fetch origin main {{branch}}`, then `git checkout --detach origin/{{branch}}`.',
   '2. Run `cd grill-room && pnpm install --frozen-lockfile --prefer-offline`.',
   "3. From grill-room/, read the PR body with `gh pr view {{branch}} --json body -q .body`. In its `## Evidence` section, collect the source ranges each entry says its test covers. Write each as a range relative to grill-room/, like `server/a.ts:10-20`: drop a leading `grill-room/`, write a single line `:N` as `:N-N`, give a bare `:start-end` the file named earlier in the same entry, split `path:a-b,c-d` into `path:a-b` and `path:c-d` (each further `,c-d` or `,N` takes the file before it, and a single `N` after a comma becomes `N-N`), and resolve a bare file name to the one tracked file of that name under grill-room/ (`git ls-files`). Skip a range you cannot resolve to a file; a bare file name that matches more than one tracked file resolves to nothing and is skipped. Run `pnpm test:mutate --base origin/main`, adding `--prefer` with the ranges joined by commas with no spaces when there are any, in the foreground, with no run_in_background, passing the Bash tool's timeout of 600000: the run stops itself within 9.5 minutes, so it always finishes inside that call. Do not return before the command has exited.",
-  '4. Read grill-room/.scratch/mutation/summary.json and return its status, mutants, score, survivors, elapsedMs, dropped and preferNotCovered unchanged, with blocked null.',
+  '4. Read grill-room/.scratch/mutation/summary.json and return its status, mutants, score, survivors, elapsedMs, dropped, preferNotCovered and dryRunFailure unchanged, with blocked null.',
   'If any step fails, return blocked with the exact command and its error, status runner-failed, and null or empty values for the rest.',
 ].join('\n')
 
@@ -149,12 +154,34 @@ const buildModel = (t) => t.model ?? 'sonnet'
 const MUTATION_GATE_SKIPPED = 'The gate is skipped for this round; say so in the verdict.'
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
-function mutationText(round, m) {
+const DRY_RUN_CAUSES = {
+  'failed-tests': (detail) => (detail ? `failed tests in the dry run: ${detail}` : 'failed tests in the dry run (no test named)'),
+  timeout: () => 'the dry run timed out',
+  error: (detail) => (detail ? `an error outside a test in the dry run: ${detail}` : 'an error outside a test in the dry run'),
+}
+
+function dryRunCause(failure) {
+  const cause = failure ? DRY_RUN_CAUSES[failure.kind] : undefined
+  return cause ? `: ${cause(failure.detail)}` : ''
+}
+
+// A failed-tests dry run was environmental in two of the three cases studied, so it gets one more run.
+const retriesMutation = (m) => Boolean(m) && !m.blocked && m.status === 'runner-failed' && m.dryRunFailure?.kind === 'failed-tests'
+
+function mutationText(round, m, retriedFrom) {
+  const text = mutationResultText(round, m)
+  if (!retriedFrom) return text
+  const detail = retriedFrom.dryRunFailure.detail || 'no test named'
+  return `${text}\nThe first run's dry run failed (failed tests: ${detail}) and was retried once.`
+}
+
+function mutationResultText(round, m) {
   const head = `Mutation run (round ${round}):`
   if (!m) return `${head} the mutation agent died. ${MUTATION_GATE_SKIPPED}`
   if (m.blocked) return `${head} blocked: ${m.blocked}. ${MUTATION_GATE_SKIPPED}`
   const seconds = m.elapsedMs == null ? 'n/a' : `${Math.round(m.elapsedMs / 1000)} s`
-  if (m.status === 'overrun' || m.status === 'runner-failed') return `${head} ${m.status} after ${seconds}. ${MUTATION_GATE_SKIPPED}`
+  if (m.status === 'overrun') return `${head} overrun after ${seconds}. ${MUTATION_GATE_SKIPPED}`
+  if (m.status === 'runner-failed') return `${head} runner-failed after ${seconds}${dryRunCause(m.dryRunFailure)}. ${MUTATION_GATE_SKIPPED}`
   if (m.status === 'no-scope') return `${head} no-scope, nothing to mutate.`
   const survivors = m.survivors ?? []
   const mutants = m.mutants == null ? 'n/a mutants' : plural(m.mutants, 'mutant')
@@ -182,9 +209,9 @@ async function askLens(prompt, label) {
   return ask(prompt + note, { ...opts, label: `${label}:again` })
 }
 
-function mutate(t, branch, round) {
+function mutate(t, branch, round, suffix = '') {
   return ask(fill(MUTATE, { branch }), {
-    label: `mutate:${t.bead}:r${round}`,
+    label: `mutate:${t.bead}:r${round}${suffix}`,
     phase: 'Mutate',
     model: 'sonnet',
     effort: 'low',
@@ -193,11 +220,11 @@ function mutate(t, branch, round) {
   })
 }
 
-async function review(t, pr, branch, round, priorFindings, mutation, buildBlocked) {
+async function review(t, pr, branch, round, priorFindings, mutation, retriedFrom, buildBlocked) {
   const prior = priorFindings
     ? `This is review round ${round}. Round ${round - 1} requested:\n${priorFindings.join('\n')}\nCheck that each is fixed, and look again for new defects.`
     : ''
-  const mutationFill = mutationText(round, mutation)
+  const mutationFill = mutationText(round, mutation, retriedFrom)
   const ending = (multiLens(t) ? ONE_OF_SEVERAL : MAIN_MARKS_READY) + (buildBlocked ? fill(BUILDER_BLOCKED, { blocked: buildBlocked }) : '')
   const verdicts = await parallel(
     t.reviewers.map((template, lens) => () =>
@@ -282,9 +309,11 @@ const results = await pipeline(
         }
         priorFindings = pendingFix
       }
-      const mutation = await mutate(t, branch, round)
-      const { fixList, ...record } = await review(t, pr, branch, round, priorFindings, mutation, buildBlocked)
-      rounds.push({ round, mutation, review: record })
+      const firstMutation = await mutate(t, branch, round)
+      const retriedFrom = retriesMutation(firstMutation) ? firstMutation : null
+      const mutation = retriedFrom ? await mutate(t, branch, round, ':retry') : firstMutation
+      const { fixList, ...record } = await review(t, pr, branch, round, priorFindings, mutation, retriedFrom, buildBlocked)
+      rounds.push({ round, mutation, ...(retriedFrom ? { mutationRetriedFrom: retriedFrom } : {}), review: record })
       if (record.verdict !== 'changes-requested' || round === lastRound) break
       pendingItems = fixList
       pendingFix = fixList.map((f, i) => fixLine(f, i + 1))

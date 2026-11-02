@@ -20,6 +20,7 @@ import {
   CAP,
   RUN_BUDGET_MS,
   countMutantLines,
+  dryRunFailureFrom,
   inMutationScope,
   isEntryPoint,
   loadTestIndex,
@@ -318,6 +319,7 @@ describe("planStrykerRun", () => {
           exitCode: null,
           stderrTail: null,
           preferNotCovered: [],
+          dryRunFailure: null,
         }),
       ).toEqual({
         status: "truncated",
@@ -332,6 +334,7 @@ describe("planStrykerRun", () => {
         exitCode: null,
         stderrTail: null,
         preferNotCovered: [],
+        dryRunFailure: null,
       });
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -380,6 +383,7 @@ describe("summarize", () => {
     exitCode: 0,
     stderrTail: null,
     preferNotCovered: [],
+    dryRunFailure: null,
   };
 
   it("summarize: survivors, mutants and score", () => {
@@ -413,6 +417,7 @@ describe("summarize", () => {
       survivors,
       exitCode: 0,
       stderrTail: null,
+      dryRunFailure: null,
     };
 
     expect(summarize(report, run)).toEqual({
@@ -455,6 +460,7 @@ describe("summarize", () => {
       exitCode: null,
       stderrTail: null,
       preferNotCovered: [],
+      dryRunFailure: null,
     });
     expect(
       summarize(null, {
@@ -477,6 +483,7 @@ describe("summarize", () => {
       exitCode: null,
       stderrTail: null,
       preferNotCovered: [],
+      dryRunFailure: null,
     });
     expect(
       summarize(null, {
@@ -499,6 +506,7 @@ describe("summarize", () => {
       exitCode: 1,
       stderrTail: "boom",
       preferNotCovered: null,
+      dryRunFailure: null,
     });
     expect(
       summarize(null, {
@@ -511,6 +519,7 @@ describe("summarize", () => {
         exitCode: null,
         stderrTail: null,
         preferNotCovered: [],
+        dryRunFailure: null,
       }),
     ).toEqual({
       status: "no-scope",
@@ -525,7 +534,76 @@ describe("summarize", () => {
       exitCode: null,
       stderrTail: null,
       preferNotCovered: [],
+      dryRunFailure: null,
     });
+  });
+});
+
+describe("dryRunFailureFrom", () => {
+  it("dryRunFailureFrom: each table row", () => {
+    const FAILED = "One or more tests failed in the initial test run:";
+    const ERROR = "One or more tests resulted in an error:";
+    const TIMEOUT = "Initial test run timed out!";
+    const LOG = "12:00:05 (123) INFO DryRunExecutor done";
+    const text = (...lines: string[]) => lines.join("\n");
+    const rows: Array<[string, string]> = [
+      ["one test", text(FAILED, "\tsuite a test b", "\t\texpected true to be false")],
+      ["two tests", text(FAILED, "\tsuite a test 1", "\t\tmessage 1", "\tsuite a test 2", "\t\tmessage 2")],
+      ["timeout", text(TIMEOUT)],
+      ["error", text(ERROR, "\tConfigError: x")],
+      ["no header", text("12:00:01 (123) INFO MutationTestExecutor Done in 3 seconds.", "\tnot an item")],
+      ["diff lines skipped", text(FAILED, "\tt1", "\t\tm1", "  - expected", "  + received", "\tt2", "\t\tm2", LOG)],
+      ["no message line", text(FAILED, "\tsuite a test b", LOG)],
+      ["message belongs to the nearest item", text(FAILED, "\tt1", "\tt2", "\t\tm2")],
+      ["empty item skipped", text(FAILED, "\t", "\tt2", "\t\tm2")],
+      ["name trimmed", text(FAILED, "\tt1  ", "\t\tm1")],
+      ["message before any item", text(FAILED, "\t\tm0", "\tt1")],
+      ["header with no item", text(FAILED, LOG)],
+      ["blank message", text(FAILED, "\tt1", "\t\t   ")],
+      ["only the first message line", text(FAILED, "\tt1", "\t\t   ", "\t\treal", LOG)],
+      [
+        "coloured",
+        text(
+          `\x1B[91m12:00:01 (123) ERROR DryRunExecutor\x1B[39m ${FAILED}`,
+          "\tt1",
+          "\t\t\x1B[31mexpected\x1B[39m 1",
+          "\x1B[90m12:00:02 (123) INFO X\x1B[39m done",
+          "\tt9",
+        ),
+      ],
+      ["error with a stack", text(ERROR, "\tConfigError: x", "    at y (z.js:1)", "\tTypeError: w")],
+      ["error block ends at a log line", text(ERROR, "\tConfigError: x", "\t\tdetail", LOG, "\tt9")],
+      ["long message", text(FAILED, "\tt1", `\t\t${"a".repeat(1500)}`)],
+      [
+        "log-prefixed header",
+        text(`12:00:01 (123) ERROR DryRunExecutor ${FAILED}`, "\tsuite a test b", "\t\texpected true to be false"),
+      ],
+      ["timeout first", text(TIMEOUT, LOG, FAILED, "\tt1", "\t\tm1")],
+      ["failed tests first", text(FAILED, "\tt1", "\t\tm1", LOG, TIMEOUT)],
+    ];
+    expect(rows.map(([name, stdout]) => [name, dryRunFailureFrom(stdout)])).toEqual([
+      ["one test", { kind: "failed-tests", detail: "suite a test b: expected true to be false" }],
+      ["two tests", { kind: "failed-tests", detail: "suite a test 1: message 1; suite a test 2: message 2" }],
+      ["timeout", { kind: "timeout", detail: "Initial test run timed out!" }],
+      ["error", { kind: "error", detail: "ConfigError: x" }],
+      ["no header", null],
+      ["diff lines skipped", { kind: "failed-tests", detail: "t1: m1; t2: m2" }],
+      ["no message line", { kind: "failed-tests", detail: "suite a test b" }],
+      ["message belongs to the nearest item", { kind: "failed-tests", detail: "t1; t2: m2" }],
+      ["empty item skipped", { kind: "failed-tests", detail: "t2: m2" }],
+      ["name trimmed", { kind: "failed-tests", detail: "t1: m1" }],
+      ["message before any item", { kind: "failed-tests", detail: "t1" }],
+      ["header with no item", { kind: "failed-tests", detail: "" }],
+      ["blank message", { kind: "failed-tests", detail: "t1" }],
+      ["only the first message line", { kind: "failed-tests", detail: "t1" }],
+      ["coloured", { kind: "failed-tests", detail: "t1: expected 1" }],
+      ["error with a stack", { kind: "error", detail: "ConfigError: x; TypeError: w" }],
+      ["error block ends at a log line", { kind: "error", detail: "ConfigError: x" }],
+      ["long message", { kind: "failed-tests", detail: `t1: ${"a".repeat(996)}` }],
+      ["log-prefixed header", { kind: "failed-tests", detail: "suite a test b: expected true to be false" }],
+      ["timeout first", { kind: "timeout", detail: "Initial test run timed out!" }],
+      ["failed tests first", { kind: "failed-tests", detail: "t1: m1" }],
+    ]);
   });
 });
 
@@ -977,6 +1055,68 @@ describe("scopeFor", () => {
     },
     180000,
   );
+  it(
+    "main: a failed dry run's cause reaches summary.json, and only from Stryker",
+    () => {
+      const stubs = mkdtempSync(path.join(tmpdir(), "mutate-stub-"));
+      try {
+        writeFileSync(
+          path.join(stubs, "pnpm"),
+          [
+            "#!/bin/sh",
+            'if [ "$1" = exec ] && [ "$2" = stryker ]; then',
+            '  case "$STUB_MODE" in',
+            "    whole) printf 'One or more tests failed in the initial test run:\\n\\tsuite a test b\\n\\t\\texpected true to be false\\n'; exit 1;;",
+            "    split) printf 'One or more tests failed in the '; sleep 0.2; printf 'initial test run:\\n\\tt1\\n\\t\\tm1\\n'; exit 1;;",
+            "    long) printf 'One or more tests failed in the initial test run:\\n'; head -c 250000 /dev/zero | tr '\\000' x; printf '\\n'; exit 1;;",
+            "    overrun) printf 'One or more tests failed in the initial test run:\\n\\tt1\\n\\t\\tm1\\n'; sleep 60; exit 1;;",
+            "  esac",
+            "fi",
+            'if [ "$1" = exec ] && [ "$2" = vitest ]; then',
+            "  printf 'One or more tests failed in the initial test run:\\n\\tt1\\n\\t\\tm1\\n'; exit 1",
+            "fi",
+            "exit 0",
+            "",
+          ].join("\n"),
+          { mode: 0o755 },
+        );
+        const root = repos.create({
+          files: { "server/a.ts": "export const a = 1 + 2;\n", "server/a.test.ts": "// t\n" },
+        });
+        const base = commitChange(root, { write: { "server/a.test.ts": "// t\n// more\n" } });
+        const onStryker = ["--mutate", "server/a.ts:1-1"];
+        const cli = (args: string[], env: NodeJS.ProcessEnv) => {
+          const result = runStubbedCli(args, root, { PATH: `${stubs}:${process.env.PATH}`, ...env });
+          return { summary: JSON.parse(result.stdout), stderr: result.stderr };
+        };
+
+        const whole = cli(onStryker, { STUB_MODE: "whole" });
+        const split = cli(onStryker, { STUB_MODE: "split" });
+        const long = cli(onStryker, { STUB_MODE: "long" });
+        const coverage = cli(["--base", base], {});
+        const overrun = cli(onStryker, { STUB_MODE: "overrun", MUTATE_BUDGET_MS: "15000" });
+
+        expect({
+          whole: [whole.summary.status, whole.summary.dryRunFailure],
+          forwarded: whole.stderr.includes("One or more tests failed in the initial test run:"),
+          split: [split.summary.status, split.summary.dryRunFailure],
+          long: [long.summary.status, long.summary.dryRunFailure],
+          coverage: [coverage.summary.status, coverage.summary.command?.includes("vitest"), coverage.summary.dryRunFailure],
+          overrun: [overrun.summary.status, overrun.summary.command !== null, overrun.summary.dryRunFailure],
+        }).toEqual({
+          whole: ["runner-failed", { kind: "failed-tests", detail: "suite a test b: expected true to be false" }],
+          forwarded: true,
+          split: ["runner-failed", { kind: "failed-tests", detail: "t1: m1" }],
+          long: ["runner-failed", null],
+          coverage: ["runner-failed", true, null],
+          overrun: ["overrun", true, null],
+        });
+      } finally {
+        rmSync(stubs, { recursive: true, force: true });
+      }
+    },
+    90000,
+  );
 });
 
 function runStubbedCli(args: string[], cwd: string, envOverride: NodeJS.ProcessEnv) {
@@ -1398,6 +1538,7 @@ describe("test:mutate CLI: --prefer", () => {
     exitCode: null,
     stderrTail: null,
     preferNotCovered,
+    dryRunFailure: null,
   });
   const files = { "f.ts": `// comment\n${heavy}\n` };
 
@@ -1441,6 +1582,7 @@ describe("test:mutate CLI: --prefer", () => {
           exitCode: null,
           stderrTail: null,
           preferNotCovered: ["g.ts:5-9"],
+          dryRunFailure: null,
         },
       ],
       noPrefer: [0, { ...truncated([]), dropped: ["f.ts:2-2"] }],
@@ -1467,6 +1609,7 @@ describe("test:mutate CLI: --prefer", () => {
       survivors: null,
       exitCode: null,
       preferNotCovered: null,
+      dryRunFailure: null,
     });
 
     function failedSummary(result: ReturnType<typeof runCli>) {

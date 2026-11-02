@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { repoPath } from "../test/repo-root.js";
+import { summarize, type RunRecord, type StrykerReport } from "./mutate-diff.js";
 
 const SCRIPT = readFileSync(
   repoPath(".claude/workflows/ticket-build-review-loop.js"),
@@ -22,7 +23,7 @@ const MUTATE_TEXT = (branch: string) =>
     `1. Run \`git fetch origin main ${branch}\`, then \`git checkout --detach origin/${branch}\`.`,
     "2. Run `cd grill-room && pnpm install --frozen-lockfile --prefer-offline`.",
     `3. From grill-room/, read the PR body with \`gh pr view ${branch} --json body -q .body\`. In its \`## Evidence\` section, collect the source ranges each entry says its test covers. Write each as a range relative to grill-room/, like \`server/a.ts:10-20\`: drop a leading \`grill-room/\`, write a single line \`:N\` as \`:N-N\`, give a bare \`:start-end\` the file named earlier in the same entry, split \`path:a-b,c-d\` into \`path:a-b\` and \`path:c-d\` (each further \`,c-d\` or \`,N\` takes the file before it, and a single \`N\` after a comma becomes \`N-N\`), and resolve a bare file name to the one tracked file of that name under grill-room/ (\`git ls-files\`). Skip a range you cannot resolve to a file; a bare file name that matches more than one tracked file resolves to nothing and is skipped. Run \`pnpm test:mutate --base origin/main\`, adding \`--prefer\` with the ranges joined by commas with no spaces when there are any, in the foreground, with no run_in_background, passing the Bash tool's timeout of 600000: the run stops itself within 9.5 minutes, so it always finishes inside that call. Do not return before the command has exited.`,
-    "4. Read grill-room/.scratch/mutation/summary.json and return its status, mutants, score, survivors, elapsedMs, dropped and preferNotCovered unchanged, with blocked null.",
+    "4. Read grill-room/.scratch/mutation/summary.json and return its status, mutants, score, survivors, elapsedMs, dropped, preferNotCovered and dryRunFailure unchanged, with blocked null.",
     "If any step fails, return blocked with the exact command and its error, status runner-failed, and null or empty values for the rest.",
   ].join("\n");
 
@@ -44,6 +45,7 @@ const OK_MUTATION = {
   blocked: null,
   preferNotCovered: [],
 };
+const RETRY_LINE = (detail: string) => `The first run's dry run failed (failed tests: ${detail}) and was retried once.`;
 const OK_MUTATION_TEXT = (round: number) =>
   `Mutation run (round ${round}): ok, 0 mutants, score n/a, 5 s, 0 survivors.`;
 
@@ -128,6 +130,7 @@ describe("mutation step", () => {
       "dropped",
       "blocked",
       "preferNotCovered",
+      "dryRunFailure",
     ]);
     expect(c.opts.schema.properties.preferNotCovered).toEqual({
       type: ["array", "null"],
@@ -235,6 +238,51 @@ describe("mutation step", () => {
       "Mutation run (round 1): ok, n/a mutants, score n/a, 5 s, 0 survivors.",
     ],
     ["ok with null survivors", { ...OK_MUTATION, survivors: null }, OK_MUTATION_TEXT(1)],
+    [
+      "runner-failed with a null cause",
+      { ...OK_MUTATION, status: "runner-failed", elapsedMs: 43000, dryRunFailure: null },
+      `Mutation run (round 1): runner-failed after 43 s. ${SKIP}`,
+    ],
+    [
+      "runner-failed with failed tests",
+      { ...OK_MUTATION, status: "runner-failed", elapsedMs: 43000, dryRunFailure: { kind: "failed-tests", detail: "a: b" } },
+      `Mutation run (round 1): runner-failed after 43 s: failed tests in the dry run: a: b. ${SKIP}\n${RETRY_LINE("a: b")}`,
+    ],
+    [
+      "runner-failed with a timeout",
+      { ...OK_MUTATION, status: "runner-failed", elapsedMs: 300000, dryRunFailure: { kind: "timeout", detail: "Initial test run timed out!" } },
+      `Mutation run (round 1): runner-failed after 300 s: the dry run timed out. ${SKIP}`,
+    ],
+    [
+      "runner-failed with failed tests and an empty detail",
+      { ...OK_MUTATION, status: "runner-failed", elapsedMs: 43000, dryRunFailure: { kind: "failed-tests", detail: "" } },
+      `Mutation run (round 1): runner-failed after 43 s: failed tests in the dry run (no test named). ${SKIP}\n${RETRY_LINE("no test named")}`,
+    ],
+    [
+      "runner-failed with an error and an empty detail",
+      { ...OK_MUTATION, status: "runner-failed", elapsedMs: 5000, dryRunFailure: { kind: "error", detail: "" } },
+      `Mutation run (round 1): runner-failed after 5 s: an error outside a test in the dry run. ${SKIP}`,
+    ],
+    [
+      "runner-failed with an error",
+      { ...OK_MUTATION, status: "runner-failed", elapsedMs: 5000, dryRunFailure: { kind: "error", detail: "ConfigError: x" } },
+      `Mutation run (round 1): runner-failed after 5 s: an error outside a test in the dry run: ConfigError: x. ${SKIP}`,
+    ],
+    [
+      "runner-failed with no dryRunFailure key",
+      { ...OK_MUTATION, status: "runner-failed", elapsedMs: 43000 },
+      `Mutation run (round 1): runner-failed after 43 s. ${SKIP}`,
+    ],
+    [
+      "blocked carrying a failed-tests cause",
+      { ...OK_MUTATION, status: "runner-failed", blocked: "x", dryRunFailure: { kind: "failed-tests", detail: "a: b" } },
+      `Mutation run (round 1): blocked: x. ${SKIP}`,
+    ],
+    [
+      "overrun carrying a stray cause",
+      { ...OK_MUTATION, status: "overrun", elapsedMs: 570000, dryRunFailure: { kind: "failed-tests", detail: "a: b" } },
+      `Mutation run (round 1): overrun after 570 s. ${SKIP}`,
+    ],
   ];
   for (const [name, mutation, text] of rows) {
     it(`mutation text: ${name}`, async () => {
@@ -295,6 +343,221 @@ describe("mutation step", () => {
         expect(call(R1).prompt).toBe(`M:${text}${MAIN_MARKS_READY}`);
       });
     }
+  });
+
+  describe("mutation retry", () => {
+    const failed = (dryRunFailure: unknown, over: Record<string, unknown> = {}) => ({
+      ...OK_MUTATION,
+      status: "runner-failed",
+      elapsedMs: 43000,
+      dryRunFailure,
+      ...over,
+    });
+    const FT = (detail: string) => failed({ kind: "failed-tests", detail });
+    const FT_TEXT = (detail: string) =>
+      `Mutation run (round 1): runner-failed after 43 s: failed tests in the dry run: ${detail}. ${SKIP}`;
+    const FIRST = "mutate:gr-x:r1";
+    const RETRY = "mutate:gr-x:r1:retry";
+    const SURVIVED = { file: "scripts/a.ts", line: 3, mutator: "ConditionalExpression", status: "Survived" };
+    const OK_WITH_SURVIVOR = { ...OK_MUTATION, mutants: 2, score: 50, elapsedMs: 9000, survivors: [SURVIVED] };
+    const rows: Array<{ name: string; first: unknown; second?: unknown; labels: string[]; text: string }> = [
+      {
+        name: "failed tests are retried",
+        first: FT("a: b"),
+        second: OK_MUTATION,
+        labels: [FIRST, RETRY],
+        text: `${OK_MUTATION_TEXT(1)}\n${RETRY_LINE("a: b")}`,
+      },
+      {
+        name: "a timeout is not retried",
+        first: failed({ kind: "timeout", detail: "Initial test run timed out!" }, { elapsedMs: 300000 }),
+        labels: [FIRST],
+        text: `Mutation run (round 1): runner-failed after 300 s: the dry run timed out. ${SKIP}`,
+      },
+      {
+        name: "an error is not retried",
+        first: failed({ kind: "error", detail: "ConfigError: x" }, { elapsedMs: 5000 }),
+        labels: [FIRST],
+        text: `Mutation run (round 1): runner-failed after 5 s: an error outside a test in the dry run: ConfigError: x. ${SKIP}`,
+      },
+      {
+        name: "a null cause is not retried",
+        first: failed(null),
+        labels: [FIRST],
+        text: `Mutation run (round 1): runner-failed after 43 s. ${SKIP}`,
+      },
+      { name: "ok is not retried", first: OK_MUTATION, labels: [FIRST], text: OK_MUTATION_TEXT(1) },
+      {
+        name: "a dead agent is not retried",
+        first: null,
+        labels: [FIRST],
+        text: `Mutation run (round 1): the mutation agent died. ${SKIP}`,
+      },
+      {
+        name: "a second failed-tests result gets no third call",
+        first: FT("a: b"),
+        second: [FT("a: b"), FT("a: b")],
+        labels: [FIRST, RETRY],
+        text: `${FT_TEXT("a: b")}\n${RETRY_LINE("a: b")}`,
+      },
+      {
+        name: "a dead retry agent",
+        first: FT("a: b"),
+        second: null,
+        labels: [FIRST, RETRY],
+        text: `Mutation run (round 1): the mutation agent died. ${SKIP}\n${RETRY_LINE("a: b")}`,
+      },
+      {
+        name: "ok carrying a stray cause is not retried",
+        first: { ...OK_MUTATION, dryRunFailure: { kind: "failed-tests", detail: "a: b" } },
+        labels: [FIRST],
+        text: OK_MUTATION_TEXT(1),
+      },
+      {
+        name: "overrun carrying a stray cause is not retried",
+        first: { ...OK_MUTATION, status: "overrun", elapsedMs: 570000, dryRunFailure: { kind: "failed-tests", detail: "a: b" } },
+        labels: [FIRST],
+        text: `Mutation run (round 1): overrun after 570 s. ${SKIP}`,
+      },
+      {
+        name: "a blocked result is never retried",
+        first: failed({ kind: "failed-tests", detail: "a: b" }, { blocked: "x" }),
+        labels: [FIRST],
+        text: `Mutation run (round 1): blocked: x. ${SKIP}`,
+      },
+      {
+        name: "the whole prompt after a retry",
+        first: FT("a: b"),
+        second: OK_WITH_SURVIVOR,
+        labels: [FIRST, RETRY],
+        text: "Mutation run (round 1): ok, 2 mutants, score 50.0, 9 s, 1 survivor.\n- scripts/a.ts:3 ConditionalExpression (Survived)\nThe first run's dry run failed (failed tests: a: b) and was retried once.",
+      },
+      {
+        name: "an empty detail is still retried",
+        first: FT(""),
+        second: OK_MUTATION,
+        labels: [FIRST, RETRY],
+        text: `${OK_MUTATION_TEXT(1)}\nThe first run's dry run failed (failed tests: no test named) and was retried once.`,
+      },
+      {
+        name: "a blocked retry",
+        first: FT("a: b"),
+        second: { ...OK_MUTATION, status: "runner-failed", blocked: "y" },
+        labels: [FIRST, RETRY],
+        text: `Mutation run (round 1): blocked: y. ${SKIP}\n${RETRY_LINE("a: b")}`,
+      },
+      {
+        name: "a retry that fails again",
+        first: FT("a: b"),
+        second: [FT("c: d"), FT("c: d")],
+        labels: [FIRST, RETRY],
+        text: `${FT_TEXT("c: d")}\nThe first run's dry run failed (failed tests: a: b) and was retried once.`,
+      },
+    ];
+    for (const row of rows) {
+      it(`mutation retry: ${row.name}`, async () => {
+        const canned: Record<string, Canned> = { [FIRST]: row.first, [R1]: verdict("approved") };
+        if ("second" in row) canned[RETRY] = row.second;
+        const { result, labels, call } = await run({ reviewers: ["M:{{mutation}}"], canned });
+        expect(labels.filter((l) => l.startsWith("mutate:"))).toEqual(row.labels);
+        expect(call(R1).prompt).toBe(`M:${row.text}${MAIN_MARKS_READY}`);
+        const retried = row.labels.length === 2;
+        const second = Array.isArray(row.second) ? row.second[0] : row.second;
+        expect(result.rounds[0].mutation).toEqual(retried ? second : row.first);
+        if (retried) expect(result.rounds[0].mutationRetriedFrom).toEqual(row.first);
+        else expect(result.rounds[0]).not.toHaveProperty("mutationRetriedFrom");
+      });
+    }
+  });
+
+  it("seam: every summary shape passes the MUTATION schema", async () => {
+    const { call } = await run({ canned: { [R1]: verdict("approved") } });
+    const schema = call("mutate:gr-x:r1").opts.schema;
+
+    const report: StrykerReport = {
+      files: {
+        "server/a.ts": {
+          mutants: [
+            { mutatorName: "ConditionalExpression", status: "Killed", location: { start: { line: 3 } } },
+            { mutatorName: "ConditionalExpression", status: "Survived", location: { start: { line: 7 } } },
+          ],
+        },
+      },
+    };
+    const record: RunRecord = {
+      outcome: "finished",
+      base: "origin/main",
+      scope: ["server/a.ts:1-20"],
+      dropped: [],
+      command: "pnpm exec stryker run --mutate server/a.ts:1-20",
+      elapsedMs: 4200,
+      exitCode: 0,
+      stderrTail: null,
+      preferNotCovered: [],
+      dryRunFailure: null,
+    };
+    const failedRun: RunRecord = { ...record, outcome: "runner-failed", exitCode: 1, stderrTail: "boom" };
+    const notStarted = { command: null, elapsedMs: null, exitCode: null };
+    const summaries = [
+      summarize(report, record),
+      summarize(report, { ...record, dropped: ["server/a.ts:30-31"] }),
+      summarize(null, { ...record, outcome: "overrun", exitCode: null }),
+      summarize(null, failedRun),
+      summarize(null, { ...record, ...notStarted, outcome: "no-scope" }),
+      summarize(null, { ...record, ...notStarted, outcome: "nothing-kept", dropped: ["server/a.ts:7-7"] }),
+      summarize(null, { ...failedRun, dryRunFailure: { kind: "failed-tests", detail: "t1: m1" } }),
+      summarize(null, { ...failedRun, dryRunFailure: { kind: "timeout", detail: "Initial test run timed out!" } }),
+      summarize(null, { ...failedRun, dryRunFailure: { kind: "error", detail: "" } }),
+    ].map((summary) => ({ ...summary, blocked: null }));
+
+    const jsonTypes = (value: unknown): string[] => {
+      if (value === null) return ["null"];
+      if (Array.isArray(value)) return ["array"];
+      if (typeof value === "number") return Number.isInteger(value) ? ["integer", "number"] : ["number"];
+      return [typeof value];
+    };
+    const problems = (value: Record<string, unknown>, spec: any, at: string): string[] =>
+      (spec.required as string[]).flatMap((key) => {
+        const property = spec.properties?.[key];
+        if (!property) return [`${at}${key}: required but not in properties`];
+        if (!(key in value)) return [`${at}${key}: missing`];
+        const types: string[] = Array.isArray(property.type) ? property.type : [property.type];
+        const actual = value[key];
+        if (!jsonTypes(actual).some((type) => types.includes(type))) {
+          return [`${at}${key}: ${jsonTypes(actual)[0]} not in ${types.join("|")}`];
+        }
+        if (property.enum && !property.enum.includes(actual)) return [`${at}${key}: ${String(actual)} not in enum`];
+        if (actual !== null && typeof actual === "object" && !Array.isArray(actual) && property.required) {
+          return problems(actual as Record<string, unknown>, property, `${at}${key}.`);
+        }
+        return [];
+      });
+
+    expect(summaries.map((summary) => [summary.status, problems(summary, schema, "")])).toEqual(
+      summaries.map((summary) => [summary.status, []]),
+    );
+    expect(summaries.map((summary) => summary.status)).toEqual([
+      "ok",
+      "truncated",
+      "overrun",
+      "runner-failed",
+      "no-scope",
+      "truncated",
+      "runner-failed",
+      "runner-failed",
+      "runner-failed",
+    ]);
+    expect(summaries.map((summary) => summary.dryRunFailure?.kind ?? null)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "failed-tests",
+      "timeout",
+      "error",
+    ]);
   });
 
   it("empty blocked counts as null", async () => {
