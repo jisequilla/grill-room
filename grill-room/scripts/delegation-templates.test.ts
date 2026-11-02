@@ -23,19 +23,19 @@ const readTemplate = (path: string): string[] =>
 
 const MARKER = "<the Evidence entry test command>";
 
-const REVERT_BLOCK = `scripts/revert-check.sh '${MARKER}'`;
+const REVERT_BLOCK = `scripts/revert-check.sh '(${MARKER})'`;
 
 const REVERT_PARAGRAPH =
-  "The script reads commits, not the working tree, so commit the change on the worktree branch before running it. Put your own test command in place of the marker, inside the single quotes, and run the line as one plain command from the worktree root. The script moves to the worktree root, reverts every non-test file the branch changes against `origin/main`, runs your command there with `bash -c`, and re-applies the source even when the test fails or the run is interrupted. If the test command needs `grill-room/`, write it as `(cd grill-room && <test command>)`. Inside the command, use only double quotes. The red run is the script's output; the green run is a separate run of the same test command afterwards. A planted-bug line is the exception: its red run is the test with the planted edit applied.";
+  "The script reads commits, not the working tree, so commit the change on the worktree branch before running it. Put your own test command in place of the marker, inside the parentheses, and run the line as one plain command from the worktree root. Keep the parentheses: the worktree guard refuses the script when its argument is a bare `bash <script>` (`docs/spikes/worktree-guard-probe.md`). The script moves to the worktree root, reverts every non-test file the branch changes against `origin/main`, runs your command there with `bash -c`, and re-applies the source even when the test fails or the run is interrupted. If the test command needs `grill-room/`, the line reads `scripts/revert-check.sh '(cd grill-room && <test command>)'`: one pair of parentheses around the whole command, never two, since `((` starts arithmetic in bash. Inside the command, use only double quotes. The red run is the script's output; the green run is a separate run of the same test command afterwards. A planted-bug line is the exception: its red run is the test with the planted edit applied.";
 
 const FAILURE_BULLET =
   "- If the script prints `git apply -R failed` (exit 3) or `git apply failed` (exit 4), stop and report, quoting git's error. Never rebuild the change by hand.";
 
 const REVIEWER_PARAGRAPH =
-  "Put the Evidence entry's test command in place of the marker, inside the single quotes, and run the line as one plain Bash call. Run the line from the scratch worktree root. The script moves to the worktree root, and it re-applies the source even when the test fails. Write any `cd grill-room` inside the command, as `(cd grill-room && <test command>)`, and use only double quotes inside it.";
+  "Put the Evidence entry's test command in place of the marker, inside the parentheses, and run the line as one plain Bash call. Run the line from the scratch worktree root. The script moves to the worktree root, and it re-applies the source even when the test fails. Keep the parentheses: the worktree guard refuses the script when its argument is a bare `bash <script>`. A command that needs `grill-room/` reads `(cd grill-room && <test command>)` inside them, one pair in all, never two, since `((` starts arithmetic in bash. Use only double quotes inside it.";
 
 const REVIEWER_RED_RUN_LINE =
-  "The red run is the Revert block with that command in place of the marker. The green run is the same command after the block finishes. An entry that proves a planted-bug line is the exception: its red run is its quoted edit applied, as the rows below say, and the Revert block does not judge it.";
+  "The red run is the Revert block with that command in place of the marker. The green run is the same command, run as `(<command>)`, after the block finishes. An entry that proves a planted-bug line is the exception: its red run is its quoted edit applied, as the rows below say, and the Revert block does not judge it.";
 
 const REVIEWER_REVERTED_ROW =
   "| The test passes with the source reverted, on an entry that does not prove a planted-bug line | `blocker`. `evidence` is the block with that test command |";
@@ -174,7 +174,7 @@ describe("Revert block", () => {
     for (const text of [BUILDER, FIX, REVIEWER]) {
       const block = revertBlockOf(text);
       expect(block.split("\n")).toEqual([
-        "scripts/revert-check.sh '<the Evidence entry test command>'",
+        "scripts/revert-check.sh '(<the Evidence entry test command>)'",
       ]);
     }
   });
@@ -235,9 +235,30 @@ describe("reviewer.md", () => {
   const lines = REVIEWER.split("\n");
 
   it("reviewer.md: the mutation step runs in the foreground", () => {
-    expect(lines[99]).toBe(
+    expect(
+      lines.find((l) => l.startsWith("2. `(cd grill-room && pnpm test:mutate")),
+    ).toBe(
       "2. `(cd grill-room && pnpm test:mutate --base origin/main)`, adding `--prefer` with the PR body's Evidence ranges (written as in the Mutate prompt of the workflow) when there are any, in the foreground with the Bash tool's timeout of 600000. The run stops itself within 9.5 minutes, so it always finishes inside that call.",
     );
+  });
+
+  it("reviewer.md: Re-running Evidence yields commands without outer parentheses", () => {
+    const start = lines.indexOf("## Re-running Evidence");
+    const bullets = lines.slice(start).filter((l) => l.startsWith("- ")).slice(0, 6);
+    expect(bullets).toEqual([
+      "- A quoted command wrapped in its own parentheses, such as `(cd grill-room && pnpm exec vitest --run scripts/x.test.ts)`, is used without them: `cd grill-room && pnpm exec vitest --run scripts/x.test.ts`.",
+      "- A quoted command that already contains `cd grill-room &&` with no parentheses around it is used as quoted.",
+      "- A quoted command whose paths start with `grill-room/`, such as `pnpm exec vitest --run grill-room/scripts/x.test.ts`, becomes `cd grill-room && pnpm exec vitest --run scripts/x.test.ts`, with the prefix stripped.",
+      "- A quoted command that runs a script at the repository root, such as `bash scripts/test-gen-wave.sh` or `python3 scripts/gen-wave.py`, is used as quoted (it runs from the worktree root, where `scripts/` is).",
+      "- Any other quoted command whose paths have no `grill-room/` prefix, such as `pnpm exec vitest --run scripts/x.test.ts`, becomes `cd grill-room && <command>`.",
+      "- When the entry quotes no command, use `cd grill-room && pnpm exec vitest --run <test file without a leading grill-room/> -t \"<test name>\"`.",
+    ]);
+  });
+
+  it("no template line contains '((", () => {
+    for (const text of [BUILDER, FIX, REVIEWER]) {
+      expect(text.split("\n").filter((l) => l.includes("'(("))).toEqual([]);
+    }
   });
 
   it("the git apply failure bullets", () => {

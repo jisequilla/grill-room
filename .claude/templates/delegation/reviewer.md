@@ -32,10 +32,10 @@ Other lenses may review the same PR at the same time, so give your scratch work 
 ### Revert
 
 ```bash
-scripts/revert-check.sh '<the Evidence entry test command>'
+scripts/revert-check.sh '(<the Evidence entry test command>)'
 ```
 
-Put the Evidence entry's test command in place of the marker, inside the single quotes, and run the line as one plain Bash call. Run the line from the scratch worktree root. The script moves to the worktree root, and it re-applies the source even when the test fails. Write any `cd grill-room` inside the command, as `(cd grill-room && <test command>)`, and use only double quotes inside it.
+Put the Evidence entry's test command in place of the marker, inside the parentheses, and run the line as one plain Bash call. Run the line from the scratch worktree root. The script moves to the worktree root, and it re-applies the source even when the test fails. Keep the parentheses: the worktree guard refuses the script when its argument is a bare `bash <script>`. A command that needs `grill-room/` reads `(cd grill-room && <test command>)` inside them, one pair in all, never two, since `((` starts arithmetic in bash. Use only double quotes inside it.
 
 - If the block prints `git apply -R failed`, stop the re-run: remove the scratch worktree with `git worktree remove --force <folder>` (the tree may be left modified, and then a plain remove exits 128), create a fresh one in a new folder that keeps the `rv<pr>-r<round>-<lens>` naming with a `-2` suffix, detached at `origin/{{branch}}`, and run the block once more. If it fails again, record a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command. Never rebuild the change by hand.
 - If the block prints `git apply failed`, do the same: a fresh worktree, one more try, then a `blocker` whose `claim` quotes the error and whose `evidence` is the block with that command.
@@ -45,12 +45,14 @@ Put the Evidence entry's test command in place of the marker, inside the single 
 
 For each Evidence entry, the test command is the one the entry quotes for its runs, run from the worktree root:
 
-- A quoted command that already contains `cd grill-room &&` runs as quoted.
-- A quoted command whose paths start with `grill-room/`, such as `pnpm exec vitest --run grill-room/scripts/x.test.ts`, runs as `(cd grill-room && pnpm exec vitest --run scripts/x.test.ts)`, with the prefix stripped.
-- A quoted command whose paths have no such prefix, such as `pnpm exec vitest --run scripts/x.test.ts`, runs as `(cd grill-room && <command>)`.
-- When the entry quotes no command, use `(cd grill-room && pnpm exec vitest --run <test file without a leading grill-room/> -t "<test name>")`.
+- A quoted command wrapped in its own parentheses, such as `(cd grill-room && pnpm exec vitest --run scripts/x.test.ts)`, is used without them: `cd grill-room && pnpm exec vitest --run scripts/x.test.ts`.
+- A quoted command that already contains `cd grill-room &&` with no parentheses around it is used as quoted.
+- A quoted command whose paths start with `grill-room/`, such as `pnpm exec vitest --run grill-room/scripts/x.test.ts`, becomes `cd grill-room && pnpm exec vitest --run scripts/x.test.ts`, with the prefix stripped.
+- A quoted command that runs a script at the repository root, such as `bash scripts/test-gen-wave.sh` or `python3 scripts/gen-wave.py`, is used as quoted (it runs from the worktree root, where `scripts/` is).
+- Any other quoted command whose paths have no `grill-room/` prefix, such as `pnpm exec vitest --run scripts/x.test.ts`, becomes `cd grill-room && <command>`.
+- When the entry quotes no command, use `cd grill-room && pnpm exec vitest --run <test file without a leading grill-room/> -t "<test name>"`.
 
-The red run is the Revert block with that command in place of the marker. The green run is the same command after the block finishes. An entry that proves a planted-bug line is the exception: its red run is its quoted edit applied, as the rows below say, and the Revert block does not judge it.
+The red run is the Revert block with that command in place of the marker. The green run is the same command, run as `(<command>)`, after the block finishes. An entry that proves a planted-bug line is the exception: its red run is its quoted edit applied, as the rows below say, and the Revert block does not judge it.
 
 A finding about the PR body, or about a missing Evidence entry, has `file: "PR body"` and `line: null`.
 
