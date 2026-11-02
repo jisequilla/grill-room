@@ -19,7 +19,7 @@ export default {
   // Matches vitest's 30 s hookTimeout, which a loaded machine has needed.
   timeoutMS: 30_000,
   // The whole mutation run budget (RUN_BUDGET_MS in scripts/mutate-diff.ts,
-  // 570000 ms, rounded up to minutes). A slower dry run ends as an overrun
+  // 565000 ms, rounded up to minutes). A slower dry run ends as an overrun
   // at the budget instead of failing as runner-failed at Stryker's default
   // 5 minutes. scripts/stryker-config.test.ts keeps the two in step.
   dryRunTimeoutMinutes: 10,

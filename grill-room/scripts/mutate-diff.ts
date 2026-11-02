@@ -8,7 +8,8 @@ import { Instrumenter } from "@stryker-mutator/instrumenter";
 import { calculateMetrics } from "mutation-testing-metrics";
 
 export const CAP = 500;
-export const RUN_BUDGET_MS = 570000;
+export const RUN_BUDGET_MS = 565000;
+export const KILL_GRACE_MS = 5000;
 const STDERR_TAIL_LINES = 20;
 const STDOUT_TAIL_CHARS = 200000;
 const DRY_RUN_DETAIL_CHARS = 1000;
@@ -531,6 +532,7 @@ function runInGroup(args: string[], cwd: string, timeoutMs: number): Promise<Fin
       if (stderrLines.length > 500) stderrLines.splice(0, stderrLines.length - 500);
     });
     let timedOut = false;
+    let killTimer: NodeJS.Timeout | undefined;
     const timer = setTimeout(() => {
       timedOut = true;
       try {
@@ -538,9 +540,17 @@ function runInGroup(args: string[], cwd: string, timeoutMs: number): Promise<Fin
       } catch {
         child.kill("SIGTERM");
       }
+      killTimer = setTimeout(() => {
+        try {
+          process.kill(-child.pid!, "SIGKILL");
+        } catch {
+          child.kill("SIGKILL");
+        }
+      }, KILL_GRACE_MS);
     }, timeoutMs);
     const done = (exitCode: number | null) => {
       clearTimeout(timer);
+      clearTimeout(killTimer);
       const tail = stderrLines.filter((line) => line.length > 0).slice(-STDERR_TAIL_LINES);
       resolve({ exitCode, timedOut, stderrTail: tail.join("\n"), stdout });
     };
