@@ -91,7 +91,7 @@ test:
 
 # Browser smoke test: picks a free E2E_PORT when unset, so two worktrees running this at once don't collide.
 # Scoped to the "chromium" project (playwright.config.ts) so the slow, video-recording
-# "demo" project never runs here — use `just demo` for that.
+# "demo" project never runs here — use `just e2e-demo` to check the demo, or `just demo` to record it.
 e2e:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -100,7 +100,8 @@ e2e:
     fi
     pnpm exec playwright test --project=chromium
 
-# The recorded demo scenario alone, as a check: no compression, no media written. Picks a free
+# The recorded demo scenario alone, as a check: Playwright still writes its raw video under
+# e2e/artifacts/, but nothing is compressed or copied to docs/media/. Picks a free
 # E2E_PORT when unset. `scripts/verify-wave.sh --e2e` runs this after `just e2e`.
 e2e-demo:
     #!/usr/bin/env bash
