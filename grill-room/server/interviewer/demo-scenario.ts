@@ -12,7 +12,8 @@ export const DEMO_SCENARIO = "demo";
  * The recorded demo session, committed as a fixture: one real interview,
  * grilled against this repository with `GRILL_ROOM_RECORD_TURNS` (see
  * `.grill-room/regression-scenarios/issues/05-recorded-demo.md`), reviewed and
- * checked in. `e2e/demo.spec.ts` replays it. Resolved relative to this file
+ * checked in. Turn 9's `## Summary` was added by hand after recording, when
+ * the spec check began requiring it (PR #240). `e2e/demo.spec.ts` replays it. Resolved relative to this file
  * rather than the process cwd, so it is found the same way whichever
  * directory the server is started from.
  */
