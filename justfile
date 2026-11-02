@@ -100,6 +100,16 @@ e2e:
     fi
     pnpm exec playwright test --project=chromium
 
+# The recorded demo scenario alone, as a check: no compression, no media written. Picks a free
+# E2E_PORT when unset. `scripts/verify-wave.sh --e2e` runs this after `just e2e`.
+e2e-demo:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "${E2E_PORT:-}" ]; then
+      export E2E_PORT="$(node -e 'const s=require("net").createServer();s.listen(0,()=>{console.log(s.address().port);s.close()})')"
+    fi
+    pnpm exec playwright test --project=demo
+
 # Record and compress the demo video: replays the `demo` scenario end to end with Playwright
 # video on, then shrinks the result into docs/media/demo.webm (target under 5 MB), replacing
 # any previous file. Also regenerates docs/media/demo.webp, the README's animated preview,
