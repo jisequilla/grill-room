@@ -2592,6 +2592,145 @@ describe("find-superseded", () => {
         }),
       ).toBeNull();
     });
+
+    it("a stored Proposal advances the decision's updatedAt", async () => {
+      const session = await aSession();
+      await aFixture(session.id, { s2: { updatedAt: T0 } });
+      scriptInterviewer([found({ deferrals: [DEFER_S2] })]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      const s2 = await readDecision("d-s2");
+      expect(s2).toMatchObject({ proposalKind: "deferral" });
+      expect(s2!.updatedAt > T0).toBe(true);
+    });
+
+    it("an unplaced decision is neither asked about nor offered as a replacer, and same-round answers never replace each other", async () => {
+      const session = await aSession();
+      await aFixture(session.id);
+      // U: an own answer awaiting placement, stamped after V. Its loose-end
+      // reason is "unplaced", and it is not derived settled.
+      await aSettledDecision(session.id, "u", T3, {
+        awaitingPlacementSince: T3,
+        createdAt: "2026-08-01T00:00:04.000Z",
+      });
+      const interviewer = scriptInterviewer([EMPTY]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      const request = interviewer.requests[0] as FindSupersededRequest;
+      expect(request.looseEndKeys).toEqual(["l"]);
+      expect(request.replaceableKeys).toEqual(["s", "s2"]);
+      expect(request.laterKeys).toEqual({ s: ["v"], s2: ["v"] });
+    });
+
+    it("a settled answer never stamped with settledAt counts as settled before every later answer", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "v", T2, {
+        createdAt: "2026-08-01T00:00:01.000Z",
+      });
+      await aSettledDecision(session.id, "s", T1, {
+        settledAt: null,
+        createdAt: "2026-08-01T00:00:00.000Z",
+      });
+      const interviewer = scriptInterviewer([EMPTY]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      const request = interviewer.requests[0] as FindSupersededRequest;
+      expect(request.laterKeys).toEqual({ s: ["v"] });
+    });
+
+    it("a restatement of an own answer with no current answer is stored", async () => {
+      const session = await aSession();
+      await aSettledDecision(session.id, "s", T1, { currentAnswer: null });
+      scriptInterviewer([
+        found({
+          restatements: [
+            { key: "s", statement: "Clean s.", operatorNotes: "", reason: "scan" },
+          ],
+        }),
+      ]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(await readDecision("d-s")).toMatchObject({
+        proposalKind: "restatement",
+        restatementText: "Clean s.",
+      });
+      await expectScanSucceeded(session.id);
+    });
+
+    describe("a session with a single kind of candidate is still checked", () => {
+      async function expectAsked(
+        sessionId: string,
+        lists: Partial<
+          Pick<
+            FindSupersededRequest,
+            "looseEndKeys" | "replaceableKeys" | "deferrableKeys" | "restatableKeys"
+          >
+        >,
+      ) {
+        const interviewer = scriptInterviewer([EMPTY]);
+
+        await findSuperseded.run({ sessionId });
+
+        expect(interviewer.requests).toHaveLength(1);
+        expect(interviewer.requests[0]).toMatchObject({
+          looseEndKeys: [],
+          replaceableKeys: [],
+          deferrableKeys: [],
+          restatableKeys: [],
+          ...lists,
+        });
+      }
+
+      it("only a loose end to answer", async () => {
+        const session = await aSession();
+        await aSettledDecision(session.id, "v", T2, {
+          answerKind: "accepted-recommendation",
+          createdAt: "2026-08-01T00:00:00.000Z",
+        });
+        await insertDecision(session.id, {
+          id: "d-l",
+          key: "l",
+          questionTitle: "Title of l",
+          answerKind: "unknown",
+          currentAnswer: "Not sure yet",
+          createdAt: "2026-08-01T00:00:01.000Z",
+        });
+
+        await expectAsked(session.id, { looseEndKeys: ["l"] });
+      });
+
+      it("only a decision to check for replacement", async () => {
+        const session = await aSession();
+        await aSettledDecision(session.id, "s", T1, {
+          answerKind: "accepted-recommendation",
+          createdAt: "2026-08-01T00:00:00.000Z",
+        });
+        await aSettledDecision(session.id, "v", T2, {
+          answerKind: "accepted-recommendation",
+          createdAt: "2026-08-01T00:00:01.000Z",
+        });
+
+        await expectAsked(session.id, { replaceableKeys: ["s"] });
+      });
+
+      it("only a decision to check for a deferral", async () => {
+        const session = await aSession();
+        await aSettledDecision(session.id, "s", T1, remembered("restatement"));
+
+        await expectAsked(session.id, { deferrableKeys: ["s"] });
+      });
+
+      it("only a decision to check for a restatement", async () => {
+        const session = await aSession();
+        await aSettledDecision(session.id, "s", T1, remembered("deferral"));
+
+        await expectAsked(session.id, { restatableKeys: ["s"] });
+      });
+    });
   });
 
   describe("turn records", () => {

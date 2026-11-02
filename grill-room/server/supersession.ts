@@ -97,9 +97,10 @@ export interface SupersessionCheck {
   restatableKeys: readonly string[];
   /**
    * The current answer of each restatable decision, by key: what a
-   * restatement's statement must differ from.
+   * restatement's statement must differ from. Null for a decision with no
+   * current answer, which no statement can repeat.
    */
-  restatableAnswers: Readonly<Record<string, string>>;
+  restatableAnswers: Readonly<Record<string, string | null>>;
   /** The keys of every decision currently derived settled. */
   settledKeys: readonly string[];
   /**
@@ -434,7 +435,7 @@ async function scan(
     deferrableKeys,
     restatableKeys,
     restatableAnswers: Object.fromEntries(
-      restatable.map((row) => [portKey(row), row.currentAnswer ?? ""]),
+      restatable.map((row) => [portKey(row), row.currentAnswer]),
     ),
     settledKeys: settledRows.map(portKey),
     dispositionedKeys: settledRows
