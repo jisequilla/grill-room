@@ -38,11 +38,14 @@ import { getDb, schema } from "./db/index.js";
 import type { DecisionProposalKind } from "./db/schema.js";
 import { type DbHandle, markSpecNotCurrent } from "./session-state.js";
 import {
-  deferrableDecisions,
-  replaceableDecisions,
-  supersedableLooseEnds,
-} from "./supersession.js";
-import { CLEARED_PENDING_PROPOSAL, type DecisionRow } from "./tree.js";
+  classifyLooseEnds,
+  CLEARED_PENDING_PROPOSAL,
+  deriveTreeStates,
+  treeFacts,
+  type DecisionRow,
+  type LooseEndReason,
+} from "./tree.js";
+import { portKey } from "./turn.js";
 
 /** A decision's pending Proposal: its kind and that kind's payload. */
 export type Proposal =
@@ -129,6 +132,120 @@ export function dismissals(row: DecisionRow): Dismissal[] {
 
 function dismissedKind(row: DecisionRow, kind: DecisionProposalKind): boolean {
   return dismissals(row).some((dismissal) => dismissal.kind === kind);
+}
+
+/**
+ * The loose ends worth asking about: the ones the user could answer themselves.
+ * Stale and unplaced decisions are excluded — they are the interviewer's to
+ * resolve by reviewing or placing them, and a decision never answered has no
+ * question behind it that another decision could have answered instead.
+ */
+const SUPERSEDABLE_REASONS: readonly LooseEndReason[] = [
+  "unknown",
+  "deferred",
+  "prototype-flagged",
+  "pushed-back",
+];
+
+/** Rows of the loose ends this turn would ask about, in tree order. */
+function supersedableLooseEnds(
+  rows: readonly DecisionRow[],
+): DecisionRow[] {
+  const reasons = classifyLooseEnds(treeFacts(rows));
+  return rows.filter((row) => {
+    const reason = reasons.get(row.id);
+    return reason != null && SUPERSEDABLE_REASONS.includes(reason);
+  });
+}
+
+/** Answer kinds that answer a question for real, rather than set it aside. */
+const ANSWERED_KINDS: readonly string[] = ["accepted-recommendation", "own-answer"];
+
+/** Rows answered for real and derived settled, in the order given. */
+function answeredRows(rows: readonly DecisionRow[]): DecisionRow[] {
+  const states = deriveTreeStates(treeFacts(rows));
+  return rows.filter(
+    (row) =>
+      states.get(row.id) === "settled" &&
+      row.answerKind != null &&
+      ANSWERED_KINDS.includes(row.answerKind),
+  );
+}
+
+/** The answered rows that settled strictly after `row`, in the order given. */
+function settledAfter(
+  row: DecisionRow,
+  answered: readonly DecisionRow[],
+): DecisionRow[] {
+  return answered.filter(
+    (later) =>
+      later.id !== row.id &&
+      later.settledAt != null &&
+      later.settledAt > (row.settledAt ?? ""),
+  );
+}
+
+/**
+ * Rows of the settled decisions this turn would check for replacement, in tree
+ * order: answered for real, not already replaced, with no deferral or
+ * restatement pending, and followed by at least one other decision answered
+ * for real that settled strictly later — whether or not that later one was
+ * itself replaced. A pending deferral or restatement and a pending replacement
+ * never sit on the same decision: this skips the one, and
+ * {@link deferrableDecisions} skips the other.
+ */
+function replaceableDecisions(
+  rows: readonly DecisionRow[],
+): DecisionRow[] {
+  const answered = answeredRows(rows);
+  return answered.filter(
+    (row) =>
+      row.replacedById == null &&
+      row.deferralReason == null &&
+      row.restatementText == null &&
+      settledAfter(row, answered).length > 0,
+  );
+}
+
+/**
+ * For each replaceable decision, by key, the keys of the decisions answered for
+ * real that settled strictly after it, in tree order: the only decisions that
+ * may replace it. Decisions answered in the same round share `settledAt`, so
+ * they never replace each other.
+ */
+export function laterKeysOf(
+  rows: readonly DecisionRow[],
+): Record<string, string[]> {
+  const answered = answeredRows(rows);
+  return Object.fromEntries(
+    eligibleFor("replacement", rows).map((row) => [
+      portKey(row),
+      settledAfter(row, answered).map(portKey),
+    ]),
+  );
+}
+
+/**
+ * Rows of the settled decisions this turn would check for a deferral, and for
+ * a restatement, in the order given: the user's own answer, settled, not
+ * replaced, and with no supersession, deferral or restatement already pending
+ * on it. An accepted recommendation is the interviewer's own answer and never
+ * a deferral or a note to self; a disposition, a kept repo decision and a
+ * loose end are not own answers.
+ */
+function deferrableDecisions(
+  rows: readonly DecisionRow[],
+): DecisionRow[] {
+  const states = deriveTreeStates(treeFacts(rows));
+  return rows.filter(
+    (row) =>
+      states.get(row.id) === "settled" &&
+      row.answerKind === "own-answer" &&
+      row.replacedById == null &&
+      row.supersededById == null &&
+      row.deferralReason == null &&
+      row.restatementText == null,
+  );
 }
 
 /**

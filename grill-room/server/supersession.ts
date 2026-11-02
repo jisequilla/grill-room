@@ -40,12 +40,12 @@ import { getDb, schema } from "./db/index.js";
 import { getInterviewer, isInterviewerError } from "./interviewer/index.js";
 import type { FindSupersededResult } from "./interviewer/index.js";
 import {
-  classifyLooseEnds,
-  deriveTreeStates,
-  treeFacts,
-  type DecisionRow,
-  type LooseEndReason,
-} from "./tree.js";
+  eligibleFor,
+  laterKeysOf,
+  propose,
+  type Proposal,
+} from "./proposal.js";
+import { deriveTreeStates, treeFacts, type DecisionRow } from "./tree.js";
 import {
   askUntilAccepted,
   decisionSnapshots,
@@ -61,19 +61,6 @@ import {
   type AttemptRecorder,
 } from "./turn-recorder.js";
 
-/**
- * The loose ends worth asking about: the ones the user could answer themselves.
- * Stale and unplaced decisions are excluded — they are the interviewer's to
- * resolve by reviewing or placing them, and a decision never answered has no
- * question behind it that another decision could have answered instead.
- */
-const SUPERSEDABLE_REASONS: readonly LooseEndReason[] = [
-  "unknown",
-  "deferred",
-  "prototype-flagged",
-  "pushed-back",
-];
-
 /** A session, as a supersession turn needs it. */
 type SupersessionSession = typeof schema.sessions.$inferSelect;
 
@@ -83,119 +70,16 @@ export interface SupersessionFailure {
   message: string;
 }
 
-/** Rows of the loose ends this turn would ask about, in tree order. */
-export function supersedableLooseEnds(
-  rows: readonly DecisionRow[],
-): DecisionRow[] {
-  const reasons = classifyLooseEnds(treeFacts(rows));
-  return rows.filter((row) => {
-    const reason = reasons.get(row.id);
-    return reason != null && SUPERSEDABLE_REASONS.includes(reason);
-  });
-}
-
-/** Answer kinds that answer a question for real, rather than set it aside. */
-const ANSWERED_KINDS: readonly string[] = ["accepted-recommendation", "own-answer"];
-
-/** Rows answered for real and derived settled, in the order given. */
-function answeredRows(rows: readonly DecisionRow[]): DecisionRow[] {
-  const states = deriveTreeStates(treeFacts(rows));
-  return rows.filter(
-    (row) =>
-      states.get(row.id) === "settled" &&
-      row.answerKind != null &&
-      ANSWERED_KINDS.includes(row.answerKind),
-  );
-}
-
-/** The answered rows that settled strictly after `row`, in the order given. */
-function settledAfter(
-  row: DecisionRow,
-  answered: readonly DecisionRow[],
-): DecisionRow[] {
-  return answered.filter(
-    (later) =>
-      later.id !== row.id &&
-      later.settledAt != null &&
-      later.settledAt > (row.settledAt ?? ""),
-  );
-}
-
 /**
- * Rows of the settled decisions this turn would check for replacement, in tree
- * order: answered for real, not already replaced, with no deferral or
- * restatement pending, and followed by at least one other decision answered
- * for real that settled strictly later — whether or not that later one was
- * itself replaced. A pending deferral or restatement and a pending replacement
- * never sit on the same decision: this skips the one, and
- * {@link deferrableDecisions} skips the other.
- */
-export function replaceableDecisions(
-  rows: readonly DecisionRow[],
-): DecisionRow[] {
-  const answered = answeredRows(rows);
-  return answered.filter(
-    (row) =>
-      row.replacedById == null &&
-      row.deferralReason == null &&
-      row.restatementText == null &&
-      settledAfter(row, answered).length > 0,
-  );
-}
-
-/**
- * For each replaceable decision, by key, the keys of the decisions answered for
- * real that settled strictly after it, in tree order: the only decisions that
- * may replace it. Decisions answered in the same round share `settledAt`, so
- * they never replace each other.
- */
-export function laterKeysOf(
-  rows: readonly DecisionRow[],
-): Record<string, string[]> {
-  const answered = answeredRows(rows);
-  return Object.fromEntries(
-    replaceableDecisions(rows).map((row) => [
-      portKey(row),
-      settledAfter(row, answered).map(portKey),
-    ]),
-  );
-}
-
-/**
- * Rows of the settled decisions this turn would check for a deferral, and for
- * a restatement, in the order given: the user's own answer, settled, not
- * replaced, and with no supersession, deferral or restatement already pending
- * on it. An accepted recommendation is the interviewer's own answer and never
- * a deferral or a note to self; a disposition, a kept repo decision and a
- * loose end are not own answers.
- */
-export function deferrableDecisions(
-  rows: readonly DecisionRow[],
-): DecisionRow[] {
-  const states = deriveTreeStates(treeFacts(rows));
-  return rows.filter(
-    (row) =>
-      states.get(row.id) === "settled" &&
-      row.answerKind === "own-answer" &&
-      row.replacedById == null &&
-      row.supersededById == null &&
-      row.deferralReason == null &&
-      row.restatementText == null,
-  );
-}
-
-/**
- * Whether a turn has anything to ask about: a loose end, a replaceable
- * decision, or an own answer to check for a deferral or a restatement (one
- * list, since both come from {@link deferrableDecisions}).
+ * Whether a turn has anything to ask about: a decision eligible for any of
+ * the four kinds of Proposal.
  */
 function hasAnythingToCheck(rows: readonly DecisionRow[]): boolean {
-  // The deferrable and the restatable own answers are one list.
-  const ownAnswersToCheck = deferrableDecisions(rows);
   return (
-    supersedableLooseEnds(rows).length > 0 ||
-    replaceableDecisions(rows).length > 0 ||
-    ownAnswersToCheck.length > 0
+    eligibleFor("answered-by", rows).length > 0 ||
+    eligibleFor("replacement", rows).length > 0 ||
+    eligibleFor("deferral", rows).length > 0 ||
+    eligibleFor("restatement", rows).length > 0
   );
 }
 
@@ -213,9 +97,10 @@ export interface SupersessionCheck {
   restatableKeys: readonly string[];
   /**
    * The current answer of each restatable decision, by key: what a
-   * restatement's statement must differ from.
+   * restatement's statement must differ from. Null for a decision with no
+   * current answer, which no statement can repeat.
    */
-  restatableAnswers: Readonly<Record<string, string>>;
+  restatableAnswers: Readonly<Record<string, string | null>>;
   /** The keys of every decision currently derived settled. */
   settledKeys: readonly string[];
   /**
@@ -523,13 +408,15 @@ async function scan(
       .orderBy(schema.decisions.createdAt, schema.decisions.id);
 
   const rows = await loadDecisions();
-  const looseEnds = supersedableLooseEnds(rows);
-  const replaceable = replaceableDecisions(rows);
-  const deferrable = deferrableDecisions(rows);
+  const looseEnds = eligibleFor("answered-by", rows);
+  const replaceable = eligibleFor("replacement", rows);
+  const deferrable = eligibleFor("deferral", rows);
+  const restatable = eligibleFor("restatement", rows);
   if (
     looseEnds.length === 0 &&
     replaceable.length === 0 &&
-    deferrable.length === 0
+    deferrable.length === 0 &&
+    restatable.length === 0
   ) {
     return conversationId;
   }
@@ -538,9 +425,7 @@ async function scan(
   const replaceableKeys = replaceable.map(portKey);
   const laterKeys = laterKeysOf(rows);
   const deferrableKeys = deferrable.map(portKey);
-  // The same own answers are checked for a restatement: one selection, so the
-  // two lists can never disagree.
-  const restatableKeys = deferrable.map(portKey);
+  const restatableKeys = restatable.map(portKey);
   const states = deriveTreeStates(treeFacts(rows));
   const settledRows = rows.filter((row) => states.get(row.id) === "settled");
   const check: SupersessionCheck = {
@@ -550,7 +435,7 @@ async function scan(
     deferrableKeys,
     restatableKeys,
     restatableAnswers: Object.fromEntries(
-      deferrable.map((row) => [portKey(row), row.currentAnswer ?? ""]),
+      restatable.map((row) => [portKey(row), row.currentAnswer]),
     ),
     settledKeys: settledRows.map(portKey),
     dispositionedKeys: settledRows
@@ -618,69 +503,49 @@ async function scan(
   const idByKey = new Map(rows.map((row) => [portKey(row), row.id] as const));
   const now = new Date().toISOString();
 
-  for (const entry of turn.result.supersessions) {
-    const looseEndId = idByKey.get(entry.looseEndKey);
-    const answeredById = idByKey.get(entry.answeredByKey);
-    if (!looseEndId || !answeredById) continue;
+  // One transaction: a Proposal `propose` skips is not a failure, and the
+  // rest are still stored.
+  await db.transaction(async (tx) => {
+    const store = (id: string | undefined, proposal: Proposal) =>
+      id ? propose(id, proposal, { now, db: tx }) : null;
 
-    await db
-      .update(schema.decisions)
-      .set({
-        supersededById: answeredById,
-        supersessionAnswer: entry.answer,
-        supersessionReason: entry.reason,
-        proposalKind: "answered-by",
-        updatedAt: now,
-      })
-      .where(eq(schema.decisions.id, looseEndId));
-  }
+    for (const entry of turn.result.supersessions) {
+      const byId = idByKey.get(entry.answeredByKey);
+      if (!byId) continue;
+      await store(idByKey.get(entry.looseEndKey), {
+        kind: "answered-by",
+        byId,
+        answer: entry.answer,
+        reason: entry.reason,
+      });
+    }
 
-  for (const entry of turn.result.replacements) {
-    const replacedId = idByKey.get(entry.replacedKey);
-    const byId = idByKey.get(entry.byKey);
-    if (!replacedId || !byId) continue;
+    for (const entry of turn.result.replacements) {
+      const byId = idByKey.get(entry.byKey);
+      if (!byId) continue;
+      await store(idByKey.get(entry.replacedKey), {
+        kind: "replacement",
+        byId,
+        reason: entry.reason,
+      });
+    }
 
-    await db
-      .update(schema.decisions)
-      .set({
-        supersededById: byId,
-        supersessionAnswer: null,
-        supersessionReason: entry.reason,
-        proposalKind: "replacement",
-        updatedAt: now,
-      })
-      .where(eq(schema.decisions.id, replacedId));
-  }
+    for (const entry of turn.result.deferrals) {
+      await store(idByKey.get(entry.key), {
+        kind: "deferral",
+        reason: entry.reason,
+      });
+    }
 
-  for (const entry of turn.result.deferrals) {
-    const deferredId = idByKey.get(entry.key);
-    if (!deferredId) continue;
-
-    await db
-      .update(schema.decisions)
-      .set({
-        deferralReason: entry.reason,
-        proposalKind: "deferral",
-        updatedAt: now,
-      })
-      .where(eq(schema.decisions.id, deferredId));
-  }
-
-  for (const entry of turn.result.restatements) {
-    const restatedId = idByKey.get(entry.key);
-    if (!restatedId) continue;
-
-    await db
-      .update(schema.decisions)
-      .set({
-        restatementText: entry.statement,
-        restatementNotes: entry.operatorNotes,
-        restatementReason: entry.reason,
-        proposalKind: "restatement",
-        updatedAt: now,
-      })
-      .where(eq(schema.decisions.id, restatedId));
-  }
+    for (const entry of turn.result.restatements) {
+      await store(idByKey.get(entry.key), {
+        kind: "restatement",
+        text: entry.statement,
+        notes: entry.operatorNotes,
+        reason: entry.reason,
+      });
+    }
+  });
 
   return turn.conversationId;
 }
