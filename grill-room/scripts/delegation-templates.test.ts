@@ -244,7 +244,11 @@ describe("reviewer.md", () => {
 
   it("reviewer.md: Re-running Evidence yields commands without outer parentheses", () => {
     const start = lines.indexOf("## Re-running Evidence");
-    const bullets = lines.slice(start).filter((l) => l.startsWith("- ")).slice(0, 6);
+    const afterHeading = lines.slice(start + 1);
+    const firstBullet = afterHeading.findIndex((l) => l.startsWith("- "));
+    const fromFirstBullet = afterHeading.slice(firstBullet);
+    const listEnd = fromFirstBullet.findIndex((l) => !l.startsWith("- "));
+    const bullets = listEnd === -1 ? fromFirstBullet : fromFirstBullet.slice(0, listEnd);
     expect(bullets).toEqual([
       "- A quoted command wrapped in its own parentheses, such as `(cd grill-room && pnpm exec vitest --run scripts/x.test.ts)`, is used without them: `cd grill-room && pnpm exec vitest --run scripts/x.test.ts`.",
       "- A quoted command that already contains `cd grill-room &&` with no parentheses around it is used as quoted.",

@@ -261,7 +261,7 @@ spec_row "start check after model check" "[{\"bead\":\"gr-a\",\"ticket\":\"$t1\"
 spec_row "start order across entries" "[{\"bead\":\"gr-a\",\"ticket\":\"$t1\",\"title\":\"A\",\"lenses\":[\"L\"],\"start\":$BAD},{\"bead\":\"gr-b\",\"ticket\":\"$t1\",\"title\":\"B\"}]" "$(start_err 0)"
 
 # docstring
-[ "$(grep -m1 '^spec:' "$gen")" = 'spec: [{"bead", "ticket" (path), "title", "lenses": [str, ...], "model" (optional: "sonnet" or "opus"), "start" (optional: {"pr", "branch", "stage", "round" (optional), "findings"})}]' ]
+[ "$(sed -n '1,/^"""$/p' "$gen" | grep -m1 '^spec:')" = 'spec: [{"bead", "ticket" (path), "title", "lenses": [str, ...], "model" (optional: "sonnet" or "opus"), "start" (optional: {"pr", "branch", "stage", "round" (optional), "findings"})}]' ]
 report $? "docstring names start"
 
 # roots used as given
