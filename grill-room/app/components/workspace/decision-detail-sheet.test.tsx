@@ -1,13 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-const { mutate, onSelects, mutationActions, mutationOptions, toastError, errorMessage } = vi.hoisted(() => ({
+const { mutate, onSelects, mutationActions, mutationOptions, toastError, errorMessage, sheetContentProps } =
+  vi.hoisted(() => ({
   mutate: vi.fn(),
   mutationActions: [] as string[],
   onSelects: {} as Record<string, () => void>,
   mutationOptions: {} as { onError?: (error: unknown) => void },
   toastError: vi.fn(),
   errorMessage: { value: null as string | null },
+  sheetContentProps: {} as { onCloseAutoFocus?: (event: Event) => void },
 }));
 
 vi.mock("sonner", () => ({ toast: { error: toastError } }));
@@ -40,14 +42,24 @@ vi.mock("@agent-native/core/client/i18n", async (importOriginal) => {
 });
 
 // Radix portals render nothing in static markup; the sheet's own content is
-// what these tests read.
+// what these tests read. SheetContent keeps its close handler so a test can
+// fire it.
 vi.mock("@/components/ui/sheet", () => {
   const Plain = ({ children }: { children?: React.ReactNode }) => (
     <div>{children}</div>
   );
   return {
     Sheet: Plain,
-    SheetContent: Plain,
+    SheetContent: ({
+      children,
+      onCloseAutoFocus,
+    }: {
+      children?: React.ReactNode;
+      onCloseAutoFocus?: (event: Event) => void;
+    }) => {
+      sheetContentProps.onCloseAutoFocus = onCloseAutoFocus;
+      return <div>{children}</div>;
+    },
     SheetHeader: Plain,
     SheetTitle: Plain,
     SheetDescription: Plain,
@@ -113,7 +125,7 @@ function aDecision(overrides: Partial<TreeDecision> = {}): TreeDecision {
   } as TreeDecision;
 }
 
-function render(decision: TreeDecision) {
+function render(decision: TreeDecision, returnFocusTo: HTMLElement | null = null) {
   return renderToStaticMarkup(
     <TooltipProvider>
       <DecisionDetailSheet
@@ -121,7 +133,7 @@ function render(decision: TreeDecision) {
         decisions={[decision]}
         open
         onOpenChange={() => {}}
-        returnFocusTo={{ current: null }}
+        returnFocusTo={{ current: returnFocusTo }}
       />
     </TooltipProvider>,
   );
@@ -254,5 +266,85 @@ describe("DecisionDetailSheet set-aside decisions", () => {
       ["The interviewer is working on this session."],
       ["Could not move that decision."],
     ]);
+  });
+});
+
+describe("DecisionDetailSheet close focus", () => {
+  function closeWith(
+    opener: { isConnected: boolean; dataset: Record<string, string> } | null,
+    replacement: { focus: () => void } | null,
+  ) {
+    const openerFocus = vi.fn();
+    const target = opener ? ({ ...opener, focus: openerFocus } as unknown as HTMLElement) : null;
+    render(aDecision(), target);
+    const querySelector = vi.fn(() => replacement);
+    vi.stubGlobal("document", { querySelector });
+    vi.stubGlobal("CSS", { escape: (value: string) => `escaped(${value})` });
+    const preventDefault = vi.fn();
+    try {
+      sheetContentProps.onCloseAutoFocus!({ preventDefault } as unknown as Event);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    return { openerFocus, querySelector, preventDefault };
+  }
+
+  it("focuses the opener when it is still in the document", () => {
+    const replacement = { focus: vi.fn() };
+    const { openerFocus, querySelector, preventDefault } = closeWith(
+      { isConnected: true, dataset: { decisionOpener: "decision-1" } },
+      replacement,
+    );
+
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(openerFocus).toHaveBeenCalledOnce();
+    expect(querySelector).not.toHaveBeenCalled();
+    expect(replacement.focus).not.toHaveBeenCalled();
+  });
+
+  it("focuses the connected element with the same opener id when the opener has left", () => {
+    const replacement = { focus: vi.fn() };
+    const { openerFocus, querySelector, preventDefault } = closeWith(
+      { isConnected: false, dataset: { decisionOpener: "decision-1" } },
+      replacement,
+    );
+
+    expect(querySelector).toHaveBeenCalledWith('[data-decision-opener="escaped(decision-1)"]');
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(replacement.focus).toHaveBeenCalledOnce();
+    expect(openerFocus).not.toHaveBeenCalled();
+  });
+
+  it("leaves focus to Radix when the opener has left and nothing replaces it", () => {
+    const { openerFocus, querySelector, preventDefault } = closeWith(
+      { isConnected: false, dataset: { decisionOpener: "decision-1" } },
+      null,
+    );
+
+    expect(querySelector).toHaveBeenCalledOnce();
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(openerFocus).not.toHaveBeenCalled();
+  });
+
+  it("leaves focus to Radix when the opener has left and carries no opener id", () => {
+    const replacement = { focus: vi.fn() };
+    const { openerFocus, querySelector, preventDefault } = closeWith(
+      { isConnected: false, dataset: {} },
+      replacement,
+    );
+
+    expect(querySelector).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(replacement.focus).not.toHaveBeenCalled();
+    expect(openerFocus).not.toHaveBeenCalled();
+  });
+
+  it("leaves focus to Radix when nothing recorded an opener", () => {
+    const replacement = { focus: vi.fn() };
+    const { querySelector, preventDefault } = closeWith(null, replacement);
+
+    expect(querySelector).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(replacement.focus).not.toHaveBeenCalled();
   });
 });
