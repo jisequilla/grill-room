@@ -497,6 +497,7 @@ describe("the fake interviewer's specs", () => {
         key: card.key,
         direction: card.direction,
         recommendedChoice: card.recommendedChoice,
+        choices: card.choices.length,
       }));
 
     expect(judgment(0).verdict).toBe("not-ready");
@@ -506,17 +507,18 @@ describe("the fake interviewer's specs", () => {
     });
     expect(judgment(6).verdict).toBe("ready");
     expect(cardShapes(1)).toEqual([
-      { key: "sharpen-what", direction: "what", recommendedChoice: 0 },
-      { key: "sharpen-who", direction: "who", recommendedChoice: 0 },
-      { key: "sharpen-outcome", direction: "outcome", recommendedChoice: 0 },
+      { key: "sharpen-what", direction: "what", recommendedChoice: 0, choices: 2 },
+      { key: "sharpen-who", direction: "who", recommendedChoice: 0, choices: 2 },
+      { key: "sharpen-outcome", direction: "outcome", recommendedChoice: 0, choices: 2 },
     ]);
     expect(cardShapes(4)).toEqual([
-      { key: "sharpen-scope", direction: "constraint", recommendedChoice: 0 },
+      { key: "sharpen-scope", direction: "constraint", recommendedChoice: 0, choices: 2 },
     ]);
     expect(
       (fakeScenarios["sharpening-stop"]!.turns[0] as { result: AssessReadinessResult })
         .result.verdict,
     ).toBe("not-ready");
+    expect(fakeScenarios["sharpening-stop"]!.turns[1]).toEqual(turns[1]);
 
     const round = fakeScenarios.sharpening!.turns[7]!;
     expect(round.kind === "propose-round" && "result" in round).toBe(true);
@@ -524,6 +526,7 @@ describe("the fake interviewer's specs", () => {
       .proposedDecisions;
     expect(decisions).toHaveLength(1);
     expect(decisions[0]!.dependsOn).toEqual(["sharpen-what"]);
+    expect(decisions[0]!.ask).toBe(true);
   });
 
   it("the sharpening scenario's results pass the sharpening checks", () => {

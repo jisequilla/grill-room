@@ -572,7 +572,15 @@ describe("accept-deferral: the answer change rule", () => {
 
   it("row 8: refuses while the interviewer is working, writing nothing", async () => {
     await anAnswerChangeFixture(
-      { deferralReason: "later" },
+      {
+        settledById: "d-w",
+        deferralReason: "later",
+        restatementText: "A clean",
+        restatementNotes: "n",
+        restatementReason: "r",
+        replacedById: "d-v",
+        replacedReason: "own replaced",
+      },
       { turnWorking: true },
     );
 

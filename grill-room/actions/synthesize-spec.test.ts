@@ -175,7 +175,8 @@ describe("specRefusalReasons", () => {
     ]);
   });
   it("row 7: counts an empty Summary as 0 bullets", () => {
-    expect(specRefusalReasons(base([]))).toEqual([needs(0)]);
+    const sections = [["## Summary"], ...baseSections([]).slice(1)];
+    expect(specRefusalReasons(join(sections))).toEqual([needs(0)]);
   });
   it("row 8: counts - and * bullets alike", () => {
     const mixed = [0, 1, 2, 3, 4, 5].map((i) => `${i % 2 === 0 ? "-" : "*"} point ${i}`);

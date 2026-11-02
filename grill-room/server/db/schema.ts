@@ -235,11 +235,6 @@ export const sessions = table("gr_sessions", {
 });
 
 /**
- * A node of a session's design tree. State (settled/frontier/blocked/stale) is
- * derived from `answerKind` and `dependsOnJson`, never stored: `settledAt` and
- * `reopenedAt` are the raw facts that derivation compares, not a cached state.
- */
-/**
  * The kind of a decision's pending Proposal: a later decision answers this
  * loose end, a later decision replaced this settled one, this own answer is
  * really a deferral, or it holds more than the decision and should be
@@ -253,6 +248,11 @@ export const DECISION_PROPOSAL_KINDS = [
 ] as const;
 export type DecisionProposalKind = (typeof DECISION_PROPOSAL_KINDS)[number];
 
+/**
+ * A node of a session's design tree. State (settled/frontier/blocked/stale) is
+ * derived from `answerKind` and `dependsOnJson`, never stored: `settledAt` and
+ * `reopenedAt` are the raw facts that derivation compares, not a cached state.
+ */
 export const decisions = table(
   "gr_decisions",
   {

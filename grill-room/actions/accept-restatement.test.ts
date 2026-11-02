@@ -376,7 +376,10 @@ describe("accept-restatement: the answer change rule", () => {
   });
 
   it("row 8: refuses while the interviewer is working, writing nothing", async () => {
-    await anAnswerChangeFixture(PROPOSAL, { turnWorking: true });
+    await anAnswerChangeFixture(
+      { ...PROPOSAL, settledById: "d-w", deferralReason: "later" },
+      { turnWorking: true },
+    );
 
     await expectTurnLockRefusal(
       () => acceptRestatement.run({ decisionId: "d-x" }),

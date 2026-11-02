@@ -349,6 +349,17 @@ describe("proposal", () => {
     expect(await row(S)).toMatchObject({ proposalKind: "replacement", supersededById: W });
   });
 
+  it("row 9a: a remembered answered-by dismissal names its own target only", async () => {
+    await fixture({
+      l: { dismissedProposalsJson: remembered({ kind: "answered-by", targetId: V, reason: "r", dismissedAt: T0 }) },
+    });
+
+    const result = await propose(L, { kind: "answered-by", byId: W, answer: "C", reason: "s" }, { now: NOW });
+
+    expect(result.stored).toBe(true);
+    expect(await row(L)).toMatchObject({ proposalKind: "answered-by", supersededById: W });
+  });
+
   it("row 9b: dismissed is checked before eligibility", async () => {
     await fixture({
       s: { replacedById: W, replacedReason: "r", dismissedProposalsJson: remembered(DEFERRAL_DISMISSAL) },
@@ -507,6 +518,21 @@ describe("proposal", () => {
     expect(await historyOf(S)).toMatchObject([
       { answer: "A", answerKind: "own-answer", interviewerReason: "r", operatorNotes: "n", recordedAt: NOW },
     ]);
+  });
+
+  it("row 16b: accepting a restatement whose notes are whitespace only stores empty operator notes", async () => {
+    await fixture({
+      s: {
+        restatementText: "A clean",
+        restatementNotes: "   ",
+        restatementReason: "r",
+        proposalKind: "restatement",
+      },
+    });
+
+    await accept(S, { now: NOW });
+
+    expect(await historyOf(S)).toMatchObject([{ answer: "A", operatorNotes: "" }]);
   });
 
   it("row 17: accept and dismiss with nothing pending return null and write nothing", async () => {

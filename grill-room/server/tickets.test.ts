@@ -519,7 +519,7 @@ describe("upstreamOf", () => {
   });
 
   it("never includes the start, even when it blocks itself", () => {
-    expect(upstreamOf([build(3, [3])], 3)).toEqual(new Set());
+    expect(upstreamOf([readLimited(3, [3])], 3)).toEqual(new Set());
   });
 
   it("passes through a gate", () => {
@@ -793,7 +793,7 @@ describe("unproducedInputs", () => {
     ]);
   });
 
-  it("a gate's consumes is not checked", () => {
+  it("a gate's consumes stays unchecked when it has no source", () => {
     expect(
       unproducedInputs([build(1), gate(2, [1], [], [consume("x", null)]), build(3, [2])], null),
     ).toEqual([]);
@@ -836,6 +836,28 @@ describe("upstreamGaps", () => {
     expect(upstreamGaps(tickets)).toEqual([]);
   });
 
+  it("lists gaps in ascending ticket number however the tickets are given", () => {
+    const tickets = [
+      build(5, [], [consume("a", 1)]),
+      build(2, [], [consume("a", 1)]),
+      build(1, [], [], ["a"]),
+    ];
+
+    expect(upstreamGaps(tickets)).toEqual([
+      gap(2, "a", 1, "not-upstream"),
+      gap(5, "a", 1, "not-upstream"),
+    ]);
+  });
+
+  it("trims a padded item", () => {
+    const tickets = [
+      build(1, [], [], ["gr_spans table"]),
+      build(2, [], [consume("  gr_spans table  ", 1)]),
+    ];
+
+    expect(upstreamGaps(tickets)).toEqual([gap(2, "gr_spans table", 1, "not-upstream")]);
+  });
+
   it("leaves out an entry that is not produced", () => {
     expect(upstreamGaps([build(1, [], [], ["a"]), build(2, [], [consume("b", 1)])])).toEqual([]);
   });
@@ -876,6 +898,7 @@ describe("parseConsumes / parseProduces / parseUnproduced", () => {
     ['[{"item":"a","from":null,"reason":"bogus"}]', []],
     ['[{"item":" ","from":null,"reason":"no-source"}]', []],
     ['[{"item":"a","from":"repo"}]', []],
+    ['[{"item":"a","from":"x","reason":"no-source"}]', []],
     ["{}", []],
   ])("parseUnproduced %j", (json, expected) => {
     expect(parseUnproduced(json)).toEqual(expected);
