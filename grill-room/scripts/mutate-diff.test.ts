@@ -1583,7 +1583,7 @@ describe("mutate-diff.test.ts: timeouts", () => {
     const inline = ['  it("x", () => {', "    work();", "  }, 30000);"];
     const separate = ["  it(", '    "x",', "    () => {", "      work();", "    },", "    180000,", "  );"];
     const none = ['  it("x", () => {', "    work();", "  });"];
-    const dataLine = ['  it("x", () => {', "    const rows = [", "    100,", "    ];", "  });"];
+    const dataLine = ['  it("x", () => {', "    const rows = [", "    ];", "    100,", "  });"];
     expect([inline, separate, none, dataLine].map(readTimeout)).toEqual([30000, 180000, null, null]);
   });
 
