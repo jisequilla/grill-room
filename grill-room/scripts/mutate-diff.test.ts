@@ -18,6 +18,7 @@ import { useTempGitRepos } from "../test/git-repos";
 import { repoPath } from "../test/repo-root";
 import {
   CAP,
+  KILL_GRACE_MS,
   RUN_BUDGET_MS,
   countMutantLines,
   dryRunFailureFrom,
@@ -1009,7 +1010,8 @@ describe("scopeFor", () => {
           { name: "99999999999", args: onCoverage, budget: "99999999999", c: 0, s: 0, ...unset },
           { name: "no-scope", args: ["--mutate", "server/b.ts:1-1"], budget: "1", c: 0, s: 0, status: "no-scope", log: [] },
           { name: "nothing-kept", args: ["--mutate", "f.ts:2-2"], budget: "1", c: 0, s: 0, status: "truncated", log: [] },
-          { name: "570000", args: onCoverage, budget: "570000", c: 0, s: 0, ...unset },
+          { name: "565000", args: onCoverage, budget: "565000", c: 0, s: 0, ...unset },
+          { name: "570000 falls back", args: onCoverage, budget: "570000", c: 0, s: 0, ...unset },
         ];
 
         const actual = rows.map((row) => {
@@ -1126,6 +1128,53 @@ describe("scopeFor", () => {
       }
     },
     90000,
+  );
+  it(
+    "main: a child that ignores SIGTERM is killed after the grace period",
+    () => {
+      const stubs = mkdtempSync(path.join(tmpdir(), "mutate-stub-"));
+      try {
+        writeFileSync(
+          path.join(stubs, "pnpm"),
+          [
+            "#!/bin/sh",
+            'if [ "$1" = exec ] && [ "$2" = stryker ]; then',
+            '  case "$STUB_MODE" in',
+            "    ignore) trap '' TERM; sleep 45; exit 1;;",
+            "    honour) sleep 45; exit 1;;",
+            "  esac",
+            "fi",
+            "exit 0",
+            "",
+          ].join("\n"),
+          { mode: 0o755 },
+        );
+        const root = repos.create({
+          files: { "server/a.ts": "export const a = 1 + 2;\n", "server/a.test.ts": "// t\n" },
+        });
+        commitChange(root, { write: { "server/a.test.ts": "// t\n// more\n" } });
+        const onStryker = ["--mutate", "server/a.ts:1-1"];
+        const timed = (mode: string) => {
+          const started = Date.now();
+          const result = runStubbedCli(onStryker, root, {
+            PATH: `${stubs}:${process.env.PATH}`,
+            STUB_MODE: mode,
+            MUTATE_BUDGET_MS: "8000",
+          });
+          return { status: JSON.parse(result.stdout).status, elapsed: Date.now() - started };
+        };
+
+        const ignore = timed("ignore");
+        const honour = timed("honour");
+
+        expect([ignore.status, honour.status]).toEqual(["overrun", "overrun"]);
+        expect(ignore.elapsed).toBeLessThan(30000);
+        expect(ignore.elapsed - honour.elapsed).toBeGreaterThanOrEqual(3000);
+      } finally {
+        rmSync(stubs, { recursive: true, force: true });
+      }
+    },
+    120000,
   );
 });
 
@@ -1320,8 +1369,13 @@ describe("mutation gate settings", () => {
     expect(CAP).toBe(500);
   });
 
-  it("RUN_BUDGET_MS is 570000", () => {
-    expect(RUN_BUDGET_MS).toBe(570000);
+  it("RUN_BUDGET_MS is 565000", () => {
+    expect(RUN_BUDGET_MS).toBe(565000);
+  });
+
+  it("KILL_GRACE_MS is 5000 and the run with its grace fits in 570000 ms", () => {
+    expect(KILL_GRACE_MS).toBe(5000);
+    expect(RUN_BUDGET_MS + KILL_GRACE_MS).toBe(570000);
   });
 
   it("strykerArgs: with and without test files", () => {
