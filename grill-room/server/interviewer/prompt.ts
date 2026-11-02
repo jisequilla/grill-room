@@ -35,6 +35,13 @@ import type {
   SharpenRewriteRequest,
 } from "./types.js";
 
+export const SUMMARY_MIN_BULLETS = 5;
+export const SUMMARY_MAX_BULLETS = 10;
+
+/** What a spec's Further Notes must say when the owner grilled an idea readiness judged not ready. */
+export const READINESS_OVERRIDE_SENTENCE =
+  "The owner chose to grill this idea although readiness judged it not ready.";
+
 /**
  * Every turn carries the full instructions and the full decision history, even
  * when the conversation is resumed. Resume then buys continuity of the model's
@@ -48,13 +55,6 @@ import type {
  * prompt as an unknown option and the turn fails before it starts, so the
  * prompt always opens with this framing line.
  */
-export const SUMMARY_MIN_BULLETS = 5;
-export const SUMMARY_MAX_BULLETS = 10;
-
-/** What a spec's Further Notes must say when the owner grilled an idea readiness judged not ready. */
-export const READINESS_OVERRIDE_SENTENCE =
-  "The owner chose to grill this idea although readiness judged it not ready.";
-
 const OPENING_LINE =
   "You are conducting a grilling interview inside the Grill Room app. Your instructions follow verbatim, then the state of the interview, then your task for this turn.";
 
