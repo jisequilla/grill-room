@@ -250,6 +250,11 @@ test.describe("at 390×844", () => {
       .click();
     await page.getByRole("button", { name: "Submit round" }).click();
     await expect(page.getByTestId("done-proposed-panel")).toBeVisible();
+    await expect(
+      page
+        .getByTestId("loose-end")
+        .filter({ hasText: "Where does the data live?" }),
+    ).toHaveAttribute("data-reason", "unknown");
     return page
       .getByTestId("loose-end")
       .getByRole("button", { name: "Where does the data live?" });
