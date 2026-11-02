@@ -211,7 +211,7 @@ export interface FindSupersededRequest extends RequestBase {
   /**
    * The own answers to check for text that is not part of the decision (an
    * instruction to the AI, a note to self, a typo), by key, in tree order.
-   * Always the same list as `deferrableKeys`: both come from one selection.
+   * Leaves out the own answers whose restatement was dismissed.
    */
   restatableKeys: string[];
 }

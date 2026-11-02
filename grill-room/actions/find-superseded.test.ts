@@ -1,18 +1,17 @@
 import { eq } from "@agent-native/core/db/schema";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { FakeInterviewer } from "../server/interviewer/fake.js";
 import {
   findSupersededResultSchema,
   InterviewerError,
   resetInterviewer,
   scriptInterviewer,
   type FindSupersededRequest,
+  type FindSupersededResult,
 } from "../server/interviewer/index.js";
-import {
-  deferrableDecisions,
-  replaceableDecisions,
-  supersessionRejectionReasons,
-} from "../server/supersession.js";
+import { eligibleFor } from "../server/proposal.js";
+import { supersessionRejectionReasons } from "../server/supersession.js";
 import { describeDecisions } from "../server/tree.js";
 import { findLatestTurn } from "../server/turn-records.js";
 import { MAX_TURN_RETRIES, portKey } from "../server/turn.js";
@@ -24,6 +23,26 @@ import getSession from "./get-session.js";
 import getTurn from "./get-turn.js";
 import listLooseEnds from "./list-loose-ends.js";
 import requestNextRound from "./request-next-round.js";
+
+/**
+ * Row 8's hook: `propose` delegates to the real one, unless a test sets
+ * `throwOnCall` to N, when its Nth call throws instead.
+ */
+const proposeHook = vi.hoisted(() => ({ throwOnCall: 0, calls: 0 }));
+
+vi.mock("../server/proposal.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../server/proposal.js")>();
+  return {
+    ...actual,
+    propose: async (...args: Parameters<typeof actual.propose>) => {
+      proposeHook.calls += 1;
+      if (proposeHook.throwOnCall > 0 && proposeHook.calls === proposeHook.throwOnCall) {
+        throw new Error("planted: propose failed");
+      }
+      return actual.propose(...args);
+    },
+  };
+});
 
 /*
  * `find-superseded` runs in two places: as the second half of a done proposal,
@@ -222,6 +241,10 @@ function supersessions(
 describe("find-superseded", () => {
   useTestDatabase();
   afterEach(resetInterviewer);
+  afterEach(() => {
+    proposeHook.throwOnCall = 0;
+    proposeHook.calls = 0;
+  });
 
   describe("as the second half of a done proposal", () => {
     it("asks for supersessions after the proposal, and stores them as proposals that leave the loose end open", async () => {
@@ -1003,7 +1026,7 @@ describe("find-superseded", () => {
         createdAt: created(11),
       });
 
-      expect(deferrableDecisions(await sessionRows(session.id)).map(portKey)).toEqual(
+      expect(eligibleFor("deferral", await sessionRows(session.id)).map(portKey)).toEqual(
         ["late-own", "own"],
       );
     });
@@ -1411,7 +1434,7 @@ describe("find-superseded", () => {
         .from(schema.decisions)
         .where(eq(schema.decisions.sessionId, session.id))
         .orderBy(schema.decisions.createdAt, schema.decisions.id);
-      const deferrableKeys = deferrableDecisions(rows).map(portKey);
+      const deferrableKeys = eligibleFor("deferral", rows).map(portKey);
 
       // What the prompt asks for: one entry per listed key, naming it in
       // `key` and saying in `reason` what the answer waits on.
@@ -1486,9 +1509,9 @@ describe("find-superseded", () => {
       await aTreeWithAPendingRestatement(session.id);
       const rows = await sessionRows(session.id);
 
-      expect(deferrableDecisions(rows).map(portKey)).toEqual(["own", "late-own"]);
+      expect(eligibleFor("deferral", rows).map(portKey)).toEqual(["own", "late-own"]);
       // Settled before late-own, so replaceable but for the restatement.
-      expect(replaceableDecisions(rows).map(portKey)).toEqual([
+      expect(eligibleFor("replacement", rows).map(portKey)).toEqual([
         "own",
         "recommended",
       ]);
@@ -1958,7 +1981,7 @@ describe("find-superseded", () => {
         .from(schema.decisions)
         .where(eq(schema.decisions.sessionId, session.id))
         .orderBy(schema.decisions.createdAt, schema.decisions.id);
-      const restatableKeys = deferrableDecisions(rows).map(portKey);
+      const restatableKeys = eligibleFor("restatement", rows).map(portKey);
 
       // What the prompt asks for: the key, the statement with typos fixed and
       // nothing added, the removed text verbatim or "", and what was removed.
@@ -2165,6 +2188,409 @@ describe("find-superseded", () => {
         turnStatus: "failed",
         turnErrorCode: "rate-limited",
       });
+    });
+  });
+
+  describe("offering and storing through the Proposal module", () => {
+    /**
+     * L: a loose end (`unknown`). S and S2: own answers settled before V, so
+     * both are replaceable by V, and all three are checked for a deferral and
+     * a restatement.
+     */
+    type Seed = Omit<
+      Partial<typeof schema.decisions.$inferInsert>,
+      "id" | "key" | "questionTitle"
+    >;
+
+    async function aFixture(
+      sessionId: string,
+      seeds: Partial<Record<"l" | "s" | "s2" | "v", Seed>> = {},
+    ) {
+      // V is inserted first, since the seeds name it; tree order is createdAt.
+      await aSettledDecision(sessionId, "v", T2, {
+        createdAt: "2026-08-01T00:00:03.000Z",
+        ...seeds.v,
+      });
+      await insertDecision(sessionId, {
+        id: "d-l",
+        key: "l",
+        questionTitle: "Title of l",
+        answerKind: "unknown",
+        currentAnswer: "Not sure yet",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        ...seeds.l,
+      });
+      await aSettledDecision(sessionId, "s", T1, {
+        createdAt: "2026-08-01T00:00:01.000Z",
+        ...seeds.s,
+      });
+      await aSettledDecision(sessionId, "s2", T1, {
+        createdAt: "2026-08-01T00:00:02.000Z",
+        ...seeds.s2,
+      });
+    }
+
+    const PENDING = {
+      answeredBy: {
+        proposalKind: "answered-by",
+        supersededById: "d-v",
+        supersessionAnswer: "B",
+        supersessionReason: "pending",
+      },
+      replacement: {
+        proposalKind: "replacement",
+        supersededById: "d-v",
+        supersessionReason: "pending",
+      },
+      deferral: { proposalKind: "deferral", deferralReason: "pending" },
+      restatement: {
+        proposalKind: "restatement",
+        restatementText: "V clean",
+        restatementNotes: "",
+        restatementReason: "pending",
+      },
+    } as const;
+
+    const NONE = {
+      proposalKind: null,
+      supersededById: null,
+      supersessionAnswer: null,
+      supersessionReason: null,
+      deferralReason: null,
+      restatementText: null,
+      restatementNotes: null,
+      restatementReason: null,
+    };
+
+    function remembered(
+      kind: string,
+      targetId?: string,
+    ): Partial<typeof schema.decisions.$inferInsert> {
+      return {
+        dismissedProposalsJson: JSON.stringify([
+          { kind, ...(targetId ? { targetId } : {}), reason: "earlier", dismissedAt: T0 },
+        ]),
+      };
+    }
+
+    function found(result: Partial<FindSupersededResult>) {
+      return {
+        kind: "find-superseded" as const,
+        result: {
+          supersessions: [],
+          replacements: [],
+          deferrals: [],
+          restatements: [],
+          ...result,
+        },
+      };
+    }
+
+    const EMPTY = found({});
+    const DEFER_S2 = { key: "s2", reason: "S2 waits on V." };
+
+    /**
+     * Wraps the fake's `findSuperseded` for its next call: the decision gains
+     * `set` straight in the database, then the call is answered as scripted.
+     */
+    function whileAnswering(
+      interviewer: FakeInterviewer,
+      id: string,
+      set: Partial<typeof schema.decisions.$inferInsert>,
+    ) {
+      const original = interviewer.findSuperseded;
+      interviewer.findSuperseded = async (request, observer) => {
+        interviewer.findSuperseded = original;
+        await getDb()
+          .update(schema.decisions)
+          .set(set)
+          .where(eq(schema.decisions.id, id));
+        return original(request, observer);
+      };
+    }
+
+    /** "resolved", or what the action threw: for a row that does not assert it. */
+    async function outcomeOfScan(sessionId: string): Promise<unknown> {
+      try {
+        await findSuperseded.run({ sessionId });
+        return "resolved";
+      } catch (error) {
+        return error;
+      }
+    }
+
+    async function expectScanSucceeded(sessionId: string) {
+      expect(await getSession.run({ id: sessionId })).toMatchObject({
+        turnStatus: "idle",
+        turnErrorCode: null,
+      });
+    }
+
+    it("row 2: a loose end holding a pending answered-by is not asked about again", async () => {
+      const session = await aSession();
+      await aFixture(session.id, { l: PENDING.answeredBy });
+      const interviewer = scriptInterviewer([]);
+
+      const outcome = await outcomeOfScan(session.id);
+
+      const request = interviewer.requests[0] as FindSupersededRequest;
+      expect(request.looseEndKeys).not.toContain("l");
+      expect(outcome).toBe("resolved");
+      expect(await readDecision("d-l")).toMatchObject(PENDING.answeredBy);
+    });
+
+    it("row 3: a decision holding a pending replacement is not offered for replacement", async () => {
+      const session = await aSession();
+      await aFixture(session.id, { s: PENDING.replacement });
+      const interviewer = scriptInterviewer([EMPTY]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      const request = interviewer.requests[0] as FindSupersededRequest;
+      expect(request.replaceableKeys).not.toContain("s");
+      expect(Object.keys(request.laterKeys)).not.toContain("s");
+    });
+
+    it("row 4: a remembered deferral dismissal leaves the decision out of the deferral list only", async () => {
+      const session = await aSession();
+      await aFixture(session.id, { s: remembered("deferral") });
+      const interviewer = scriptInterviewer([EMPTY]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      const request = interviewer.requests[0] as FindSupersededRequest;
+      expect(request.deferrableKeys).not.toContain("s");
+      expect(request.restatableKeys).toContain("s");
+    });
+
+    it("row 5: a remembered restatement dismissal leaves the decision out of the restatement list only", async () => {
+      const session = await aSession();
+      await aFixture(session.id, { s: remembered("restatement") });
+      const interviewer = scriptInterviewer([EMPTY]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      const request = interviewer.requests[0] as FindSupersededRequest;
+      expect(request.deferrableKeys).toContain("s");
+      expect(request.restatableKeys).not.toContain("s");
+    });
+
+    it("row 6: a replacement the owner dismissed is not stored again, and the rest still is", async () => {
+      const session = await aSession();
+      await aFixture(session.id, { s: remembered("replacement", "d-v") });
+      scriptInterviewer([
+        found({
+          replacements: [{ replacedKey: "s", byKey: "v", reason: "scan" }],
+          deferrals: [DEFER_S2],
+        }),
+      ]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(await readDecision("d-s")).toMatchObject(NONE);
+      expect(await readDecision("d-s2")).toMatchObject({
+        proposalKind: "deferral",
+        deferralReason: DEFER_S2.reason,
+      });
+      await expectScanSucceeded(session.id);
+    });
+
+    it("row 6b: an answered-by the owner dismissed is not stored again, and the rest still is", async () => {
+      const session = await aSession();
+      await aFixture(session.id, { l: remembered("answered-by", "d-v") });
+      scriptInterviewer([
+        found({
+          supersessions: [
+            { looseEndKey: "l", answeredByKey: "v", answer: "scan", reason: "scan" },
+          ],
+          deferrals: [DEFER_S2],
+        }),
+      ]);
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(await readDecision("d-l")).toMatchObject(NONE);
+      expect(await readDecision("d-s2")).toMatchObject({
+        proposalKind: "deferral",
+        deferralReason: DEFER_S2.reason,
+      });
+      await expectScanSucceeded(session.id);
+    });
+
+    it("row 7: a deferral stored while the interviewer answered is not overwritten by a replacement", async () => {
+      const session = await aSession();
+      await aFixture(session.id);
+      const interviewer = scriptInterviewer([
+        found({
+          replacements: [{ replacedKey: "s", byKey: "v", reason: "scan" }],
+          deferrals: [DEFER_S2],
+        }),
+      ]);
+      whileAnswering(interviewer, "d-s", {
+        proposalKind: "deferral",
+        deferralReason: "mid-answer",
+      });
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(await readDecision("d-s")).toMatchObject({
+        ...NONE,
+        proposalKind: "deferral",
+        deferralReason: "mid-answer",
+      });
+      expect(await readDecision("d-s2")).toMatchObject({
+        proposalKind: "deferral",
+        deferralReason: DEFER_S2.reason,
+      });
+      await expectScanSucceeded(session.id);
+    });
+
+    it("row 7b: a replacement stored while the interviewer answered is not overwritten by a deferral", async () => {
+      const session = await aSession();
+      await aFixture(session.id);
+      const interviewer = scriptInterviewer([
+        found({ deferrals: [DEFER_S2, { key: "s", reason: "S waits on V." }] }),
+      ]);
+      whileAnswering(interviewer, "d-s2", {
+        proposalKind: "replacement",
+        supersededById: "d-v",
+        supersessionReason: "mid-answer",
+      });
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(await readDecision("d-s2")).toMatchObject({
+        ...NONE,
+        proposalKind: "replacement",
+        supersededById: "d-v",
+        supersessionReason: "mid-answer",
+      });
+      expect(await readDecision("d-s")).toMatchObject({
+        proposalKind: "deferral",
+        deferralReason: "S waits on V.",
+      });
+      await expectScanSucceeded(session.id);
+    });
+
+    it("row 7c: a deferral stored while the interviewer answered is not overwritten by a restatement", async () => {
+      const session = await aSession();
+      await aFixture(session.id);
+      const interviewer = scriptInterviewer([
+        found({
+          restatements: [
+            { key: "s", statement: "Clean s.", operatorNotes: "", reason: "scan" },
+          ],
+          deferrals: [DEFER_S2],
+        }),
+      ]);
+      whileAnswering(interviewer, "d-s", {
+        proposalKind: "deferral",
+        deferralReason: "mid-answer",
+      });
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(await readDecision("d-s")).toMatchObject({
+        ...NONE,
+        proposalKind: "deferral",
+        deferralReason: "mid-answer",
+      });
+      expect(await readDecision("d-s2")).toMatchObject({
+        proposalKind: "deferral",
+        deferralReason: DEFER_S2.reason,
+      });
+      await expectScanSucceeded(session.id);
+    });
+
+    it("row 7d: an answered-by stored while the interviewer answered is not overwritten", async () => {
+      const session = await aSession();
+      await aFixture(session.id);
+      const interviewer = scriptInterviewer([
+        found({
+          supersessions: [
+            { looseEndKey: "l", answeredByKey: "v", answer: "scan", reason: "scan" },
+          ],
+          deferrals: [DEFER_S2],
+        }),
+      ]);
+      whileAnswering(interviewer, "d-l", {
+        proposalKind: "answered-by",
+        supersededById: "d-v",
+        supersessionAnswer: "mid-answer",
+        supersessionReason: "mid-answer",
+      });
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(await readDecision("d-l")).toMatchObject({
+        proposalKind: "answered-by",
+        supersessionAnswer: "mid-answer",
+        supersessionReason: "mid-answer",
+      });
+      expect(await readDecision("d-s2")).toMatchObject({
+        proposalKind: "deferral",
+        deferralReason: DEFER_S2.reason,
+      });
+      await expectScanSucceeded(session.id);
+    });
+
+    it("row 7e: a replacement accepted while the interviewer answered is not proposed again", async () => {
+      const session = await aSession();
+      await aFixture(session.id);
+      const interviewer = scriptInterviewer([
+        found({
+          replacements: [{ replacedKey: "s", byKey: "v", reason: "scan" }],
+          deferrals: [DEFER_S2],
+        }),
+      ]);
+      whileAnswering(interviewer, "d-s", { replacedById: "d-v" });
+
+      await findSuperseded.run({ sessionId: session.id });
+
+      expect(await readDecision("d-s")).toMatchObject({
+        ...NONE,
+        replacedById: "d-v",
+      });
+      expect(await readDecision("d-s2")).toMatchObject({
+        proposalKind: "deferral",
+        deferralReason: DEFER_S2.reason,
+      });
+      await expectScanSucceeded(session.id);
+    });
+
+    it("row 8: the scan's Proposals are stored in one transaction", async () => {
+      const session = await aSession();
+      await aFixture(session.id);
+      scriptInterviewer([
+        found({ deferrals: [{ key: "s", reason: "S waits on V." }, DEFER_S2] }),
+      ]);
+      proposeHook.throwOnCall = 2;
+
+      await outcomeOfScan(session.id);
+
+      expect(await readDecision("d-s")).toMatchObject(NONE);
+      expect(await readDecision("d-s2")).toMatchObject(NONE);
+    });
+
+    it("row 9: no turn when every candidate already holds a Proposal", async () => {
+      const session = await aSession();
+      await aFixture(session.id, {
+        l: PENDING.answeredBy,
+        s: PENDING.replacement,
+        s2: PENDING.deferral,
+        v: PENDING.restatement,
+      });
+      const interviewer = scriptInterviewer([]);
+
+      await outcomeOfScan(session.id);
+
+      expect(interviewer.requests).toEqual([]);
+      expect(
+        await findLatestTurn({
+          sessionId: session.id,
+          turnKind: "find-superseded",
+        }),
+      ).toBeNull();
     });
   });
 
