@@ -58,7 +58,7 @@ Under the new cap, gr-qpo.1 (446 mutants) and gr-qpo.2 (128) both fit. Narrowing
 |---|---|---|---|---|
 | gr-qpo.2 gate as recorded (kept 96) | 151 s, 2,284 tests | 167 s | 96 | 2,071 total, mean 21.6 per mutant |
 | gr-qpo.2 full scope, c2 (E2 / E2b) | 156 s / 158 s, 2,362 tests | 432 s / 155 s | 147, 5 static | 4,752 |
-| gr-qpo.1 kept set, c2, uncapped | 170 s, 2,582 tests | **1,119 s** | 97, **41 static** | 21,677 in `fake.ts`'s 29 static mutants alone |
+| gr-qpo.1 kept set, c2, uncapped | 170 s, 2,582 tests | **1,119 s** | 97, **41 static or hybrid** | 21,677 in `fake.ts`'s 29 static or hybrid mutants alone |
 
 - **The dry run is half of a typical run, and concurrency does not touch it.** It costs 150 to 170 s whatever `concurrency` says, because Stryker runs it in one runner. Inside each runner vitest is pinned to `pool: 'threads', maxWorkers: 1` by the vitest runner, so every test file boots its PGlite one after another.
 - **Tests per mutant.**
@@ -66,7 +66,7 @@ Under the new cap, gr-qpo.1 (446 mutants) and gr-qpo.2 (128) both fit. Narrowing
   - With bail on, a mean of 21.6 tests actually run per mutant.
   - The 14 `.tsx` mutants and 1 other run nothing: they are NoCoverage.
 - **Static mutants are what overran gr-qpo.1.** A static mutant is evaluated only at import, so Stryker reloads the environment and runs every related test for it.
-  - 41 of the 97 kept mutants are static: 29 in `server/interviewer/fake.ts`, 7 in `schemas.ts`, 3 in `db/schema.ts` and 2 in `db/migrations.ts`.
+  - 41 of the 97 kept mutants are static or hybrid: 29 in `server/interviewer/fake.ts`, 7 in `schemas.ts`, 3 in `db/schema.ts` and 2 in `db/migrations.ts`.
   - The 29 in `fake.ts` alone ran 21,677 tests.
   - With `--ignoreStatic` the same 97 mutants take 86 s in the mutant phase instead of 1,119 s, and 261 s in all.
 - **A full vitest run does not explain the 600 s.** All 3,458 tests in 124 files take 73 s at the configured 6 workers and 225 s at 1 worker. The dry run covers a subset of 2,284 to 2,582 tests in 150 to 170 s, and a single run of it is well inside the cap. The overrun came from the static mutants re-running that subset dozens of times.
@@ -149,7 +149,7 @@ And on gr-qpo.1, from `grill-room/` at `6076f71`:
 
 | Run | Change | Wall | Dry run | Mutant phase | Mutants | Score |
 |---|---|---|---|---|---|---|
-| q1-kept | the 97 the gate kept, no wall clock | 1,292 s | 170 s | 1,119 s | 97 (41 static) | 87.6 |
+| q1-kept | the 97 the gate kept, no wall clock | 1,292 s | 170 s | 1,119 s | 97 (41 static or hybrid) | 87.6 |
 | q1-kept-is | the same with `--ignoreStatic` | 261 s | 172 s | 86 s | 92 | 80.4 |
 | q1-full-is | full diff, `--ignoreStatic` | 439 s | 172 s | 265 s | 433 | 88.7 |
 | q1-full-combo | full diff, `--ignoreStatic` + `--testFiles` (7 changed tests) | **261 s** | **24 s**, 695 tests | 234 s | 426 (20 ignored, 7 of them survivors in q1-full-is) | **90.1** |
