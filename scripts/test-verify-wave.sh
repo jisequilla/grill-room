@@ -64,6 +64,7 @@ STUB
 cat >"$stubs/just" <<'STUB'
 #!/usr/bin/env bash
 echo "just $*|$(pwd -P)" >>"$STUB_LOG"
+[ "${1:-}" = e2e-demo ] && exit "${STUB_JUST_DEMO_RC:-0}"
 exit "${STUB_JUST_RC:-0}"
 STUB
 chmod +x "$stubs/pnpm" "$stubs/just"
@@ -170,7 +171,7 @@ repo_main="$clone"
 
 # all pass
 vwrun "" "$clone" feat-b feat-a
-row "all pass" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: skipped" "RESULT: pass")" 0
+row "all pass" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: skipped" "demo: skipped" "RESULT: pass")" 0
 
 # call sequence
 [ "$(calls)" = "$(join "$install_cmd" "$vitest_cmd" "pnpm typecheck" "pnpm lint")" ] && wt_ok
@@ -178,38 +179,47 @@ report $? "call sequence"
 
 # e2e flag
 vwrun "" "$clone" --e2e feat-b feat-a
-row "e2e flag" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: exit 0" "RESULT: pass")" 0
-[ "$(calls)" = "$(join "$install_cmd" "$vitest_cmd" "pnpm typecheck" "pnpm lint" "just e2e")" ] && wt_ok
+row "e2e flag" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: exit 0" "demo: exit 0" "RESULT: pass")" 0
+[ "$(calls)" = "$(join "$install_cmd" "$vitest_cmd" "pnpm typecheck" "pnpm lint" "just e2e" "just e2e-demo")" ] && wt_ok
 report $? "e2e flag call sequence"
 
-# e2e fails
+# demo fails
+vwrun "STUB_JUST_DEMO_RC=1" "$clone" --e2e feat-b feat-a
+row "demo fails" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: exit 0" "demo: exit 1" "RESULT: fail")" 1
+[ "$(calls)" = "$(join "$install_cmd" "$vitest_cmd" "pnpm typecheck" "pnpm lint" "just e2e" "just e2e-demo")" ]
+report $? "demo fails call sequence"
+
+# e2e fails, demo passes
 vwrun "STUB_JUST_RC=1" "$clone" --e2e feat-b feat-a
-row "e2e fails" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: exit 1" "RESULT: fail")" 1
+[ "$(calls)" = "$(join "$install_cmd" "$vitest_cmd" "pnpm typecheck" "pnpm lint" "just e2e" "just e2e-demo")" ]
+report $? "e2e fails demo passes call sequence"
+vwrun "STUB_JUST_RC=1" "$clone" --e2e feat-b feat-a
+row "e2e fails demo passes" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: exit 1" "demo: exit 0" "RESULT: fail")" 1
 
 # vitest fails
 vwrun "STUB_VITEST_RC=1" "$clone" feat-b feat-a
-row "vitest fails" "$(join "$merged" "$install0" "vitest: exit 1" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: skipped" "RESULT: fail")" 1
+row "vitest fails" "$(join "$merged" "$install0" "vitest: exit 1" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: skipped" "demo: skipped" "RESULT: fail")" 1
 
 # vitest fails, e2e passes
 vwrun "STUB_VITEST_RC=1" "$clone" --e2e feat-b feat-a
-row "vitest fails e2e passes" "$(join "$merged" "$install0" "vitest: exit 1" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: exit 0" "RESULT: fail")" 1
-[ "$(calls)" = "$(join "$install_cmd" "$vitest_cmd" "pnpm typecheck" "pnpm lint" "just e2e")" ]
+row "vitest fails e2e passes" "$(join "$merged" "$install0" "vitest: exit 1" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: exit 0" "demo: exit 0" "RESULT: fail")" 1
+[ "$(calls)" = "$(join "$install_cmd" "$vitest_cmd" "pnpm typecheck" "pnpm lint" "just e2e" "just e2e-demo")" ]
 report $? "vitest fails e2e passes call sequence"
 
 # typecheck ERROR line with exit 0
 vwrun "STUB_TC_ERROR=1" "$clone" feat-b feat-a
-row "typecheck ERROR line exit 0" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: skipped" "RESULT: pass")" 0
+row "typecheck ERROR line exit 0" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: skipped" "demo: skipped" "RESULT: pass")" 0
 
 # typecheck fails
 vwrun "STUB_TC_RC=1" "$clone" feat-b feat-a
-row "typecheck fails" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 1" "lint: exit 0" "e2e: skipped" "RESULT: fail")" 1
+row "typecheck fails" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 1" "lint: exit 0" "e2e: skipped" "demo: skipped" "RESULT: fail")" 1
 
 # lint fails
 vwrun "STUB_LINT_RC=1" "$clone" feat-b feat-a
-row "lint fails" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 1" "e2e: skipped" "RESULT: fail")" 1
+row "lint fails" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 1" "e2e: skipped" "demo: skipped" "RESULT: fail")" 1
 
 # install fails
-skipped="$(join "install: exit 1" "vitest: skipped" "typecheck: skipped" "lint: skipped" "e2e: skipped" "RESULT: fail")"
+skipped="$(join "install: exit 1" "vitest: skipped" "typecheck: skipped" "lint: skipped" "e2e: skipped" "demo: skipped" "RESULT: fail")"
 vwrun "STUB_INSTALL_RC=1" "$clone" feat-b feat-a
 row "install fails" "$(join "$merged" "$skipped")" 1
 [ "$(calls)" = "$install_cmd" ]
@@ -221,11 +231,11 @@ report $? "install fails with e2e call log"
 
 # vitest prints no summary
 vwrun "STUB_VITEST_OUT=none STUB_VITEST_RC=1" "$clone" feat-b feat-a
-row "vitest no summary" "$(join "$merged" "$install0" "vitest: exit 1" "typecheck: exit 0" "lint: exit 0" "e2e: skipped" "RESULT: fail")" 1
+row "vitest no summary" "$(join "$merged" "$install0" "vitest: exit 1" "typecheck: exit 0" "lint: exit 0" "e2e: skipped" "demo: skipped" "RESULT: fail")" 1
 
 # vitest failed summary lines
 vwrun "STUB_VITEST_OUT=failed STUB_VITEST_RC=1" "$clone" feat-b feat-a
-row "vitest failed summary" "$(join "$merged" "$install0" "vitest: exit 1" "Test Files  1 failed (1)" "Tests  3 failed (3)" "typecheck: exit 0" "lint: exit 0" "e2e: skipped" "RESULT: fail")" 1
+row "vitest failed summary" "$(join "$merged" "$install0" "vitest: exit 1" "Test Files  1 failed (1)" "Tests  3 failed (3)" "typecheck: exit 0" "lint: exit 0" "e2e: skipped" "demo: skipped" "RESULT: fail")" 1
 
 # logs land under the checkout the script was run from
 vwrun "" "$clone/grill-room" feat-b feat-a
