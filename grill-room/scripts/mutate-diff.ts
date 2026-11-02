@@ -10,6 +10,8 @@ import { calculateMetrics } from "mutation-testing-metrics";
 export const CAP = 500;
 export const RUN_BUDGET_MS = 570000;
 const STDERR_TAIL_LINES = 20;
+const STDOUT_TAIL_CHARS = 200000;
+const DRY_RUN_DETAIL_CHARS = 1000;
 const DEFAULT_BASE = "origin/main";
 const OUTPUT_DIR = path.join(".scratch", "mutation");
 const SUMMARY_FILE = path.join(OUTPUT_DIR, "summary.json");
@@ -288,6 +290,54 @@ export function preferNotCoveredFor(counted: LineCount[] | null, prefer: string[
   return counted === null ? null : uncoveredPreferred(counted, prefer);
 }
 
+export interface DryRunFailure {
+  kind: "failed-tests" | "timeout" | "error";
+  detail: string;
+}
+
+const ANSI_ESCAPE = /\x1B\[[0-9;]*m/g;
+const STRYKER_LOG_PREFIX = /^\d\d:\d\d:\d\d \(\d+\) /;
+const ITEM_LINE = /^\t(?!\t)/;
+const DRY_RUN_HEADERS: Array<{ kind: DryRunFailure["kind"]; text: string }> = [
+  { kind: "failed-tests", text: "One or more tests failed in the initial test run:" },
+  { kind: "timeout", text: "Initial test run timed out!" },
+  { kind: "error", text: "One or more tests resulted in an error:" },
+];
+
+function blockItems(lines: string[], withMessages: boolean): string[] {
+  const items: string[] = [];
+  let current: { name: string; message: string | null } | null = null;
+  const flush = () => {
+    if (current === null || current.name === "") return;
+    items.push(current.message ? `${current.name}: ${current.message}` : current.name);
+  };
+  for (const line of lines) {
+    if (STRYKER_LOG_PREFIX.test(line)) break;
+    if (ITEM_LINE.test(line)) {
+      flush();
+      current = { name: line.trim(), message: null };
+    } else if (withMessages && current !== null && current.message === null && line.startsWith("\t\t")) {
+      current.message = line.trim();
+    }
+  }
+  flush();
+  return items;
+}
+
+export function dryRunFailureFrom(stdout: string): DryRunFailure | null {
+  const lines = stdout.replace(ANSI_ESCAPE, "").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const header = DRY_RUN_HEADERS.find((candidate) => lines[i].includes(candidate.text));
+    if (header === undefined) continue;
+    const detail =
+      header.kind === "timeout"
+        ? header.text
+        : blockItems(lines.slice(i + 1), header.kind === "failed-tests").join("; ");
+    return { kind: header.kind, detail: detail.slice(0, DRY_RUN_DETAIL_CHARS) };
+  }
+  return null;
+}
+
 export interface RunRecord {
   outcome: "finished" | "overrun" | "runner-failed" | "nothing-kept" | "no-scope";
   base: string | null;
@@ -298,6 +348,7 @@ export interface RunRecord {
   exitCode: number | null;
   stderrTail: string | null;
   preferNotCovered: string[] | null;
+  dryRunFailure: DryRunFailure | null;
 }
 
 export interface StrykerReport {
@@ -333,6 +384,7 @@ export interface Summary {
   exitCode: number | null;
   stderrTail: string | null;
   preferNotCovered: string[] | null;
+  dryRunFailure: DryRunFailure | null;
 }
 
 export function summarize(report: StrykerReport | null, run: RunRecord): Summary {
@@ -345,6 +397,7 @@ export function summarize(report: StrykerReport | null, run: RunRecord): Summary
     exitCode: run.exitCode,
     stderrTail: run.stderrTail,
     preferNotCovered: run.preferNotCovered,
+    dryRunFailure: run.dryRunFailure,
   };
   const unknown = { mutants: null, score: null, survivors: null };
 
@@ -454,6 +507,7 @@ interface Finished {
   exitCode: number | null;
   timedOut: boolean;
   stderrTail: string;
+  stdout: string;
 }
 
 function runInGroup(args: string[], cwd: string, timeoutMs: number): Promise<Finished> {
@@ -461,7 +515,14 @@ function runInGroup(args: string[], cwd: string, timeoutMs: number): Promise<Fin
     const child: ChildProcess = spawn(args[0], args.slice(1), {
       cwd,
       detached: true,
-      stdio: ["ignore", process.stderr.fd, "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      process.stderr.write(chunk);
+      stdout += chunk;
+      if (stdout.length > STDOUT_TAIL_CHARS) stdout = stdout.slice(-STDOUT_TAIL_CHARS);
     });
     const stderrLines: string[] = [];
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -481,7 +542,7 @@ function runInGroup(args: string[], cwd: string, timeoutMs: number): Promise<Fin
     const done = (exitCode: number | null) => {
       clearTimeout(timer);
       const tail = stderrLines.filter((line) => line.length > 0).slice(-STDERR_TAIL_LINES);
-      resolve({ exitCode, timedOut, stderrTail: tail.join("\n") });
+      resolve({ exitCode, timedOut, stderrTail: tail.join("\n"), stdout });
     };
     child.on("error", (error) => {
       stderrLines.push(String(error));
@@ -548,6 +609,7 @@ async function main(): Promise<void> {
     exitCode: null,
     stderrTail: null,
     preferNotCovered: [],
+    dryRunFailure: null,
   };
 
   try {
@@ -591,6 +653,7 @@ async function main(): Promise<void> {
             exitCode: finished === null ? null : finished.exitCode,
             stderrTail: finished === null ? null : finished.stderrTail,
             preferNotCovered: preferNotCoveredFor(null, prefer),
+            dryRunFailure: null,
           }),
           cwd,
         );
@@ -650,6 +713,8 @@ async function main(): Promise<void> {
         exitCode: finished === null ? null : finished.exitCode,
         stderrTail: outcome === "finished" || finished === null ? null : finished.stderrTail,
         preferNotCovered: preferNotCoveredFor(counted, prefer),
+        dryRunFailure:
+          finished !== null && outcome === "runner-failed" ? dryRunFailureFrom(finished.stdout) : null,
       }),
       cwd,
     );
@@ -660,6 +725,7 @@ async function main(): Promise<void> {
         outcome: "runner-failed",
         stderrTail: error instanceof Error ? error.message : String(error),
         preferNotCovered: preferNotCoveredFor(null, prefer),
+        dryRunFailure: null,
       }),
       cwd,
     );
