@@ -557,6 +557,7 @@ describe("dryRunFailureFrom", () => {
       ["message belongs to the nearest item", text(FAILED, "\tt1", "\tt2", "\t\tm2")],
       ["empty item skipped", text(FAILED, "\t", "\tt2", "\t\tm2")],
       ["name trimmed", text(FAILED, "\tt1  ", "\t\tm1")],
+      ["other line before the message", text(FAILED, "\tt1", "  - expected", "\t\tm1")],
       ["message before any item", text(FAILED, "\t\tm0", "\tt1")],
       ["header with no item", text(FAILED, LOG)],
       ["blank message", text(FAILED, "\tt1", "\t\t   ")],
@@ -592,6 +593,7 @@ describe("dryRunFailureFrom", () => {
       ["message belongs to the nearest item", { kind: "failed-tests", detail: "t1; t2: m2" }],
       ["empty item skipped", { kind: "failed-tests", detail: "t2: m2" }],
       ["name trimmed", { kind: "failed-tests", detail: "t1: m1" }],
+      ["other line before the message", { kind: "failed-tests", detail: "t1: m1" }],
       ["message before any item", { kind: "failed-tests", detail: "t1" }],
       ["header with no item", { kind: "failed-tests", detail: "" }],
       ["blank message", { kind: "failed-tests", detail: "t1" }],
@@ -1069,6 +1071,8 @@ describe("scopeFor", () => {
             "    whole) printf 'One or more tests failed in the initial test run:\\n\\tsuite a test b\\n\\t\\texpected true to be false\\n'; exit 1;;",
             "    split) printf 'One or more tests failed in the '; sleep 0.2; printf 'initial test run:\\n\\tt1\\n\\t\\tm1\\n'; exit 1;;",
             "    long) printf 'One or more tests failed in the initial test run:\\n'; head -c 250000 /dev/zero | tr '\\000' x; printf '\\n'; exit 1;;",
+            "    tailed) head -c 100000 /dev/zero | tr '\\000' x; printf '\\nOne or more tests failed in the initial test run:\\n\\tt1\\n\\t\\tm1\\n'; head -c 150000 /dev/zero | tr '\\000' x; printf '\\n'; exit 1;;",
+            "    stderr) printf 'e1\\ne2\\n' >&2; exit 1;;",
             "    overrun) printf 'One or more tests failed in the initial test run:\\n\\tt1\\n\\t\\tm1\\n'; sleep 60; exit 1;;",
             "  esac",
             "fi",
@@ -1093,6 +1097,8 @@ describe("scopeFor", () => {
         const whole = cli(onStryker, { STUB_MODE: "whole" });
         const split = cli(onStryker, { STUB_MODE: "split" });
         const long = cli(onStryker, { STUB_MODE: "long" });
+        const tailed = cli(onStryker, { STUB_MODE: "tailed" });
+        const stderr = cli(onStryker, { STUB_MODE: "stderr" });
         const coverage = cli(["--base", base], {});
         const overrun = cli(onStryker, { STUB_MODE: "overrun", MUTATE_BUDGET_MS: "15000" });
 
@@ -1101,6 +1107,8 @@ describe("scopeFor", () => {
           forwarded: whole.stderr.includes("One or more tests failed in the initial test run:"),
           split: [split.summary.status, split.summary.dryRunFailure],
           long: [long.summary.status, long.summary.dryRunFailure],
+          tailed: [tailed.summary.status, tailed.summary.dryRunFailure],
+          stderrTail: [stderr.summary.status, stderr.summary.stderrTail],
           coverage: [coverage.summary.status, coverage.summary.command?.includes("vitest"), coverage.summary.dryRunFailure],
           overrun: [overrun.summary.status, overrun.summary.command !== null, overrun.summary.dryRunFailure],
         }).toEqual({
@@ -1108,6 +1116,8 @@ describe("scopeFor", () => {
           forwarded: true,
           split: ["runner-failed", { kind: "failed-tests", detail: "t1: m1" }],
           long: ["runner-failed", null],
+          tailed: ["runner-failed", { kind: "failed-tests", detail: "t1: m1" }],
+          stderrTail: ["runner-failed", "e1\ne2"],
           coverage: ["runner-failed", true, null],
           overrun: ["overrun", true, null],
         });
