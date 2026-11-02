@@ -275,9 +275,10 @@ describe("scripts/revert-check.sh", () => {
       const shims = tempFolder("revert-shim-");
       const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
       const shim = join(shims, "git");
+      const marker = join(shims, "revert-started");
       writeFileSync(
         shim,
-        `#!/usr/bin/env bash\nif [ "$1" = apply ] && [ "$2" = -R ]; then sleep 2; fi\nexec ${realGit} "$@"\n`,
+        `#!/usr/bin/env bash\nif [ "$1" = apply ] && [ "$2" = -R ]; then touch ${marker}; sleep 2; fi\nexec ${realGit} "$@"\n`,
       );
       chmodSync(shim, 0o755);
       const child = spawn(SCRIPT, ["touch ran"], {
@@ -289,11 +290,38 @@ describe("scripts/revert-check.sh", () => {
         child.on("exit", (code) => resolve(code));
       });
       try {
-        await new Promise((resolve) => setTimeout(resolve, 1_200));
+        await waitFor(() => existsSync(marker), 10_000);
         child.kill("SIGTERM");
         expect(await exited).toBe(143);
         expect(read(work, "src/a.ts")).toBe("branch\n");
         expect(status(work)).toBe("");
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
+    },
+    20_000,
+  );
+
+  it(
+    "row 11b: a TERM after the test dirtied the tree makes the re-apply fail with exit 4",
+    async () => {
+      const { work } = makeFixture();
+      const markers = tempFolder("revert-marker-");
+      const marker = join(markers, "test-started");
+      const child = spawn(
+        SCRIPT,
+        [`echo x >> src/a.ts; touch ${marker}; sleep 5`],
+        { cwd: work, stdio: "ignore" },
+      );
+      const exited = new Promise<number | null>((resolve) => {
+        child.on("exit", (code) => resolve(code));
+      });
+      try {
+        await waitFor(() => existsSync(marker), 10_000);
+        child.kill("SIGTERM");
+        expect(await exited).toBe(4);
       } finally {
         if (child.exitCode === null && child.signalCode === null) {
           child.kill("SIGKILL");

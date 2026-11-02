@@ -827,9 +827,7 @@ describe("evidence re-ask", () => {
     expect(labels.filter((l) => l.endsWith(":again"))).toEqual([`${R1}:again`]);
     expect(call("fix:gr-x:r1").prompt).toBe("FIX 1. [blocker] a.ts:2: A");
   });
-});
 
-describe("whitespace evidence", () => {
   it("re-ask answer with whitespace-only evidence", async () => {
     const { call, labels } = await run({
       reviewers: ["M"],
@@ -926,6 +924,7 @@ describe("nonBlocking", () => {
     const { result } = await run({
       start: undefined,
       builder: { pr: null, branch: null, verification: "x", blocked: "hook", notes: "" },
+      canned: { "review:gr-x:r1:lens1": verdict("approved") },
     });
     expect(result.outcome).toBe("build-blocked");
     expect(result.nonBlocking).toEqual([]);

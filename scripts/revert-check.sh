@@ -6,8 +6,11 @@
 # Reverts every non-test file the branch changes against origin/main, runs the
 # command with bash -c from the worktree root, and re-applies the source even
 # when the command fails or the run is interrupted. Use only double quotes
-# inside the command. Exit codes: 2 usage, 3 revert failed, 4 re-apply failed,
-# 5 fetch failed, 130/143 interrupted, otherwise the command's own status.
+# inside the command. Exit codes: 1 not inside a git repository, 2 usage,
+# 3 revert failed, 4 re-apply failed (4 can also mean a TERM arrived while a
+# revert, git apply -R, was failing, so the re-apply ran on a tree that was
+# never reverted: the tree is unchanged), 5 fetch failed, 130/143
+# interrupted, otherwise the command's own status.
 set -uo pipefail
 
 if [ -z "${1:-}" ]; then

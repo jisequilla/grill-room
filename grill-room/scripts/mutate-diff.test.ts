@@ -904,17 +904,20 @@ describe("scopeFor", () => {
         write: { "server/a.ts": "export const a = 1 + 2;\n", "server/a.test.ts": "// t\n// more\n" },
       });
 
-      const onDiff = runStubbedCli(["--base", base], root, env);
+      const summaryFile = path.join(root, ".scratch", "mutation", "summary.json");
+      runStubbedCli(["--base", base], root, env);
+      const diffCommand = JSON.parse(readFileSync(summaryFile, "utf8")).command;
       const onDiffLog = readFileSync(log, "utf8").trim().split("\n");
       rmSync(log);
-      const mutated = runStubbedCli(["--mutate", "server/a.ts:1-1", "--base", base], root, env);
+      runStubbedCli(["--mutate", "server/a.ts:1-1", "--base", base], root, env);
+      const mutateCommand = JSON.parse(readFileSync(summaryFile, "utf8")).command;
       const mutatedLog = readFileSync(log, "utf8").trim().split("\n");
 
       expect({
         diffArgv: onDiffLog,
-        diffCommand: JSON.parse(onDiff.stdout).command,
+        diffCommand,
         mutateArgv: mutatedLog,
-        mutateCommand: JSON.parse(mutated.stdout).command,
+        mutateCommand,
       }).toEqual({
         diffArgv: ["exec stryker run --mutate server/a.ts:1-1 --testFiles server/a.test.ts"],
         diffCommand: "pnpm exec stryker run --mutate server/a.ts:1-1 --testFiles server/a.test.ts",
@@ -1570,7 +1573,6 @@ describe("test:mutate CLI: --prefer", () => {
     files: Record<string, string>,
     args: string[],
     existingDirectory?: string,
-    envOverride: NodeJS.ProcessEnv = {},
   ) {
     const cwd = existingDirectory ?? mkdtempSync(path.join(tmpdir(), "mutate-cli-"));
     try {
@@ -1578,7 +1580,7 @@ describe("test:mutate CLI: --prefer", () => {
         mkdirSync(path.dirname(path.join(cwd, name)), { recursive: true });
         writeFileSync(path.join(cwd, name), contents);
       }
-      const env: NodeJS.ProcessEnv = { ...process.env, ...envOverride };
+      const env: NodeJS.ProcessEnv = { ...process.env };
       for (const name of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"]) delete env[name];
       const result = spawnSync(tsx, [script, ...args], { cwd, encoding: "utf8", env });
       const summaryFile = path.join(cwd, ".scratch", "mutation", "summary.json");
@@ -1724,7 +1726,21 @@ describe("test:mutate CLI: --prefer", () => {
       const result = runCli({ ...stale, "f.ts": "// only a comment\n" }, ["--mutate", "f.ts:1-1"]);
       expect(result.status).toBe(0);
       const summary = JSON.parse(result.stdout);
-      expect(summary).toMatchObject({ status: "no-scope", mutants: 0, scope: ["f.ts:1-1"], preferNotCovered: [] });
+      expect(summary).toEqual({
+        status: "no-scope",
+        base: null,
+        scope: ["f.ts:1-1"],
+        dropped: [],
+        command: null,
+        elapsedMs: null,
+        mutants: 0,
+        score: null,
+        survivors: [],
+        exitCode: null,
+        stderrTail: null,
+        preferNotCovered: [],
+        dryRunFailure: null,
+      });
       expect(JSON.parse(result.summary ?? "null")).toEqual(summary);
     }, 30000);
   });

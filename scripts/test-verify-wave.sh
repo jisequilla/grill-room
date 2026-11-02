@@ -191,10 +191,9 @@ report $? "demo fails call sequence"
 
 # e2e fails, demo passes
 vwrun "STUB_JUST_RC=1" "$clone" --e2e feat-b feat-a
+row "e2e fails demo passes" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: exit 1" "demo: exit 0" "RESULT: fail")" 1
 [ "$(calls)" = "$(join "$install_cmd" "$vitest_cmd" "pnpm typecheck" "pnpm lint" "just e2e" "just e2e-demo")" ]
 report $? "e2e fails demo passes call sequence"
-vwrun "STUB_JUST_RC=1" "$clone" --e2e feat-b feat-a
-row "e2e fails demo passes" "$(join "$merged" "$install0" "vitest: exit 0" "$pass_tail" "typecheck: exit 0" "lint: exit 0" "e2e: exit 1" "demo: exit 0" "RESULT: fail")" 1
 
 # vitest fails
 vwrun "STUB_VITEST_RC=1" "$clone" feat-b feat-a
