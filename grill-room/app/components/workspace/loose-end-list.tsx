@@ -4,6 +4,7 @@ import {
 } from "@agent-native/core/client/hooks";
 import { useT } from "@agent-native/core/client/i18n";
 import { IconLink, IconRefresh } from "@tabler/icons-react";
+import { useLayoutEffect, useRef, type FocusEvent } from "react";
 import { toast } from "sonner";
 
 import { AnswerNow } from "@/components/workspace/answer-now";
@@ -111,6 +112,7 @@ function Row({
     >
       <button
         type="button"
+        data-decision-opener={looseEnd.id}
         onClick={() => onOpenDecision(looseEnd.id)}
         className="rounded-sm text-left text-sm leading-snug font-medium hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
@@ -124,6 +126,48 @@ function Row({
       ) : null}
     </li>
   );
+}
+
+/** The decision id a loose-end row's title button opens, or null for any other element. */
+function openerId(element: EventTarget | null): string | null {
+  return element instanceof HTMLElement
+    ? (element.dataset.decisionOpener ?? null)
+    : null;
+}
+
+/**
+ * Keeps focus on a loose end's title button when its row moves to the other
+ * group, which remounts it. The list remembers the button that has focus and
+ * forgets it once focus moves to another element; a blur to nothing (the row
+ * being removed) keeps it. After a render that replaced that button, while
+ * nothing has focus, the new button for the same decision takes it.
+ */
+function useKeepOpenerFocus() {
+  const tracked = useRef<{ id: string; element: HTMLElement } | null>(null);
+
+  useLayoutEffect(() => {
+    const current = tracked.current;
+    if (!current || current.element.isConnected) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    const replacement = document.querySelector<HTMLElement>(
+      `[data-decision-opener="${CSS.escape(current.id)}"]`,
+    );
+    if (!replacement) return;
+    tracked.current = { id: current.id, element: replacement };
+    replacement.focus();
+  });
+
+  return {
+    onFocus(event: FocusEvent<HTMLElement>) {
+      const id = openerId(event.target);
+      if (id !== null) tracked.current = { id, element: event.target };
+    },
+    onBlur(event: FocusEvent<HTMLElement>) {
+      if (openerId(event.target) === null) return;
+      if (event.relatedTarget instanceof Element) tracked.current = null;
+    },
+  };
 }
 
 /**
@@ -146,6 +190,7 @@ export function LooseEndList({
   isContinuing: boolean;
 }) {
   const t = useT();
+  const keepOpenerFocus = useKeepOpenerFocus();
 
   if (isLoading) {
     return (
@@ -176,7 +221,7 @@ export function LooseEndList({
     theirs.length === 0 && mine.some((end) => end.reason === "deferred");
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" {...keepOpenerFocus}>
       {mine.length > 0 ? (
         <div className="space-y-2">
           <ul className="space-y-2">

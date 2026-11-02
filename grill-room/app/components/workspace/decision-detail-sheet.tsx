@@ -201,7 +201,9 @@ function AdrSection({ decision }: { decision: TreeDecision }) {
  *
  * The sheet has no Radix trigger, so on close it hands focus back to
  * `returnFocusTo`, the element that opened it. When that element has left the
- * document, Radix's default runs.
+ * document, focus goes to the connected element carrying the same
+ * `data-decision-opener` value (a loose-end row remounted in the other group
+ * while the sheet was open); Radix's default runs only when there is none.
  */
 export function DecisionDetailSheet({
   decision,
@@ -238,9 +240,20 @@ export function DecisionDetailSheet({
         className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-lg"
         onCloseAutoFocus={(event) => {
           const target = returnFocusTo.current;
-          if (!target?.isConnected) return;
+          if (!target) return;
+          if (target.isConnected) {
+            event.preventDefault();
+            target.focus();
+            return;
+          }
+          const openerId = target.dataset.decisionOpener;
+          if (openerId === undefined) return;
+          const replacement = document.querySelector<HTMLElement>(
+            `[data-decision-opener="${CSS.escape(openerId)}"]`,
+          );
+          if (!replacement) return;
           event.preventDefault();
-          target.focus();
+          replacement.focus();
         }}
       >
         <SheetHeader className="space-y-3 text-left">
