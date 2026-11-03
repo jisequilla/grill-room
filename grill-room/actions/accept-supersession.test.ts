@@ -77,6 +77,7 @@ async function aPendingSupersession(overrides: {
     questionTitle: "Where does the data live?",
     answerKind: overrides.looseEndKind ?? "unknown",
     currentAnswer: "Not sure yet",
+    proposalKind: "answered-by",
     supersededById: "d-shape",
     supersessionAnswer: "On disk",
     supersessionReason: REASON,
@@ -108,6 +109,7 @@ async function aPendingReplacement() {
     answerKind: "accepted-recommendation",
     currentAnswer: "On disk",
     settledAt: "2026-09-01T00:00:01.000Z",
+    proposalKind: "replacement",
     supersededById: "d-location",
     supersessionReason: REPLACED_REASON,
   });
@@ -302,11 +304,13 @@ describe("accept-supersession: the answer change rule", () => {
     answerKind: "unknown" as const,
     currentAnswer: "dunno",
     settledAt: null,
+    proposalKind: "answered-by" as const,
     supersededById: "d-v",
     supersessionAnswer: "B",
     supersessionReason: "V answers it",
   };
   const REPLACED = {
+    proposalKind: "replacement" as const,
     supersededById: "d-v",
     supersessionAnswer: null,
     supersessionReason: "V replaced it",
@@ -367,7 +371,7 @@ describe("accept-supersession: the answer change rule", () => {
     expect(await historyOf("d-x")).toEqual([]);
   });
 
-  it("row 7: the replaced branch stays outside answer change", async () => {
+  it("gr-wim.3 row 5: the replaced branch stays outside answer change, and marks the spec not current", async () => {
     await anAnswerChangeFixture(REPLACED);
 
     await acceptSupersession.run({ decisionId: "d-x" });
@@ -375,13 +379,16 @@ describe("accept-supersession: the answer change rule", () => {
     expect(await readDecision("d-x")).toMatchObject({
       replacedById: "d-v",
       replacedReason: "V replaced it",
+      proposalKind: null,
       supersededById: null,
+      supersessionAnswer: null,
       supersessionReason: null,
       currentAnswer: "A",
+      answerKind: "own-answer",
       settledAt: NOW_STAMP,
     });
     expect(await historyOf("d-x")).toEqual([]);
-    expect((await readSpec()).current).toBe(true);
+    expect((await readSpec()).current).toBe(false);
   });
 
   it("row 8: refuses a loose end's supersession while the interviewer is working, writing nothing", async () => {
@@ -408,6 +415,76 @@ describe("accept-supersession: the answer change rule", () => {
     await expect(
       acceptSupersession.run({ decisionId: "d-x" }),
     ).rejects.toMatchObject({ errorCode: "no-supersession", statusCode: 409 });
+  });
+
+  it("gr-wim.3 row 6: settles a loose end's answered-by with the proposed answer, writing one history row", async () => {
+    await anAnswerChangeFixture();
+    await getDb()
+      .update(schema.decisions)
+      .set({
+        proposalKind: "answered-by",
+        supersededById: "d-v",
+        supersessionAnswer: "B",
+        supersessionReason: "r",
+      })
+      .where(eq(schema.decisions.id, "d-y"));
+
+    await acceptSupersession.run({ decisionId: "d-y" });
+
+    expect(await readDecision("d-y")).toMatchObject({
+      currentAnswer: "B",
+      answerKind: "own-answer",
+      settledById: "d-v",
+      proposalKind: null,
+    });
+    expect(await historyOf("d-y")).toHaveLength(1);
+  });
+
+  it.each([
+    [
+      "deferral",
+      { proposalKind: "deferral" as const, deferralReason: "later" },
+    ],
+    [
+      "restatement",
+      {
+        proposalKind: "restatement" as const,
+        restatementText: "A clean",
+        restatementNotes: "n",
+        restatementReason: "r",
+      },
+    ],
+  ])(
+    "gr-wim.3 row 9: refuses a pending %s with no-supersession, changing nothing",
+    async (_kind, seed) => {
+      await anAnswerChangeFixture(seed);
+      const before = await readDecision("d-x");
+
+      await expect(
+        acceptSupersession.run({ decisionId: "d-x" }),
+      ).rejects.toMatchObject({ errorCode: "no-supersession", statusCode: 409 });
+      expect(await readDecision("d-x")).toEqual(before);
+    },
+  );
+
+  it("gr-wim.3 row 10: refuses a stale supersededById with no stored kind, with no-supersession", async () => {
+    await anAnswerChangeFixture({ proposalKind: null, supersededById: "d-v" });
+
+    await expect(
+      acceptSupersession.run({ decisionId: "d-x" }),
+    ).rejects.toMatchObject({ errorCode: "no-supersession", statusCode: 409 });
+  });
+
+  it("gr-wim.3 row 12: accepts a pending replacement whose reason is null", async () => {
+    await anAnswerChangeFixture({ ...REPLACED, supersessionReason: null });
+
+    await acceptSupersession.run({ decisionId: "d-x" });
+
+    expect(await readDecision("d-x")).toMatchObject({
+      replacedById: "d-v",
+      replacedReason: null,
+      proposalKind: null,
+    });
   });
 });
 

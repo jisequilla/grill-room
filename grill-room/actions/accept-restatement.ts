@@ -2,8 +2,8 @@ import { defineAction, fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
-import { reword } from "../server/answer-change.js";
 import { getDb, schema } from "../server/db/index.js";
+import { accept, pendingProposal } from "../server/proposal.js";
 import { describeDecisions } from "../server/tree.js";
 import { failIfTurnInProgress } from "../server/turn.js";
 
@@ -30,15 +30,14 @@ export default defineAction({
 
     if (!row) fail(`Decision not found: ${decisionId}`, { statusCode: 404 });
 
-    if (row.restatementText == null) {
+    if (pendingProposal(row)?.kind !== "restatement") {
       fail(
         `"${row.questionTitle}" has no restatement to accept: no clean statement has been proposed for its answer.`,
         { errorCode: "no-restatement", statusCode: 409 },
       );
     }
 
-    const edited = statement?.trim();
-    if (statement != null && !edited) {
+    if (statement != null && !statement.trim()) {
       fail("The statement to record cannot be blank.", {
         errorCode: "empty-statement",
         statusCode: 400,
@@ -56,20 +55,12 @@ export default defineAction({
       "The interviewer is working on this session. Wait for the turn to finish before accepting a restatement.",
     );
 
-    // Never null: a non-null `operatorNotes` is what marks an accepted
-    // restatement's entry, and the interviewer's context leaves every such
-    // entry out. Its text is the original answer, which may hold notes even
-    // when these are empty (an owner's edit took them out).
-    const notes = row.restatementNotes?.trim() ? row.restatementNotes : "";
+    const updated = await accept(row.id, {
+      now: new Date().toISOString(),
+      statement,
+    });
 
-    const updated = await reword(
-      row.id,
-      { text: edited || row.restatementText, notes },
-      {
-        now: new Date().toISOString(),
-        reason: row.restatementReason ?? undefined,
-      },
-    );
+    if (!updated) fail("Failed to accept the restatement.", { statusCode: 500 });
 
     return describeDecisions([updated])[0];
   },

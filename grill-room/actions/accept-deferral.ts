@@ -2,8 +2,8 @@ import { defineAction, fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
-import { defer } from "../server/answer-change.js";
 import { getDb, schema } from "../server/db/index.js";
+import { accept, pendingProposal } from "../server/proposal.js";
 import { describeDecisions } from "../server/tree.js";
 import { failIfTurnInProgress } from "../server/turn.js";
 
@@ -24,7 +24,7 @@ export default defineAction({
 
     if (!row) fail(`Decision not found: ${decisionId}`, { statusCode: 404 });
 
-    if (!row.deferralReason) {
+    if (pendingProposal(row)?.kind !== "deferral") {
       fail(
         `"${row.questionTitle}" has no deferral to accept: its answer has not been proposed as postponing the question.`,
         { errorCode: "no-deferral", statusCode: 409 },
@@ -42,10 +42,9 @@ export default defineAction({
       "The interviewer is working on this session. Wait for the turn to finish before accepting a deferral.",
     );
 
-    const updated = await defer(row.id, {
-      now: new Date().toISOString(),
-      reason: row.deferralReason ?? undefined,
-    });
+    const updated = await accept(row.id, { now: new Date().toISOString() });
+
+    if (!updated) fail("Failed to accept the deferral.", { statusCode: 500 });
 
     return describeDecisions([updated])[0];
   },
