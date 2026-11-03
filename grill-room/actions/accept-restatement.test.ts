@@ -68,6 +68,7 @@ async function aPendingRestatement(
     answerKind: "own-answer",
     currentAnswer: ORIGINAL,
     settledAt: SETTLED_AT,
+    proposalKind: "restatement",
     restatementText: STATEMENT,
     restatementNotes: NOTES,
     restatementReason: REASON,
@@ -220,7 +221,7 @@ describe("accept-restatement", () => {
   });
 
   it("refuses a decision with no restatement pending, with no-restatement, changing nothing", async () => {
-    await aPendingRestatement(CLEARED);
+    await aPendingRestatement({ ...CLEARED, proposalKind: null });
 
     await expect(
       acceptRestatement.run({ decisionId: "d-provider" }),
@@ -319,6 +320,7 @@ describe("accept-restatement: the answer change rule", () => {
   useTestDatabase();
 
   const PROPOSAL = {
+    proposalKind: "restatement" as const,
     restatementText: "A clean",
     restatementNotes: "n",
     restatementReason: "r",
@@ -417,6 +419,60 @@ describe("accept-restatement: the answer change rule", () => {
     await acceptRestatement.run({ decisionId: "d-x", statement: " B " });
 
     expect(await readDecision("d-x")).toMatchObject({ currentAnswer: "B" });
+  });
+
+  it.each([
+    [
+      "deferral",
+      { proposalKind: "deferral" as const, deferralReason: "later" },
+    ],
+    [
+      "replacement",
+      {
+        proposalKind: "replacement" as const,
+        supersededById: "d-v",
+        supersessionReason: "r",
+      },
+    ],
+    [
+      "answered-by",
+      {
+        answerKind: "unknown" as const,
+        currentAnswer: "dunno",
+        settledAt: null,
+        proposalKind: "answered-by" as const,
+        supersededById: "d-v",
+        supersessionAnswer: "B",
+        supersessionReason: "r",
+      },
+    ],
+  ])(
+    "gr-wim.3 row 9: refuses a pending %s with no-restatement, changing nothing",
+    async (_kind, seed) => {
+      await anAnswerChangeFixture(seed);
+      const before = await readDecision("d-x");
+
+      await expect(
+        acceptRestatement.run({ decisionId: "d-x" }),
+      ).rejects.toMatchObject({ errorCode: "no-restatement", statusCode: 409 });
+      expect(await readDecision("d-x")).toEqual(before);
+    },
+  );
+
+  it("gr-wim.3 row 10: refuses a stale restatement text with no stored kind, with no-restatement", async () => {
+    await anAnswerChangeFixture({ proposalKind: null, restatementText: "A clean" });
+
+    await expect(
+      acceptRestatement.run({ decisionId: "d-x" }),
+    ).rejects.toMatchObject({ errorCode: "no-restatement", statusCode: 409 });
+  });
+
+  it("gr-wim.3 row 11: refuses a blank statement with no restatement pending as no-restatement", async () => {
+    await anAnswerChangeFixture();
+
+    await expect(
+      acceptRestatement.run({ decisionId: "d-x", statement: "   " }),
+    ).rejects.toMatchObject({ errorCode: "no-restatement", statusCode: 409 });
   });
 });
 
@@ -654,7 +710,10 @@ describe("accept-deferral beside a restatement", () => {
 
   it("clears the restatement columns too, through the shared proposal constant", async () => {
     // Never both pending in practice: the check skips one for the other.
-    await aPendingRestatement({ deferralReason: "It waits on the fee review." });
+    await aPendingRestatement({
+      proposalKind: "deferral",
+      deferralReason: "It waits on the fee review.",
+    });
 
     await acceptDeferral.run({ decisionId: "d-provider" });
 

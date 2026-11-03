@@ -70,6 +70,7 @@ async function aPendingDeferral() {
     answerKind: "own-answer",
     currentAnswer: ANSWER,
     settledAt: SETTLED_AT,
+    proposalKind: "deferral",
     deferralReason: REASON,
   });
   await getDb()
@@ -423,6 +424,7 @@ describe("accept-deferral: the claims other decisions make about its answer", ()
       answerKind: "own-answer",
       currentAnswer: WAIT,
       settledAt: "2026-09-01T00:00:02.000Z",
+      proposalKind: "deferral",
       deferralReason: "It waits on launch.",
     });
     await insertDecision(session.id, {
@@ -514,6 +516,7 @@ describe("accept-deferral: the answer change rule", () => {
   it("row 1: defers with the whole answer change rule", async () => {
     await anAnswerChangeFixture({
       settledById: "d-w",
+      proposalKind: "deferral",
       deferralReason: "later",
       restatementText: "A clean",
       restatementNotes: "n",
@@ -560,6 +563,7 @@ describe("accept-deferral: the answer change rule", () => {
   it("row 2: history records the kind the answer had", async () => {
     await anAnswerChangeFixture({
       answerKind: "accepted-recommendation",
+      proposalKind: "deferral",
       deferralReason: "later",
     });
 
@@ -574,6 +578,7 @@ describe("accept-deferral: the answer change rule", () => {
     await anAnswerChangeFixture(
       {
         settledById: "d-w",
+        proposalKind: "deferral",
         deferralReason: "later",
         restatementText: "A clean",
         restatementNotes: "n",
@@ -596,6 +601,69 @@ describe("accept-deferral: the answer change rule", () => {
     await expect(
       acceptDeferral.run({ decisionId: "d-x" }),
     ).rejects.toMatchObject({ errorCode: "no-deferral", statusCode: 409 });
+  });
+
+  it.each([
+    [
+      "restatement",
+      {
+        proposalKind: "restatement" as const,
+        restatementText: "A clean",
+        restatementNotes: "n",
+        restatementReason: "r",
+      },
+    ],
+    [
+      "replacement",
+      {
+        proposalKind: "replacement" as const,
+        supersededById: "d-v",
+        supersessionReason: "r",
+      },
+    ],
+    [
+      "answered-by",
+      {
+        answerKind: "unknown" as const,
+        currentAnswer: "dunno",
+        settledAt: null,
+        proposalKind: "answered-by" as const,
+        supersededById: "d-v",
+        supersessionAnswer: "B",
+        supersessionReason: "r",
+      },
+    ],
+  ])(
+    "gr-wim.3 row 9: refuses a pending %s with no-deferral, changing nothing",
+    async (_kind, seed) => {
+      await anAnswerChangeFixture(seed);
+      const before = await readDecision("d-x");
+
+      await expect(
+        acceptDeferral.run({ decisionId: "d-x" }),
+      ).rejects.toMatchObject({ errorCode: "no-deferral", statusCode: 409 });
+      expect(await readDecision("d-x")).toEqual(before);
+    },
+  );
+
+  it("gr-wim.3 row 10: refuses a stale deferral reason with no stored kind, with no-deferral", async () => {
+    await anAnswerChangeFixture({ proposalKind: null, deferralReason: "later" });
+
+    await expect(
+      acceptDeferral.run({ decisionId: "d-x" }),
+    ).rejects.toMatchObject({ errorCode: "no-deferral", statusCode: 409 });
+  });
+
+  it("gr-wim.3 row 12: accepts a pending deferral whose reason is null", async () => {
+    await anAnswerChangeFixture({ proposalKind: "deferral", deferralReason: null });
+
+    await acceptDeferral.run({ decisionId: "d-x" });
+
+    expect(await readDecision("d-x")).toMatchObject({
+      answerKind: "deferred",
+      settledAt: null,
+      proposalKind: null,
+    });
   });
 });
 

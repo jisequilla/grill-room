@@ -1234,6 +1234,7 @@ describe("planExport: an own answer restated", () => {
       answerKind: "own-answer",
       currentAnswer: ORIGINAL,
       settledAt: "2026-09-01T00:00:01.000Z",
+      proposalKind: "restatement",
       restatementText: "Stripe.",
       restatementNotes: NOTES,
       restatementReason: "Took out a note to the AI.",
