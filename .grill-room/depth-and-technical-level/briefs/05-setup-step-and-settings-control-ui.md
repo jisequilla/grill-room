@@ -20,11 +20,11 @@ Add a header control beside `grill-room/app/components/workspace/session-model-c
 
 Judged by: component tests for skip defaults, empty first-time level, pre-fill and write-back, pending indicator and stale warning; a Playwright spec `grill-room/e2e/depth-and-level.spec.ts` creating a session through the step and changing both values mid-grill.
 
-## Open questions on this ticket
+## Owner's answers on this ticket
 
-The consistency check found that this ticket leaves these questions to the owner. Do not choose an answer yourself: if your prompt does not give you the owner's answer to one, stop and report the question instead of building around it.
+The consistency check left these questions open; the owner has answered them. Build to these answers.
 
-- Is a level pick in the setup step saved to the profile the moment it is picked, or only when the session is created, so that picking a level and then cancelling or skipping leaves the profile untouched? ("A level pick writes through `set-owner-technical-level`.")
+- A level picked in the setup step is saved to the profile only when the session is created. Picking a level and then cancelling or skipping leaves the profile untouched.
 
 ## File boundaries
 
