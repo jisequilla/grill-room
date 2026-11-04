@@ -25,7 +25,7 @@ also_called: [user, session creator, session owner, owner, operator, reader]
 
 The Idea owner brings a loose idea and wants to leave with decisions they can commit to. They answer the interviewer's cards, push back or set questions aside, change earlier answers, and export a spec and tickets into a project's repository.[^founding] Every decision in a session is theirs.
 
-Their technical level varies, and it changes what they need. The founding spec's owner is technical and wrote it for himself.[^founding] Pipe is not technical, will not tell the interviewer what to build, and asks to be asked his technical level up front.[^meeting] A use case says when the level changes the outcome.
+Their technical level varies, and it changes what they need. The founding spec's owner is technical and wrote it for himself.[^founding] Pipe is not technical, will not tell the interviewer what to build, and asks to be asked his technical level up front.[^meeting] A use case says when the level changes the outcome. The level is kept on the signed-in owner's profile and asked once; how deep to grill is chosen per session ([where the level lives](/product/decisions/technical-level-lives-on-the-signed-in-owner.md)).
 
 Jeremias De Isequilla is the Idea owner of the ideas he grills, and of Grill Room itself: the decisions about how Grill Room is built are his, recorded as [product decisions](/product/index.md).[^roles]
 

@@ -21,6 +21,7 @@ Who Grill Room serves and what each of them does with it, across the [bounded co
 - **Decisions** (`decisions/`):
   - [Grill Room has three bounded contexts](decisions/three-bounded-contexts.md)
   - [One Idea owner, with technical level as a trait](decisions/one-idea-owner-technical-level-is-a-trait.md)
+  - [Technical level lives on the signed-in owner's profile](decisions/technical-level-lives-on-the-signed-in-owner.md)
   - [Three agents consume an export](decisions/three-agents-consume-an-export.md)
   - [Grill Room's developers are not a role](decisions/grill-room-developers-are-not-a-role.md)
   - Founding, from the founding spec:

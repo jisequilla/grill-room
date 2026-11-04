@@ -35,6 +35,7 @@ Each word has one meaning here. A Term's words to avoid include the meanings it 
 ## Decisions
 
 - [Builder's calls have their own spec section and reach the tickets they concern](decisions/builders-calls-have-their-own-spec-section.md)
+- [Depth sets the spec check's bar; technical level changes nothing downstream](decisions/depth-sets-the-spec-checks-bar.md)
 
 ## Use cases that touch it
 

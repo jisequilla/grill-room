@@ -24,6 +24,7 @@ Each word has one meaning here. A Term's words to avoid include the meanings it 
 | [Card](language/card.md) | One question of a round as the Idea owner answers it, with the interviewer's recommended answer and any offered choices. |
 | [Claim](language/claim.md) | Another decision's link to this decision's answer: a pending supersession by it, or a record of having been replaced by it. |
 | [Decision](language/decision.md) | A node of the design tree: one thing to settle, with what it depends on and, once answered, its answer and history. |
+| [Depth](language/depth.md) | How far a session grills its idea, in three steps (proof of concept, first working version, full spec), chosen per session. |
 | [Design tree](language/design-tree.md) | Every decision of a session with its dependencies, whose states the app works out so that nothing is asked before what it depends on is settled. |
 | [Idea](language/idea.md) | The loose text the Idea owner starts a session with, before anything is decided. |
 | [Loose end](language/loose-end.md) | A decision that blocks confirming the session: unknown, deferred, waiting for a prototype, or otherwise not settled. |
@@ -35,14 +36,17 @@ Each word has one meaning here. A Term's words to avoid include the meanings it 
 | [Shared understanding](language/shared-understanding.md) | What the Idea owner confirms to end a session: the interviewer proposed being done, every loose end is resolved, and the owner agrees. |
 | [Sharpening](language/sharpening.md) | A short grill of a not-ready idea, inside the session and before round 1, that rewrites the idea and leaves seed decisions until readiness judges it ready. |
 | [Stale review](language/stale-review.md) | The interviewer's pass over the decisions downstream of a reopened one, reconfirming what still holds and re-asking the rest. |
+| [Technical level](language/technical-level.md) | The Idea owner's trait, in three values (builder, technical but not building, not technical), kept on their profile and read live by every session. |
 
 ## Decisions
 
 - [A not-ready idea has three ways forward](decisions/a-not-ready-idea-has-three-ways-forward.md)
+- [Depth is chosen per session and asked with the level before readiness](decisions/depth-is-chosen-per-session.md)
 - [Readiness opens the interview](decisions/readiness-opens-the-interview.md)
 - [Setting a loose end aside offers two kinds](decisions/setting-aside-offers-two-kinds.md)
 - [Sharpening rewrites the idea and seeds decisions until it is ready](decisions/sharpening-rewrites-the-idea-until-ready.md)
 - [The helper chat waits for its own grill and spike](decisions/the-helper-chat-waits-for-its-own-grill.md)
+- [The interview is pitched to depth and technical level](decisions/the-interview-is-pitched-to-depth-and-level.md)
 
 ## Open questions
 
