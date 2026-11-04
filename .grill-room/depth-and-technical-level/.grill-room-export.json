@@ -1,0 +1,99 @@
+{
+  "version": 3,
+  "sessionId": "73896582-d9fc-4c3c-bf82-c20106c906f2",
+  "revision": 2,
+  "root": "working",
+  "otherRootFolder": "docs/specs/depth-and-technical-level",
+  "scoutCommit": "c62ffadf24a2f3f6cdcc843df0008868cc18c971",
+  "headCommit": "c62ffadf24a2f3f6cdcc843df0008868cc18c971",
+  "files": [
+    {
+      "path": "HANDOFF.md",
+      "sha256": "9e72213c4896574d0075da29c0c78d759c91238da515e321b47dd14eca1dbd52"
+    },
+    {
+      "path": "issues/01-owner-profile-schema-and-session-columns.md",
+      "sha256": "e98687000255c1d94645de11e234a236b5f1e708c18addb32650a7e48c543586"
+    },
+    {
+      "path": "issues/02-current-owner-and-migrated-inheritance.md",
+      "sha256": "dffe5bb5487239f6a928ca229f6bd1b9b56cbd7284652c35a623e2f0a3ecbd0f"
+    },
+    {
+      "path": "issues/03-readiness-and-sharpening-read-depth-and-level.md",
+      "sha256": "9e7dabbb077b23e05f1e52ca946de70566ef4d672011805f63d55706ffecfdef"
+    },
+    {
+      "path": "issues/04-depth-and-level-actions.md",
+      "sha256": "4d37c729e9ade7ec271450fdf8403cea96be246a00e8e6b51fdccf9870b59cee"
+    },
+    {
+      "path": "issues/05-setup-step-and-settings-control-ui.md",
+      "sha256": "d91db004d9b066cf42ae8b3c0b6c8aeb161665016685416188d1d67283e796eb"
+    },
+    {
+      "path": "issues/06-prompt-builder-depth-and-level.md",
+      "sha256": "f20aaf277b1cd91ad8dfa66fbfe2fe2af637f2a006cf7354807a6db1a5a45e46"
+    },
+    {
+      "path": "issues/07-spec-check-depth-bar.md",
+      "sha256": "89483deb4d094633b5079040f279970d5629971afa34f0437ae0b0bc20ea1056"
+    },
+    {
+      "path": "issues/08-knowledge-bundle-and-adr.md",
+      "sha256": "a5366b56266d4b71ce3dea6b8aaf06d911583608f5d2a7041cf1b8d6f0bb1f63"
+    },
+    {
+      "path": "issues/09-record-adrs-from-suggestions.md",
+      "sha256": "87272daaa3f390e687f8060eeb011d4075689def396a2aea092c75984548a33d"
+    },
+    {
+      "path": "adr-suggestions/level-change-writes-back.md",
+      "sha256": "59927df4a6efcbcb1ee6f6f422b299096c25979057d114096bcbd0b06e916fa9"
+    },
+    {
+      "path": "adr-suggestions/level-storage.md",
+      "sha256": "6948339904a03030e5c7647d524294083347af523caf7d19002b752b21db5872"
+    },
+    {
+      "path": "adr-suggestions/owner-identity.md",
+      "sha256": "59bed16902c1e741646c2284403c4bd58cce758fa306efb29a18c165eef1a3a1"
+    },
+    {
+      "path": "adr-suggestions/profile-table-shape.md",
+      "sha256": "55048203823c63246b5c5c29140ae27f00c73b0f7aa5c80e25622ab88284fbcd"
+    },
+    {
+      "path": "briefs/01-owner-profile-schema-and-session-columns.md",
+      "sha256": "636c54f6ea7e61faf1d20a9be9b6b6f63ed8680da8d03274d73b8fa2ea4fe056"
+    },
+    {
+      "path": "briefs/02-current-owner-and-migrated-inheritance.md",
+      "sha256": "79724cc3299fa7bf25f351cafc479edbdafe4086fdd7b8d1964d15063de2f62a"
+    },
+    {
+      "path": "briefs/03-readiness-and-sharpening-read-depth-and-level.md",
+      "sha256": "5cec687e20cfef620a76d08aea8ffa2440c9bb5275ac59e6d3e174f21a5f12d5"
+    },
+    {
+      "path": "briefs/04-depth-and-level-actions.md",
+      "sha256": "4ff02e8dcf46c3b998b40f27685126390340eb9f4577f27d386e0a5d3cd795b2"
+    },
+    {
+      "path": "briefs/05-setup-step-and-settings-control-ui.md",
+      "sha256": "bbd1844796b816c9107a5c79b6639c43da79985daefb32db0d034a36f6ecee35"
+    },
+    {
+      "path": "briefs/06-prompt-builder-depth-and-level.md",
+      "sha256": "0a2e853d76eb0881763f9e2b0a3314213f71df354c30be99e5c79e4b09fa4700"
+    },
+    {
+      "path": "briefs/07-spec-check-depth-bar.md",
+      "sha256": "bd7f84579a0f2e30068c28d9c1b4386e9f32e896267023f4f22c9de0fc494003"
+    },
+    {
+      "path": "briefs/08-knowledge-bundle-and-adr.md",
+      "sha256": "73a8e70c3665cb93e6769eb448120dafb5a2eff296c3793de2eeb562bff0296f"
+    }
+  ]
+}

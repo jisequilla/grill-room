@@ -1,0 +1,23 @@
+{
+  "version": 3,
+  "sessionId": "73896582-d9fc-4c3c-bf82-c20106c906f2",
+  "revision": 2,
+  "root": "durable",
+  "otherRootFolder": ".grill-room/depth-and-technical-level",
+  "scoutCommit": "c62ffadf24a2f3f6cdcc843df0008868cc18c971",
+  "headCommit": "c62ffadf24a2f3f6cdcc843df0008868cc18c971",
+  "files": [
+    {
+      "path": "spec.md",
+      "sha256": "5e4e9cd7b7dc48e02b7986bbe62ed19415d3bb0c03b02c72163f8911700e1036"
+    },
+    {
+      "path": "intent.md",
+      "sha256": "082300c5f344c3e3cf97fea0cac5e54fe6a50f558c09570035a2cbbcf548d2a1"
+    },
+    {
+      "path": "decisions.md",
+      "sha256": "01d556708259ff4505a86d54967c7dea50533c11b4fa2da9ee71ef9608e4db45"
+    }
+  ]
+}
