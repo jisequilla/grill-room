@@ -26,11 +26,13 @@ Add `grill-room/actions/set-session-depth.ts`, `grill-room/actions/set-owner-tec
 
 Judged by: action tests for each depth branch, override clearing, latest-wins with a single re-judge, done proposal withdrawn with and without a spec, stale marks with no regeneration, and level write-back visible from a second session of the same owner.
 
-## Open questions on this ticket
+## Owner's answers on this ticket
 
-The consistency check found that this ticket leaves these questions to the owner. Do not choose an answer yourself: if your prompt does not give you the owner's answer to one, stop and report the question instead of building around it.
+The consistency check left these questions open; the owner has answered them. Build to these answers.
 
-- If the working turn that the depth change queued behind is the one producing round 1, so the session has rounds when it ends, is the pending depth applied without a re-judge, applied with a re-judge, or discarded? ("when a pre-round-1 turn finishes and `pendingDepth` is set, move it to `depth`, clear it and the override, and run one re-judge.")
+- A depth change queued behind the turn that produces round 1 is applied when that turn ends, with no re-judge: readiness runs only before round 1, and the new depth applies from the next round.
+- When depth changes after a spec exists, the builder briefs and HANDOFF.md are marked stale along with the spec, its consistency check and the tickets.
+- A technical-level change never withdraws a done proposal and never marks anything stale: it changes only the wording and recommendations of the next round, whatever the session's state.
 
 ## File boundaries
 

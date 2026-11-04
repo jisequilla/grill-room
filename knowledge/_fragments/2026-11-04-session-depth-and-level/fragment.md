@@ -15,14 +15,16 @@ ingested: true
 in_git: true
 material:
   - file: material/acta.md
-    sha256: 1f8fb38ae9425d10af7363bba261a7d886c1efe67993e01c97a755945c9af828
+    sha256: 253ef6f677da523fc10eb08866e88946e27f4bd1e0563010b485c3d5bc5d62e7
 ---
 
 # Session on depth and technical level before the grill
 
-Working bead `gr-2sw`, Claude ran the grill through the Grill Room app with the real interviewer and put every card to the owner as a multiple-choice question. Depth becomes a per-session value in three steps, technical level a per-owner trait in three values kept in an owner profile keyed by the signed-in user, and both are asked in a setup step at session creation. Depth changes which branches open, when done is proposed, readiness's bar and the spec check's bar; level changes how cards are worded and recommended, and nothing after the interview. Three consistency-check passes were asked back into the interview before the export.
+Working bead `gr-2sw`, Claude ran the grill through the Grill Room app with the real interviewer and put every card to the owner as a multiple-choice question. Depth becomes a per-session value in three steps, technical level a per-owner trait in three values kept in an owner profile keyed by the signed-in user, and both are asked in a setup step at session creation. Depth changes which branches open, when done is proposed, readiness's bar and the spec check's bar; level changes how cards are worded and recommended, and nothing after the interview. Three consistency-check passes were asked back into the interview before the export, and the five findings left open were answered before the build, with three storage choices from the first ticket's pre-flight.
 
 ## Log
 
 * **2026-11-04 · Capture**: Record written by Claude after the owner's answers, quoting the option labels they chose.
 * **2026-11-04 · Ingestion**: Four decisions in [Interview](/interview/index.md), [Delivery](/delivery/index.md) and [Product](/product/index.md), two Terms, and the use case and role they change.
+* **2026-11-04 · Capture**: Choices 36 to 43, the open findings and ticket 01's pre-flight questions, added to the record.
+* **2026-11-04 · Ingestion**: Into the depth, interview and technical-level decisions.

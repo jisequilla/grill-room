@@ -14,14 +14,58 @@ Blocked by: none
 
 ### 01 Owner profile table, session owner reference, depth columns and migration
 
-Add the storage for both values.
+Add the storage for both values. Every name below is exact.
 
-- In `grill-room/shared/session-constants.ts`: `TECHNICAL_LEVELS` (builder | technical-not-building | not-technical), `DEPTHS` (proof-of-concept | first-working-version | full-spec), `DEFAULT_DEPTH` = first-working-version, `DEFAULT_TECHNICAL_LEVEL` = not-technical, and `LOCAL_OWNER_ID`, the fixed id used both for the AUTH_DISABLED owner and as the migration placeholder.
-- In `grill-room/server/db/schema.ts`: a new `owner_profiles` table keyed by the auth user id with a nullable `technicalLevel`; a one-row `migration_inheritance` marker holding the nullable `inheritorUserId`; on `sessions` a non-nullable `ownerId`, a `depth` column defaulting to first-working-version, and a nullable `pendingDepth`; an optional `depth` field inside the stored readiness judgment JSON. No technical-level column on sessions. Do not touch Better Auth's own tables.
-- In `grill-room/server/db/migrations.ts`: create the `LOCAL_OWNER_ID` profile row and assign every existing session to it. Existing readiness judgments keep their depth field empty.
-- New `grill-room/server/owner-profiles.ts`: `getOrCreateOwnerProfile(userId)`, `getTechnicalLevel(userId)` (null when unset), `setTechnicalLevel(userId, level)`.
+- **Constants**, in `grill-room/shared/session-constants.ts`, following the const-array-plus-derived-type pattern already there:
+  - `TECHNICAL_LEVELS` = `builder`, `technical-not-building`, `not-technical`, with type `TechnicalLevel`;
+  - `DEPTHS` = `proof-of-concept`, `first-working-version`, `full-spec`, with type `Depth`;
+  - `DEFAULT_DEPTH` = `first-working-version`;
+  - `DEFAULT_TECHNICAL_LEVEL` = `not-technical`;
+  - `LOCAL_OWNER_ID` = `local-owner`, the one id for the AUTH_DISABLED owner and for the migration placeholder.
 
-Judged by: `grill-room/server/db/migrations.test.ts` shows existing sessions gain the placeholder owner and judgments keep no depth; unit tests cover lazy creation, null read and write; `grill-room/test/table-names.test.ts` updated; build green.
+  `grill-room/server/db/schema.ts` re-exports all five, and both types, as it re-exports the existing constants.
+- **Tables**, in `grill-room/server/db/schema.ts`. Better Auth's own tables are not touched.
+
+  | Table | Drizzle export | Columns |
+  |---|---|---|
+  | `gr_owner_profiles` | `ownerProfiles` | `user_id` text primary key; `technical_level` text, nullable; `created_at` and `updated_at` as the other tables carry them |
+  | `gr_migration_inheritance` | `migrationInheritance` | `id` text primary key, always `singleton`; `inheritor_user_id` text, nullable |
+  | `gr_sessions` (added columns) | `ownerId`, `depth`, `pendingDepth` | `owner_id` text, not null, default `local-owner`, with no foreign key; `depth` text, not null, default `first-working-version`; `pending_depth` text, nullable |
+
+  Sessions get no technical-level column.
+- **Readiness judgment.** `storedReadinessSchema` in `grill-room/server/readiness.ts` gains `depth: z.enum(DEPTHS).nullish()`. Absent and null both parse, so `StoredReadiness` literals without `depth` still typecheck. The signature of `storeReadiness` does not change. `parseStoredReadiness` may be exported for the migration test.
+- **Migration**, appended to `grill-room/server/db/migrations.ts` from version 84. Shipped entries are never edited.
+  - Each new entry creates or alters a `gr_` table, so the check that every migration names a table still holds.
+  - A seed `INSERT` goes in the same entry as the `CREATE` of its table, and gives `created_at` and `updated_at` a literal ISO-8601 string, so the SQL stays portable between PGlite and the production database.
+  - Every database is seeded, fresh installs included. The seeds are the `local-owner` profile row, with a null level, and the marker row `singleton`, with a null inheritor.
+  - Existing sessions get `owner_id` = `local-owner`, and their `readiness_json` is left unchanged.
+- **Module.** New `grill-room/server/owner-profiles.ts`:
+  - `getOrCreateOwnerProfile(userId)` returns `{ userId, technicalLevel }` and inserts a row with a null level when none exists;
+  - `getTechnicalLevel(userId)` returns the level, or null, and creates no row;
+  - `setTechnicalLevel(userId, level: TechnicalLevel | null)` upserts the level, and refuses a value outside `TECHNICAL_LEVELS` with an error.
+
+Out of scope, for ticket 02: stamping the signed-in owner on new sessions, and removing the `local-owner` row at first sign-in.
+
+#### Behaviour
+
+| # | Input | Expected | Mutation it catches |
+|---|---|---|---|
+| 1 | Database migrated to version 83, holding session S whose `readiness_json` R is a valid stored judgment with no depth key and an `ideaJudged` equal to S's idea; apply the rest | S has `owner_id` `local-owner`, `depth` `first-working-version`, `pending_depth` null; `readiness_json` is byte-identical to R (this comparison is the catch); `parseStoredReadiness({ idea, readinessJson })` is non-null with `depth` null or undefined | an `owner_id` default other than `local-owner`; a migration that rewrites or stamps `readiness_json` |
+| 2 | Empty database, all migrations applied | `gr_owner_profiles` has exactly one row, (`local-owner`, null level); `gr_migration_inheritance` has exactly one row, (`singleton`, null) | a missing seed; a seed that runs only when sessions exist |
+| 3 | After all migrations, insert a session naming no owner and no depth | `owner_id` is `local-owner`; `depth` is `first-working-version` | a missing column default |
+| 4 | Columns of `gr_sessions` after all migrations | none contains `technical` or `level` | a planted `technical_level` column |
+| 4b | Foreign keys on `gr_sessions` after all migrations | none on `owner_id` | a planted `REFERENCES` on `owner_id` |
+| 5 | `getTechnicalLevel("u1")`, no row | null, and `gr_owner_profiles` still has no `u1` row | a read that creates a row |
+| 6 | `getOrCreateOwnerProfile("u1")` called twice | one `u1` row; both calls return `{ userId: "u1", technicalLevel: null }` | a duplicate insert, or a throw on the second call |
+| 7 | `setTechnicalLevel("u1", "builder")`, no row | a row is created; `getTechnicalLevel("u1")` is `builder` | a set that only updates an existing row |
+| 8 | In one test: `setTechnicalLevel("u1", "builder")`, then `setTechnicalLevel("u1", null)` | `getTechnicalLevel("u1")` is null | a set that ignores null |
+| 9 | In one test: `setTechnicalLevel("u1", "builder")`, then `setTechnicalLevel("u1", "expert" as never)`; separately, `setTechnicalLevel("u2", "expert" as never)` with no `u2` row | the first throws and `getTechnicalLevel("u1")` is still `builder`; the second throws and no `u2` row exists | a set with no runtime check; a set that inserts before validating |
+
+Judged by:
+- rows 1–4b in `grill-room/server/db/migrations.test.ts`, copying the stop-at-a-version pattern of the `projects-rename-export-folder` test there;
+- rows 5–9 in `grill-room/server/owner-profiles.test.ts`, each asserting only on its own user ids, never on the total row count (the first test in a file sees the seed rows, later ones do not);
+- the table count in `grill-room/test/table-names.test.ts`, raised from 18 to 20;
+- `pnpm test`, `pnpm typecheck` and `pnpm lint` green.
 
 ## File boundaries
 
@@ -37,27 +81,31 @@ Files to edit:
 - `grill-room/server/db/migrations.ts`
 - `grill-room/server/readiness.ts`
 - `grill-room/test/table-names.test.ts`
+- `grill-room/server/db/migrations.test.ts`
 
 Existing files it builds on:
 
 - `grill-room/server/db/schema.ts:73-76`
 - `grill-room/server/db/migrations.ts:694-699`
-- `grill-room/test/table-names.test.ts:89-91`
+- `grill-room/test/table-names.test.ts:143-157`
 - `grill-room/server/readiness.ts:48-55`
+- `grill-room/server/db/migrations.test.ts:27-40`
 
 ## Codebase facts
 
 - The sessions table declares id, title, idea, model, answeringMode, state, readinessJson, turnStatus and the other columns, and has no owner, depth or pending-depth column today. (`grill-room/server/db/schema.ts:154-235`)
-- Every app table is declared with table("gr_...", ...) as globalSettings is, so the new owner profile and inheritance marker tables must be named with the gr_ prefix (for example gr_owner_profiles), not owner_profiles as the ticket writes it. (`grill-room/server/db/schema.ts:73-76`)
+- Every app table is declared with table("gr_...", ...) as globalSettings is; the ticket's names already carry the gr_ prefix. (`grill-room/server/db/schema.ts:73-76`)
 - The migrations header states that every table and index carries the gr_ prefix and that a shipped entry is never edited, only appended with a new version. (`grill-room/server/db/migrations.ts:16-35`)
 - The last migration is version 83 (sessions-readiness-override), so this ticket appends version 84 onward. (`grill-room/server/db/migrations.ts:694-699`)
 - The test asserts the Drizzle schema declares exactly 18 tables, so adding the two new tables requires changing that number to 20. (`grill-room/test/table-names.test.ts:143-149`)
 - That test also asserts every table and index named in appMigrations starts with gr_, which would fail on an unprefixed owner_profiles table. (`grill-room/test/table-names.test.ts:151-157`)
-- create-session inserts a sessions row without any owner field, so a non-nullable ownerId column with no default would break this insert and every test that inserts sessions directly; the column needs a default of LOCAL_OWNER_ID in both the migration and the Drizzle declaration. (`grill-room/actions/create-session.ts:72-86`)
-- The stored readiness judgment is a JSON text column parsed by storedReadinessSchema (ideaJudged, result, judgedAt, scoutReportId), so the optional depth field belongs in that zod schema in readiness.ts, defaulting to null, rather than in schema.ts. (`grill-room/server/readiness.ts:48-55`)
+- create-session inserts a sessions row without any owner field, and so do `server/answer-change.test.ts:117`, `server/proposal.test.ts:125` and the raw `INSERT INTO gr_sessions` rows in `server/db/migrations.test.ts`; the `local-owner` default on `owner_id` is what keeps them all working, so none of them is edited. (`grill-room/actions/create-session.ts:72-86`)
+- The stored readiness judgment is a JSON text column parsed by storedReadinessSchema (ideaJudged, result, judgedAt, scoutReportId); `.nullish()` keeps the inferred `StoredReadiness` type's `depth` optional, so the `StoredReadiness` literals in `server/export.test.ts:568` and `storeReadiness` need no edit. (`grill-room/server/readiness.ts:48-55`)
 - storeReadiness is what writes that JSON (ideaJudged, result, judgedAt, scoutReportId), so judgments written before this ticket carry no depth key and must parse as null. (`grill-room/server/readiness.ts:125-138`)
 - Existing enumerations are exported as const arrays with a derived type in session-constants.ts, the pattern TECHNICAL_LEVELS and DEPTHS follow; schema.ts re-exports them. (`grill-room/shared/session-constants.ts:12-14`)
-- Migrations are applied in tests through applyMigrations(list, table) from test/db.js, which is how a migration test can stop at version 83, insert a session, then apply the new version. (`grill-room/test/table-names.test.ts:89-91`)
+- A migration test stops at a version, inserts rows, then applies the rest: `appMigrations.filter((m) => m.version < N)` then `applyMigrations(before, MIGRATIONS_TABLE)` after `beforeEach(dropSchema)`, as the `projects-rename-export-folder` test does. (`grill-room/server/db/migrations.test.ts:27-40`)
+- `useTestDatabase` builds the schema, seeds included, on a file's first reset and truncates every app table on later ones, so the first test in a file sees the seed rows and later tests do not. (`grill-room/test/db.ts:108-126`)
+- `table-names.test.ts` checks `names.length >= appMigrations.length`, so a migration entry that only inserts or updates, naming no table, can fail it; keep seeds inside the entry that creates the table. (`grill-room/test/table-names.test.ts:151-157`)
 - The project runs vitest through pnpm test (vitest --run) with default discovery of *.test.ts files and only e2e and build folders excluded, so grill-room/server/owner-profiles.test.ts is collected. (`grill-room/package.json:16`)
 - The vitest config excludes only node_modules, dist, .scratch and e2e paths, leaving server/*.test.ts collected. (`grill-room/vitest.config.ts:42-52`)
 - Repository rule: Each acceptance line names a test that fails with the change reverted, so the migration, lazy-creation, null-read and write cases each get a test in the new test file. (`.claude/rules/worktrees.md:28`).
@@ -68,7 +116,7 @@ Existing files it builds on:
 Test: `grill-room/server/owner-profiles.test.ts`
 
 ```bash
-pnpm --dir grill-room exec vitest --run server/owner-profiles.test.ts test/table-names.test.ts
+pnpm --dir grill-room exec vitest --run server/owner-profiles.test.ts server/db/migrations.test.ts test/table-names.test.ts
 ```
 
 ## Rules
@@ -80,10 +128,10 @@ pnpm --dir grill-room exec vitest --run server/owner-profiles.test.ts test/table
 
 ## Verify
 
-From the repository root in your worktree, this must exit 0:
+From `grill-room/` in your worktree, each must exit 0. The ticket changes no UI, so e2e is not run.
 
 ```bash
-just check
+pnpm test && pnpm typecheck && pnpm lint
 ```
 
 ## Delivery
@@ -99,7 +147,7 @@ Report:
 - worktree path and branch;
 - the PR URL, or "push pending: gh account" with your commit hash;
 - commits and files changed;
-- the exact output of `just check`;
+- the exact output of the verify commands;
 - anything ambiguous, and anything this brief was missing.
 
 A separate reviewer reviews the work before any merge.

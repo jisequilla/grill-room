@@ -64,3 +64,16 @@ The fourth check found five more, exported open as the owner chose: three sit in
 ## What it produced
 
 The bundle `docs/specs/depth-and-technical-level/` and `.grill-room/depth-and-technical-level/`: spec, decisions, nine tickets in four waves, eight grounded briefs and four ADR suggestions. The owner chose to record the grill in this bundle in the same session, so ticket 08 (Record the decisions in the knowledge bundle) is covered by this capture.
+
+## Before the build
+
+Later the same day, after the bundle was merged, Claude put the five open findings to the owner, then the three design questions that the pre-flight of ticket 01 raised.
+
+36. A level change after done was proposed, or after a spec exists: "Wording only (Recommended)".
+37. A depth change queued behind the turn that produces round 1: first "Apply + re-judge". Claude pointed out that this broke the kept decision that readiness runs only before round 1, and the owner chose "Apply, no re-judge (Recommended)".
+38. A level set on the recreated local profile, when later local sessions are reassigned to the inheritor: "Move if empty, delete (Recommended)".
+39. A level picked in the setup step is saved: "On session create (Recommended)".
+40. Briefs and HANDOFF.md when depth changes after a spec exists: "Yes, all stale (Recommended)".
+41. The session's owner column, when no owner is given: "Default to local owner (Recommended)".
+42. A foreign key from the session's owner to the profile: "No foreign key (Recommended)".
+43. The local-owner profile row and the inheritance marker: "Always seed both (Recommended)".

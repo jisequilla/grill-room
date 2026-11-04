@@ -22,11 +22,11 @@ New `grill-room/server/current-owner.ts` with `resolveOwnerId(request)`.
 
 Judged by: tests for auth on and off; first sign-in inherits sessions and level once; a second user inherits nothing; local sessions created later go to the recorded inheritor; a created session carries the owner id.
 
-## Open questions on this ticket
+## Owner's answers on this ticket
 
-The consistency check found that this ticket leaves these questions to the owner. Do not choose an answer yourself: if your prompt does not give you the owner's answer to one, stop and report the question instead of building around it.
+The consistency check left these questions open; the owner has answered them. Build to these answers.
 
-- When later local sessions are reassigned to the recorded inheritor, does a technical level set on the recreated local profile also move to the inheritor if theirs is empty, and is the local profile row deleted again? ("reassign them to the recorded inheritor.")
+- When local sessions created after the hand-off are reassigned to the recorded inheritor, a technical level set on the recreated `local-owner` profile moves to the inheritor only when the inheritor's level is empty, and the `local-owner` profile row is deleted again.
 
 ## File boundaries
 
