@@ -8,6 +8,9 @@ import {
   setTechnicalLevel,
 } from "./owner-profiles.js";
 
+const UNKNOWN_EXPERT =
+  'Unknown technical level "expert": expected one of builder, technical-not-building, not-technical, or null.';
+
 async function profileRows(userId: string) {
   return getDb()
     .select()
@@ -31,6 +34,15 @@ describe("owner profiles", () => {
     expect(await profileRows("u1")).toHaveLength(1);
   });
 
+  it("6b: returns the stored level of an owner who has one", async () => {
+    await setTechnicalLevel("u3", "builder");
+    expect(await getOrCreateOwnerProfile("u3")).toEqual({
+      userId: "u3",
+      technicalLevel: "builder",
+    });
+    expect(await profileRows("u3")).toHaveLength(1);
+  });
+
   it("7: setting a level creates the profile when there is none", async () => {
     await setTechnicalLevel("u1", "builder");
     expect(await profileRows("u1")).toHaveLength(1);
@@ -45,10 +57,14 @@ describe("owner profiles", () => {
 
   it("9: refuses an unknown level, leaving an existing level and creating no row", async () => {
     await setTechnicalLevel("u1", "builder");
-    await expect(setTechnicalLevel("u1", "expert" as never)).rejects.toThrow();
+    await expect(setTechnicalLevel("u1", "expert" as never)).rejects.toThrow(
+      UNKNOWN_EXPERT,
+    );
     expect(await getTechnicalLevel("u1")).toBe("builder");
 
-    await expect(setTechnicalLevel("u2", "expert" as never)).rejects.toThrow();
+    await expect(setTechnicalLevel("u2", "expert" as never)).rejects.toThrow(
+      UNKNOWN_EXPERT,
+    );
     expect(await profileRows("u2")).toEqual([]);
   });
 });
