@@ -11,6 +11,7 @@ import {
 
 import {
   ATTEMPT_KINDS,
+  DEFAULT_DEPTH,
   DEFAULT_DURABLE_EXPORT_FOLDER,
   DEFAULT_MAX_TICKETS_IN_FLIGHT,
   DEFAULT_PROJECT_SLUG_PATTERN,
@@ -18,6 +19,8 @@ import {
   DECISION_DISPOSITION_TARGETS,
   DECISION_INTRODUCED_BY,
   DELIVERY_RECIPES,
+  DEPTHS,
+  LOCAL_OWNER_ID,
   PROJECT_TRACKER_KINDS,
   PROJECT_VISIBILITIES,
   REPO_DECISION_SOURCES,
@@ -26,6 +29,7 @@ import {
   SESSION_MODELS,
   SESSION_STATES,
   SESSION_TURN_STATUSES,
+  TECHNICAL_LEVELS,
   TICKET_KINDS,
   TICKET_STATUSES,
 } from "../../shared/session-constants.js";
@@ -44,9 +48,14 @@ export {
   type DecisionDispositionTarget,
   DECISION_INTRODUCED_BY,
   type DecisionIntroducedBy,
+  DEFAULT_DEPTH,
   DEFAULT_PROJECT_SLUG_PATTERN,
+  DEFAULT_TECHNICAL_LEVEL,
   DELIVERY_RECIPES,
   type DeliveryRecipe,
+  DEPTHS,
+  type Depth,
+  LOCAL_OWNER_ID,
   PROJECT_TRACKER_KINDS,
   type ProjectTrackerKind,
   PROJECT_VISIBILITIES,
@@ -63,6 +72,8 @@ export {
   type SessionState,
   SESSION_TURN_STATUSES,
   type SessionTurnStatus,
+  TECHNICAL_LEVELS,
+  type TechnicalLevel,
   TICKET_KINDS,
   type TicketKind,
   TICKET_STATUSES,
@@ -73,6 +84,28 @@ export {
 export const globalSettings = table("gr_global_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
+});
+
+/**
+ * What the app knows about one owner, keyed by their user id: how technical
+ * they are. Read and written only through `server/owner-profiles.ts`.
+ */
+export const ownerProfiles = table("gr_owner_profiles", {
+  userId: text("user_id").primaryKey(),
+  /** Null until the owner chooses a level. See {@link TECHNICAL_LEVELS}. */
+  technicalLevel: text("technical_level", { enum: TECHNICAL_LEVELS }),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/**
+ * The one-row marker naming who inherits the sessions and profile stamped
+ * `local-owner` before owners existed. Its `id` is always `singleton`; the
+ * inheritor is null until one is chosen.
+ */
+export const migrationInheritance = table("gr_migration_inheritance", {
+  id: text("id").primaryKey(),
+  inheritorUserId: text("inheritor_user_id"),
 });
 
 /**
@@ -155,6 +188,15 @@ export const sessions = table("gr_sessions", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
   idea: text("idea").notNull(),
+  /**
+   * The user id of the session's owner, or `local-owner`. No foreign key: the
+   * owner is a Better Auth user, whose tables the app does not touch.
+   */
+  ownerId: text("owner_id").notNull().default(LOCAL_OWNER_ID),
+  /** How far the grill goes. See {@link DEPTHS}. */
+  depth: text("depth", { enum: DEPTHS }).notNull().default(DEFAULT_DEPTH),
+  /** A depth the owner chose that has not taken effect yet, or null. */
+  pendingDepth: text("pending_depth", { enum: DEPTHS }),
   model: text("model", { enum: SESSION_MODELS }).notNull().default("fable"),
   answeringMode: text("answering_mode", { enum: SESSION_ANSWERING_MODES })
     .notNull()
