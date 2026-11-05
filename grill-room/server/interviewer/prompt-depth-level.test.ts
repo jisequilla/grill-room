@@ -197,6 +197,37 @@ describe("the section texts", () => {
     expect(LEVEL_SECTIONS[level].startsWith(heading)).toBe(true);
   });
 
+  it.each([
+    [
+      "proof-of-concept",
+      "Do not propose decisions about scale, edge cases or operations (hosting, monitoring, backups, on-call): the builder makes those calls. Propose `done` once the core thing to try is settled.",
+    ],
+    [
+      "first-working-version",
+      "Ask about edge cases: odd inputs, empty states and failures a user would meet.",
+    ],
+    ["full-spec", "Open every branch, scale, edge cases and operations included."],
+  ] as const)("P1: the %s depth section carries its own body", (depth, sentence) => {
+    expect(DEPTH_SECTIONS[depth]).toContain(sentence);
+  });
+
+  it.each([
+    [
+      "builder",
+      "The owner builds software and makes the technology calls. Keep technical wording, and name technologies, paths and products where they help.",
+    ],
+    [
+      "technical-not-building",
+      "The owner follows technical talk but will not build this. Keep technical wording, but phrase every recommendation by its consequences for the owner: cost, speed, lock-in, what users see.",
+    ],
+    [
+      "not-technical",
+      "The owner is not technical. Write every card in plain words: no file paths, and no product or technology names in a card's title or body unless the idea itself uses them. Put every technology question as its consequences for the owner: cost, speed, lock-in, what users see.",
+    ],
+  ] as const)("P2: the %s level section carries its own body", (level, sentence) => {
+    expect(LEVEL_SECTIONS[level]).toContain(sentence);
+  });
+
   it.each(DEPTHS)("P7: the %s depth section ends with the done rule", (depth) => {
     expect(DEPTH_SECTIONS[depth].endsWith(DONE_WHILE_ASKED_RULE)).toBe(true);
   });
