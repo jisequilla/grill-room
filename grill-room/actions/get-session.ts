@@ -1,7 +1,8 @@
 import { defineAction } from "@agent-native/core/action";
-import { eq } from "@agent-native/core/db/schema";
+import { and, eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
+import { resolveOwnerId } from "../server/current-owner.js";
 import { getDb, schema } from "../server/db/index.js";
 import { exportRetirement } from "../server/export-bundle.js";
 import { isModelLocked } from "../server/model-lock.js";
@@ -14,10 +15,13 @@ export default defineAction({
   }),
   http: { method: "GET" },
   run: async ({ id }) => {
+    const ownerId = await resolveOwnerId();
     const [row] = await getDb()
       .select()
       .from(schema.sessions)
-      .where(eq(schema.sessions.id, id))
+      .where(
+        and(eq(schema.sessions.id, id), eq(schema.sessions.ownerId, ownerId)),
+      )
       .limit(1);
 
     if (!row) throw new Error(`Session not found: ${id}`);

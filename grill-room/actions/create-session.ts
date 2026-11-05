@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { SESSION_ANSWERING_MODES, SESSION_MODELS } from "../server/db/schema.js";
+import { resolveOwnerId } from "../server/current-owner.js";
 import { getProject } from "../server/projects.js";
 import getDefaultModel from "./get-default-model.js";
 import { resolveDocsFolder } from "./set-docs-folder.js";
@@ -45,6 +46,7 @@ export default defineAction({
       ),
   }),
   run: async ({ title, idea, model, answeringMode, docsFolder, projectId }) => {
+    const ownerId = await resolveOwnerId();
     const resolvedModel = model ?? (await getDefaultModel.run({})).model;
 
     let resolvedDocsFolder: string | null = null;
@@ -75,6 +77,7 @@ export default defineAction({
         id,
         title,
         idea,
+        ownerId,
         model: resolvedModel,
         answeringMode,
         docsFolder: resolvedDocsFolder,

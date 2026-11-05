@@ -21,6 +21,14 @@ delete process.env.NETLIFY_DATABASE_URL;
 process.env.DATABASE_URL = IN_MEMORY_DATABASE_URL;
 
 /**
+ * Login off for the whole suite, so an action run with no identity resolves to
+ * `local-owner`, the owner every row already defaults to. A login-on test
+ * stubs both variables and restores them afterwards.
+ */
+process.env.AUTH_DISABLED = "true";
+delete process.env.AGENT_USER_EMAIL;
+
+/**
  * The home directory the suite runs under: a fresh, empty temp directory, so
  * nothing that resolves `~` — the Claude Code transcript reader above all,
  * which defaults to `~/.claude/projects` — can read the developer's own files.
