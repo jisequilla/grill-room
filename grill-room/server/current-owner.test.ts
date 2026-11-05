@@ -40,7 +40,7 @@ function loginOn(): void {
 }
 
 async function as<T>(email: string, fn: () => Promise<T>): Promise<T> {
-  return runWithRequestContext({ userEmail: email }, fn);
+  return await runWithRequestContext({ userEmail: email }, fn);
 }
 
 async function insertUsers(): Promise<void> {
@@ -299,8 +299,8 @@ describe("session actions with login on", () => {
   });
 
   it("R7: create-session stamps the current owner", async () => {
-    const created = await as(ANA.email, () =>
-      createSession.run({ title: "T", idea: "I", answeringMode: "whole-round" }),
+    const created = await as(ANA.email, async () =>
+      await createSession.run({ title: "T", idea: "I", answeringMode: "whole-round" }),
     );
 
     expect(created!.ownerId).toBe(ANA.id);
