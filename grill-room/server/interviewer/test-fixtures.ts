@@ -17,6 +17,7 @@ import type {
   InterviewContext,
   ProposeRoundRequest,
   ProjectServerFacts,
+  ReviewStaleRequest,
   ScoutProjectRequest,
   ScoutReportForReadiness,
   SharpenCardsRequest,
@@ -76,6 +77,19 @@ export function aProposeRoundRequest(
     context: aContext(),
     latestAnswers: [],
     userAddedDecisions: [],
+    rejectionReason: null,
+    ...overrides,
+  };
+}
+
+export function aReviewStaleRequest(
+  overrides: Partial<ReviewStaleRequest> = {},
+): ReviewStaleRequest {
+  return {
+    kind: "review-stale",
+    context: aContext(),
+    reopenedDecisionKey: "shape",
+    staleDecisionKeys: ["storage"],
     rejectionReason: null,
     ...overrides,
   };

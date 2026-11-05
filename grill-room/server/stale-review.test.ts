@@ -12,6 +12,8 @@ import {
   scriptInterviewer,
   type ScriptedTurn,
 } from "./interviewer/index.js";
+import { LOCAL_OWNER_ID } from "../shared/session-constants.js";
+import { setTechnicalLevel } from "./owner-profiles.js";
 import { runDueStaleReviews } from "./stale-review.js";
 
 /**
@@ -208,7 +210,7 @@ async function aChainWithPendingProposals() {
 
 /** Reopens shape and answers it again, running the stale review that re-asks storage. */
 async function reopenShapeAndReAskStorage(sessionId: string) {
-  scriptInterviewer([
+  const interviewer = scriptInterviewer([
     {
       kind: "review-stale",
       result: {
@@ -236,6 +238,7 @@ async function reopenShapeAndReAskStorage(sessionId: string) {
     answer: "A page, after all",
   });
   await submitRound.run({ id: open.round!.id });
+  return interviewer;
 }
 
 describe("a stale review that re-asks a decision", () => {
@@ -265,6 +268,18 @@ describe("a stale review that re-asks a decision", () => {
       supersessionReason: null,
       deferralReason: DEFERRAL,
     });
+  });
+
+  it("A5: words the re-ask to the owner's level, with no depth", async () => {
+    const session = await aChainWithPendingProposals();
+    await setTechnicalLevel(LOCAL_OWNER_ID, "technical-not-building");
+
+    const interviewer = await reopenShapeAndReAskStorage(session.id);
+
+    const review = interviewer.requests.find((request) => request.kind === "review-stale");
+    expect(review).toBeDefined();
+    expect(review!.context.technicalLevel).toBe("technical-not-building");
+    expect(review!.context.depth).toBeUndefined();
   });
 });
 

@@ -1,5 +1,6 @@
 import type { HandoffFactPack } from "../handoff-fact-pack.js";
 import type { ProjectServerFacts } from "../project-facts.js";
+import type { Depth, TechnicalLevel } from "../../shared/session-constants.js";
 import type { InterviewerErrorCode } from "./errors.js";
 import type {
   AssessReadinessResult,
@@ -138,6 +139,16 @@ export interface InterviewContext {
    * `server/turn.ts`).
    */
   projectContext: ProjectContext | null;
+  /**
+   * How deep the session's grill goes, from `sessions.depth`. Absent, the
+   * prompt carries no depth section.
+   */
+  depth?: Depth;
+  /**
+   * The owner's technical level, read live from their profile. Absent or null,
+   * the prompt carries no level section.
+   */
+  technicalLevel?: TechnicalLevel | null;
 }
 
 /** One answer from the round just submitted. A push back arrives as `pushed-back`. */

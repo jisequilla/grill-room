@@ -13,7 +13,7 @@
  *
  * | Transition | answer   | kind       | target         | settledAt         | reopenedAt              | withdrawnAt |
  * |------------|----------|------------|----------------|-------------------|-------------------------|-------------|
- * | settle     | given    | given      | given when kind is `dispositioned`, else null | now if kind settles, else null | kept | kept |
+ * | settle     | given    | given, or `dispositioned` when the answer picks `Leave it to the builder` | `builders-call` when it picks that choice, given when kind is `dispositioned`, else null | now if kind settles, else null | kept | kept |
  * | defer      | kept     | `deferred` | null           | null              | kept                    | kept        |
  * | reword     | given    | kept       | kept           | kept              | kept                    | kept        |
  * | unsettle   | null     | null       | null           | null              | now if prior kind settled, else kept | kept |
@@ -39,6 +39,7 @@ import {
   CLEARED_PROPOSAL,
   type DecisionRow,
   isSettlingAnswerKind,
+  picksLeaveItToTheBuilder,
 } from "./tree.js";
 import {
   withdrawClaimsOn,
@@ -133,7 +134,10 @@ function inTransaction(
 }
 
 /**
- * Give the decision an answer of `kind`. A settling kind stamps `settledAt`;
+ * Give the decision an answer of `kind`. An accepted recommendation or own
+ * answer that picks the choice labelled `Leave it to the builder` is recorded
+ * as a builder's call instead (see `picksLeaveItToTheBuilder`), its answer text
+ * kept as the note. A settling kind stamps `settledAt`;
  * any other leaves it null. A `dispositioned` answer requires its target, and
  * any other kind drops one. Given `settledById`, records the decision whose
  * answer settled this one.
@@ -158,12 +162,20 @@ export function settle(
   return inTransaction(
     id,
     {
-      answerState: () => ({
-        currentAnswer: input.answer,
-        answerKind: input.kind,
-        dispositionTarget: dispositioned ? input.dispositionTarget : null,
-        settledAt: isSettlingAnswerKind(input.kind) ? opts.now : null,
-      }),
+      answerState: (prior) =>
+        picksLeaveItToTheBuilder(prior, input.kind, input.answer)
+          ? {
+              currentAnswer: input.answer,
+              answerKind: "dispositioned",
+              dispositionTarget: "builders-call",
+              settledAt: opts.now,
+            }
+          : {
+              currentAnswer: input.answer,
+              answerKind: input.kind,
+              dispositionTarget: dispositioned ? input.dispositionTarget : null,
+              settledAt: isSettlingAnswerKind(input.kind) ? opts.now : null,
+            },
       keepsLinks: false,
       operatorNotes: null,
       settledById: input.settledById ?? undefined,

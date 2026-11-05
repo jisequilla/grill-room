@@ -9,6 +9,8 @@ import {
   type ScriptedTurn,
 } from "../server/interviewer/index.js";
 import { findLatestTurn } from "../server/turn-records.js";
+import { decisionSnapshots } from "../server/turn.js";
+import { LEAVE_IT_TO_THE_BUILDER } from "../shared/session-constants.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import addDecision from "./add-decision.js";
 import answerDecision from "./answer-decision.js";
@@ -1626,6 +1628,45 @@ describe("list-rounds", () => {
       submissionState: "open",
       submittedAt: null,
       decisions: [{ key: "storage", answeredInRound: null }],
+    });
+  });
+});
+
+describe("submit-round records an accepted Leave-it choice as a builder's call", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  it("B9: the decision is a builder's call, and synthesis reads it as one", async () => {
+    const { session, round } = await aSessionMidRound(
+      proposal({
+        key: "database",
+        title: "Which database?",
+        recommendedAnswer: "The builder knows which database engine fits.",
+        choices: ["Use Postgres", LEAVE_IT_TO_THE_BUILDER],
+        recommendedChoice: 1,
+      }),
+      proposal({ key: "tone", title: "How blunt?", dependsOn: ["database"] }),
+    );
+    const card = round.decisions[0]!;
+
+    await saveDraftAnswer.run({ decisionId: card.id, answerKind: "accepted-recommendation" });
+    await submitRound.run({ id: round.id });
+
+    const rows = await getDb()
+      .select()
+      .from(schema.decisions)
+      .where(eq(schema.decisions.sessionId, session.id));
+    const stored = rows.find((row) => row.id === card.id)!;
+    expect(stored).toMatchObject({
+      answerKind: "dispositioned",
+      dispositionTarget: "builders-call",
+      currentAnswer: "The builder knows which database engine fits.",
+    });
+    expect(stored.settledAt).not.toBeNull();
+
+    const snapshots = await decisionSnapshots(rows);
+    expect(snapshots.find((snapshot) => snapshot.key === "database")?.answer).toMatchObject({
+      kind: "builders-call",
     });
   });
 });

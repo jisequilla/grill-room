@@ -17,6 +17,7 @@ import type {
   decisions,
   DecisionAnswerKind,
 } from "./db/schema.js";
+import { LEAVE_IT_TO_THE_BUILDER } from "../shared/session-constants.js";
 
 /**
  * The six states of a decision. Computed, never stored. `withdrawn` and
@@ -540,6 +541,36 @@ export function recommendedChoiceLabel(
 ): string | null {
   if (recommendedChoice == null) return null;
   return choices[recommendedChoice]?.label ?? null;
+}
+
+/**
+ * Whether an answer picks the choice labelled exactly
+ * {@link LEAVE_IT_TO_THE_BUILDER}: an accepted recommendation whose recommended
+ * choice carries it, or an own answer equal to an offered choice that does.
+ * Labels compare trimmed and case-sensitively, never by containment. Every
+ * other kind is not a pick.
+ */
+export function picksLeaveItToTheBuilder(
+  decision: {
+    offeredChoicesJson: string;
+    choiceRationalesJson: string;
+    recommendedChoice: number | null;
+  },
+  kind: DecisionAnswerKind,
+  answer: string | null,
+): boolean {
+  const labels = parseChoices(decision).map((choice) => choice.label.trim());
+  if (kind === "accepted-recommendation") {
+    if (decision.recommendedChoice == null) return false;
+    return labels[decision.recommendedChoice] === LEAVE_IT_TO_THE_BUILDER;
+  }
+  if (kind === "own-answer") {
+    return (
+      answer?.trim() === LEAVE_IT_TO_THE_BUILDER &&
+      labels.includes(LEAVE_IT_TO_THE_BUILDER)
+    );
+  }
+  return false;
 }
 
 /** A stored row, reduced to the facts derivation and selection work from. */

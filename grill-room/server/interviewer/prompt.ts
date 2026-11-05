@@ -1,5 +1,11 @@
 import type { HandoffFactPack } from "../handoff-fact-pack.js";
-import { MAX_TICKETS_IN_FLIGHT, MIN_TICKETS_IN_FLIGHT } from "../../shared/session-constants.js";
+import {
+  LEAVE_IT_TO_THE_BUILDER,
+  MAX_TICKETS_IN_FLIGHT,
+  MIN_TICKETS_IN_FLIGHT,
+  type Depth,
+  type TechnicalLevel,
+} from "../../shared/session-constants.js";
 import { numberRanges } from "../tickets.js";
 import { interviewerInstructions, loadSpecTemplate } from "./instructions.js";
 import {
@@ -34,6 +40,58 @@ import type {
   SharpeningRoundForPrompt,
   SharpenRewriteRequest,
 } from "./types.js";
+
+export { LEAVE_IT_TO_THE_BUILDER };
+
+/** Ends every depth section: the server refuses `done` while a card would still be asked. */
+export const DONE_WHILE_ASKED_RULE =
+  "A decision already in the tree, a technology decision included, must still be answered or set aside before `done`: never propose `done` while one would still be asked.";
+
+/** How deep to grill, by the session's depth. Rendered into the `propose-round` task only. */
+export const DEPTH_SECTIONS: Record<Depth, string> = {
+  "proof-of-concept": [
+    "## How deep to grill: a proof of concept",
+    "",
+    `The owner wants a proof of concept: the smallest thing that tries the idea. Do not propose decisions about scale, edge cases or operations (hosting, monitoring, backups, on-call): the builder makes those calls. Propose \`done\` once the core thing to try is settled. ${DONE_WHILE_ASKED_RULE}`,
+  ].join("\n"),
+  "first-working-version": [
+    "## How deep to grill: a first working version",
+    "",
+    `The owner wants a first working version that real users can use. Ask about edge cases: odd inputs, empty states and failures a user would meet. Do not propose decisions about scale or operations (hosting, monitoring, backups, on-call): the builder makes those calls. Still ask every technology decision. Propose \`done\` once every user-facing flow and the data it keeps are settled. ${DONE_WHILE_ASKED_RULE}`,
+  ].join("\n"),
+  "full-spec": [
+    "## How deep to grill: a full spec",
+    "",
+    `The owner wants a full spec. Open every branch, scale, edge cases and operations included. Propose \`done\` only when nothing is left to the builder's guesswork. ${DONE_WHILE_ASKED_RULE}`,
+  ].join("\n"),
+};
+
+/**
+ * How to word cards, by the owner's technical level. Rendered into the
+ * `propose-round` and `review-stale` tasks, the two that write cards.
+ */
+export const LEVEL_SECTIONS: Record<TechnicalLevel, string> = {
+  builder: [
+    "## The owner's technical level: builder",
+    "",
+    "The owner builds software and makes the technology calls. Keep technical wording, and name technologies, paths and products where they help.",
+  ].join("\n"),
+  "technical-not-building": [
+    "## The owner's technical level: technical, not building",
+    "",
+    `The owner follows technical talk but will not build this. Keep technical wording, but phrase every recommendation by its consequences for the owner: cost, speed, lock-in, what users see. For a pure technology choice with no consequence the owner would see, offer a choice labelled exactly \`${LEAVE_IT_TO_THE_BUILDER}\` and point \`recommendedChoice\` at it. Still ask every technology question, and still show the owner every choice whose consequence they would see. Never treat your recommendation as the owner's answer: only the owner's answer settles a decision.`,
+  ].join("\n"),
+  "not-technical": [
+    "## The owner's technical level: not technical",
+    "",
+    `The owner is not technical. Write every card in plain words: no file paths, and no product or technology names in a card's title or body unless the idea itself uses them. Put every technology question as its consequences for the owner: cost, speed, lock-in, what users see. For a pure technology choice with no consequence the owner would see, offer a choice labelled exactly \`${LEAVE_IT_TO_THE_BUILDER}\` and point \`recommendedChoice\` at it. Still ask every technology question, and still show the owner every choice whose consequence they would see. Never treat your recommendation as the owner's answer: only the owner's answer settles a decision.`,
+  ].join("\n"),
+};
+
+/** The depth and level sections a task carries, each only when its field is set. */
+function pitchSections(sections: (string | undefined)[]): string[] {
+  return sections.flatMap((section) => (section ? ["", section] : []));
+}
 
 export const SUMMARY_MIN_BULLETS = 5;
 export const SUMMARY_MAX_BULLETS = 10;
@@ -327,6 +385,12 @@ function renderTask(
         "An answer of `unknown`, `deferred` or `prototype-flagged` does not settle",
         "its decision: treat it as an open prerequisite and react to it, rather",
         "than moving past it.",
+        ...pitchSections([
+          request.context.depth ? DEPTH_SECTIONS[request.context.depth] : undefined,
+          request.context.technicalLevel
+            ? LEVEL_SECTIONS[request.context.technicalLevel]
+            : undefined,
+        ]),
       ].join("\n");
     }
 
@@ -352,6 +416,11 @@ function renderTask(
         "",
         "Do not re-ask a decision merely because it is downstream. Reconfirming",
         "what still holds is the point of this step.",
+        ...pitchSections([
+          request.context.technicalLevel
+            ? LEVEL_SECTIONS[request.context.technicalLevel]
+            : undefined,
+        ]),
       ].join("\n");
 
     case "find-superseded": {

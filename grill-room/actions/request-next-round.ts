@@ -13,6 +13,8 @@ import type {
   UserAddedDecision,
 } from "../server/interviewer/index.js";
 import { increasingTimestamps } from "../server/ordering.js";
+import { getTechnicalLevel } from "../server/owner-profiles.js";
+import { DEFAULT_TECHNICAL_LEVEL } from "../shared/session-constants.js";
 import {
   currentReadiness,
   sessionHasRounds,
@@ -297,6 +299,9 @@ export default defineAction({
       // The tree cannot change between attempts: nothing is written until one
       // is accepted. Refusal only needs the proposal read against it.
       let against: KeyedTreeDecision[] = [];
+      const depth = session!.depth;
+      const technicalLevel =
+        (await getTechnicalLevel(session!.ownerId)) ?? DEFAULT_TECHNICAL_LEVEL;
 
       return askUntilAccepted<ProposeRoundResult>({
         conversationId: session!.conversationId,
@@ -317,6 +322,8 @@ export default defineAction({
                 conversationId,
                 decisions: await decisionSnapshots(current),
                 projectContext: await projectContextFor(session!),
+                depth,
+                technicalLevel,
               },
               latestAnswers,
               userAddedDecisions: pendingUserAddedDecisions(current),
