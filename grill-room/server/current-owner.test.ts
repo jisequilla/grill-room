@@ -161,6 +161,18 @@ describe("resolveOwnerId with login off", () => {
     expect(await marker()).toBeNull();
   });
 
+  it("R1d: treats AUTH_DISABLED 1 as login off", async () => {
+    vi.stubEnv("AUTH_DISABLED", "1");
+    expect(await as(ANA.email, resolveOwnerId)).toBe(LOCAL_OWNER_ID);
+    expect(await marker()).toBeNull();
+  });
+
+  it("R11b: treats an unset AUTH_DISABLED as login on", async () => {
+    vi.stubEnv("AUTH_DISABLED", undefined);
+    vi.stubEnv("AGENT_USER_EMAIL", "");
+    await expect(resolveOwnerId()).rejects.toBeInstanceOf(OwnerNotResolvedError);
+  });
+
   it("R11: treats AUTH_DISABLED false as login on", async () => {
     vi.stubEnv("AUTH_DISABLED", "false");
     vi.stubEnv("AGENT_USER_EMAIL", "");
@@ -231,6 +243,16 @@ describe("resolveOwnerId with login on", () => {
     expect(await sessionCount(BEN.id)).toBe(0);
   });
 
+  it("R5c: a null local level gives the inheritor no profile row", async () => {
+    await setMarker(ANA.id);
+    await insertProfile(LOCAL_OWNER_ID, null);
+
+    await as(BEN.email, resolveOwnerId);
+
+    expect(await profileExists(ANA.id)).toBe(false);
+    expect(await profileExists(LOCAL_OWNER_ID)).toBe(false);
+  });
+
   it("R5b: the level moves to an inheritor with no profile row", async () => {
     await setMarker(ANA.id);
     await insertSession(LOCAL_OWNER_ID);
@@ -270,9 +292,18 @@ describe("resolveOwnerId with login on", () => {
 
   it("R9: rejects with no request context, and for an email with no user", async () => {
     await expect(resolveOwnerId()).rejects.toBeInstanceOf(OwnerNotResolvedError);
+    await expect(resolveOwnerId()).rejects.toThrow(
+      "No signed-in owner could be resolved.",
+    );
     await expect(as("nobody@example.test", resolveOwnerId)).rejects.toBeInstanceOf(
       OwnerNotResolvedError,
     );
+    await expect(as("nobody@example.test", resolveOwnerId)).rejects.toThrow(
+      "No user found for nobody@example.test.",
+    );
+    await expect(
+      runWithRequestContext({ userEmail: undefined }, resolveOwnerId),
+    ).rejects.toBeInstanceOf(OwnerNotResolvedError);
 
     await expect(listSessions.run({})).rejects.toBeInstanceOf(OwnerNotResolvedError);
     await expect(getSession.run({ id: "any" })).rejects.toBeInstanceOf(
