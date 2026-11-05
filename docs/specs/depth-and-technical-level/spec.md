@@ -111,7 +111,7 @@ Interviewer
 
 - The prompt builder takes depth and technical level as inputs every turn, for grill rounds and for Sharpening alike.
 - Depth rules: proof of concept skips scale, edge-case and operations branches and proposes done once the core thing to try is settled; first working version opens edge-case branches, skips scale and operations, and proposes done when every user-facing flow and its data are settled, with technology and operations allowed as builder's calls; full spec opens every branch and holds done until nothing is left to the builder's guesswork.
-- Level rules: builder keeps technical wording; technical but not building keeps technical wording but phrases recommendations as consequences and recommends 'Leave it to the builder' for pure technology choices with no owner-visible consequence; not technical uses plain wording with the same recommendation shape. Technology cards are never suppressed. The interviewer never records its own recommendation as settled.
+- Level rules: builder keeps technical wording; technical but not building keeps technical wording but phrases recommendations as consequences and recommends 'Leave it to the builder' for pure technology choices with no owner-visible consequence; not technical uses plain wording with the same recommendation shape. Technology cards are never suppressed. The interviewer never records its own recommendation as settled. When the owner accepts the recommendation or picks the choice labelled 'Leave it to the builder', the app records that decision as a builder's call, exactly as setting it aside as the builder's call does.
 
 Readiness and downstream
 
@@ -125,9 +125,9 @@ Knowledge bundle
 
 ## Testing Decisions
 
-- A good test exercises external behaviour: given an owner level and session depth, the prompt the interviewer receives, the readiness verdict, the spec check verdict, the stale marks, the done-proposal state and the stored rows. Tests do not assert on prompt wording internals.
+- A good test exercises external behaviour: given an owner level and session depth, the prompt the interviewer receives, the readiness verdicts the server accepts, the stale marks, the done-proposal state and the stored rows. Each depth and level section of a prompt is held in an exported constant, and tests assert that it is present for its value and absent for the others, never a snapshot of the whole prompt. Which findings the spec check reports is the model's judgment, so tests assert the bar its prompt carries, not the findings.
 - Modules under test: session creation with the setup step and its defaults, the owner profile table and lazy creation, the AUTH_DISABLED fixed owner, the migration placeholder with first-sign-in inheritance of sessions and level and the later reassignment of local sessions to the recorded inheritor, the prompt builder's depth and level inputs per step and per level for both grill and Sharpening, readiness with depth and the empty-depth label for pre-existing judgments, the pre-round-1 re-judge including override clearing and queued latest-wins behaviour, Sharpening finishing its round on a ready re-judge, the post-done depth change withdrawing the proposal and marking artifacts stale, the spec check's depth-scaled bar, and the mid-session change path with profile write-back.
-- Prior art: the existing readiness tests that judge an idea before round 1, the existing spec check tests that look for builder-alone decisions, and the existing stale-review tests, each extended with a depth parameter.
+- Prior art: the existing readiness tests that judge an idea before round 1, the existing spec check tests that validate a finding's shape, and the existing stale-review tests, each extended with a depth parameter.
 
 ## Out of Scope
 
@@ -137,7 +137,7 @@ Knowledge bundle
 - Coarser tickets at lower depth beyond what follows from the spec.
 - Re-judging readiness after round 1 or lifting the pre-round-1 lock.
 - Automatic regeneration of the spec or tickets after a depth change.
-- Automatic recording of builder's calls without the owner's action.
+- Recording a builder's call the owner did not choose: only accepting or picking 'Leave it to the builder', or setting a decision aside as the builder's call, records one.
 - Free-text technical level or depth.
 - Any new authentication beyond the framework's existing login.
 - A configured email for migrated-session inheritance.
