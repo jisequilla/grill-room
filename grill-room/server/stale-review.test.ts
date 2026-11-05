@@ -12,7 +12,7 @@ import {
   scriptInterviewer,
   type ScriptedTurn,
 } from "./interviewer/index.js";
-import { LOCAL_OWNER_ID } from "../shared/session-constants.js";
+import { DEFAULT_TECHNICAL_LEVEL, LOCAL_OWNER_ID } from "../shared/session-constants.js";
 import { setTechnicalLevel } from "./owner-profiles.js";
 import { runDueStaleReviews } from "./stale-review.js";
 
@@ -280,6 +280,32 @@ describe("a stale review that re-asks a decision", () => {
     expect(review).toBeDefined();
     expect(review!.context.technicalLevel).toBe("technical-not-building");
     expect(review!.context.depth).toBeUndefined();
+  });
+
+  it("A5: sends the default level when the owner's level is null", async () => {
+    const session = await aChainWithPendingProposals();
+    await setTechnicalLevel(LOCAL_OWNER_ID, null);
+
+    const interviewer = await reopenShapeAndReAskStorage(session.id);
+
+    const review = interviewer.requests.find((request) => request.kind === "review-stale");
+    expect(review!.context.technicalLevel).toBe(DEFAULT_TECHNICAL_LEVEL);
+    expect(DEFAULT_TECHNICAL_LEVEL).toBe("not-technical");
+  });
+
+  it("A5: reads the level of the session's own owner", async () => {
+    const session = await aChainWithPendingProposals();
+    await getDb()
+      .update(schema.sessions)
+      .set({ ownerId: "u-ana" })
+      .where(eq(schema.sessions.id, session.id));
+    await setTechnicalLevel("u-ana", "technical-not-building");
+    await setTechnicalLevel(LOCAL_OWNER_ID, "builder");
+
+    const interviewer = await reopenShapeAndReAskStorage(session.id);
+
+    const review = interviewer.requests.find((request) => request.kind === "review-stale");
+    expect(review!.context.technicalLevel).toBe("technical-not-building");
   });
 });
 

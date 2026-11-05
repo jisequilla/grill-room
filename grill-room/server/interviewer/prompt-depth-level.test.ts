@@ -31,6 +31,10 @@ import {
 } from "./test-fixtures.js";
 import type { CheckConsistencyRequest, InterviewContext } from "./types.js";
 
+/** The last line of each task's own text, before any section is appended. */
+const PROPOSE_ROUND_END = "than moving past it.";
+const REVIEW_STALE_END = "the point of this step.";
+
 const ALL_SECTIONS = [
   ...DEPTHS.map((depth) => DEPTH_SECTIONS[depth]),
   ...TECHNICAL_LEVELS.map((level) => LEVEL_SECTIONS[level]),
@@ -62,19 +66,36 @@ function expectOnlyLevel(text: string, level: TechnicalLevel | null) {
 
 describe("the propose-round prompt pitched to depth and level", () => {
   it.each(DEPTHS)("P1: carries the %s depth section and no other", (depth) => {
-    expectOnlyDepth(prompt("propose-round", { depth }), depth);
+    const text = prompt("propose-round", { depth });
+    expectOnlyDepth(text, depth);
+    expect(text).toContain(`${PROPOSE_ROUND_END}\n\n${DEPTH_SECTIONS[depth]}`);
   });
 
   it.each(TECHNICAL_LEVELS)(
     "P2: carries the %s level section and no other",
     (level) => {
-      expectOnlyLevel(prompt("propose-round", { technicalLevel: level }), level);
+      const text = prompt("propose-round", { technicalLevel: level });
+      expectOnlyLevel(text, level);
+      expect(text).toContain(`${PROPOSE_ROUND_END}\n\n${LEVEL_SECTIONS[level]}`);
     },
   );
+
+  it("P1/P2: appends the depth section, then the level section, each after a blank line", () => {
+    const text = prompt("propose-round", {
+      depth: "proof-of-concept",
+      technicalLevel: "builder",
+    });
+    expect(
+      text.endsWith(
+        `${PROPOSE_ROUND_END}\n\n${DEPTH_SECTIONS["proof-of-concept"]}\n\n${LEVEL_SECTIONS.builder}`,
+      ),
+    ).toBe(true);
+  });
 
   it("P3: renders a section only when its field is set, and a null level as none", () => {
     const plain = prompt("propose-round", {});
     for (const section of ALL_SECTIONS) expect(plain).not.toContain(section);
+    expect(plain.endsWith(PROPOSE_ROUND_END)).toBe(true);
 
     const nullLevel = prompt("propose-round", {
       depth: "full-spec",
@@ -82,6 +103,9 @@ describe("the propose-round prompt pitched to depth and level", () => {
     });
     expectOnlyDepth(nullLevel, "full-spec");
     expectOnlyLevel(nullLevel, null);
+    expect(nullLevel.endsWith(`${PROPOSE_ROUND_END}\n\n${DEPTH_SECTIONS["full-spec"]}`)).toBe(
+      true,
+    );
   });
 });
 
@@ -93,6 +117,15 @@ describe("the review-stale prompt pitched to level only", () => {
     });
     expectOnlyLevel(text, "not-technical");
     expectOnlyDepth(text, null);
+    expect(text.endsWith(`${REVIEW_STALE_END}\n\n${LEVEL_SECTIONS["not-technical"]}`)).toBe(true);
+  });
+
+  it("P3: renders today's review-stale task when the level is absent or null", () => {
+    for (const technicalLevel of [undefined, null]) {
+      const text = prompt("review-stale", { depth: "full-spec", technicalLevel });
+      for (const section of ALL_SECTIONS) expect(text).not.toContain(section);
+      expect(text.endsWith(REVIEW_STALE_END)).toBe(true);
+    }
   });
 });
 
@@ -146,6 +179,22 @@ describe("the section texts", () => {
 
   it("P6c: the builder level is never told to leave technology to the builder", () => {
     expect(LEVEL_SECTIONS.builder).not.toContain(LEAVE_IT_TO_THE_BUILDER);
+  });
+
+  it.each([
+    ["proof-of-concept", "## How deep to grill: a proof of concept\n\n"],
+    ["first-working-version", "## How deep to grill: a first working version\n\n"],
+    ["full-spec", "## How deep to grill: a full spec\n\n"],
+  ] as const)("P1: the %s depth section opens with its own heading", (depth, heading) => {
+    expect(DEPTH_SECTIONS[depth].startsWith(heading)).toBe(true);
+  });
+
+  it.each([
+    ["builder", "## The owner's technical level: builder\n\n"],
+    ["technical-not-building", "## The owner's technical level: technical, not building\n\n"],
+    ["not-technical", "## The owner's technical level: not technical\n\n"],
+  ] as const)("P2: the %s level section opens with its own heading", (level, heading) => {
+    expect(LEVEL_SECTIONS[level].startsWith(heading)).toBe(true);
   });
 
   it.each(DEPTHS)("P7: the %s depth section ends with the done rule", (depth) => {

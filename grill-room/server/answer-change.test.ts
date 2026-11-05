@@ -728,6 +728,10 @@ describe("choosing the builder's call by picking Leave it to the builder", () =>
     ).toBe(false);
   });
 
+  it("B5: an own answer with no text never picks it", () => {
+    expect(picksLeaveItToTheBuilder(withRecommendation(1), "own-answer", null)).toBe(false);
+  });
+
   it.each(["unknown", "deferred", "pushed-back"] as const)(
     "B6: a %s steering move is never a builder's call",
     (kind) => {
