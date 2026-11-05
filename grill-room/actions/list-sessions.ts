@@ -1,7 +1,8 @@
 import { defineAction } from "@agent-native/core/action";
-import { desc } from "@agent-native/core/db/schema";
+import { desc, eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
+import { resolveOwnerId } from "../server/current-owner.js";
 import { getDb, schema } from "../server/db/index.js";
 import { readinessVerdict } from "../server/readiness.js";
 import { classifyLooseEnds, treeFacts } from "../server/tree.js";
@@ -12,9 +13,11 @@ export default defineAction({
   schema: z.object({}),
   http: { method: "GET" },
   run: async () => {
+    const ownerId = await resolveOwnerId();
     const rows = await getDb()
       .select()
       .from(schema.sessions)
+      .where(eq(schema.sessions.ownerId, ownerId))
       // `updatedAt` has millisecond precision, so two sessions touched inside
       // the same millisecond tie. No other column carries a meaningful
       // secondary "more active" signal, so ties break by id — arbitrary, but
