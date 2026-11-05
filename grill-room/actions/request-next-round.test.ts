@@ -3502,10 +3502,15 @@ describe("request-next-round pitches the grill to depth and level", () => {
     let calls = 0;
     setInterviewer({
       ...fake,
+      // The request is built before this call, so the level changes at the
+      // end of the first attempt: after its request, before the second's.
       proposeRound: async (request, observer) => {
         calls += 1;
-        if (calls === 2) await setTechnicalLevel(LOCAL_OWNER_ID, "builder");
-        return fake.proposeRound(request, observer);
+        try {
+          return await fake.proposeRound(request, observer);
+        } finally {
+          if (calls === 1) await setTechnicalLevel(LOCAL_OWNER_ID, "builder");
+        }
       },
     });
 
