@@ -295,6 +295,9 @@ describe("resolveOwnerId with login on", () => {
     await expect(resolveOwnerId()).rejects.toThrow(
       "No signed-in owner could be resolved.",
     );
+    await expect(resolveOwnerId()).rejects.toMatchObject({
+      name: "OwnerNotResolvedError",
+    });
     await expect(as("nobody@example.test", resolveOwnerId)).rejects.toBeInstanceOf(
       OwnerNotResolvedError,
     );
