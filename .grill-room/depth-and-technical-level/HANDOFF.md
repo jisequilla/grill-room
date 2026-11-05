@@ -56,16 +56,15 @@ Commit and push again whenever the bundle is re-exported.
 
 ## Execution plan
 
-- Longest chain: 5 build tickets, built one after another: 01 → 02 → 04 → 05 → 09.
-- Wave widths, in build tickets: 2, 2, 2, 2, 1 (wave 1 first).
+- Longest chain: 6 build tickets, built one after another: 01 → 06 → 03 → 04 → 05 → 09.
+- Wave widths, in build tickets: 2, 2, 2, 1, 1, 1 (wave 1 first).
 - Run at most 3 tickets at a time, even when a wave is wider. The repository sets this cap: `.claude/rules/worktrees.md:44`. Every ticket in flight draws on the same subscription's rate limit, and a rate-limited failure reads like a failed ticket; each one's reports also need your attention before it can merge.
 
 ## Waves
 
 Tickets in one wave do not block each other and may run in parallel, each in its own worktree; start with at most 3 at a time. Start a wave only once every ticket of the previous wave is merged and verified.
 
-- Ticket 06 waits for ticket 03: both change `grill-room/server/interviewer/prompt.ts` and `grill-room/server/interviewer/types.ts`.
-- Ticket 07 waits for ticket 06: both change `grill-room/server/interviewer/prompt.ts` and `grill-room/server/interviewer/types.ts`.
+- Ticket 07 waits for ticket 03 inside wave 3: both change `grill-room/server/interviewer/prompt.ts`.
 
 ### Wave 1
 
@@ -81,29 +80,32 @@ Tickets in one wave do not block each other and may run in parallel, each in its
 - **02 Resolve the current owner and hand local sessions and level to the inheriting user** (blocked by 01)
   - Ticket: `.grill-room/depth-and-technical-level/issues/02-current-owner-and-migrated-inheritance.md`
   - Brief: [`.grill-room/depth-and-technical-level/briefs/02-current-owner-and-migrated-inheritance.md`](briefs/02-current-owner-and-migrated-inheritance.md)
-- **03 Readiness takes depth; Sharpening takes depth and level** (blocked by 01)
-  - Ticket: `.grill-room/depth-and-technical-level/issues/03-readiness-and-sharpening-read-depth-and-level.md`
-  - Brief: [`.grill-room/depth-and-technical-level/briefs/03-readiness-and-sharpening-read-depth-and-level.md`](briefs/03-readiness-and-sharpening-read-depth-and-level.md)
-
-### Wave 3
-
-- **04 Actions to read and change depth and level, with re-judge, queuing, done withdrawal and stale marking** (blocked by 01, 02, 03)
-  - Ticket: `.grill-room/depth-and-technical-level/issues/04-depth-and-level-actions.md`
-  - Brief: [`.grill-room/depth-and-technical-level/briefs/04-depth-and-level-actions.md`](briefs/04-depth-and-level-actions.md)
 - **06 Interviewer prompt pitched to depth and technical level** (blocked by 01)
   - Ticket: `.grill-room/depth-and-technical-level/issues/06-prompt-builder-depth-and-level.md`
   - Brief: [`.grill-room/depth-and-technical-level/briefs/06-prompt-builder-depth-and-level.md`](briefs/06-prompt-builder-depth-and-level.md)
 
+### Wave 3
+
+- **03 Readiness takes depth; Sharpening takes depth and level** (blocked by 01, 06)
+  - Ticket: `.grill-room/depth-and-technical-level/issues/03-readiness-and-sharpening-read-depth-and-level.md`
+  - Brief: [`.grill-room/depth-and-technical-level/briefs/03-readiness-and-sharpening-read-depth-and-level.md`](briefs/03-readiness-and-sharpening-read-depth-and-level.md)
+- **07 Spec names the depth and the spec check's bar follows it** (blocked by 01, 06)
+  - Ticket: `.grill-room/depth-and-technical-level/issues/07-spec-check-depth-bar.md`
+  - Brief: [`.grill-room/depth-and-technical-level/briefs/07-spec-check-depth-bar.md`](briefs/07-spec-check-depth-bar.md)
+
 ### Wave 4
+
+- **04 Actions to read and change depth and level, with re-judge, queuing, done withdrawal and stale marking** (blocked by 01, 02, 03, 06)
+  - Ticket: `.grill-room/depth-and-technical-level/issues/04-depth-and-level-actions.md`
+  - Brief: [`.grill-room/depth-and-technical-level/briefs/04-depth-and-level-actions.md`](briefs/04-depth-and-level-actions.md)
+
+### Wave 5
 
 - **05 Setup step at session creation and the mid-grill settings control** (blocked by 01, 04)
   - Ticket: `.grill-room/depth-and-technical-level/issues/05-setup-step-and-settings-control-ui.md`
   - Brief: [`.grill-room/depth-and-technical-level/briefs/05-setup-step-and-settings-control-ui.md`](briefs/05-setup-step-and-settings-control-ui.md)
-- **07 Spec names the depth and the spec check scales its builder-alone bar** (blocked by 01)
-  - Ticket: `.grill-room/depth-and-technical-level/issues/07-spec-check-depth-bar.md`
-  - Brief: [`.grill-room/depth-and-technical-level/briefs/07-spec-check-depth-bar.md`](briefs/07-spec-check-depth-bar.md)
 
-### Wave 5
+### Wave 6
 
 - **09 Record ADRs from suggestions** (blocked by 01, 02, 03, 04, 05, 06, 07, 08; self-contained: delegate it from its ticket file; it has no brief)
   - Ticket: `.grill-room/depth-and-technical-level/issues/09-record-adrs-from-suggestions.md`
@@ -168,7 +170,7 @@ Every ticket is reviewed by a second, fresh-context agent before it can be merge
 - **01 Owner profile table, session owner reference, depth columns and migration** (`.claude/rules/worktrees.md:81`)
 - **03 Readiness takes depth; Sharpening takes depth and level** (`.claude/rules/worktrees.md:81`)
 - **06 Interviewer prompt pitched to depth and technical level** (`.claude/rules/worktrees.md:81`)
-- **07 Spec names the depth and the spec check scales its builder-alone bar** (`.claude/rules/worktrees.md:81`)
+- **07 Spec names the depth and the spec check's bar follows it** (`.claude/rules/worktrees.md:81`)
 
 Each of the two reviewers takes one lens:
 

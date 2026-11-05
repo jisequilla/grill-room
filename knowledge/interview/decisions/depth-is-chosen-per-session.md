@@ -29,8 +29,8 @@ Both values can change at any round and apply from the next one; cards already a
 - after a spec exists, also marks the spec, its check, the tickets, the builder briefs and HANDOFF.md stale;
 - after round 1 leaves the readiness judgment as it was, recording the depth it was made at. Judgments from before depth existed carry none, and the panel says so.
 
-Readiness reads depth and scales what counts as ready, still warning and never blocking.[^depth]
+Readiness reads depth and scales what counts as ready, still warning and never blocking. At proof of concept, its server check accepts a ready verdict with no evidence and up to 8 unknowns, though an objective is still required. At the other two depths the check is unchanged, and the finer difference between them lives in the readiness prompt.[^depth]
 
 Why: depth describes the idea, not the person, so the same owner can want a proof of concept for one idea and a full spec for another. Sharpening runs only for a not-ready idea and readiness has already judged by the time its panel shows, so only a step at creation reaches every owner before anything is judged. A proof-of-concept owner sent to Sharpening over a full-spec gap is the over-grilling this exists to stop.[^depth]
 
-[^depth]: Session on depth and technical level before the grill, choices 1, 3, 5, 9, 10, 15, 19, 20, 24-28, 31, 33, 34, 37, 39 and 40 ([fragment](/_fragments/2026-11-04-session-depth-and-level/fragment.md)).
+[^depth]: Session on depth and technical level before the grill, choices 1, 3, 5, 9, 10, 15, 19, 20, 24-28, 31, 33, 34, 37, 39, 40, 48 and 49 ([fragment](/_fragments/2026-11-04-session-depth-and-level/fragment.md)).

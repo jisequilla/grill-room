@@ -15,7 +15,7 @@ ingested: true
 in_git: true
 material:
   - file: material/acta.md
-    sha256: 253ef6f677da523fc10eb08866e88946e27f4bd1e0563010b485c3d5bc5d62e7
+    sha256: 19c22dfc2a4ad8823415e774bdccad5403056b617b6414bea6cad01bbcdaaf9c
 ---
 
 # Session on depth and technical level before the grill
@@ -28,3 +28,5 @@ Working bead `gr-2sw`, Claude ran the grill through the Grill Room app with the 
 * **2026-11-04 · Ingestion**: Four decisions in [Interview](/interview/index.md), [Delivery](/delivery/index.md) and [Product](/product/index.md), two Terms, and the use case and role they change.
 * **2026-11-04 · Capture**: Choices 36 to 43, the open findings and ticket 01's pre-flight questions, added to the record.
 * **2026-11-04 · Ingestion**: Into the depth, interview and technical-level decisions.
+* **2026-11-05 · Capture**: Choices 44 to 53, from the pre-flight of the second wave, added to the record.
+* **2026-11-05 · Ingestion**: Into the depth, interview, spec-check and technical-level decisions.

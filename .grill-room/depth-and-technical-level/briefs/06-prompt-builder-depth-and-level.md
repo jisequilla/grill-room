@@ -4,7 +4,7 @@ You are implementing ticket 06 of "Depth and technical level before the grill". 
 
 ## Step 0: confirm your base
 
-Your worktree was created from `origin/main`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries, are present. If any is missing, stop and report; do not recreate them.
+Your worktree was created from `origin/main`. Before anything else, confirm that the existing files this ticket builds on, named under File boundaries and Builds on, are present. If any is missing, stop and report; do not recreate them.
 
 The bundle is committed in this repository, so your worktree has it. Read the spec at `docs/specs/depth-and-technical-level/spec.md` and your ticket at `.grill-room/depth-and-technical-level/issues/06-prompt-builder-depth-and-level.md`, relative to the repository root in your worktree.
 
@@ -14,13 +14,85 @@ Blocked by: 01 (merged before this brief was delegated)
 
 ### 06 Interviewer prompt pitched to depth and technical level
 
-Add `depth` and `technicalLevel` inputs to `buildPrompt` in `grill-room/server/interviewer/prompt.ts` and `grill-room/server/interviewer/types.ts`; `grill-room/server/turn.ts` reads depth from the session and level live via `getTechnicalLevel`, falling back to `DEFAULT_TECHNICAL_LEVEL` when null. Export the level prompt fragment so Sharpening (ticket 3) reuses it.
+Give the interviewer the session's depth and the owner's live technical level, and pitch the grill-round prompt to both. When the owner accepts or picks the choice labelled `Leave it to the builder`, the app records a builder's call. This ticket owns the shared pieces that tickets 03 and 07 import, so it defines them and they never do. Every name below is exact.
 
-Depth section: proof of concept skips scale, edge-case and operations branches and proposes done once the core thing to try is settled; first working version opens edge-case branches, skips scale and operations, and proposes done when every user-facing flow and its data are settled with technology and operations allowed as builder's calls; full spec opens everything and holds done until nothing is left to the builder's guesswork.
+- **Context fields**, in `grill-room/server/interviewer/types.ts`: `InterviewContext` gains `depth?: Depth` and `technicalLevel?: TechnicalLevel | null`, both optional, so every context literal that does not set them still compiles.
+- **The label**, `LEAVE_IT_TO_THE_BUILDER = "Leave it to the builder"`, is exported from `grill-room/shared/session-constants.ts`, because the server's answer path reads it too. `prompt.ts` imports it and re-exports it.
+- **Exported constants**, in `grill-room/server/interviewer/prompt.ts`:
+  - `DONE_WHILE_ASKED_RULE` = ``A decision already in the tree, a technology decision included, must still be answered or set aside before `done`: never propose `done` while one would still be asked.``;
+  - `DEPTH_SECTIONS: Record<Depth, string>` and `LEVEL_SECTIONS: Record<TechnicalLevel, string>`, with the texts below. Each `DEPTH_SECTIONS` value ends with `DONE_WHILE_ASKED_RULE`. The two non-builder `LEVEL_SECTIONS` values interpolate `LEAVE_IT_TO_THE_BUILDER`.
 
-Level section: builder keeps today's wording; technical-not-building keeps technical wording but phrases recommendations as consequences and recommends 'Leave it to the builder' for pure technology choices with no owner-visible consequence; not-technical uses plain wording (no paths or product names in card bodies) with the same recommendation shape. Technology cards are never suppressed; the interviewer never records its own recommendation as settled. Extend `grill-room/server/interviewer/fake.ts` to honour both inputs.
+  | Constant | Text |
+  |---|---|
+  | `DEPTH_SECTIONS["proof-of-concept"]` | `## How deep to grill: a proof of concept` / blank / ``The owner wants a proof of concept: the smallest thing that tries the idea. Do not propose decisions about scale, edge cases or operations (hosting, monitoring, backups, on-call): the builder makes those calls. Propose `done` once the core thing to try is settled.`` + space + `DONE_WHILE_ASKED_RULE` |
+  | `DEPTH_SECTIONS["first-working-version"]` | `## How deep to grill: a first working version` / blank / ``The owner wants a first working version that real users can use. Ask about edge cases: odd inputs, empty states and failures a user would meet. Do not propose decisions about scale or operations (hosting, monitoring, backups, on-call): the builder makes those calls. Still ask every technology decision. Propose `done` once every user-facing flow and the data it keeps are settled.`` + space + `DONE_WHILE_ASKED_RULE` |
+  | `DEPTH_SECTIONS["full-spec"]` | `## How deep to grill: a full spec` / blank / ``The owner wants a full spec. Open every branch, scale, edge cases and operations included. Propose `done` only when nothing is left to the builder's guesswork.`` + space + `DONE_WHILE_ASKED_RULE` |
+  | `LEVEL_SECTIONS["builder"]` | `## The owner's technical level: builder` / blank / `The owner builds software and makes the technology calls. Keep technical wording, and name technologies, paths and products where they help.` |
+  | `LEVEL_SECTIONS["technical-not-building"]` | `## The owner's technical level: technical, not building` / blank / ``The owner follows technical talk but will not build this. Keep technical wording, but phrase every recommendation by its consequences for the owner: cost, speed, lock-in, what users see. For a pure technology choice with no consequence the owner would see, offer a choice labelled exactly `${LEAVE_IT_TO_THE_BUILDER}` and point `recommendedChoice` at it. Still ask every technology question, and still show the owner every choice whose consequence they would see. Never treat your recommendation as the owner's answer: only the owner's answer settles a decision.`` |
+  | `LEVEL_SECTIONS["not-technical"]` | `## The owner's technical level: not technical` / blank / ``The owner is not technical. Write every card in plain words: no file paths, and no product or technology names in a card's title or body unless the idea itself uses them. Put every technology question as its consequences for the owner: cost, speed, lock-in, what users see. For a pure technology choice with no consequence the owner would see, offer a choice labelled exactly `${LEAVE_IT_TO_THE_BUILDER}` and point `recommendedChoice` at it. Still ask every technology question, and still show the owner every choice whose consequence they would see. Never treat your recommendation as the owner's answer: only the owner's answer settles a decision.`` |
 
-Judged by: prompt tests asserting each depth and level section per value (not exact wording); a fake scenario where a not-technical owner's technology card recommends builder's call while a builder's does not.
+  "/ blank /" means a `\n\n` between the heading line and the paragraph.
+- **Where they render.** A section renders only when its field is set. A context with no `depth` gets no depth section, and one whose `technicalLevel` is absent or null gets no level section, so the prompt for that kind is exactly today's.
+  - The `propose-round` task (`renderTask` in `prompt.ts`) appends `DEPTH_SECTIONS[depth]` and then `LEVEL_SECTIONS[technicalLevel]`, after its closing paragraph about `unknown`, `deferred` and `prototype-flagged`.
+  - The `review-stale` task appends `LEVEL_SECTIONS[technicalLevel]` only. A re-ask writes a card's title, body, choices and recommendation, so it is worded to the level. It decides no branch and no `done`, so it gets no depth section.
+  - `find-superseded` gets neither. It writes answers in the loose end's own terms and restatements in the owner's own words, never a card for the owner. `renderContext` gets neither, because the consistency prompt renders it too.
+  - The readiness, sharpening, spec and consistency prompts are not this ticket's: 03 and 07 add theirs, importing these constants where they reuse them.
+- **The actions read both values once per call, before the interviewer turn.** `depth` is `session.depth`, never `pendingDepth`. `technicalLevel` is `(await getTechnicalLevel(session.ownerId)) ?? DEFAULT_TECHNICAL_LEVEL`. This ticket needs nothing from ticket 02.
+  - `propose` in `grill-room/actions/request-next-round.ts` reads them before `askUntilAccepted` and puts both into its `propose-round` context literal.
+  - `runDueStaleReviews` in `grill-room/server/stale-review.ts` reads the level once, after it loads the session and before any review's `askUntilAccepted`, and puts it into the `review-stale` context literal. That literal gets no depth.
+- **What a first working version allows as builder's calls.** Technology cards are still asked and never hidden. For the two non-builder levels, a pure technology choice recommends a literal choice labelled `Leave it to the builder`, with `recommendedChoice` at its index. The owner's answer records the builder's call, as the next bullet says; the interviewer never records one. At a proof of concept, "skips scale, edge-case and operations branches" means the interviewer does not propose those decisions.
+- **Accepting that choice is choosing the builder's call.** One rule: when the owner accepts the recommendation and the recommended choice is labelled exactly `Leave it to the builder`, or gives an own answer equal to the label of an offered choice labelled exactly that, the decision is recorded as a builder's call. That is exactly what the builder's-call disposition writes: `answerKind` `dispositioned`, `dispositionTarget` `builders-call`, `settledAt` now. The answer text (the recommendation's reasoning, or the label) is kept as its note.
+  - New pure predicate in `grill-room/server/tree.ts`: `picksLeaveItToTheBuilder(decision: { offeredChoicesJson: string; choiceRationalesJson: string; recommendedChoice: number | null }, kind: DecisionAnswerKind, answer: string | null): boolean`. It reads the choices with `parseChoices`. `accepted-recommendation` matches when the label at `recommendedChoice`, trimmed, equals `LEAVE_IT_TO_THE_BUILDER`. `own-answer` matches when the answer, trimmed, equals it and an offered choice's trimmed label equals it too. Labels are compared exactly and case-sensitively, never by containment, as `matchingChoice` in `server/export.ts` compares them. Every other kind returns false.
+  - The seam is `settle` in `grill-room/server/answer-change.ts`, the one function every answer write goes through: `submit-round` (accepted recommendations and own answers in a round), `answer-decision` (an own answer to a loose end) and an accepted supersession all call it. Its `answerState(prior)` applies the predicate to the decision as it stood, and on a match writes the builder's-call state in place of the given kind. Nothing else about `settle` changes: history, lapsed proposals, withdrawn claims and the spec marked not current happen as for any answer. Update the `settle` row of the module's header table to say so.
+  - The builder's call then reaches the spec the way every builder's-call disposition does: `decisionSnapshots` sends it to synthesis with answer kind `builders-call` (`portAnswerKind` in `server/turn.ts`). No export code changes.
+- **Fixture.** `grill-room/server/interviewer/test-fixtures.ts` gains `aReviewStaleRequest(overrides: Partial<ReviewStaleRequest> = {})`, modelled on `aProposeRoundRequest`. This ticket owns any new fixture there.
+- A level change never touches done state. That is already the case, and this ticket does no work on it.
+
+The fake interviewer (`grill-room/server/interviewer/fake.ts`) is a scripted queue that ignores the prompt, so no test here claims to show a prompt's effect through it. It is used only to capture the request an action sends.
+
+#### Behaviour
+
+`prompt(kind, ctx)` is `buildPrompt` of that kind's fixture with `context: aContext(ctx)`. "Contains X and no other value" means `toContain(X)`, plus `not.toContain` for each other value of the same constant.
+
+| # | Input | Expected | Mutation it catches |
+|---|---|---|---|
+| P1 | `prompt("propose-round", { depth: d })`, for each of the three depths | contains `DEPTH_SECTIONS[d]` and no other `DEPTH_SECTIONS` value | one depth text for all three; a swapped mapping |
+| P2 | `prompt("propose-round", { technicalLevel: l })`, for each of the three levels | contains `LEVEL_SECTIONS[l]` and no other `LEVEL_SECTIONS` value | one level text for all three; a swapped mapping |
+| P3 | `prompt("propose-round", {})` and `prompt("propose-round", { depth: "full-spec", technicalLevel: null })` | the first contains none of the six section values; the second contains `DEPTH_SECTIONS["full-spec"]` and no `LEVEL_SECTIONS` value | a section rendered by default when its field is absent; a null level read as the default |
+| P4 | `prompt("review-stale", { depth: "proof-of-concept", technicalLevel: "not-technical" })` | contains `LEVEL_SECTIONS["not-technical"]` and no `DEPTH_SECTIONS` value | review-stale left unpitched; review-stale given the depth |
+| P5 | `find-superseded`, `synthesize-spec`, `assess-readiness` and `check-consistency` prompts (the last built inline: no fixture exists for it), each with `{ depth: "proof-of-concept", technicalLevel: "not-technical" }` | none contains any `DEPTH_SECTIONS` or `LEVEL_SECTIONS` value | sections placed in `renderContext` or another shared renderer |
+| P6 | the section constants | (a) `LEVEL_SECTIONS["technical-not-building"]` and `LEVEL_SECTIONS["not-technical"]` each contain `` `Leave it to the builder` `` (with backticks), `Still ask every technology question, and still show the owner every choice whose consequence they would see.` and `Never treat your recommendation as the owner's answer: only the owner's answer settles a decision.`; (b) `DEPTH_SECTIONS["first-working-version"]` contains `Still ask every technology decision.`; (c) `LEVEL_SECTIONS["builder"]` does not contain `LEAVE_IT_TO_THE_BUILDER` | planted bug: drop the "Still ask every technology …" sentences (the rule that technology cards are never hidden) or the "Never treat your recommendation …" sentence (the rule that the interviewer never records its recommendation); also the builder told to leave technology to the builder, and the label drifting from the constant |
+| P7 | `DEPTH_SECTIONS` values | every one ends with `DONE_WHILE_ASKED_RULE` | a depth text that lets `done` pass over a card still on the frontier, which the server refuses (S3) |
+| P8 | `messages.workspace.targetBuildersCall` from `grill-room/app/i18n/en-US.ts` | `toBe(LEAVE_IT_TO_THE_BUILDER)` | the set-aside dialog's label for the builder's call drifting from the card choice that records one |
+| S1 | Seam: a proposed decision with choices `[{ label: "Use Postgres", rationale: "…" }, { label: LEAVE_IT_TO_THE_BUILDER, rationale: "…" }]`, `recommendedChoice` 1, `ask` true, no dependencies | `recommendedChoiceRejection` returns null, and `validateProposal([], [it])` is `ok` | a `recommendedChoiceRejection` in `server/tree.ts` tightened so it refuses the Leave-it choice (for example refusing a label equal to `LEAVE_IT_TO_THE_BUILDER`, or index 1 of 2) |
+| S2 | Seam: `existing` holds only settled decisions (no scale, edge-case or operations decision was ever added); `validateProposal(existing, [], { done: true })` | `ok`, no reasons | a done shape the depth texts describe being refused |
+| S3 | Seam: `existing` holds one never-answered decision on the frontier, a technology choice; `validateProposal(existing, [], { done: true })` | not `ok`; the reasons contain `would still be asked in a round` | a server check loosened so that the depth texts' `done` would skip a technology card |
+| A1 | Action: a session with `depth` `proof-of-concept` and owner `local-owner` whose profile level is `builder`; `request-next-round` with the fake scripted for one round | the `propose-round` request's `context.depth` is `proof-of-concept` and its `context.technicalLevel` is `builder` | the action not passing either value |
+| A2 | As A1, but the `local-owner` profile has a null level | `context.technicalLevel` is `not-technical` (`DEFAULT_TECHNICAL_LEVEL`) | a null passed through instead of the default |
+| A3 | A session with `depth` `first-working-version` and `pending_depth` `full-spec` | `context.depth` is `first-working-version` | reading `pendingDepth` |
+| A4 | A session whose `owner_id` is set directly to `u-ana`, with ana's level `technical-not-building` and the `local-owner` level `builder` | `context.technicalLevel` is `technical-not-building` | reading `LOCAL_OWNER_ID` instead of `session.ownerId` |
+| A6 | Action: owner level `technical-not-building`; the fake scripted with a refused proposal (`treeRuleViolation.offFrontier()`) and then a valid round, wrapped so that before its second `proposeRound` call it runs `setTechnicalLevel(LOCAL_OWNER_ID, "builder")` | two `propose-round` requests, both with `context.technicalLevel` `technical-not-building` | the level read inside `ask`, once per attempt |
+| B1 | `picksLeaveItToTheBuilder` with choices `["Use Postgres", "Leave it to the builder"]`, `recommendedChoice` 1, kind `accepted-recommendation`, answer `"The builder knows which database engine fits."` | true | the accepted-recommendation case not handled |
+| B2 | same choices, kind `own-answer`, answer `" Leave it to the builder "` | true | the own-answer case not handled; no trimming |
+| B3 | same choices; (a) `accepted-recommendation` with `recommendedChoice` 0; (b) `own-answer` `"Use Postgres"` | false for both | every accepted or picked choice recorded as a builder's call |
+| B4 | choices `["Use Postgres", "Leave it to the builder to decide"]`, `recommendedChoice` 1, `accepted-recommendation`; and the B1 choices with `own-answer` `"leave it to the builder"` | false for both | matching by containment or ignoring case |
+| B5 | choices `["Use Postgres"]`, `own-answer` `"Leave it to the builder"` | false | an own answer matched with no such choice offered |
+| B6 | the B1 choices, `recommendedChoice` 1, kinds `unknown`, `deferred` and `pushed-back`, answer `"Leave it to the builder"` | false for each | a steering move turned into a settled builder's call |
+| B10 | choices `["Leave it to the builder", "Use Postgres"]`, `recommendedChoice` 1, `own-answer` `"Leave it to the builder"` | true | an own answer compared only with the recommended choice's label |
+| B11 | choices `["Use Postgres", " Leave it to the builder "]` (padded label), `recommendedChoice` 1; (a) `accepted-recommendation`; (b) `own-answer` `"Leave it to the builder"` | true for both | an offered label not trimmed |
+| B12 | the B1 choices, `recommendedChoice` null, `accepted-recommendation`, answer `"Leave it to the builder"` | false | an accepted recommendation that falls back to scanning the choices |
+| B7 | `settle` on a frontier decision with the B1 choices and `recommendedChoice` 1, `{ answer: "R", kind: "accepted-recommendation" }` | the row has `answerKind` `dispositioned`, `dispositionTarget` `builders-call`, `currentAnswer` `R`, `settledAt` the given `now` | `settle` not applying the predicate |
+| B8 | `settle` on the same decision with `{ answer: "Use Postgres", kind: "own-answer" }` | `answerKind` `own-answer`, `dispositionTarget` null | an ordinary answer rewritten |
+| B9 | Action: a round whose card has the B1 choices and `recommendedChoice` 1; `save-draft-answer` with `accepted-recommendation`, then `submit-round` | the decision reads `dispositioned` / `builders-call`, and `decisionSnapshots` of the session's rows (what `synthesize-spec` sends) gives it answer kind `builders-call` | the round path bypassing the rule; the call not reaching the spec's input |
+| A5 | The stale-review path: owner level `technical-not-building`; a reopen whose stale review re-asks a decision | the `review-stale` request's `context.technicalLevel` is `technical-not-building` and its `context.depth` is undefined | the review-stale literal not carrying the level, or carrying the depth |
+
+Judged by:
+- P1–P8 and S1–S3 in the new `grill-room/server/interviewer/prompt-depth-level.test.ts`, asserting through the exported constants with `toContain` as `grill-room/server/interviewer/instructions.test.ts` does, never a snapshot; S2 and S3 build `KeyedTreeDecision` literals as `grill-room/server/interviewer/fake.test.ts` does;
+- A1–A4 and A6 in `grill-room/actions/request-next-round.test.ts`, reading `interviewer.requests` as its test "opens the first round from the interviewer's proposal" does; A6 wraps the fake with `setInterviewer({ ...fake, proposeRound })` and counts calls, as that file's attempt-recording test does;
+- A5 in `grill-room/server/stale-review.test.ts`, through its `reopenShapeAndReAskStorage` helper, changed to return the fake it scripts;
+- B1–B8 and B10–B12 in `grill-room/server/answer-change.test.ts`; B9 in `grill-room/actions/submit-round.test.ts`;
+- "The interviewer never records a builder's call" holds because it never records any answer: the planted bug "a proposed card's recommendation is stored as its answer when the round opens" fails the existing `grill-room/actions/request-next-round.test.ts` › "opens the first round from the interviewer's proposal", which expects every new card `frontier` with `draft` null. That test stays unedited;
+- `pnpm test`, `pnpm typecheck` and `pnpm lint` green.
 
 ## File boundaries
 
@@ -30,57 +102,93 @@ Files to create:
 
 Files to edit:
 
-- `grill-room/server/interviewer/prompt.ts`
 - `grill-room/server/interviewer/types.ts`
-- `grill-room/server/interviewer/fake.ts`
+- `grill-room/server/interviewer/prompt.ts`
 - `grill-room/server/interviewer/test-fixtures.ts`
 - `grill-room/actions/request-next-round.ts`
+- `grill-room/actions/request-next-round.test.ts`
+- `grill-room/server/stale-review.ts`
+- `grill-room/server/stale-review.test.ts`
+- `grill-room/shared/session-constants.ts`
+- `grill-room/server/tree.ts`
+- `grill-room/server/answer-change.ts`
+- `grill-room/server/answer-change.test.ts`
+- `grill-room/actions/submit-round.test.ts`
 
 Existing files it builds on:
 
-- `grill-room/server/turn.ts:352-352`
-- `grill-room/server/interviewer/prompt.ts:1652-1689`
+- `grill-room/server/interviewer/types.ts:114-141`
+- `grill-room/server/interviewer/prompt.ts:268-355`
+- `grill-room/actions/request-next-round.ts:293-320`
+- `grill-room/server/stale-review.ts:164-185`
+- `grill-room/server/stale-review.ts:244-262`
+- `grill-room/server/owner-profiles.ts:41-49`
+- `grill-room/server/tree.ts:720-732`
+- `grill-room/server/tree.ts:1072-1102`
+- `grill-room/server/tree.ts:525-543`
+- `grill-room/server/answer-change.ts:141-173`
+- `grill-room/server/turn.ts:239-247`
 
 ## Codebase facts
 
-- buildPrompt returns the readiness, sharpen, scout, handoff and consistency prompts by request kind, and builds the interview prompt for the rest from interviewerInstructions, renderContext and renderTask. (`grill-room/server/interviewer/prompt.ts:1652-1689`)
-- The propose-round task ends with the `done` rule ('null unless the frontier is genuinely empty and nothing is left silently assumed'), which is the line the depth-dependent done guidance changes. (`grill-room/server/interviewer/prompt.ts:324-325`)
-- renderContext is also used by the consistency prompt, so a depth or level section placed there would reach checks the spec says must not vary with level; the section belongs in the propose-round task instead. (`grill-room/server/interviewer/prompt.ts:151-194`)
-- InterviewContext has no depth or technicalLevel today, and the app builds that context separately in each action, so the grill-round value comes from request-next-round's context literal rather than from turn.ts. (`grill-room/server/interviewer/types.ts:114-141`)
-- request-next-round builds the propose-round context from the session row (sessionId, idea, title, model, answeringMode, docsFolder, decisions, projectContext), where depth and the live technical level are added. (`grill-room/actions/request-next-round.ts:307-320`)
-- The fake interviewer is a scripted queue that records every request in `requests`, so it does not interpret depth or level itself; a test asserts the request it received carries both, and a scenario scripts the builder's-call recommendation. (`grill-room/server/interviewer/fake.ts:210-217`)
-- aContext in test-fixtures is the default InterviewContext every prompt test builds on, so new optional fields need defaults there only if made required. (`grill-room/server/interviewer/test-fixtures.ts:54-69`)
-- The ticket text says turn.ts reads depth, but turn.ts holds runTurn, askUntilAccepted and projectContextFor and does not build the interview context. (`grill-room/server/turn.ts:100-186`)
-- Prompt tests exist that call buildPrompt with fixtures (sharpening.test.ts), the model for the per-value section tests. (`grill-room/server/sharpening.test.ts:1-24`)
-- Ticket 3 is not a blocker of this ticket and also edits prompt.ts and types.ts, so the two edits must be merged and the level fragment defined once. (`grill-room/server/interviewer/prompt.ts:917-963`)
-- The suite collects server/**/*.test.ts through vitest --run default discovery. (`grill-room/package.json:16`)
-- Repository rule: Each acceptance line (each depth section, each level section, builder's-call recommendation for a not-technical owner) names a test that fails with the change reverted. (`.claude/rules/worktrees.md:28`).
+- `InterviewContext` has no depth or technical level today. Every action builds its own context literal, so optional fields leave the literals this ticket does not touch compiling. (`grill-room/server/interviewer/types.ts:114-141`)
+- `buildPrompt` builds readiness, sharpening, scout, handoff-scout and consistency prompts by request kind, and every other kind from `interviewerInstructions`, `renderContext` and `renderTask`. (`grill-room/server/interviewer/prompt.ts:1652-1689`)
+- `renderContext` is also rendered by the consistency prompt, so a section placed there would reach a prompt that must not vary with level. (`grill-room/server/interviewer/prompt.ts:151-194`, `grill-room/server/interviewer/prompt.ts:1626-1644`)
+- The `propose-round` task lists the result fields, ends with the `done` rule and a paragraph on `unknown`, `deferred` and `prototype-flagged`. The sections go after that paragraph. (`grill-room/server/interviewer/prompt.ts:268-331`)
+- The `review-stale` task asks for a re-ask's `title`, `body`, `choices`, `recommendedChoice` and `recommendedAnswer`, which is card wording. (`grill-room/server/interviewer/prompt.ts:333-355`)
+- The `find-superseded` task asks for answers "in the loose end's own terms", replacement reasons, deferrals and restatements "in the owner's words", never a card for the owner. (`grill-room/server/interviewer/prompt.ts:357-444`)
+- The grill round's context literal is in `propose` in `request-next-round.ts`, built inside `ask` on every attempt. Read depth and level before `askUntilAccepted`, not inside `ask`. (`grill-room/actions/request-next-round.ts:293-320`)
+- `runDueStaleReviews` loads the session once, and `reviewOne` builds the `review-stale` literal inside `ask`. (`grill-room/server/stale-review.ts:164-185`, `grill-room/server/stale-review.ts:244-262`)
+- `getTechnicalLevel(userId)` returns the level or null and creates no row. (`grill-room/server/owner-profiles.ts:41-49`)
+- `sessions.ownerId` defaults to `local-owner`; `sessions.depth` defaults to `first-working-version`; `sessions.pendingDepth` is nullable. (`grill-room/server/db/schema.ts:195-199`)
+- `DEFAULT_TECHNICAL_LEVEL` is `not-technical`, and `TECHNICAL_LEVELS`, `DEPTHS` and their types are exported from the shared constants. (`grill-room/shared/session-constants.ts:165-184`)
+- `recommendedChoiceRejection` accepts any index inside the choices, and `validateProposal` runs it on every proposed decision. (`grill-room/server/tree.ts:720-732`, `grill-room/server/tree.ts:914-919`)
+- `validateProposal` with `done` refuses while any never-answered or deferred decision would sit on the frontier, with "would still be asked in a round", and while the proposal itself asks anything. (`grill-room/server/tree.ts:1072-1102`)
+- A `KeyedTreeDecision` literal for `validateProposal` tests looks like the `existing` tree in `fake.test.ts`. (`grill-room/server/interviewer/fake.test.ts:744-766`)
+- The fake records every request it is given in `requests` and otherwise only replays its scripted queue. (`grill-room/server/interviewer/fake.ts:210-217`)
+- Prompt tests import exported constants from `prompt.ts` and assert with `toContain`, no snapshots. (`grill-room/server/interviewer/instructions.test.ts:14-24`)
+- `aContext` is the default `InterviewContext`, and `aProposeRoundRequest` is the fixture `aReviewStaleRequest` copies. (`grill-room/server/interviewer/test-fixtures.ts:54-83`)
+- An action test reads the captured request from `interviewer.requests[0]`. (`grill-room/actions/request-next-round.test.ts:275-305`)
+- `reopenShapeAndReAskStorage` scripts a `review-stale` re-ask, then reopens, re-answers and submits; it returns nothing today. (`grill-room/server/stale-review.test.ts:209-239`)
+- Every answer write goes through `answer-change.ts`. `settle` writes `currentAnswer`, `answerKind`, `dispositionTarget` (only for `dispositioned`) and `settledAt` inside `answerState(prior)`, which receives the decision row as it stood. (`grill-room/server/answer-change.ts:1-26`, `grill-room/server/answer-change.ts:141-173`)
+- `settle` is called by `submit-round` for every card's draft, by `answer-decision` with `own-answer`, by `disposition-decision` with `dispositioned` and its target, and by an accepted supersession with `own-answer`. (`grill-room/actions/submit-round.ts:79-92`, `grill-room/actions/answer-decision.ts:58-62`, `grill-room/actions/disposition-decision.ts:75-79`, `grill-room/server/proposal.ts:413-421`)
+- An accepted recommendation's draft text is the recommendation's reasoning, not the label, so the choice is named by `recommendedChoice`. An own answer names a choice when its trimmed text equals the choice's trimmed label. Both readings are `server/export.ts`'s. (`grill-room/actions/save-draft-answer.ts:57-60`, `grill-room/server/export.ts:541-557`)
+- `parseChoices` reads a row's `offeredChoicesJson` and `choiceRationalesJson`; `recommendedChoice` is an integer column on decisions. (`grill-room/server/tree.ts:525-543`, `grill-room/server/db/schema.ts:313-326`)
+- A builder's-call disposition reaches the interviewer, and so the spec's synthesis, as answer kind `builders-call` through `portAnswerKind` in `decisionSnapshots`, which `synthesize-spec` sends. (`grill-room/server/turn.ts:239-247`, `grill-room/server/turn.ts:260-300`, `grill-room/actions/synthesize-spec.ts:234`)
+- The set-aside dialog already labels the builder's-call target "Leave it to the builder". (`grill-room/app/i18n/en-US.ts:448`)
+- A test wraps the fake to act between attempts with `setInterviewer({ ...fake, proposeRound: ... })` and a call counter, and `treeRuleViolation.offFrontier()` scripts a refused first attempt. (`grill-room/actions/request-next-round.test.ts:3135-3153`, `grill-room/actions/request-next-round.test.ts:2873-2876`)
+- Tests import the en-US messages as `import messages from "@/i18n/en-US"` (the vitest `@` alias), and the builder's-call label is `messages.workspace.targetBuildersCall`. (`grill-room/app/lib/projects.test.ts:3`, `grill-room/vitest.config.ts:28`, `grill-room/app/i18n/en-US.ts:448`)
+- `answer-change.test.ts` tests `settle` against the real test database. (`grill-room/server/answer-change.test.ts:1-5`)
+- Repository rule: each acceptance line names a test that fails with the change reverted. (`.claude/rules/worktrees.md:28`)
+- Repository rule: a ticket that changes a model prompt and the server check enforcing it carries a seam test (S1–S3 here; the checks themselves are unchanged). (`.claude/rules/worktrees.md:29`)
 
 ## Builds on
 
-- Ticket 01: TECHNICAL_LEVELS, DEFAULT_TECHNICAL_LEVEL and DEPTHS constants, sessions.depth and getTechnicalLevel in server/owner-profiles.ts — ticket 01 adds `DEFAULT_TECHNICAL_LEVEL` to `grill-room/shared/session-constants.ts` — check: `grep -q DEFAULT_TECHNICAL_LEVEL grill-room/shared/session-constants.ts`
+- Ticket 01: `DEPTHS`, `Depth`, `TECHNICAL_LEVELS`, `TechnicalLevel` and `DEFAULT_TECHNICAL_LEVEL` in `grill-room/shared/session-constants.ts`, `sessions.depth`, `sessions.pendingDepth` and `sessions.ownerId` in `grill-room/server/db/schema.ts`, `getTechnicalLevel` in `grill-room/server/owner-profiles.ts`. Merged in PR #277. Check: `grep -q DEFAULT_TECHNICAL_LEVEL grill-room/shared/session-constants.ts && grep -q getTechnicalLevel grill-room/server/owner-profiles.ts`
 
 ## Proved by
 
 Test: `grill-room/server/interviewer/prompt-depth-level.test.ts`
 
 ```bash
-pnpm --dir grill-room exec vitest --run server/interviewer/prompt-depth-level.test.ts
+pnpm --dir grill-room exec vitest --run server/interviewer/prompt-depth-level.test.ts actions/request-next-round.test.ts server/stale-review.test.ts server/answer-change.test.ts actions/submit-round.test.ts
 ```
 
 ## Rules
 
 - Create and edit files only within the file boundaries above. If the ticket cannot be done inside them, stop and report instead of widening them.
 - Build test fixtures in the encoding production uses for the same data: when a Codebase fact states how a value is stored or sent, match it, and never encode a value twice (such as JSON.stringify into a JSON column).
+- Prove each Behaviour row by reverting the change it covers (or applying the mutation it names), watching its test fail, and restoring it.
+- Never claim a prompt's effect through the fake interviewer: it ignores the prompt.
 - Run git only inside your worktree. Never run git against another checkout, never commit directly on `main`, and never merge anything.
 - Commit on your worktree branch as you go.
 
 ## Verify
 
-From the repository root in your worktree, this must exit 0:
+From `grill-room/` in your worktree, each must exit 0. The ticket changes no UI, so e2e is not run.
 
 ```bash
-just check
+pnpm test && pnpm typecheck && pnpm lint
 ```
 
 ## Delivery
@@ -96,7 +204,7 @@ Report:
 - worktree path and branch;
 - the PR URL, or "push pending: gh account" with your commit hash;
 - commits and files changed;
-- the exact output of `just check`;
+- the exact output of the verify commands;
 - anything ambiguous, and anything this brief was missing.
 
 A separate reviewer reviews the work before any merge.

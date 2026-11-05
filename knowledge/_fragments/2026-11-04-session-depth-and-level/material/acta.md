@@ -77,3 +77,18 @@ Later the same day, after the bundle was merged, Claude put the five open findin
 41. The session's owner column, when no owner is given: "Default to local owner (Recommended)".
 42. A foreign key from the session's owner to the profile: "No foreign key (Recommended)".
 43. The local-owner profile row and the inheritance marker: "Always seed both (Recommended)".
+
+## Pre-flight of the second wave
+
+On 2026-11-05 the pre-flights of tickets 02, 03, 06 and 07 raised questions only the owner could settle. Claude had confirmed that the framework gives an action the signed-in user's email but not their user id.
+
+44. What the owner profile and a session's owner hold: "Look up auth user id (Recommended)".
+45. When a request counts as the fixed local owner: "AUTH_DISABLED only". With login on and no signed-in user, the action refuses.
+46. Who triggers moving later local sessions to the inheritor: "Any sign-in".
+47. Owner checks on the other actions that take a session id: "Later ticket (Recommended)".
+48. Readiness's server check by depth: "PoC drops evidence (Recommended)". Claude set the proof-of-concept limit on unknowns at 8, against 5.
+49. Sharpening finishing its open round after a ready re-judge, with no code driving Sharpening yet: "File a bead for it (Recommended)".
+50. How the spec check leaves more to the builder at lower depths: "Prompt only (Recommended)".
+51. How the spec names its depth: "App writes the line (Recommended)".
+52. Accepting the choice "Leave it to the builder": "Yes, record it (Recommended)".
+53. Replacing the framework's login with WorkOS AuthKit, which Claude found free at this scale but hosted and not made to sit behind Better Auth: "Drop it".

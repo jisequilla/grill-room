@@ -10,19 +10,19 @@ The bundle is committed in this repository, so your worktree has it. Read the sp
 
 ## The ticket
 
-Blocked by: 01, 02, 03 (merged before this brief was delegated)
+Blocked by: 01, 02, 03, 06 (merged before this brief was delegated)
 
 ### 04 Actions to read and change depth and level, with re-judge, queuing, done withdrawal and stale marking
 
 Add `grill-room/actions/set-session-depth.ts`, `grill-room/actions/set-owner-technical-level.ts` and `grill-room/actions/get-owner-profile.ts`, modelled on `grill-room/actions/set-session-answering-mode.ts`.
 
 `set-session-depth`:
-- Before round 1, no turn working: write depth, clear the readiness override ('Grill it as is'), and re-run readiness via ticket 3's path.
+- Before round 1, no turn working: write depth, clear the readiness override ('Grill it as is'), and re-run readiness through `assess-readiness` as ticket 03 leaves it, which judges at `session.depth` and records that depth with the judgment.
 - Before round 1, a turn working: write `sessions.pendingDepth` (latest value wins). In `grill-room/server/turn.ts`, when a pre-round-1 turn finishes and `pendingDepth` is set, move it to `depth`, clear it and the override, and run one re-judge.
 - After round 1: write depth; the stored judgment is untouched.
 - If the interviewer has proposed done, withdraw the done proposal so the frontier reopens on the next round request. If a spec, consistency check or tickets exist, mark them stale through `grill-room/server/stale-review.ts`; never regenerate automatically.
 
-`set-owner-technical-level` writes the profile via `setTechnicalLevel` for the current owner. `get-session` payload gains `depth`, `pendingDepth` and `technicalLevel` (live, null when unset).
+`set-owner-technical-level` writes the profile via `setTechnicalLevel` for the current owner, `await resolveOwnerId()` from ticket 02's `grill-room/server/current-owner.ts` (no argument). `get-session` payload gains `depth`, `pendingDepth` and `technicalLevel` (live via `getTechnicalLevel(session.ownerId)`, null when unset). The next interviewer turn reads the new values through ticket 06's `InterviewContext` fields `depth` and `technicalLevel`, which the actions fill from `session.depth` and the live level.
 
 Judged by: action tests for each depth branch, override clearing, latest-wins with a single re-judge, done proposal withdrawn with and without a spec, stale marks with no regeneration, and level write-back visible from a second session of the same owner.
 
@@ -53,7 +53,7 @@ Existing files it builds on:
 
 - `grill-room/actions/set-session-answering-mode.ts:8-26`
 - `grill-room/server/session-state.ts:39-69`
-- `grill-room/server/readiness.ts:293-337`
+- `grill-room/server/readiness.ts:296-341`
 - `grill-room/actions/reopen-decision.ts:114-116`
 - `grill-room/server/turn.ts:72-78`
 
@@ -63,21 +63,22 @@ Existing files it builds on:
 - Spec and ticket staleness is not in stale-review.ts, which handles stale decisions after a reopen; the spec is marked stale by markSpecNotCurrent in session-state.ts, and tickets are judged current against the spec's updatedAt. (`grill-room/server/session-state.ts:54-69`)
 - returnSessionToInterviewing sets state to interviewing and clears doneSummary, and marks the spec not current only when the prior state was confirmed, so withdrawing a done-proposed session does not itself touch the spec. (`grill-room/server/session-state.ts:39-52`)
 - reopen-decision already calls returnSessionToInterviewing for a non-interviewing session, the existing way a done proposal is withdrawn. (`grill-room/actions/reopen-decision.ts:114-116`)
-- The spec row carries current, ticketsGeneratedAt and the consistency stamps (consistencyCheckedFor, consistencyAttemptedFor, consistencySpecSha256), and tickets are current only while ticketsGeneratedAt is not earlier than the spec's updatedAt. (`grill-room/server/db/schema.ts:516-558`)
+- The spec row carries current, ticketsGeneratedAt and the consistency stamps (consistencyCheckedFor, consistencyAttemptedFor, consistencySpecSha256), and tickets are current only while ticketsGeneratedAt is not earlier than the spec's updatedAt. (`grill-room/server/db/schema.ts:558-600`)
 - runTurn is shared by every turn kind and ends by updating the session to idle at its last statement, which is the place a pending depth is moved to depth after a pre-round-1 turn. (`grill-room/server/turn.ts:174-185`)
 - The readiness logic is inline in assess-readiness's defineAction run with no exported core function, so turn.ts cannot call it without this ticket extracting one (as scout-project does with scoutProjectCore) or calling the action's run. (`grill-room/actions/assess-readiness.ts:27-153`)
 - Judging again already clears the 'Grill it as is' override, because the stored update sets readinessOverrideJson to null. (`grill-room/actions/assess-readiness.ts:123-137`)
-- failIfPastFirstRound refuses a judgment once a round exists (has-rounds) or while a turn is working (turn-working), and sessionHasRounds is the round-1 test. (`grill-room/server/readiness.ts:293-337`)
+- failIfPastFirstRound refuses a judgment once a round exists (has-rounds) or while a turn is working (turn-working), and sessionHasRounds is the round-1 test. (`grill-room/server/readiness.ts:296-341`)
 - get-session returns the row spread plus modelLocked and export retirement fields, so depth and pendingDepth arrive once the columns exist and technicalLevel must be added to this payload. (`grill-room/actions/get-session.ts:17-31`)
-- The sessions turnStatus column holds idle, working or failed and is what 'a turn is working' reads. (`grill-room/server/db/schema.ts:225-228`)
+- The sessions turnStatus column holds idle, working or failed and is what 'a turn is working' reads. (`grill-room/server/db/schema.ts:268-271`)
 - failIfTurnInProgress refuses with turn-in-progress when turnStatus is working. (`grill-room/server/turn.ts:72-78`)
 - Repository rule: Each depth branch (before round 1 idle, before round 1 working, after round 1, done proposed, spec exists) names a test that fails with the change reverted. (`.claude/rules/worktrees.md:28`).
 
 ## Builds on
 
-- Ticket 01: sessions.depth and sessions.pendingDepth columns — ticket 01 adds `pendingDepth` to `grill-room/server/db/schema.ts` — check: `grep -q pendingDepth grill-room/server/db/schema.ts`
-- Ticket 02: resolveOwnerId for the current owner — created by ticket 02 at `grill-room/server/current-owner.ts` — check: `grep -q resolveOwnerId grill-room/server/current-owner.ts`
-- Ticket 03: assess-readiness passing the session's depth and storing it with the judgment — ticket 03 adds `depth` to `grill-room/actions/assess-readiness.ts` — check: `grep -q depth grill-room/actions/assess-readiness.ts`
+- Ticket 01: `sessions.depth` and `sessions.pendingDepth` in `grill-room/server/db/schema.ts`, and `getTechnicalLevel`/`setTechnicalLevel` in `grill-room/server/owner-profiles.ts`. Merged in PR #277. Check: `grep -q pendingDepth grill-room/server/db/schema.ts && grep -q setTechnicalLevel grill-room/server/owner-profiles.ts`
+- Ticket 02: `resolveOwnerId(): Promise<string>` (no argument) and `OwnerNotResolvedError` in `grill-room/server/current-owner.ts`. Check: `grep -q "export async function resolveOwnerId()" grill-room/server/current-owner.ts`
+- Ticket 03: `assess-readiness` judging at `session.depth` (`reasonsToRefuseReadiness(result, idea, projectRoot, depth)`) and recording it (`storeReadiness(..., depth)`), in `grill-room/actions/assess-readiness.ts` and `grill-room/server/readiness.ts`. Check: `grep -q "session.depth" grill-room/actions/assess-readiness.ts`
+- Ticket 06: `depth?: Depth` and `technicalLevel?: TechnicalLevel | null` on `InterviewContext` in `grill-room/server/interviewer/types.ts`. Check: `grep -q "technicalLevel?:" grill-room/server/interviewer/types.ts`
 
 ## Proved by
 

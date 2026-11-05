@@ -19,8 +19,8 @@ state: in force
 
 # Depth sets the spec check's bar; technical level changes nothing downstream
 
-The [spec](/delivery/language/spec.md) names the session's [depth](/interview/language/depth.md), and the spec check reads it: at lower depths more may be left to the builder. [Tickets](/delivery/language/ticket.md) derive from the spec with no depth branch of their own. [Technical level](/interview/language/technical-level.md) changes nothing after the interview.[^depth]
+The [spec](/delivery/language/spec.md) names the session's [depth](/interview/language/depth.md), and the spec check reads it: at lower depths more may be left to the builder. The app writes a fixed sentence naming the depth into the spec's Further Notes, and the bar lives in the spec check's prompt: which findings it reports stays the model's judgment, and the server's check of a finding's shape is the same at every depth. [Tickets](/delivery/language/ticket.md) derive from the spec with no depth branch of their own. [Technical level](/interview/language/technical-level.md) changes nothing after the interview.[^depth]
 
 Why: without depth the check would flag gaps a proof-of-concept owner chose to leave. The spec and tickets are read by the builder whatever the owner's level, and the plain-words Summary and the "Left to the builder" section already serve a non-technical owner.[^depth]
 
-[^depth]: Session on depth and technical level before the grill, choices 7 and 13 ([fragment](/_fragments/2026-11-04-session-depth-and-level/fragment.md)).
+[^depth]: Session on depth and technical level before the grill, choices 7, 13, 50 and 51 ([fragment](/_fragments/2026-11-04-session-depth-and-level/fragment.md)).
