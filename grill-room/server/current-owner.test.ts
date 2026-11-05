@@ -22,9 +22,14 @@ useTestDatabase();
 
 let authTablesBuilt = false;
 beforeEach(async () => {
-  if (authTablesBuilt) return;
-  await applyMigrations(BETTER_AUTH_MIGRATIONS, "_better_auth_migrations");
-  authTablesBuilt = true;
+  if (!authTablesBuilt) {
+    await applyMigrations(BETTER_AUTH_MIGRATIONS, "_better_auth_migrations");
+    authTablesBuilt = true;
+  }
+  // The first reset in a file builds the schema, seed rows included; later
+  // resets truncate them. Every test starts from neither.
+  await getDb().delete(schema.ownerProfiles);
+  await getDb().delete(schema.migrationInheritance);
 });
 
 afterEach(() => {
