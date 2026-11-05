@@ -13,6 +13,7 @@ import { fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
+import { DEPTHS } from "../shared/session-constants.js";
 import { getDb, schema } from "./db/index.js";
 import {
   assessReadinessEvidenceItem,
@@ -52,6 +53,9 @@ const storedReadinessSchema = z.object({
   /** The scout report the judgment read, or null without a project or report.
    *  Absent on a judgment stored before this ticket, which reads as null. */
   scoutReportId: z.string().nullable().default(null),
+  /** The depth the judgment was made for. Absent or null on a judgment stored
+   *  before depths existed. */
+  depth: z.enum(DEPTHS).nullish(),
 });
 
 /** What `gr_sessions.readiness_json` holds. */
@@ -73,7 +77,7 @@ type ReadinessSessionWithReport = ReadinessSession &
  * one. Does not check a linked scout report's staleness — see
  * {@link currentReadiness}.
  */
-function parseStoredReadiness(session: ReadinessSession): StoredReadiness | null {
+export function parseStoredReadiness(session: ReadinessSession): StoredReadiness | null {
   if (!session.readinessJson) return null;
 
   let raw: unknown;

@@ -156,3 +156,36 @@ export const MAX_HANDOFF_SCOUT_TICKETS = 40;
 
 /** A grounded ticket names at most this many dependencies: one per blocker. */
 export const MAX_HANDOFF_SCOUT_BUILDS_ON = 15;
+
+/**
+ * How technical an owner says they are: building software themselves,
+ * technical but not building this, or not technical. Stored per owner, never
+ * per session; null until the owner chooses.
+ */
+export const TECHNICAL_LEVELS = [
+  "builder",
+  "technical-not-building",
+  "not-technical",
+] as const;
+export type TechnicalLevel = (typeof TECHNICAL_LEVELS)[number];
+
+/** The level the app assumes for an owner who has not chosen one. */
+export const DEFAULT_TECHNICAL_LEVEL: TechnicalLevel = "not-technical";
+
+/** How far a session's grill goes: a proof of concept, a first working version, or a full spec. */
+export const DEPTHS = [
+  "proof-of-concept",
+  "first-working-version",
+  "full-spec",
+] as const;
+export type Depth = (typeof DEPTHS)[number];
+
+/** The depth a session gets when none is chosen. */
+export const DEFAULT_DEPTH: Depth = "first-working-version";
+
+/**
+ * The owner id of the single owner when authentication is disabled, and the
+ * placeholder the migration stamps on every session that existed before
+ * sessions had an owner.
+ */
+export const LOCAL_OWNER_ID = "local-owner";

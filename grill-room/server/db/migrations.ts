@@ -696,4 +696,39 @@ UPDATE gr_decisions SET proposal_kind = CASE WHEN answer_kind IN (${SETTLING_ANS
     name: "sessions-readiness-override",
     sql: "ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS readiness_override_json TEXT",
   },
+  {
+    version: 84,
+    name: "owner-profiles-table",
+    // Every database is seeded with the `local-owner` profile, fresh installs
+    // included; the timestamps are literals so the SQL stays portable.
+    sql: `CREATE TABLE IF NOT EXISTS gr_owner_profiles (
+      user_id TEXT PRIMARY KEY,
+      technical_level TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+INSERT INTO gr_owner_profiles (user_id, technical_level, created_at, updated_at)
+  VALUES ('local-owner', NULL, '2026-11-04T00:00:00.000Z', '2026-11-04T00:00:00.000Z')
+  ON CONFLICT (user_id) DO NOTHING`,
+  },
+  {
+    version: 85,
+    name: "migration-inheritance-table",
+    sql: `CREATE TABLE IF NOT EXISTS gr_migration_inheritance (
+      id TEXT PRIMARY KEY,
+      inheritor_user_id TEXT
+    );
+INSERT INTO gr_migration_inheritance (id, inheritor_user_id)
+  VALUES ('singleton', NULL)
+  ON CONFLICT (id) DO NOTHING`,
+  },
+  {
+    version: 86,
+    name: "sessions-owner-depth",
+    // `owner_id` has no foreign key: owners are Better Auth users, and the
+    // default stamps every existing session `local-owner`.
+    sql: `ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS owner_id TEXT NOT NULL DEFAULT 'local-owner';
+ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS depth TEXT NOT NULL DEFAULT 'first-working-version';
+ALTER TABLE gr_sessions ADD COLUMN IF NOT EXISTS pending_depth TEXT`,
+  },
 ];

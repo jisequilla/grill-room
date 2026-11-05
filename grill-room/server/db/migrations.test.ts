@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { applyMigrations } from "../../test/db.js";
 import { IN_MEMORY_DATABASE_URL } from "../../test/setup.js";
 import { hashExportContent } from "../export.js";
+import { parseStoredReadiness, storeReadiness } from "../readiness.js";
 import { appMigrations, MIGRATIONS_TABLE } from "./migrations.js";
 
 async function dropSchema(): Promise<void> {
@@ -831,5 +832,109 @@ describe("decisions-proposal-kind-dismissals migration", () => {
        WHERE table_name = 'gr_decisions' AND column_name IN ('proposal_kind', 'dismissed_proposals_json')`,
     );
     expect(rows).toEqual([]);
+  });
+});
+
+describe("owner-profiles, migration-inheritance and sessions-owner-depth migrations", () => {
+  beforeEach(dropSchema);
+
+  it("1: stamps an existing session local-owner at the default depth, leaving its readiness judgment byte-identical", async () => {
+    const before = appMigrations.filter((migration) => migration.version < 84);
+    await applyMigrations(before, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    const idea = "Ask the owner for a depth before the first round.";
+    const readinessJson = storeReadiness(
+      idea,
+      {
+        evidence: [{ text: "Ask the owner for a depth", source: "idea", citation: null }],
+        objective: "A depth question before the first round.",
+        objectiveIsProcess: false,
+        expectedOutcome: "Every session carries a depth.",
+        unknowns: [],
+        verdict: "ready",
+        missing: [],
+      },
+      now,
+      null,
+    );
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, readiness_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [sessionId, "Depth", idea, readinessJson, now, now],
+    });
+
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const { rows } = await getDbExec().execute({
+      sql: `SELECT owner_id, depth, pending_depth, readiness_json FROM gr_sessions WHERE id = ?`,
+      args: [sessionId],
+    });
+    expect(rows).toEqual([
+      {
+        owner_id: "local-owner",
+        depth: "first-working-version",
+        pending_depth: null,
+        readiness_json: readinessJson,
+      },
+    ]);
+    const parsed = parseStoredReadiness({ idea, readinessJson: String(rows[0]!.readiness_json) });
+    expect(parsed).not.toBeNull();
+    expect(parsed!.depth ?? null).toBeNull();
+  });
+
+  it("2: seeds the local-owner profile and the inheritance marker on an empty database", async () => {
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const profiles = await getDbExec().execute(
+      `SELECT user_id, technical_level FROM gr_owner_profiles`,
+    );
+    expect(profiles.rows).toEqual([{ user_id: "local-owner", technical_level: null }]);
+    const markers = await getDbExec().execute(
+      `SELECT id, inheritor_user_id FROM gr_migration_inheritance`,
+    );
+    expect(markers.rows).toEqual([{ id: "singleton", inheritor_user_id: null }]);
+  });
+
+  it("3: gives a session inserted with no owner and no depth local-owner and the default depth", async () => {
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const now = new Date().toISOString();
+    const sessionId = randomUUID();
+    await getDbExec().execute({
+      sql: `INSERT INTO gr_sessions (id, title, idea, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [sessionId, "Grill Room", "An idea.", now, now],
+    });
+    const { rows } = await getDbExec().execute({
+      sql: `SELECT owner_id, depth FROM gr_sessions WHERE id = ?`,
+      args: [sessionId],
+    });
+    expect(rows).toEqual([{ owner_id: "local-owner", depth: "first-working-version" }]);
+  });
+
+  it("4: gives sessions no technical-level column", async () => {
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const { rows } = await getDbExec().execute(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'gr_sessions'`,
+    );
+    const columns = rows.map((row) => String(row.column_name));
+    expect(columns).toContain("owner_id");
+    expect(columns.filter((name) => name.includes("technical") || name.includes("level"))).toEqual([]);
+  });
+
+  it("4b: puts no foreign key on sessions.owner_id", async () => {
+    await applyMigrations(appMigrations, MIGRATIONS_TABLE);
+
+    const { rows } = await getDbExec().execute(
+      `SELECT kcu.column_name
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu
+         ON tc.constraint_name = kcu.constraint_name AND tc.table_name = kcu.table_name
+       WHERE tc.table_name = 'gr_sessions' AND tc.constraint_type = 'FOREIGN KEY'`,
+    );
+    const columns = rows.map((row) => String(row.column_name));
+    expect(columns).toContain("project_id");
+    expect(columns).not.toContain("owner_id");
   });
 });
