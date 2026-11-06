@@ -23,8 +23,10 @@ import { eq } from "@agent-native/core/db/schema";
 
 import { unsettle } from "./answer-change.js";
 import { getDb, schema } from "./db/index.js";
+import { DEFAULT_TECHNICAL_LEVEL } from "../shared/session-constants.js";
 import { getInterviewer } from "./interviewer/index.js";
 import type { ReviewStaleResult } from "./interviewer/index.js";
+import { getTechnicalLevel } from "./owner-profiles.js";
 import {
   deriveTreeStates,
   recommendedChoiceRejection,
@@ -186,6 +188,9 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
 
   if (!session) return;
 
+  const technicalLevel =
+    (await getTechnicalLevel(session.ownerId)) ?? DEFAULT_TECHNICAL_LEVEL;
+
   await runTurn({
     sessionId,
     failedMessage: "The stale review turn failed.",
@@ -254,6 +259,7 @@ export async function runDueStaleReviews(sessionId: string): Promise<void> {
               conversationId,
               decisions: await decisionSnapshots(await loadDecisions()),
               projectContext: await projectContextFor(session!),
+              technicalLevel,
             },
             reopenedDecisionKey: keyOf(group.reopenedId),
             staleDecisionKeys: staleKeys,

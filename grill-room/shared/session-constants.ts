@@ -169,6 +169,13 @@ export const TECHNICAL_LEVELS = [
 ] as const;
 export type TechnicalLevel = (typeof TECHNICAL_LEVELS)[number];
 
+/**
+ * The label of the card choice that leaves a technology call to the builder.
+ * The interviewer offers it to a non-builder owner, and the answer path records
+ * a builder's call when the owner accepts or picks it.
+ */
+export const LEAVE_IT_TO_THE_BUILDER = "Leave it to the builder";
+
 /** The level the app assumes for an owner who has not chosen one. */
 export const DEFAULT_TECHNICAL_LEVEL: TechnicalLevel = "not-technical";
 

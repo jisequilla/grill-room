@@ -2,7 +2,9 @@ import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getDb, schema, useTestDatabase } from "../test/db.js";
+import { LEAVE_IT_TO_THE_BUILDER } from "../shared/session-constants.js";
 import { defer, moveSetAside, reword, settle, unsettle, withdraw } from "./answer-change.js";
+import { picksLeaveItToTheBuilder } from "./tree.js";
 
 /**
  * While `active`, every `getDb()` handle records the queries made through it
@@ -664,5 +666,145 @@ describe("answer change", () => {
     await getDb().transaction((tx) => moveSetAside(X, "open-question", { now: T2, db: tx }));
     spy.active = false;
     expect(spy.transactions).toBe(1);
+  });
+});
+
+describe("choosing the builder's call by picking Leave it to the builder", () => {
+  const choices = (labels: string[]) => ({
+    offeredChoicesJson: JSON.stringify(labels),
+    choiceRationalesJson: JSON.stringify(labels.map((label) => `Why ${label}`)),
+  });
+  const B1_CHOICES = choices(["Use Postgres", LEAVE_IT_TO_THE_BUILDER]);
+  const withRecommendation = (recommendedChoice: number | null) => ({
+    ...B1_CHOICES,
+    recommendedChoice,
+  });
+
+  it("B1: an accepted recommendation of the Leave-it choice picks it", () => {
+    expect(
+      picksLeaveItToTheBuilder(
+        withRecommendation(1),
+        "accepted-recommendation",
+        "The builder knows which database engine fits.",
+      ),
+    ).toBe(true);
+  });
+
+  it("B2: an own answer equal to the Leave-it label, trimmed, picks it", () => {
+    expect(
+      picksLeaveItToTheBuilder(withRecommendation(1), "own-answer", " Leave it to the builder "),
+    ).toBe(true);
+  });
+
+  it("B3: accepting or picking another choice does not", () => {
+    expect(
+      picksLeaveItToTheBuilder(withRecommendation(0), "accepted-recommendation", "Postgres fits."),
+    ).toBe(false);
+    expect(picksLeaveItToTheBuilder(withRecommendation(1), "own-answer", "Use Postgres")).toBe(
+      false,
+    );
+  });
+
+  it("B4: labels match exactly and case-sensitively, never by containment", () => {
+    expect(
+      picksLeaveItToTheBuilder(
+        { ...choices(["Use Postgres", "Leave it to the builder to decide"]), recommendedChoice: 1 },
+        "accepted-recommendation",
+        "Reasoning",
+      ),
+    ).toBe(false);
+    expect(
+      picksLeaveItToTheBuilder(withRecommendation(1), "own-answer", "leave it to the builder"),
+    ).toBe(false);
+  });
+
+  it("B5: an own answer matches only when such a choice is offered", () => {
+    expect(
+      picksLeaveItToTheBuilder(
+        { ...choices(["Use Postgres"]), recommendedChoice: null },
+        "own-answer",
+        LEAVE_IT_TO_THE_BUILDER,
+      ),
+    ).toBe(false);
+  });
+
+  it("B5: an own answer with no text never picks it", () => {
+    expect(picksLeaveItToTheBuilder(withRecommendation(1), "own-answer", null)).toBe(false);
+  });
+
+  it.each(["unknown", "deferred", "pushed-back"] as const)(
+    "B6: a %s steering move is never a builder's call",
+    (kind) => {
+      expect(picksLeaveItToTheBuilder(withRecommendation(1), kind, LEAVE_IT_TO_THE_BUILDER)).toBe(
+        false,
+      );
+    },
+  );
+
+  it("B10: an own answer matches any offered Leave-it choice, not only the recommended one", () => {
+    expect(
+      picksLeaveItToTheBuilder(
+        { ...choices([LEAVE_IT_TO_THE_BUILDER, "Use Postgres"]), recommendedChoice: 1 },
+        "own-answer",
+        LEAVE_IT_TO_THE_BUILDER,
+      ),
+    ).toBe(true);
+  });
+
+  it("B11: an offered label is trimmed before it is compared", () => {
+    const padded = {
+      ...choices(["Use Postgres", " Leave it to the builder "]),
+      recommendedChoice: 1,
+    };
+    expect(picksLeaveItToTheBuilder(padded, "accepted-recommendation", "Reasoning")).toBe(true);
+    expect(picksLeaveItToTheBuilder(padded, "own-answer", LEAVE_IT_TO_THE_BUILDER)).toBe(true);
+  });
+
+  it("B12: an accepted recommendation with no recommended choice never scans the choices", () => {
+    expect(
+      picksLeaveItToTheBuilder(
+        withRecommendation(null),
+        "accepted-recommendation",
+        LEAVE_IT_TO_THE_BUILDER,
+      ),
+    ).toBe(false);
+  });
+
+  describe("through settle", () => {
+    useTestDatabase();
+
+    const frontier = {
+      currentAnswer: null,
+      answerKind: null,
+      settledAt: null,
+      ...B1_CHOICES,
+      recommendedChoice: 1,
+    };
+
+    it("B7: accepting the Leave-it recommendation records a builder's call", async () => {
+      await fixture({ x: frontier });
+
+      await settle(X, { answer: "R", kind: "accepted-recommendation" }, { now: T2 });
+
+      expect(await row(X)).toMatchObject({
+        answerKind: "dispositioned",
+        dispositionTarget: "builders-call",
+        currentAnswer: "R",
+        settledAt: T2,
+      });
+    });
+
+    it("B8: an ordinary own answer is written as given", async () => {
+      await fixture({ x: frontier });
+
+      await settle(X, { answer: "Use Postgres", kind: "own-answer" }, { now: T2 });
+
+      expect(await row(X)).toMatchObject({
+        answerKind: "own-answer",
+        dispositionTarget: null,
+        currentAnswer: "Use Postgres",
+        settledAt: T2,
+      });
+    });
   });
 });

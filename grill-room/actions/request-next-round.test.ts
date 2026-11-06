@@ -16,6 +16,8 @@ import {
   withResumeFallback,
 } from "../server/interviewer/index.js";
 import { buildPrompt } from "../server/interviewer/prompt.js";
+import { setTechnicalLevel } from "../server/owner-profiles.js";
+import { DEFAULT_TECHNICAL_LEVEL, LOCAL_OWNER_ID } from "../shared/session-constants.js";
 import {
   aScoutProjectResult,
   anAssessReadinessResult,
@@ -3428,5 +3430,97 @@ describe("propose-round manual retry", () => {
       manualRetry: false,
     });
     expect(freshStaleReviewTurn?.outcome).toBe("succeeded");
+  });
+});
+
+describe("request-next-round pitches the grill to depth and level", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  async function sessionWith(columns: Partial<typeof schema.sessions.$inferInsert>) {
+    const session = await aSession();
+    await getDb().update(schema.sessions).set(columns).where(eq(schema.sessions.id, session.id));
+    return session;
+  }
+
+  function contextOf(request: unknown) {
+    return (request as { context: { depth?: string; technicalLevel?: string | null } }).context;
+  }
+
+  it("A1: sends the session's depth and the owner's level", async () => {
+    const session = await sessionWith({ depth: "proof-of-concept" });
+    await setTechnicalLevel(LOCAL_OWNER_ID, "builder");
+    const interviewer = scriptInterviewer([round(proposed())]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect(interviewer.requests[0]).toMatchObject({ kind: "propose-round" });
+    expect(contextOf(interviewer.requests[0])).toMatchObject({
+      depth: "proof-of-concept",
+      technicalLevel: "builder",
+    });
+  });
+
+  it("A2: sends the default level when the owner's level is null", async () => {
+    const session = await sessionWith({ depth: "proof-of-concept" });
+    await setTechnicalLevel(LOCAL_OWNER_ID, null);
+    const interviewer = scriptInterviewer([round(proposed())]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect(contextOf(interviewer.requests[0]).technicalLevel).toBe(DEFAULT_TECHNICAL_LEVEL);
+    expect(DEFAULT_TECHNICAL_LEVEL).toBe("not-technical");
+  });
+
+  it("A3: sends the depth in effect, never the pending one", async () => {
+    const session = await sessionWith({ depth: "first-working-version", pendingDepth: "full-spec" });
+    const interviewer = scriptInterviewer([round(proposed())]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect(contextOf(interviewer.requests[0]).depth).toBe("first-working-version");
+  });
+
+  it("A4: reads the level of the session's own owner", async () => {
+    const session = await sessionWith({ ownerId: "u-ana" });
+    await setTechnicalLevel("u-ana", "technical-not-building");
+    await setTechnicalLevel(LOCAL_OWNER_ID, "builder");
+    const interviewer = scriptInterviewer([round(proposed())]);
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect(contextOf(interviewer.requests[0]).technicalLevel).toBe("technical-not-building");
+  });
+
+  it("A6: reads the level once per call, not once per attempt", async () => {
+    const session = await aSession();
+    await setTechnicalLevel(LOCAL_OWNER_ID, "technical-not-building");
+    const fake = scriptInterviewer([
+      { kind: "propose-round" as const, result: treeRuleViolation.offFrontier() },
+      round(proposed()),
+    ]);
+    let calls = 0;
+    setInterviewer({
+      ...fake,
+      // The request is built before this call, so the level changes at the
+      // end of the first attempt: after its request, before the second's.
+      proposeRound: async (request, observer) => {
+        calls += 1;
+        try {
+          return await fake.proposeRound(request, observer);
+        } finally {
+          if (calls === 1) await setTechnicalLevel(LOCAL_OWNER_ID, "builder");
+        }
+      },
+    });
+
+    await requestNextRound.run({ sessionId: session.id });
+
+    expect(calls).toBe(2);
+    expect(fake.requests).toHaveLength(2);
+    for (const request of fake.requests) {
+      expect(request).toMatchObject({ kind: "propose-round" });
+      expect(contextOf(request).technicalLevel).toBe("technical-not-building");
+    }
   });
 });
