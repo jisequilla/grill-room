@@ -262,6 +262,12 @@ describe("the section texts", () => {
     expect(LEVEL_SECTIONS[level]).toBe(text);
   });
 
+  it("P7: the done rule is exactly the ticket's text", () => {
+    expect(DONE_WHILE_ASKED_RULE).toBe(
+      "A decision already in the tree, a technology decision included, must still be answered or set aside before `done`: never propose `done` while one would still be asked.",
+    );
+  });
+
   it.each(DEPTHS)("P7: the %s depth section ends with the done rule", (depth) => {
     expect(DEPTH_SECTIONS[depth].endsWith(DONE_WHILE_ASKED_RULE)).toBe(true);
   });
