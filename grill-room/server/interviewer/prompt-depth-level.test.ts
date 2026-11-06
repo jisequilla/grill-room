@@ -228,6 +228,40 @@ describe("the section texts", () => {
     expect(LEVEL_SECTIONS[level]).toContain(sentence);
   });
 
+  it.each([
+    [
+      "proof-of-concept",
+      `## How deep to grill: a proof of concept\n\nThe owner wants a proof of concept: the smallest thing that tries the idea. Do not propose decisions about scale, edge cases or operations (hosting, monitoring, backups, on-call): the builder makes those calls. Propose \`done\` once the core thing to try is settled. ${DONE_WHILE_ASKED_RULE}`,
+    ],
+    [
+      "first-working-version",
+      `## How deep to grill: a first working version\n\nThe owner wants a first working version that real users can use. Ask about edge cases: odd inputs, empty states and failures a user would meet. Do not propose decisions about scale or operations (hosting, monitoring, backups, on-call): the builder makes those calls. Still ask every technology decision. Propose \`done\` once every user-facing flow and the data it keeps are settled. ${DONE_WHILE_ASKED_RULE}`,
+    ],
+    [
+      "full-spec",
+      `## How deep to grill: a full spec\n\nThe owner wants a full spec. Open every branch, scale, edge cases and operations included. Propose \`done\` only when nothing is left to the builder's guesswork. ${DONE_WHILE_ASKED_RULE}`,
+    ],
+  ] as const)("P1: the %s depth section is exactly the ticket's text", (depth, text) => {
+    expect(DEPTH_SECTIONS[depth]).toBe(text);
+  });
+
+  it.each([
+    [
+      "builder",
+      "## The owner's technical level: builder\n\nThe owner builds software and makes the technology calls. Keep technical wording, and name technologies, paths and products where they help.",
+    ],
+    [
+      "technical-not-building",
+      "## The owner's technical level: technical, not building\n\nThe owner follows technical talk but will not build this. Keep technical wording, but phrase every recommendation by its consequences for the owner: cost, speed, lock-in, what users see. For a pure technology choice with no consequence the owner would see, offer a choice labelled exactly `Leave it to the builder` and point `recommendedChoice` at it. Still ask every technology question, and still show the owner every choice whose consequence they would see. Never treat your recommendation as the owner's answer: only the owner's answer settles a decision.",
+    ],
+    [
+      "not-technical",
+      "## The owner's technical level: not technical\n\nThe owner is not technical. Write every card in plain words: no file paths, and no product or technology names in a card's title or body unless the idea itself uses them. Put every technology question as its consequences for the owner: cost, speed, lock-in, what users see. For a pure technology choice with no consequence the owner would see, offer a choice labelled exactly `Leave it to the builder` and point `recommendedChoice` at it. Still ask every technology question, and still show the owner every choice whose consequence they would see. Never treat your recommendation as the owner's answer: only the owner's answer settles a decision.",
+    ],
+  ] as const)("P2: the %s level section is exactly the ticket's text", (level, text) => {
+    expect(LEVEL_SECTIONS[level]).toBe(text);
+  });
+
   it.each(DEPTHS)("P7: the %s depth section ends with the done rule", (depth) => {
     expect(DEPTH_SECTIONS[depth].endsWith(DONE_WHILE_ASKED_RULE)).toBe(true);
   });
