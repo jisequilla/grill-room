@@ -278,6 +278,8 @@ export interface PlanExportInput {
    * correct however the value was produced.
    */
   readiness: StoredReadiness | null;
+  /** The owner's recorded override of a not-ready verdict, or null when the interview did not start past one. */
+  readinessOverride: { missing: readonly string[] } | null;
   /** The session's current scout report with staleness, or null when it has never been scouted. */
   scoutReport: ScoutReportWithStaleness | null;
   /** Each suggested decision's earlier answers as the tree shows them, keyed by decision id, oldest first. */
@@ -893,6 +895,11 @@ function evidenceLine(item: ReadinessEvidenceItem): string {
     : `- ${item.text} · the user said`;
 }
 
+export const READINESS_OVERRIDE_SENTENCE =
+  "The owner started the interview although readiness judged the idea not ready.";
+
+const OVERRIDE_INTERVIEW_HOLDS = "decisions.md and spec.md hold what the interview settled.";
+
 /**
  * `intent.md`'s "Readiness before the interview" section: the readiness
  * judgment made on the idea before the first question was asked, labeled as
@@ -904,7 +911,11 @@ function evidenceLine(item: ReadinessEvidenceItem): string {
  * Exactly "Not judged for this version of the idea." when `readiness` is
  * null or was judged for a different idea than `idea`.
  */
-function renderReadinessSection(idea: string, readiness: StoredReadiness | null): string {
+function renderReadinessSection(
+  idea: string,
+  readiness: StoredReadiness | null,
+  override: { missing: readonly string[] } | null,
+): string {
   if (readiness === null || readiness.ideaJudged !== idea) {
     return "## Readiness before the interview\n\nNot judged for this version of the idea.";
   }
@@ -921,10 +932,23 @@ function renderReadinessSection(idea: string, readiness: StoredReadiness | null)
   ];
 
   if (result.verdict === "not-ready") {
-    lines.push(
-      "",
-      "The interview that followed worked through what this judgment lacked; decisions.md and spec.md hold the result.",
-    );
+    if (override === null) {
+      lines.push(
+        "",
+        "The interview that followed worked through what this judgment lacked; decisions.md and spec.md hold the result.",
+      );
+    } else if (override.missing.length === 0) {
+      lines.push("", READINESS_OVERRIDE_SENTENCE, "", OVERRIDE_INTERVIEW_HOLDS);
+    } else {
+      lines.push(
+        "",
+        `${READINESS_OVERRIDE_SENTENCE} Readiness found this missing:`,
+        "",
+        ...override.missing.map((item) => `- ${item}`),
+        "",
+        OVERRIDE_INTERVIEW_HOLDS,
+      );
+    }
   }
 
   if (result.evidence.length > 0) {
@@ -1023,12 +1047,13 @@ export function renderIntentFile(
   specMarkdown: string,
   idea: string,
   readiness: StoredReadiness | null,
+  readinessOverride: { missing: readonly string[] } | null,
   scoutReport: ScoutReportWithStaleness | null,
 ): string {
   const sections = [
     `# Intent: ${oneLine(sessionTitle)}`,
     ...openingSections(specMarkdown, idea),
-    renderReadinessSection(idea, readiness),
+    renderReadinessSection(idea, readiness, readinessOverride),
   ];
 
   const projectState = renderProjectStateSection(scoutReport);
@@ -1056,6 +1081,7 @@ export function planExport(input: PlanExportInput): ExportPlan {
         input.specMarkdown,
         input.idea,
         input.readiness,
+        input.readinessOverride,
         input.scoutReport,
       ),
     },

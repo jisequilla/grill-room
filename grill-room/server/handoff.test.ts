@@ -31,7 +31,7 @@ import {
   ruleConflicts,
   withDocsToken,
 } from "./handoff.js";
-import { hashExportContent } from "./export.js";
+import { hashExportContent, READINESS_OVERRIDE_SENTENCE, renderIntentFile } from "./export.js";
 import type { AdrConvention } from "./project-facts.js";
 import { withBundleToken } from "../shared/bundle-tokens.js";
 import { consistencyFindingsResult } from "./interviewer/fake.js";
@@ -2313,6 +2313,38 @@ describe("grilled past a not-ready verdict", () => {
       without.replace("\n\n## Where things are", `\n\n${SECTION}\n\n## Where things are`),
     );
     expect(markdown).not.toBe(without);
+  });
+
+  it("intent.md and HANDOFF print the same override sentence", () => {
+    const readiness = {
+      ideaJudged: "An idea.",
+      result: {
+        evidence: [],
+        objective: null,
+        objectiveIsProcess: false,
+        expectedOutcome: null,
+        unknowns: [],
+        verdict: "not-ready" as const,
+        missing: [],
+      },
+      judgedAt: "2026-09-01T00:00:00.000Z",
+      scoutReportId: null,
+    };
+    const intent = renderIntentFile(
+      "Grill Room",
+      "## Problem\n\nA spec.",
+      "An idea.",
+      readiness,
+      { missing: ["*Who* pays ", "A single buildable thing", "*Who* pays "] },
+      null,
+    );
+    const handoff = renderHandoffMarkdown({
+      ...aSource(),
+      readinessOverride: { missing: ["Who pays"] },
+    });
+
+    expect(intent).toContain(READINESS_OVERRIDE_SENTENCE);
+    expect(handoff).toContain(READINESS_OVERRIDE_SENTENCE);
   });
 
   it("has no list when nothing was missing", () => {

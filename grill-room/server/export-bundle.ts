@@ -216,7 +216,7 @@ import {
   parseBriefs,
 } from "./handoff.js";
 import { getProject, measuredVisibility } from "./projects.js";
-import { currentReadiness } from "./readiness.js";
+import { currentReadiness, readinessOverride } from "./readiness.js";
 import { currentScoutReport } from "./scout-report.js";
 import { describeTickets, separateOverlaps, ticketsAreCurrent } from "./tickets.js";
 import { describeDecisions, describeHistoryEntry } from "./tree.js";
@@ -1023,6 +1023,7 @@ export async function planExportBundle(input: PlanExportBundleInput): Promise<Ex
     tickets: exportTickets,
     decisions,
     readiness,
+    readinessOverride: readinessOverride(session),
     scoutReport,
     history,
     adrTicket: adrTicket ? { ...adrTicket, body: renderAdrTicketBody(adrTicket) } : null,
