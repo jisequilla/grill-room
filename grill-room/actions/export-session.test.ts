@@ -26,6 +26,7 @@ import {
 import type { HandoffScoutResult } from "../server/interviewer/index.js";
 import { aHandoffScoutResult } from "../server/interviewer/test-fixtures.js";
 import { getProject } from "../server/projects.js";
+import { storeReadiness, storeReadinessOverride } from "../server/readiness.js";
 import type { ProjectVisibility } from "../shared/session-constants.js";
 import { getDb, schema, useTestDatabase } from "../test/db.js";
 import { useTempGitRepos } from "../test/git-repos.js";
@@ -381,6 +382,73 @@ describe("preview-export and export-session", () => {
       "briefs/01-build-the-workspace.md",
       "briefs/02-store-on-disk.md",
     ]);
+  });
+
+  it("intent.md records a stored not-ready override", async () => {
+    const { root, session } = await aReadySession();
+    const readinessJson = storeReadiness(
+      session.idea,
+      {
+        evidence: [],
+        objective: "Grill an idea.",
+        objectiveIsProcess: false,
+        expectedOutcome: "A decided idea.",
+        unknowns: [],
+        verdict: "not-ready",
+        missing: ["Who pays", "A single buildable thing"],
+      },
+      "2026-09-01T00:00:00.000Z",
+      null,
+    );
+    await getDb()
+      .update(schema.sessions)
+      .set({
+        readinessJson,
+        readinessOverrideJson: storeReadinessOverride(
+          JSON.parse(readinessJson),
+          "2026-09-01T00:05:00.000Z",
+        ),
+      })
+      .where(eq(schema.sessions.id, session.id));
+    await generateHandoff.run({ sessionId: session.id });
+
+    await exportSession.run({ sessionId: session.id, slug: "grill-room" });
+
+    expect(
+      await fs.readFile(path.join(root, "docs", "specs", "grill-room", "intent.md"), "utf8"),
+    ).toBe(
+      [
+        "# Intent: Grill Room",
+        "",
+        "## Problem Statement",
+        "",
+        "A settled idea.",
+        "",
+        "## Solution",
+        "",
+        "A workspace.",
+        "",
+        "## The original idea, before the interview",
+        "",
+        session.idea,
+        "",
+        "## Readiness before the interview",
+        "",
+        "Judged at 2026-09-01T00:00:00.000Z, on the idea as first written, before any question was asked.",
+        "",
+        "- **Objective:** Grill an idea.",
+        "- **Expected outcome:** A decided idea.",
+        "- **Verdict:** not-ready",
+        "",
+        "The owner started the interview although readiness judged the idea not ready. Readiness found this missing:",
+        "",
+        "- Who pays",
+        "- A single buildable thing",
+        "",
+        "decisions.md and spec.md hold what the interview settled.",
+        "",
+      ].join("\n"),
+    );
   });
 
   it("proposes a slug of at most four title words, and uses an edited slug instead", async () => {

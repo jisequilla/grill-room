@@ -67,6 +67,7 @@ import {
   hashExportContent,
   openingSections,
   padTicketNumber,
+  READINESS_OVERRIDE_SENTENCE,
   sanitizeTicketSlug,
 } from "./export.js";
 import type { AdrConvention } from "./project-facts.js";
@@ -1408,8 +1409,7 @@ function buildRecordSection(source: HandoffSource): string | null {
 }
 
 function readinessOverrideSection(missing: readonly string[]): string {
-  const intro =
-    "The owner started the interview although readiness judged the idea not ready.";
+  const intro = READINESS_OVERRIDE_SENTENCE;
   if (missing.length === 0) {
     return ["## Grilled past a not-ready verdict", "", intro].join("\n");
   }

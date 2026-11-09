@@ -197,6 +197,7 @@ describe("supersededEntries with ADR fields", () => {
       tickets: [],
       decisions: [reopened],
       readiness: null,
+      readinessOverride: null,
       scoutReport: null,
     });
     return plan.files.find((file) => file.relativePath === "decisions.md")!.content;

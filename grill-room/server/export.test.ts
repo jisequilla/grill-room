@@ -95,6 +95,7 @@ function decisionsFile(decisions: readonly DecisionView[], sessionTitle = "Grill
     tickets: [],
     decisions,
     readiness: null,
+    readinessOverride: null,
     scoutReport: null,
   });
   return plan.files.find((file) => file.relativePath === "decisions.md")?.content;
@@ -528,6 +529,7 @@ describe("planExport: decisions.md", () => {
       tickets: [{ number: 1, slug: "first", title: "First", body: "Body", blockedBy: [] }],
       decisions: [decision("only")],
       readiness: null,
+      readinessOverride: null,
       scoutReport: null,
     });
     expect(withEntry.files.map((file) => file.relativePath)).toEqual([
@@ -637,6 +639,7 @@ function intentFile(
   input: {
     idea?: string;
     readiness?: StoredReadiness | null;
+    readinessOverride?: { missing: readonly string[] } | null;
     scoutReport?: ScoutReportWithStaleness | null;
     specMarkdown?: string;
   } = {},
@@ -649,6 +652,7 @@ function intentFile(
     tickets: [],
     decisions: [],
     readiness: input.readiness ?? null,
+    readinessOverride: input.readinessOverride ?? null,
     scoutReport: input.scoutReport ?? null,
   });
   return plan.files.find((file) => file.relativePath === "intent.md")!.content;
@@ -1257,6 +1261,7 @@ describe("planExport: an own answer restated", () => {
       tickets: [],
       decisions: describeDecisions(rows),
       readiness: null,
+      readinessOverride: null,
       scoutReport: null,
     }).files;
   }
@@ -1294,6 +1299,119 @@ describe("planExport: an own answer restated", () => {
   });
 });
 
+describe("planExport: intent.md after a not-ready verdict the owner grilled past", () => {
+  function expectedIntent(afterVerdict: string[]): string {
+    return [
+      "# Intent: Grill Room",
+      "",
+      "## The original idea, before the interview",
+      "",
+      IDEA,
+      "",
+      "## Readiness before the interview",
+      "",
+      "Judged at 2026-09-01T00:00:00.000Z, on the idea as first written, before any question was asked.",
+      "",
+      "- **Objective:** Write intent.md into every export bundle.",
+      "- **Expected outcome:** A reader of the repo can see why the feature exists without opening Grill Room.",
+      "- **Verdict:** not-ready",
+      ...afterVerdict,
+      "",
+    ].join("\n");
+  }
+
+  const SENTENCE = "The owner started the interview although readiness judged the idea not ready.";
+
+  it("a not-ready verdict the owner grilled past lists what readiness found missing", () => {
+    const row1 = intentFile({
+      readiness: readinessJudgment(IDEA, { verdict: "not-ready", missing: ["Something else"] }),
+      readinessOverride: { missing: ["*Who* pays ", "A single buildable thing", "*Who* pays "] },
+    });
+    expect(row1).toBe(
+      expectedIntent([
+        "",
+        SENTENCE + " Readiness found this missing:",
+        "",
+        "- *Who* pays ",
+        "- A single buildable thing",
+        "- *Who* pays ",
+        "",
+        "decisions.md and spec.md hold what the interview settled.",
+      ]),
+    );
+
+    const row1b = intentFile({
+      readiness: readinessJudgment(IDEA, {
+        verdict: "not-ready",
+        missing: ["Something else"],
+        evidence: [{ text: "Sellers asked for it", source: "user" } as never],
+        unknowns: ["Who reviews payouts"],
+      }),
+      readinessOverride: { missing: ["Who pays"] },
+    });
+    expect(row1b).toBe(
+      expectedIntent([
+        "",
+        SENTENCE + " Readiness found this missing:",
+        "",
+        "- Who pays",
+        "",
+        "decisions.md and spec.md hold what the interview settled.",
+        "",
+        "**Evidence**",
+        "",
+        "- Sellers asked for it · the user said",
+        "",
+        "**Unknowns**",
+        "",
+        "- Who reviews payouts",
+      ]),
+    );
+  });
+
+  it("a grilled-past verdict with nothing missing prints the sentence without a list", () => {
+    const content = intentFile({
+      readiness: readinessJudgment(IDEA, { verdict: "not-ready", missing: ["Something else"] }),
+      readinessOverride: { missing: [] },
+    });
+    expect(content).toBe(
+      expectedIntent(["", SENTENCE, "", "decisions.md and spec.md hold what the interview settled."]),
+    );
+  });
+
+  it("a ready verdict prints no override text even when one is stored", () => {
+    const withOverride = intentFile({
+      readiness: readinessJudgment(IDEA, { verdict: "ready" }),
+      readinessOverride: { missing: ["Who pays"] },
+    });
+    const without = intentFile({ readiness: readinessJudgment(IDEA, { verdict: "ready" }) });
+    expect(withOverride).toBe(without);
+    expect(withOverride).not.toContain(SENTENCE);
+  });
+
+  it("an override never shows when readiness is missing or judged another idea", () => {
+    const fallback = [
+      "## Readiness before the interview",
+      "",
+      "Not judged for this version of the idea.",
+    ].join("\n");
+    const override = { missing: ["Who pays"] };
+
+    const nullReadiness = intentFile({ readiness: null, readinessOverride: override });
+    expect(nullReadiness).toBe(
+      ["# Intent: Grill Room", "", "## The original idea, before the interview", "", IDEA, "", fallback, ""].join(
+        "\n",
+      ),
+    );
+
+    const otherIdea = intentFile({
+      readiness: readinessJudgment("An earlier version of the idea.", { verdict: "not-ready" }),
+      readinessOverride: override,
+    });
+    expect(otherIdea).toBe(nullReadiness);
+  });
+});
+
 describe("planExport: a gate's ticket file", () => {
   const ACCOUNT = "A live account on the payment platform, with API keys issued.";
 
@@ -1318,6 +1436,7 @@ describe("planExport: a gate's ticket file", () => {
       ],
       decisions: [],
       readiness: null,
+      readinessOverride: null,
       scoutReport: null,
     }).files.filter((file) => file.relativePath.startsWith("issues/"));
   }
@@ -1363,6 +1482,7 @@ describe("planExport: a ticket's Implements line", () => {
       tickets,
       decisions: [],
       readiness: null,
+      readinessOverride: null,
       scoutReport: null,
     }).files.find((file) => file.relativePath === "issues/01-build-the-workspace.md")!.content;
   }
@@ -1419,6 +1539,7 @@ describe("planExport: decisions.md ADR marks", () => {
       tickets: [],
       decisions,
       readiness: null,
+      readinessOverride: null,
       scoutReport,
     });
     return plan.files.find((file) => file.relativePath === "decisions.md")?.content;
@@ -1657,6 +1778,7 @@ describe("planExport: a ticket's Implements decisions line", () => {
       ],
       decisions: [],
       readiness: null,
+      readinessOverride: null,
       scoutReport: null,
     }).files.find((file) => file.relativePath === "issues/01-build-the-workspace.md")!.content;
   }
@@ -1745,6 +1867,7 @@ describe("planExport: adr-suggestions", () => {
       tickets: options.tickets ?? [],
       decisions,
       readiness: null,
+      readinessOverride: null,
       scoutReport: options.convention
         ? { ...report, facts: { ...report.facts, adrConvention: options.convention } }
         : null,
@@ -2130,6 +2253,7 @@ describe("planExport: a decision gets a suggestion exactly when decisions.md mar
       tickets: [],
       decisions,
       readiness: null,
+      readinessOverride: null,
       scoutReport: null,
       history: {},
     };
