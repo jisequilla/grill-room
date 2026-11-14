@@ -54,6 +54,10 @@ export default defineAction({
       );
     }
 
+    // The depth the judgment is made for, as the session stands now: never
+    // the pending depth, which takes effect only once it is applied.
+    const depth = session.depth;
+
     // With a project, ground the judgment in the project: run the scout first
     // when there is no current report (none yet, or the one there has gone
     // stale), then read whatever report is now current. Without a project,
@@ -94,6 +98,7 @@ export default defineAction({
                   conversationId: null,
                   decisions: [],
                   projectContext: await projectContextFor(session),
+                  depth,
                 },
                 scoutReport: report ? scoutReportForReadiness(report) : null,
                 rejectionReason,
@@ -112,6 +117,7 @@ export default defineAction({
               result,
               session.idea,
               project?.rootPath ?? null,
+              depth,
             ),
           exhausted: (lastReason) =>
             new TurnRejected(
@@ -129,6 +135,7 @@ export default defineAction({
               accepted.result,
               now,
               report?.id ?? null,
+              depth,
             ),
             readinessTurnId: recorder?.turnId ?? null,
             readinessOverrideJson: null,

@@ -268,6 +268,7 @@ const messages = {
       "This idea is not ready yet. Edit it and assess it again, or grill it as is: the spec and the handoff will say it was not ready.",
     readinessEditIdea: "Edit the idea",
     readinessGrillAsIs: "Grill it as is",
+    readinessJudgedBeforeDepth: "Judged before depth existed",
 
     scoutTitle: "Project scout",
     scoutDescription:

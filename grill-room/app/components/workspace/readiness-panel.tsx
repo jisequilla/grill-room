@@ -106,6 +106,14 @@ export function ReadinessPanel({
           {result ? (
             <ReadinessBadge verdict={result.verdict} testId="readiness-verdict" />
           ) : null}
+          {readiness && !readiness.depth ? (
+            <span
+              className="text-xs text-muted-foreground"
+              data-testid="readiness-judged-before-depth"
+            >
+              {t("workspace.readinessJudgedBeforeDepth")}
+            </span>
+          ) : null}
         </div>
         {canAssess ? (
           <Button

@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import enUS from "@/i18n/en-US";
 import {
   ReadinessPanel,
   ScoutReportPanel,
@@ -61,6 +62,29 @@ function section(html: string, testId: string): string {
   const end = next === -1 ? html.length : html.lastIndexOf("<", next);
   return html.slice(start, end);
 }
+
+describe("ReadinessPanel and the depth a judgment was made for", () => {
+  const BEFORE_DEPTH = 'data-testid="readiness-judged-before-depth"';
+
+  it("U1: labels a judgment with no depth, absent or null", () => {
+    // `render()` has no i18n catalog wired up, so `useT()` humanizes the key
+    // instead of returning the copy: the label's text is pinned against
+    // `en-US.ts` itself, and its presence against the markup.
+    expect(enUS.workspace.readinessJudgedBeforeDepth).toBe(
+      "Judged before depth existed",
+    );
+    for (const readiness of [judged(), { ...judged(), depth: null }]) {
+      const html = render(readiness);
+      expect(html).toContain(BEFORE_DEPTH);
+      expect(section(html, "readiness-judged-before-depth")).not.toBe("");
+    }
+  });
+
+  it("U2: no label for a judgment with a depth, or for no judgment", () => {
+    expect(render({ ...judged(), depth: "proof-of-concept" })).not.toContain(BEFORE_DEPTH);
+    expect(render(null)).not.toContain(BEFORE_DEPTH);
+  });
+});
 
 describe("ReadinessPanel", () => {
   it("invites an assessment when the idea has not been judged", () => {

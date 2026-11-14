@@ -4,12 +4,31 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { DEPTHS } from "../shared/session-constants.js";
 import {
+  READINESS_DEPTH_BARS,
+  READINESS_VERDICT_RULE,
+  READINESS_VERDICT_RULE_PROOF_OF_CONCEPT,
+  buildPrompt,
+} from "./interviewer/prompt.js";
+import {
+  MAX_READY_UNKNOWNS,
+  MAX_READY_UNKNOWNS_PROOF_OF_CONCEPT,
+  type AssessReadinessResult,
+} from "./interviewer/schemas.js";
+import {
+  aContext,
+  anAssessReadinessRequest,
   anAssessReadinessResult,
   ideaEvidence,
   repoEvidence,
 } from "./interviewer/test-fixtures.js";
-import { clampReadinessCitations, reasonsToRefuseReadiness } from "./readiness.js";
+import {
+  clampReadinessCitations,
+  parseStoredReadiness,
+  reasonsToRefuseReadiness,
+  storeReadiness,
+} from "./readiness.js";
 import { useTempGitRepos } from "../test/git-repos.js";
 
 const IDEA = "A tiny web app to track books I want to read.";
@@ -222,6 +241,207 @@ describe("reasonsToRefuseReadiness", () => {
         reasons.some((reason) => reason.includes("restates the idea's goal")),
       ).toBe(false);
     });
+  });
+});
+
+const ready = (over: Partial<AssessReadinessResult> = {}) =>
+  anAssessReadinessResult({ verdict: "ready", ...over });
+const NO_EVIDENCE = { evidence: [] };
+const items = (n: number) => Array.from({ length: n }, (_, i) => `Unknown ${i + 1}`);
+const NEEDS_EVIDENCE = "A ready verdict needs at least one evidence item.";
+
+describe("reasonsToRefuseReadiness by depth", () => {
+  it("C1: a proof of concept needs no evidence item", () => {
+    expect(
+      reasonsToRefuseReadiness(ready({ ...NO_EVIDENCE }), IDEA, null, "proof-of-concept"),
+    ).toEqual([]);
+  });
+
+  it("C1b: a proof of concept allows 8 unknowns", () => {
+    expect(
+      reasonsToRefuseReadiness(ready({ unknowns: items(8) }), IDEA, null, "proof-of-concept"),
+    ).toEqual([]);
+  });
+
+  it("C2: a proof of concept allows no more than 8 unknowns", () => {
+    expect(
+      reasonsToRefuseReadiness(
+        ready({ ...NO_EVIDENCE, unknowns: items(9) }),
+        IDEA,
+        null,
+        "proof-of-concept",
+      ),
+    ).toEqual(["A ready verdict allows at most 8 unknowns; this one has 9."]);
+  });
+
+  it("C3: a proof of concept still needs an objective", () => {
+    expect(
+      reasonsToRefuseReadiness(
+        ready({ ...NO_EVIDENCE, objective: null, objectiveIsProcess: false }),
+        IDEA,
+        null,
+        "proof-of-concept",
+      ),
+    ).toEqual(["A ready verdict needs an objective."]);
+  });
+
+  it("C4: a proof of concept still needs an objective that is not a process", () => {
+    expect(
+      reasonsToRefuseReadiness(
+        ready({ ...NO_EVIDENCE, objectiveIsProcess: true }),
+        IDEA,
+        null,
+        "proof-of-concept",
+      ),
+    ).toEqual(["A ready verdict needs an objective that is not a process."]);
+  });
+
+  it("C5: a first working version still needs evidence", () => {
+    expect(
+      reasonsToRefuseReadiness(ready({ ...NO_EVIDENCE }), IDEA, null, "first-working-version"),
+    ).toEqual([NEEDS_EVIDENCE]);
+  });
+
+  it("C6: a full spec still needs evidence", () => {
+    expect(
+      reasonsToRefuseReadiness(ready({ ...NO_EVIDENCE }), IDEA, null, "full-spec"),
+    ).toEqual([NEEDS_EVIDENCE]);
+  });
+
+  it("C7: a first working version keeps the cap of 5 unknowns", () => {
+    expect(
+      reasonsToRefuseReadiness(ready({ unknowns: items(6) }), IDEA, null, "first-working-version"),
+    ).toEqual(["A ready verdict allows at most 5 unknowns; this one has 6."]);
+  });
+
+  it("C8: the citation checks run at a proof of concept", () => {
+    expect(
+      reasonsToRefuseReadiness(
+        ready({ evidence: [repoEvidence("Sessions are stored in PGlite", "server/db.ts:1")] }),
+        IDEA,
+        null,
+        "proof-of-concept",
+      ),
+    ).toEqual([
+      'Evidence item "Sessions are stored in PGlite" is sourced from the repo, but this session has no project to check its citation against.',
+    ]);
+  });
+
+  it("C9: a not-ready verdict at a proof of concept is not refused", () => {
+    const result = anAssessReadinessResult({
+      verdict: "not-ready",
+      evidence: [],
+      objective: null,
+    });
+    expect(() =>
+      reasonsToRefuseReadiness(result, IDEA, null, "proof-of-concept"),
+    ).not.toThrow();
+    expect(reasonsToRefuseReadiness(result, IDEA, null, "proof-of-concept")).toEqual([]);
+  });
+
+  it("C10: with no depth argument, the check is a first working version's", () => {
+    expect(reasonsToRefuseReadiness(ready({ ...NO_EVIDENCE }), IDEA)).toEqual([
+      NEEDS_EVIDENCE,
+    ]);
+  });
+
+  it("C12: the restated-goal rule runs at a proof of concept", () => {
+    const objective = ready().objective!;
+    expect(
+      reasonsToRefuseReadiness(
+        ready({ evidence: [ideaEvidence(objective)] }),
+        IDEA,
+        null,
+        "proof-of-concept",
+      ),
+    ).toEqual([
+      `Evidence item "${objective}" only restates the idea's goal, not a fact about the world. A ready verdict needs evidence other than the objective: a constraint, a user, an existing system, or an observed problem.`,
+    ]);
+  });
+
+  it("C13: the restated-goal rule does not run for a not-ready verdict", () => {
+    expect(
+      reasonsToRefuseReadiness(
+        anAssessReadinessResult({ verdict: "not-ready", evidence: [ideaEvidence(IDEA)] }),
+        IDEA,
+        null,
+        "first-working-version",
+      ),
+    ).toEqual([]);
+  });
+
+  describe("C11: every ready shape a depth's verdict rule describes passes that depth's check", () => {
+    it("proof-of-concept: no evidence and 8 unknowns", () => {
+      expect(
+        reasonsToRefuseReadiness(
+          ready({ ...NO_EVIDENCE, unknowns: items(MAX_READY_UNKNOWNS_PROOF_OF_CONCEPT) }),
+          IDEA,
+          null,
+          "proof-of-concept",
+        ),
+      ).toEqual([]);
+    });
+
+    for (const depth of ["first-working-version", "full-spec"] as const) {
+      it(`${depth}: one evidence item and 5 unknowns`, () => {
+        expect(
+          reasonsToRefuseReadiness(ready({ unknowns: items(MAX_READY_UNKNOWNS) }), IDEA, null, depth),
+        ).toEqual([]);
+      });
+    }
+  });
+});
+
+const TASK_HEADING = "## Your task: judge whether the idea is ready to grill";
+
+describe("the readiness prompt by depth", () => {
+  for (const depth of DEPTHS) {
+    const prompt = () =>
+      buildPrompt(anAssessReadinessRequest({ context: aContext({ depth }) }));
+
+    it(`P1: at ${depth}, its bar sits just before the task, and no other bar`, () => {
+      const text = prompt();
+      expect(text).toContain(`${READINESS_DEPTH_BARS[depth]}\n\n${TASK_HEADING}`);
+      for (const other of DEPTHS.filter((d) => d !== depth)) {
+        expect(text).not.toContain(READINESS_DEPTH_BARS[other]);
+      }
+    });
+
+    it(`P2: at ${depth}, the verdict rule matches the check`, () => {
+      const text = prompt();
+      if (depth === "proof-of-concept") {
+        expect(text).toContain(READINESS_VERDICT_RULE_PROOF_OF_CONCEPT);
+        expect(text).not.toContain(READINESS_VERDICT_RULE);
+      } else {
+        expect(text).toContain(READINESS_VERDICT_RULE);
+        expect(text).not.toContain(READINESS_VERDICT_RULE_PROOF_OF_CONCEPT);
+      }
+    });
+  }
+
+  it("P3: with no depth, the prompt carries today's rule and no bar", () => {
+    const text = buildPrompt(anAssessReadinessRequest());
+    expect(text).toContain(READINESS_VERDICT_RULE);
+    expect(text).not.toContain(READINESS_VERDICT_RULE_PROOF_OF_CONCEPT);
+    for (const bar of Object.values(READINESS_DEPTH_BARS)) {
+      expect(text).not.toContain(bar);
+    }
+  });
+});
+
+describe("storeReadiness and the depth", () => {
+  const at = "2026-11-14T00:00:00.000Z";
+
+  it("S1: without a depth, the stored JSON has no depth key", () => {
+    const stored = storeReadiness(IDEA, anAssessReadinessResult(), at, null);
+    expect("depth" in JSON.parse(stored)).toBe(false);
+  });
+
+  it("S2: a depth is stored and read back", () => {
+    const stored = storeReadiness(IDEA, anAssessReadinessResult(), at, null, "full-spec");
+    expect(parseStoredReadiness({ idea: IDEA, readinessJson: stored })?.depth).toBe(
+      "full-spec",
+    );
   });
 });
 

@@ -330,6 +330,9 @@ export const assessReadinessResultSchema = z.strictObject({
 /** A ready verdict tolerates at most this many unknowns. */
 export const MAX_READY_UNKNOWNS = 5;
 
+/** The unknowns a `ready` verdict may carry at a proof of concept. */
+export const MAX_READY_UNKNOWNS_PROOF_OF_CONCEPT = 8;
+
 /** A sharpening round asks at most this many direction cards. */
 export const MAX_SHARPENING_CARDS = 4;
 

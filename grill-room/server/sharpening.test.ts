@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { buildPrompt } from "./interviewer/prompt.js";
+import { DEPTHS, TECHNICAL_LEVELS } from "../shared/session-constants.js";
+import {
+  DEPTH_SECTIONS,
+  LEAVE_IT_TO_THE_BUILDER,
+  LEVEL_SECTIONS,
+  SHARPEN_DEPTH_SECTIONS,
+  buildPrompt,
+} from "./interviewer/prompt.js";
 import {
   MAX_SHARPENED_IDEA_LENGTH,
   MAX_SHARPENING_CARDS,
@@ -11,13 +18,15 @@ import {
 import {
   aDecision,
   aContext,
+  aProposeRoundRequest,
   aSharpenCardsRequest,
+  aSharpenCardsResult,
   aSharpeningCard,
   aSharpeningRound,
   aSharpenRewriteRequest,
   aSharpenRewriteResult,
 } from "./interviewer/test-fixtures.js";
-import type { SharpeningAnswerKind } from "./interviewer/types.js";
+import type { InterviewContext, SharpeningAnswerKind } from "./interviewer/types.js";
 import {
   reasonsToRefuseSharpenCards,
   reasonsToRefuseSharpenRewrite,
@@ -538,5 +547,120 @@ describe("the sharpening prompts and their checks", () => {
         ),
       ).toEqual([lengthReason(max + 1)]);
     }
+  });
+});
+
+describe("the Sharpening depth and level sections", () => {
+  const prompts = [
+    {
+      name: "cards",
+      task: "## Your task: direction cards",
+      build: (extra: Partial<InterviewContext>) => {
+        const request = aSharpenCardsRequest();
+        return buildPrompt({ ...request, context: { ...request.context, ...extra } });
+      },
+    },
+    {
+      name: "rewrite",
+      task: "## Your task: rewrite the idea",
+      build: (extra: Partial<InterviewContext>) => {
+        const request = aSharpenRewriteRequest();
+        return buildPrompt({ ...request, context: { ...request.context, ...extra } });
+      },
+    },
+  ];
+
+  for (const { name, task, build } of prompts) {
+    for (const depth of DEPTHS) {
+      for (const level of TECHNICAL_LEVELS) {
+        it(`P4/P5: the ${name} prompt at ${depth} and ${level} carries both sections before its task`, () => {
+          const prompt = build({ depth, technicalLevel: level });
+          expect(prompt).toContain(
+            `${SHARPEN_DEPTH_SECTIONS[depth]}\n\n${LEVEL_SECTIONS[level]}\n\n${task}`,
+          );
+          for (const other of DEPTHS.filter((d) => d !== depth)) {
+            expect(prompt).not.toContain(SHARPEN_DEPTH_SECTIONS[other]);
+          }
+          for (const other of TECHNICAL_LEVELS.filter((l) => l !== level)) {
+            expect(prompt).not.toContain(LEVEL_SECTIONS[other]);
+          }
+          for (const grill of Object.values(DEPTH_SECTIONS)) {
+            expect(prompt).not.toContain(grill);
+          }
+        });
+      }
+
+      it(`P4b: the ${name} prompt with depth ${depth} only carries its depth section before its task`, () => {
+        const prompt = build({ depth });
+        expect(prompt).toContain(`${SHARPEN_DEPTH_SECTIONS[depth]}\n\n${task}`);
+        for (const section of Object.values(LEVEL_SECTIONS)) {
+          expect(prompt).not.toContain(section);
+        }
+        expect(prompt).not.toContain("\n\n\n");
+      });
+    }
+
+    for (const level of TECHNICAL_LEVELS) {
+      it(`P4c: the ${name} prompt with level ${level} only carries its level section before its task`, () => {
+        const prompt = build({ technicalLevel: level });
+        expect(prompt).toContain(`${LEVEL_SECTIONS[level]}\n\n${task}`);
+        for (const section of Object.values(SHARPEN_DEPTH_SECTIONS)) {
+          expect(prompt).not.toContain(section);
+        }
+        expect(prompt).not.toContain("\n\n\n");
+      });
+    }
+
+    it(`P6: the ${name} prompt with neither field carries none of the sections`, () => {
+      const prompt = build({});
+      for (const section of [
+        ...Object.values(SHARPEN_DEPTH_SECTIONS),
+        ...Object.values(LEVEL_SECTIONS),
+      ]) {
+        expect(prompt).not.toContain(section);
+      }
+      expect(prompt).not.toContain("\n\n\n");
+    });
+  }
+
+  for (const depth of DEPTHS) {
+    it(`P7: the propose-round prompt at ${depth} carries no Sharpening depth section`, () => {
+      const prompt = buildPrompt(aProposeRoundRequest({ context: aContext({ depth }) }));
+      for (const section of Object.values(SHARPEN_DEPTH_SECTIONS)) {
+        expect(prompt).not.toContain(section);
+      }
+    });
+  }
+
+  it("P8: a card recommending the builder's call passes the cards check and the rewrite check", () => {
+    const cards = aSharpenCardsResult({
+      cards: [
+        aSharpeningCard("sharpen-what", {
+          direction: "what",
+          choices: [
+            { label: "One", rationale: "The first option." },
+            { label: LEAVE_IT_TO_THE_BUILDER, rationale: "The builder decides." },
+          ],
+          recommendedChoice: 1,
+        }),
+        aSharpeningCard("sharpen-who", { direction: "who" }),
+        aSharpeningCard("sharpen-outcome", { direction: "outcome" }),
+      ],
+    });
+    expect(
+      reasonsToRefuseSharpenCards(cards, { usedKeys: [], firstRound: true }),
+    ).toEqual([]);
+    expect(
+      reasonsToRefuseSharpenRewrite(
+        aSharpenRewriteResult({
+          idea: NEW_IDEA,
+          uses: [{ cardKey: "sharpen-what", how: "Leaves the choice to the builder." }],
+        }),
+        {
+          currentIdea: CURRENT_IDEA,
+          answers: [{ key: "sharpen-what", kind: "accepted-recommendation" }],
+        },
+      ),
+    ).toEqual([]);
   });
 });
