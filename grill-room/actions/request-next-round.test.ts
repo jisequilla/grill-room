@@ -3566,7 +3566,10 @@ describe("request-next-round settles a depth queued before the interview", () =>
 
   it("F1: the first round applies the queue and clears the override, with no re-judge", async () => {
     const id = await queuedSession();
-    const interviewer = scriptInterviewer([round(proposed())]);
+    const interviewer = scriptInterviewer([
+      round(proposed()),
+      { kind: "assess-readiness", result: anAssessReadinessResult() },
+    ]);
 
     const result = await requestNextRound.run({ sessionId: id });
 

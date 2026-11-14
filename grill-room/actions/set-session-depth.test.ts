@@ -192,7 +192,9 @@ describe("set-session-depth before the interview starts", () => {
 
   it("D3: a session never judged changes depth with no model turn", async () => {
     const id = await sessionWith({ readinessJson: null });
-    const interviewer = scriptInterviewer([]);
+    const interviewer = scriptInterviewer([
+      { kind: "assess-readiness", result: anAssessReadinessResult() },
+    ]);
 
     await setSessionDepth.run({ sessionId: id, depth: "full-spec" });
 
@@ -203,7 +205,9 @@ describe("set-session-depth before the interview starts", () => {
   it("D4: the same depth runs no re-judge and keeps the override", async () => {
     const stored = judgedAt("first-working-version");
     const id = await sessionWith({ readinessJson: stored, readinessOverrideJson: OVERRIDE });
-    const interviewer = scriptInterviewer([]);
+    const interviewer = scriptInterviewer([
+      { kind: "assess-readiness", result: anAssessReadinessResult() },
+    ]);
 
     await setSessionDepth.run({ sessionId: id, depth: "first-working-version" });
 
