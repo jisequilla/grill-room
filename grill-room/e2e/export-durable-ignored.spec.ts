@@ -65,6 +65,7 @@ test("refuses the export and warns in project settings when the durable folder i
 
   await page.getByLabel("Title").fill("Durable ignored e2e");
   await page.getByLabel("Idea").fill("A session whose durable folder git ignores.");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
 
   await page.waitForURL(/\/sessions\/[^/]+$/);

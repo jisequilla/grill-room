@@ -36,6 +36,7 @@ test("the sidebar carries the mark, New session, Projects, Recent and footer lin
   await page
     .getByLabel("Idea")
     .fill("A workspace app that grills a loose idea into a spec.");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.waitForURL(/\/sessions\/[^/]+$/);
 

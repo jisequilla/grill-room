@@ -107,6 +107,7 @@ test("demo: the whole app, from idea to export", async ({ page, request }) => {
   await page.getByRole("option", { name: "Demo repo" }).click();
 
   await beat(page);
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
 
   await page.waitForURL(/\/sessions\/[^/]+$/);

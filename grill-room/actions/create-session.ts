@@ -7,12 +7,13 @@ import { getDb, schema } from "../server/db/index.js";
 import { SESSION_ANSWERING_MODES, SESSION_MODELS } from "../server/db/schema.js";
 import { resolveOwnerId } from "../server/current-owner.js";
 import { getProject } from "../server/projects.js";
+import { DEFAULT_DEPTH, DEPTHS } from "../shared/session-constants.js";
 import getDefaultModel from "./get-default-model.js";
 import { resolveDocsFolder } from "./set-docs-folder.js";
 
 export default defineAction({
   description:
-    "Start a new grilling session from a loose idea. The interviewer model defaults to the global default model when omitted.",
+    "Start a new grilling session from a loose idea. The interviewer model defaults to the global default model when omitted, and the depth to the default depth.",
   schema: z.object({
     title: z
       .string()
@@ -44,8 +45,22 @@ export default defineAction({
       .describe(
         "Id of the registered project this session exports into; omit to choose one later",
       ),
+    depth: z
+      .enum(DEPTHS)
+      .optional()
+      .describe(
+        "How deep the grill goes; defaults to first-working-version when omitted",
+      ),
   }),
-  run: async ({ title, idea, model, answeringMode, docsFolder, projectId }) => {
+  run: async ({
+    title,
+    idea,
+    model,
+    answeringMode,
+    docsFolder,
+    projectId,
+    depth,
+  }) => {
     const ownerId = await resolveOwnerId();
     const resolvedModel = model ?? (await getDefaultModel.run({})).model;
 
@@ -82,6 +97,7 @@ export default defineAction({
         answeringMode,
         docsFolder: resolvedDocsFolder,
         projectId: projectId ?? null,
+        depth: depth ?? DEFAULT_DEPTH,
         state: "interviewing",
         createdAt: now,
         updatedAt: now,

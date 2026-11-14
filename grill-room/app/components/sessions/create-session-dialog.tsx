@@ -8,6 +8,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
 import { ProjectSelect } from "@/components/projects/project-select";
+import { SessionSetupStep } from "@/components/sessions/session-setup-step";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,6 +30,13 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { actionErrorCode } from "@/lib/decisions";
+import {
+  levelOnProfileLoad,
+  setupActionsDisabled,
+  setupSubmission,
+  submitSetup,
+  type SetupAction,
+} from "@/lib/depth-level";
 import { DOCS_FOLDER_ERROR_KEY } from "@/lib/docs-folder";
 import {
   clearSessionDraft,
@@ -45,10 +53,13 @@ import {
 } from "@/lib/session-labels";
 
 import {
+  DEFAULT_DEPTH,
   SESSION_ANSWERING_MODES,
   SESSION_MODELS,
+  type Depth,
   type SessionAnsweringMode,
   type SessionModel,
+  type TechnicalLevel,
 } from "@shared/session-constants";
 
 interface CreateSessionDialogProps {
@@ -96,6 +107,25 @@ export function CreateSessionDialog({
   );
   const [docsFolderError, setDocsFolderError] = useState<string | null>(null);
   const { data: projects } = useActionQuery("list-projects", {});
+  const profile = useActionQuery("get-owner-profile", {});
+  // Settled with data or with an error: either way Create can decide.
+  const profileLoaded = !profile.isPending;
+  const profileLevel: TechnicalLevel | null =
+    profile.data?.technicalLevel ?? null;
+
+  // Screen 1 is the form, screen 2 the setup step. The picks live only while
+  // the dialog stays open; they are never part of the draft.
+  const [screen, setScreen] = useState<1 | 2>(1);
+  const [depth, setDepth] = useState<Depth>(DEFAULT_DEPTH);
+  const [level, setLevel] = useState<TechnicalLevel | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  // Whether the level on screen 2 is the owner's pick. Until then a
+  // late-arriving profile may replace it.
+  const levelIsUsersRef = useRef(false);
+  const levelRef = useRef(level);
+  levelRef.current = level;
+  const profileLevelRef = useRef(profileLevel);
+  profileLevelRef.current = profileLevel;
 
   // The latest form, so two quick edits never write a stale draft.
   const formRef = useRef(form);
@@ -134,6 +164,16 @@ export function CreateSessionDialog({
   // none. Edits write the draft, and so does an open that names a project.
   useEffect(() => {
     if (!open) return;
+    setScreen(1);
+    setDepth(DEFAULT_DEPTH);
+    levelIsUsersRef.current = false;
+    setLevel(
+      levelOnProfileLoad({
+        userPicked: false,
+        pickedLevel: null,
+        profileLevel: profileLevelRef.current,
+      }),
+    );
     const stored = readSessionDraft(draftStorage());
     const draft =
       projectId === null ? stored : draftInProject(stored, projectId);
@@ -162,6 +202,19 @@ export function CreateSessionDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultModel]);
 
+  // The profile loads asynchronously; it fills the level only while the level
+  // is not the owner's pick.
+  useEffect(() => {
+    if (!open) return;
+    setLevel(
+      levelOnProfileLoad({
+        userPicked: levelIsUsersRef.current,
+        pickedLevel: levelRef.current,
+        profileLevel,
+      }),
+    );
+  }, [open, profileLevel]);
+
   // A draft can name a project that no longer exists. Show none, without
   // rewriting storage: the next edit prunes it there too.
   useEffect(() => {
@@ -176,42 +229,77 @@ export function CreateSessionDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, projects, form.projectId]);
 
-  const { mutate, isPending } = useActionMutation("create-session", {
-    onSuccess: (session: { id: string }) => {
-      clearSessionDraft(draftStorage());
-      onOpenChange(false);
-      onCreated(session.id);
+  const { mutateAsync: createSession, isPending } = useActionMutation(
+    "create-session",
+    {
+      onError: (error: unknown) => {
+        // A refused docs folder belongs beside the field that caused it; the
+        // dialog stays open so the path can be corrected rather than retyped.
+        const key = DOCS_FOLDER_ERROR_KEY[actionErrorCode(error) ?? ""];
+        if (key) {
+          setDocsFolderError(t(key));
+          return;
+        }
+        toast.error(actionErrorMessage(error) ?? t("sessions.createFailed"));
+      },
     },
-    onError: (error: unknown) => {
-      // A refused docs folder belongs beside the field that caused it; the
-      // dialog stays open so the path can be corrected rather than retyped.
-      const key = DOCS_FOLDER_ERROR_KEY[actionErrorCode(error) ?? ""];
-      if (key) {
-        setDocsFolderError(t(key));
-        return;
-      }
-      toast.error(actionErrorMessage(error) ?? t("sessions.createFailed"));
-    },
-  });
+  );
+  const { mutateAsync: saveLevel } = useActionMutation(
+    "set-owner-technical-level",
+  );
 
   const canSubmit =
     form.title.trim().length > 0 && form.idea.trim().length > 0;
 
-  function handleSubmit(event: FormEvent) {
+  function handleNext(event: FormEvent) {
     event.preventDefault();
     if (!canSubmit || isPending) return;
+    setScreen(2);
+  }
+
+  async function finishSetup(action: SetupAction) {
+    if (submitting) return;
+    setSubmitting(true);
     setDocsFolderError(null);
     const { title, idea, model, answeringMode, docsFolder, projectId } = form;
     const folder = docsFolder.trim();
-    mutate({
-      title: title.trim(),
-      idea: idea.trim(),
-      model,
-      answeringMode,
-      ...(folder.length > 0 ? { docsFolder: folder } : {}),
-      ...(projectId !== null ? { projectId } : {}),
+    const result = await submitSetup({
+      submission: setupSubmission({
+        action,
+        pickedDepth: depth,
+        pickedLevel: level,
+        profileLevel,
+      }),
+      setLevel: (technicalLevel) => saveLevel({ technicalLevel }),
+      createSession: (chosenDepth) =>
+        createSession({
+          title: title.trim(),
+          idea: idea.trim(),
+          model,
+          answeringMode,
+          ...(folder.length > 0 ? { docsFolder: folder } : {}),
+          ...(projectId !== null ? { projectId } : {}),
+          depth: chosenDepth,
+        }),
     });
+    setSubmitting(false);
+    // A refused create belongs on the form, where it can be fixed: the
+    // mutation's own onError already put it beside the field or toasted it.
+    if (!result.ok && result.failed === "session") {
+      setScreen(1);
+      return;
+    }
+    if (!result.ok) {
+      toast.error(
+        actionErrorMessage(result.error) ?? t("sessions.levelSaveFailed"),
+      );
+    }
+    clearSessionDraft(draftStorage());
+    onOpenChange(false);
+    onCreated(result.sessionId);
   }
+
+  const disabled = setupActionsDisabled({ profileLoaded, submitting });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -224,145 +312,194 @@ export function CreateSessionDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>{t("sessions.createTitle")}</DialogTitle>
+          <DialogTitle>
+            {t(screen === 1 ? "sessions.createTitle" : "sessions.setupTitle")}
+          </DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="session-title">{t("sessions.titleLabel")}</Label>
-            <Input
-              id="session-title"
-              value={form.title}
-              onChange={(event) => update({ title: event.target.value })}
-              placeholder={t("sessions.titlePlaceholder")}
-              autoFocus
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="session-idea">{t("sessions.ideaLabel")}</Label>
-            <Textarea
-              id="session-idea"
-              value={form.idea}
-              onChange={(event) => update({ idea: event.target.value })}
-              placeholder={t("sessions.ideaPlaceholder")}
-              rows={4}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="session-model">
-                {t("sessions.modelLabel")}
-              </Label>
-              <Select
-                value={form.model}
-                onValueChange={(value) =>
-                  update({ model: value as SessionModel })
-                }
-              >
-                <SelectTrigger id="session-model">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SESSION_MODELS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {t(MODEL_LABEL_KEY[value])}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>{t("sessions.answeringModeLabel")}</Label>
-              <ToggleGroup
-                type="single"
-                variant="outline"
-                value={form.answeringMode}
-                onValueChange={(value) => {
-                  if (value) {
-                    update({ answeringMode: value as SessionAnsweringMode });
-                  }
-                }}
-                className="w-full"
-              >
-                {SESSION_ANSWERING_MODES.map((value) => (
-                  <ToggleGroupItem
-                    key={value}
-                    value={value}
-                    className="flex-1 text-xs"
-                  >
-                    {t(ANSWERING_MODE_LABEL_KEY[value])}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="session-docs-folder">
-              {t("sessions.docsFolderLabel")}
-            </Label>
-            <Input
-              id="session-docs-folder"
-              value={form.docsFolder}
-              onChange={(event) => {
-                update({ docsFolder: event.target.value });
-                setDocsFolderError(null);
+        {screen === 2 ? (
+          <div className="space-y-4">
+            <SessionSetupStep
+              depth={depth}
+              level={level}
+              onDepthChange={setDepth}
+              onLevelChange={(picked) => {
+                levelIsUsersRef.current = true;
+                setLevel(picked);
               }}
-              placeholder={t("sessions.docsFolderPlaceholder")}
-              aria-invalid={docsFolderError !== null}
-              aria-describedby="session-docs-folder-hint"
-              spellCheck={false}
             />
-            <p
-              id="session-docs-folder-hint"
-              className={
-                docsFolderError
-                  ? "text-xs text-destructive"
-                  : "text-xs text-muted-foreground"
-              }
-            >
-              {docsFolderError ?? t("sessions.docsFolderHint")}
-            </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="session-project">
-              {t("projects.selectOptionalLabel")}
-            </Label>
-            <ProjectSelect
-              id="session-project"
-              value={form.projectId}
-              onChange={(projectId) => update({ projectId })}
-              aria-describedby="session-project-hint"
-            />
-            <p id="session-project-hint" className="text-xs text-muted-foreground">
-              {t("projects.selectHint")}
-            </p>
-          </div>
-          <DialogFooter>
-            {hasDraftText(form) && (
+            <DialogFooter>
               <Button
                 type="button"
                 variant="ghost"
-                data-testid="discard-session-draft"
-                onClick={() => {
-                  clearSessionDraft(draftStorage());
-                  resetForm();
-                }}
+                disabled={disabled.cancel}
+                onClick={() => onOpenChange(false)}
               >
-                {t("sessions.discardDraft")}
+                {t("sessions.cancel")}
               </Button>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-            >
-              {t("sessions.cancel")}
-            </Button>
-            <Button type="submit" disabled={!canSubmit || isPending}>
-              {isPending && <Spinner className="size-4" />}
-              {t(isPending ? "sessions.creating" : "sessions.create")}
-            </Button>
-          </DialogFooter>
-        </form>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={disabled.back}
+                onClick={() => setScreen(1)}
+              >
+                {t("sessions.back")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={disabled.skip}
+                onClick={() => void finishSetup("skip")}
+              >
+                {t("sessions.skip")}
+              </Button>
+              <Button
+                type="button"
+                disabled={disabled.create}
+                onClick={() => void finishSetup("create")}
+              >
+                {submitting && <Spinner className="size-4" />}
+                {t(submitting ? "sessions.creating" : "sessions.create")}
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          <form onSubmit={handleNext} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="session-title">{t("sessions.titleLabel")}</Label>
+              <Input
+                id="session-title"
+                value={form.title}
+                onChange={(event) => update({ title: event.target.value })}
+                placeholder={t("sessions.titlePlaceholder")}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="session-idea">{t("sessions.ideaLabel")}</Label>
+              <Textarea
+                id="session-idea"
+                value={form.idea}
+                onChange={(event) => update({ idea: event.target.value })}
+                placeholder={t("sessions.ideaPlaceholder")}
+                rows={4}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="session-model">
+                  {t("sessions.modelLabel")}
+                </Label>
+                <Select
+                  value={form.model}
+                  onValueChange={(value) =>
+                    update({ model: value as SessionModel })
+                  }
+                >
+                  <SelectTrigger id="session-model">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SESSION_MODELS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {t(MODEL_LABEL_KEY[value])}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>{t("sessions.answeringModeLabel")}</Label>
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  value={form.answeringMode}
+                  onValueChange={(value) => {
+                    if (value) {
+                      update({ answeringMode: value as SessionAnsweringMode });
+                    }
+                  }}
+                  className="w-full"
+                >
+                  {SESSION_ANSWERING_MODES.map((value) => (
+                    <ToggleGroupItem
+                      key={value}
+                      value={value}
+                      className="flex-1 text-xs"
+                    >
+                      {t(ANSWERING_MODE_LABEL_KEY[value])}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="session-docs-folder">
+                {t("sessions.docsFolderLabel")}
+              </Label>
+              <Input
+                id="session-docs-folder"
+                value={form.docsFolder}
+                onChange={(event) => {
+                  update({ docsFolder: event.target.value });
+                  setDocsFolderError(null);
+                }}
+                placeholder={t("sessions.docsFolderPlaceholder")}
+                aria-invalid={docsFolderError !== null}
+                aria-describedby="session-docs-folder-hint"
+                spellCheck={false}
+              />
+              <p
+                id="session-docs-folder-hint"
+                className={
+                  docsFolderError
+                    ? "text-xs text-destructive"
+                    : "text-xs text-muted-foreground"
+                }
+              >
+                {docsFolderError ?? t("sessions.docsFolderHint")}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="session-project">
+                {t("projects.selectOptionalLabel")}
+              </Label>
+              <ProjectSelect
+                id="session-project"
+                value={form.projectId}
+                onChange={(projectId) => update({ projectId })}
+                aria-describedby="session-project-hint"
+              />
+              <p id="session-project-hint" className="text-xs text-muted-foreground">
+                {t("projects.selectHint")}
+              </p>
+            </div>
+            <DialogFooter>
+              {hasDraftText(form) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  data-testid="discard-session-draft"
+                  onClick={() => {
+                    clearSessionDraft(draftStorage());
+                    resetForm();
+                  }}
+                >
+                  {t("sessions.discardDraft")}
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => onOpenChange(false)}
+              >
+                {t("sessions.cancel")}
+              </Button>
+              <Button type="submit" disabled={!canSubmit || isPending}>
+                {t("sessions.next")}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );
