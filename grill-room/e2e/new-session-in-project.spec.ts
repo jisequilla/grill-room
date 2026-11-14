@@ -139,6 +139,7 @@ test.describe("new session in a project", () => {
     await page.getByTestId("project-new-session").click();
     await page.getByLabel("Title").fill(title);
     await page.getByLabel("Idea").fill("Made from the project page.");
+    await page.getByRole("button", { name: "Next", exact: true }).click();
     await page.getByRole("button", { name: "Create", exact: true }).click();
     await page.waitForURL(/\/sessions\/[^/]+$/);
     await page.goto(`/projects/${projectY.id}`);

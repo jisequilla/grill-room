@@ -58,6 +58,7 @@ test("names a flagged decision no ticket builds, then exports its suggestion", a
 
   await page.getByLabel("Title").fill("ADR suggestions e2e");
   await page.getByLabel("Idea").fill("A session with a decision worth recording as an ADR.");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
 
   await page.waitForURL(/\/sessions\/[^/]+$/);

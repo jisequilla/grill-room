@@ -75,6 +75,7 @@ test("shows brief links as the planned bundle path, and follows the export slug"
   await page
     .getByLabel("Idea")
     .fill("A session whose handoff brief links show the planned bundle path.");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
 
   await page.waitForURL(/\/sessions\/[^/]+$/);

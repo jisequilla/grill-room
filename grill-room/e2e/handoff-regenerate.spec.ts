@@ -78,6 +78,7 @@ test("keeps an edited brief on regeneration, names it outdated, and replaces it 
 
   await page.getByLabel("Title").fill("Handoff regenerate e2e");
   await page.getByLabel("Idea").fill("A session whose handoff brief is edited by hand.");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
 
   await page.waitForURL(/\/sessions\/[^/]+$/);

@@ -15,7 +15,7 @@ import getSession from "./get-session.js";
 
 export default defineAction({
   description:
-    "Change how deep a session's grill goes. Before the interview starts (no round, still interviewing): while a turn is working the depth is queued as `pendingDepth` and applied once that turn succeeds; otherwise it takes effect at once, clears the \"Grill it as is\" record and, when the idea has a stored readiness judgment, judges it again at the new depth. After the interview starts: refused with `turn-in-progress` while a turn is working; otherwise the depth takes effect, a done proposal or a confirmation is withdrawn back to interviewing, and the spec, if any, is marked not current. Nothing is regenerated. Returns the session.",
+    "Change how deep a session's grill goes. Before the interview starts (no round, still interviewing): while a turn is working the depth is queued as `pendingDepth` and applied once that turn succeeds; otherwise it takes effect at once, clears the \"Grill it as is\" record and, when the idea has a stored readiness judgment, judges it again at the new depth. After the interview starts: refused with `turn-in-progress` while a turn is working; otherwise the depth takes effect, a done proposal or a confirmation is withdrawn back to interviewing, and the spec, if any, of a confirmed or interviewing session is marked not current; a done-proposed session's spec is not. Nothing is regenerated. Returns the session.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
     depth: z.enum(DEPTHS).describe("The depth to grill the session to"),

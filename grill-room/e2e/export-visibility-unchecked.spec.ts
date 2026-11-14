@@ -111,6 +111,7 @@ test("reports a file exported through a symlinked folder as \"could not check\",
   await page
     .getByLabel("Idea")
     .fill("A session whose export folder sits behind a symlink.");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
 
   await page.waitForURL(/\/sessions\/[^/]+$/);
