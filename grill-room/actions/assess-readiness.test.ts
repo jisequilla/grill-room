@@ -144,6 +144,18 @@ describe("assess-readiness", () => {
     expect(raw.evidence[1]!.citation).toBe("docs/adr/0003-queue.md:5-10");
   });
 
+  it("an unknown session is not found", async () => {
+    const interviewer = scriptInterviewer([
+      { kind: "assess-readiness", result: anAssessReadinessResult() },
+    ]);
+
+    await expect(assessReadiness.run({ sessionId: "no-such-session" })).rejects.toMatchObject({
+      statusCode: 404,
+      message: "Session not found: no-such-session",
+    });
+    expect(interviewer.requests).toHaveLength(0);
+  });
+
   describe("the session's depth", () => {
     async function sessionAt(depth: Depth, pendingDepth: Depth | null = null) {
       const session = await createSession.run({

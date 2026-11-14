@@ -3664,6 +3664,55 @@ describe("request-next-round settles a depth queued before the interview", () =>
     expect(after.readinessOverrideJson).not.toBeNull();
   });
 
+  it("F7: applying the queue on an interviewing session marks its spec not current", async () => {
+    const id = await queuedSession();
+    const now = new Date().toISOString();
+    await getDb().insert(schema.specs).values({
+      id: "spec-1",
+      sessionId: id,
+      markdown: "## Problem Statement\n\nAn idea.",
+      current: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    scriptInterviewer([round(proposed())]);
+
+    await requestNextRound.run({ sessionId: id });
+
+    const [spec] = await getDb()
+      .select()
+      .from(schema.specs)
+      .where(eq(schema.specs.sessionId, id));
+    expect(spec!.current).toBe(false);
+    expect((await row(id)).depth).toBe("proof-of-concept");
+  });
+
+  it("F8: a session deleted during the first turn is not found when the queue is settled", async () => {
+    const id = await queuedSession();
+    const interviewer = scriptInterviewer([
+      {
+        kind: "propose-round",
+        result: {
+          proposedDecisions: [],
+          pushBackResponses: [],
+          userDecisionPlacements: [],
+          done: { summary: "Everything is settled." },
+        },
+      },
+    ]);
+    const propose = interviewer.proposeRound.bind(interviewer);
+    interviewer.proposeRound = async (request, observer) => {
+      const turn = await propose(request, observer);
+      await getDb().delete(schema.sessions).where(eq(schema.sessions.id, id));
+      return turn;
+    };
+
+    await expect(requestNextRound.run({ sessionId: id })).rejects.toMatchObject({
+      statusCode: 404,
+      message: `Session not found: ${id}`,
+    });
+  });
+
   it("F6: a failed first turn leaves the queue and the override", async () => {
     const id = await queuedSession();
     scriptInterviewer([rateLimitedTurn("propose-round")]);

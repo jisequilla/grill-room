@@ -389,7 +389,11 @@ describe("set-session-depth after the interview starts", () => {
 
     await expect(
       setSessionDepth.run({ sessionId: id, depth: "full-spec" }),
-    ).rejects.toMatchObject({ errorCode: "turn-in-progress", statusCode: 409 });
+    ).rejects.toMatchObject({
+      errorCode: "turn-in-progress",
+      statusCode: 409,
+      message: expect.stringMatching(/Wait for the turn to finish before changing its depth/),
+    });
 
     expect(await row(id)).toEqual(before);
   });
@@ -417,6 +421,46 @@ describe("set-session-depth after the interview starts", () => {
   });
 });
 
+describe("set-session-depth on a session started by its state", () => {
+  it("R8: a first proposal of done with no round counts as started: done is withdrawn, the override kept, no re-judge", async () => {
+    const stored = judgedAt("first-working-version");
+    const id = await sessionWith({
+      state: "done-proposed",
+      doneSummary: "All settled.",
+      readinessJson: stored,
+      readinessOverrideJson: OVERRIDE,
+    });
+    const interviewer = scriptInterviewer([
+      { kind: "assess-readiness", result: anAssessReadinessResult() },
+    ]);
+
+    await setSessionDepth.run({ sessionId: id, depth: "full-spec" });
+
+    const after = await row(id);
+    expect(after.depth).toBe("full-spec");
+    expect(after.state).toBe("interviewing");
+    expect(after.doneSummary).toBeNull();
+    expect(after.readinessOverrideJson).toBe(OVERRIDE);
+    expect(after.readinessJson).toBe(stored);
+    expect(interviewer.requests).toHaveLength(0);
+  });
+
+  it("R9: a first proposal of done with no round is refused while a turn works", async () => {
+    const id = await sessionWith({
+      state: "done-proposed",
+      doneSummary: "All settled.",
+      turnStatus: "working",
+    });
+    const before = await row(id);
+
+    await expect(
+      setSessionDepth.run({ sessionId: id, depth: "full-spec" }),
+    ).rejects.toMatchObject({ errorCode: "turn-in-progress", statusCode: 409 });
+
+    expect(await row(id)).toEqual(before);
+  });
+});
+
 describe("set-session-depth with login on", () => {
   it("O1: another owner's session is not found", async () => {
     loginOn();
@@ -426,7 +470,10 @@ describe("set-session-depth with login on", () => {
 
     await expect(
       as(BEN.email, async () => setSessionDepth.run({ sessionId: anaSession, depth: "full-spec" })),
-    ).rejects.toMatchObject({ statusCode: 404 });
+    ).rejects.toMatchObject({
+      statusCode: 404,
+      message: `Session not found: ${anaSession}`,
+    });
 
     expect(await row(anaSession)).toEqual(before);
   });
