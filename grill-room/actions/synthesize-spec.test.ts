@@ -522,9 +522,13 @@ describe("synthesize-spec", () => {
     });
   });
 
-  it("regenerates the spec, replacing its markdown and marking any generated tickets out of date", async () => {
+  it("regenerates the spec, replacing its markdown and marking any generated tickets out of date (A1b: naming its depth)", async () => {
     const session = await aSession();
     await confirm(session.id);
+    await getDb()
+      .update(schema.sessions)
+      .set({ depth: "proof-of-concept" })
+      .where(eq(schema.sessions.id, session.id));
     scriptInterviewer([specTurn(goodSpecMarkdown("First version."))]);
     await synthesizeSpec.run({ sessionId: session.id });
 
@@ -534,14 +538,16 @@ describe("synthesize-spec", () => {
       true,
     );
 
-    scriptInterviewer([specTurn(goodSpecMarkdown("Second version."))]);
+    const second = goodSpecMarkdown("Second version.");
+    scriptInterviewer([specTurn(second)]);
     const result = await synthesizeSpec.run({ sessionId: session.id });
 
     expect(result.markdown).toContain("Second version.");
     expect(result.markdown).not.toContain("First version.");
+    expect(result.markdown).toBe(withDepthSentence(second, "proof-of-concept"));
 
     const after = await getSpec.run({ sessionId: session.id });
-    expect(after.spec?.markdown).toContain("Second version.");
+    expect(after.spec?.markdown).toBe(withDepthSentence(second, "proof-of-concept"));
     expect(after.ticketsCurrent).toBe(false);
   });
 
@@ -642,6 +648,7 @@ describe("synthesize-spec", () => {
     expect(context.depth).toBe("proof-of-concept");
     expect("technicalLevel" in context).toBe(false);
     expect(stored.markdown).toBe(withDepthSentence(scripted, "proof-of-concept"));
+    expect(stored.markdown).not.toBe(scripted);
   });
 
   it("A2: reads the session's depth, never its pending depth", async () => {

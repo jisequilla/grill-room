@@ -5,7 +5,12 @@ import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { normaliseQuote, specSections } from "../server/consistency.js";
+import {
+  normaliseQuote,
+  SPEC_SECTION_END,
+  SPEC_SECTION_HEADING,
+  specSections,
+} from "../server/consistency.js";
 import { getInterviewer } from "../server/interviewer/index.js";
 import type { Depth } from "../shared/session-constants.js";
 import {
@@ -76,25 +81,35 @@ function readinessOverrideReasons(
 }
 
 /**
- * The spec with the sentence naming its depth at the end of its
- * `## Further Notes` section, which runs to the next `# ` or `## ` line or to
- * the end. Unchanged when the section already holds the sentence, or when the
- * spec has no such section.
+ * The spec with the sentence naming its depth as the last line of its
+ * `## Further Notes` section, found the way `specSections` finds it. Any
+ * depth sentence already in the section is removed first, with the blank line
+ * after it, so a re-synthesis holds exactly one. Unchanged when the spec has
+ * no such section.
  */
 export function withDepthSentence(markdown: string, depth: Depth): string {
-  const sentence = DEPTH_SPEC_SENTENCES[depth];
-  const lines = markdown.split("\n");
-  const start = lines.findIndex((line) => /^## Further Notes\s*$/.test(line));
-  if (start === -1) return markdown;
-  const next = lines.findIndex(
-    (line, index) => index > start && (line.startsWith("# ") || line.startsWith("## ")),
+  const lines = markdown.split(/\r?\n/);
+  const start = lines.findIndex(
+    (line) =>
+      SPEC_SECTION_END.test(line) && SPEC_SECTION_HEADING.exec(line)?.[1] === "Further Notes",
   );
+  if (start === -1) return markdown;
+  const next = lines.findIndex((line, index) => index > start && SPEC_SECTION_END.test(line));
   const end = next === -1 ? lines.length : next;
-  const body = lines.slice(start + 1, end);
-  if (body.some((line) => line.includes(sentence))) return markdown;
+  const sentences = new Set(Object.values(DEPTH_SPEC_SENTENCES));
+  const body: string[] = [];
+  const original = lines.slice(start + 1, end);
+  for (let index = 0; index < original.length; index++) {
+    const line = original[index]!;
+    if (!sentences.has(line)) {
+      body.push(line);
+      continue;
+    }
+    if (original[index + 1]?.trim() === "") index++;
+  }
   while (body.length > 0 && body[body.length - 1]!.trim() === "") body.pop();
-  const section = [lines[start]!, ...body, "", sentence];
-  if (next === -1) return [...lines.slice(0, start), ...section].join("\n") + "\n";
+  const section = [lines[start]!, ...body, "", DEPTH_SPEC_SENTENCES[depth]];
+  if (next === -1) return [...lines.slice(0, start), ...section, ""].join("\n");
   return [...lines.slice(0, start), ...section, "", ...lines.slice(end)].join("\n");
 }
 

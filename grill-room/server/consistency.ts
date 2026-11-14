@@ -79,8 +79,8 @@ export function normaliseQuote(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-const SPEC_SECTION_HEADING = /^##[ \t]+(.+?)[ \t]*$/;
-const SPEC_SECTION_END = /^#{1,2}[ \t]/;
+export const SPEC_SECTION_HEADING = /^##[ \t]+(.+?)[ \t]*$/;
+export const SPEC_SECTION_END = /^#{1,2}[ \t]/;
 
 /**
  * The spec's level-2 sections, in document order: each heading's text as
