@@ -20,7 +20,10 @@ import {
   sessionHasRounds,
   storeReadinessOverride,
 } from "../server/readiness.js";
-import { returnSessionToInterviewing } from "../server/session-state.js";
+import {
+  markSpecNotCurrent,
+  returnSessionToInterviewing,
+} from "../server/session-state.js";
 import { runDueStaleReviews } from "../server/stale-review.js";
 import {
   findSupersessionsForDone,
@@ -47,6 +50,8 @@ import {
 } from "../server/turn.js";
 import type { AttemptRecorder } from "../server/turn-recorder.js";
 import getCurrentRound from "./get-current-round.js";
+
+type SessionRow = typeof schema.sessions.$inferSelect;
 
 /** A row, as `validateProposal` needs an existing decision: tree facts plus its question. */
 function toKeyedTreeDecision(row: DecisionRow): KeyedTreeDecision {
@@ -96,7 +101,8 @@ export default defineAction({
     // Starting the interview past a not-ready verdict is recorded, whichever
     // control asked for the first round, so the spec and the handoff can say
     // so. A failed turn below leaves the record in place.
-    if (!(await sessionHasRounds(sessionId))) {
+    const startedWithoutRound = !(await sessionHasRounds(sessionId));
+    if (startedWithoutRound) {
       const readiness = await currentReadiness(session);
       if (readiness?.result.verdict === "not-ready") {
         await db
@@ -201,6 +207,13 @@ export default defineAction({
       pending = nextRoundCandidates(rows);
     }
 
+    // The session the round opens on: re-read on a first request, so a depth
+    // queued before the interview started is settled here, whether or not a
+    // proposal turn ran.
+    const opening = startedWithoutRound
+      ? await settlePendingDepth()
+      : session;
+
     if (pending.length === 0) return getCurrentRound.run({ sessionId });
 
     // One at a time means one card per round; the rest stay pending and open
@@ -224,8 +237,8 @@ export default defineAction({
       // that had proposed (or, via a reopen elsewhere, confirmed) done returns
       // to interviewing, its done summary is dropped, and — leaving
       // `confirmed` — its spec is marked not current.
-      if (session.state !== "interviewing") {
-        await returnSessionToInterviewing(session, now, tx);
+      if (opening.state !== "interviewing") {
+        await returnSessionToInterviewing(opening, now, tx);
       }
 
       for (const row of returningDeferred) {
@@ -261,6 +274,56 @@ export default defineAction({
     });
 
     return getCurrentRound.run({ sessionId });
+
+    /**
+     * Apply a depth queued before the interview started, as a change after it
+     * started does: the depth takes effect, a done proposal (whichever turn
+     * wrote it) is withdrawn, and a spec is marked not current. The queue and
+     * the "Grill it as is" record are cleared with it. No re-judge runs: the
+     * interview has started. Resolves with the session as it now stands.
+     */
+    async function settlePendingDepth(): Promise<SessionRow> {
+      const reread = await readSession();
+      if (reread.pendingDepth == null) return reread;
+
+      if (reread.pendingDepth === reread.depth) {
+        await db
+          .update(schema.sessions)
+          .set({ pendingDepth: null })
+          .where(eq(schema.sessions.id, sessionId));
+        return readSession();
+      }
+
+      const pendingDepth = reread.pendingDepth;
+      const now = new Date().toISOString();
+      await db.transaction(async (tx) => {
+        await tx
+          .update(schema.sessions)
+          .set({
+            depth: pendingDepth,
+            pendingDepth: null,
+            readinessOverrideJson: null,
+            updatedAt: now,
+          })
+          .where(eq(schema.sessions.id, sessionId));
+        if (reread.state === "interviewing") {
+          await markSpecNotCurrent(sessionId, now, tx);
+        } else {
+          await returnSessionToInterviewing(reread, now, tx);
+        }
+      });
+      return readSession();
+    }
+
+    async function readSession(): Promise<SessionRow> {
+      const [row] = await db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, sessionId))
+        .limit(1);
+      if (!row) fail(`Session not found: ${sessionId}`, { statusCode: 404 });
+      return row;
+    }
 
     /**
      * One interviewer turn, retried with the app's reasons while the proposal

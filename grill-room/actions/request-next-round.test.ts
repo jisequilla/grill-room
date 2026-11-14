@@ -17,6 +17,7 @@ import {
 } from "../server/interviewer/index.js";
 import { buildPrompt } from "../server/interviewer/prompt.js";
 import { setTechnicalLevel } from "../server/owner-profiles.js";
+import { storeReadiness } from "../server/readiness.js";
 import { DEFAULT_TECHNICAL_LEVEL, LOCAL_OWNER_ID } from "../shared/session-constants.js";
 import {
   aScoutProjectResult,
@@ -3522,5 +3523,205 @@ describe("request-next-round pitches the grill to depth and level", () => {
       expect(request).toMatchObject({ kind: "propose-round" });
       expect(contextOf(request).technicalLevel).toBe("technical-not-building");
     }
+  });
+});
+
+describe("request-next-round settles a depth queued before the interview", () => {
+  useTestDatabase();
+  afterEach(resetInterviewer);
+
+  const IDEA = "A local app that grills me about an idea until it is decided.";
+
+  async function queuedSession(
+    columns: Partial<typeof schema.sessions.$inferInsert> = {},
+    answeringMode?: "one-at-a-time",
+  ) {
+    const session = await aSession(answeringMode ? { answeringMode } : {});
+    await getDb()
+      .update(schema.sessions)
+      .set({
+        depth: "first-working-version",
+        pendingDepth: "proof-of-concept",
+        readinessJson: storeReadiness(
+          IDEA,
+          anAssessReadinessResult({ verdict: "not-ready", missing: ["An objective"] }),
+          "2026-10-31T09:00:00.000Z",
+          null,
+          "first-working-version",
+        ),
+        ...columns,
+      })
+      .where(eq(schema.sessions.id, session.id));
+    return session.id;
+  }
+
+  async function row(sessionId: string) {
+    const [found] = await getDb()
+      .select()
+      .from(schema.sessions)
+      .where(eq(schema.sessions.id, sessionId))
+      .limit(1);
+    return found!;
+  }
+
+  it("F1: the first round applies the queue and clears the override, with no re-judge", async () => {
+    const id = await queuedSession();
+    const interviewer = scriptInterviewer([
+      round(proposed()),
+      { kind: "assess-readiness", result: anAssessReadinessResult() },
+    ]);
+
+    const result = await requestNextRound.run({ sessionId: id });
+
+    expect(result.round?.decisions).toHaveLength(1);
+    const after = await row(id);
+    expect(after.depth).toBe("proof-of-concept");
+    expect(after.pendingDepth).toBeNull();
+    expect(after.readinessOverrideJson).toBeNull();
+    expect(
+      interviewer.requests.filter((request) => request.kind === "assess-readiness"),
+    ).toHaveLength(0);
+  });
+
+  it("F2: a first proposal of done is withdrawn when the queue applies", async () => {
+    const id = await queuedSession();
+    scriptInterviewer([
+      {
+        kind: "propose-round",
+        result: {
+          proposedDecisions: [],
+          pushBackResponses: [],
+          userDecisionPlacements: [],
+          done: { summary: "Everything is settled." },
+        },
+      },
+    ]);
+
+    await requestNextRound.run({ sessionId: id });
+
+    const after = await row(id);
+    expect(after.depth).toBe("proof-of-concept");
+    expect(after.pendingDepth).toBeNull();
+    expect(after.state).toBe("interviewing");
+    expect(after.doneSummary).toBeNull();
+  });
+
+  it("F3: a later round leaves the queue alone", async () => {
+    const id = await queuedSession({ readinessJson: null });
+    const now = new Date().toISOString();
+    await getDb().insert(schema.rounds).values({
+      id: "round-1",
+      sessionId: id,
+      submissionState: "submitted",
+      createdAt: now,
+      submittedAt: now,
+    });
+    const interviewer = scriptInterviewer([round(proposed())]);
+
+    await requestNextRound.run({ sessionId: id });
+
+    expect(interviewer.requests).toHaveLength(1);
+    const after = await row(id);
+    expect(after.pendingDepth).toBe("proof-of-concept");
+    expect(after.depth).toBe("first-working-version");
+  });
+
+  it("F4: the queue applies when the first round opens without a proposal turn", async () => {
+    const id = await queuedSession({ readinessJson: null }, "one-at-a-time");
+    for (const key of ["shape", "tone"]) {
+      const now = new Date().toISOString();
+      await getDb().insert(schema.decisions).values({
+        id: `decision-${key}`,
+        sessionId: id,
+        key,
+        questionTitle: `Question ${key}?`,
+        dependsOnJson: "[]",
+        pendingAsk: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    const interviewer = scriptInterviewer([]);
+
+    const result = await requestNextRound.run({ sessionId: id });
+
+    expect(result.round?.decisions).toHaveLength(1);
+    expect(interviewer.requests).toHaveLength(0);
+    const after = await row(id);
+    expect(after.depth).toBe("proof-of-concept");
+    expect(after.pendingDepth).toBeNull();
+  });
+
+  it("F5: a queue equal to the depth is cleared and the override kept", async () => {
+    const id = await queuedSession({ pendingDepth: "first-working-version" });
+    scriptInterviewer([round(proposed())]);
+
+    const result = await requestNextRound.run({ sessionId: id });
+
+    expect(result.round?.decisions).toHaveLength(1);
+    const after = await row(id);
+    expect(after.pendingDepth).toBeNull();
+    expect(after.readinessOverrideJson).not.toBeNull();
+  });
+
+  it("F7: applying the queue on an interviewing session marks its spec not current", async () => {
+    const id = await queuedSession();
+    const now = new Date().toISOString();
+    await getDb().insert(schema.specs).values({
+      id: "spec-1",
+      sessionId: id,
+      markdown: "## Problem Statement\n\nAn idea.",
+      current: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    scriptInterviewer([round(proposed())]);
+
+    await requestNextRound.run({ sessionId: id });
+
+    const [spec] = await getDb()
+      .select()
+      .from(schema.specs)
+      .where(eq(schema.specs.sessionId, id));
+    expect(spec!.current).toBe(false);
+    expect((await row(id)).depth).toBe("proof-of-concept");
+  });
+
+  it("F8: a session deleted during the first turn is not found when the queue is settled", async () => {
+    const id = await queuedSession();
+    const interviewer = scriptInterviewer([
+      {
+        kind: "propose-round",
+        result: {
+          proposedDecisions: [],
+          pushBackResponses: [],
+          userDecisionPlacements: [],
+          done: { summary: "Everything is settled." },
+        },
+      },
+    ]);
+    const propose = interviewer.proposeRound.bind(interviewer);
+    interviewer.proposeRound = async (request, observer) => {
+      const turn = await propose(request, observer);
+      await getDb().delete(schema.sessions).where(eq(schema.sessions.id, id));
+      return turn;
+    };
+
+    await expect(requestNextRound.run({ sessionId: id })).rejects.toMatchObject({
+      statusCode: 404,
+      message: `Session not found: ${id}`,
+    });
+  });
+
+  it("F6: a failed first turn leaves the queue and the override", async () => {
+    const id = await queuedSession();
+    scriptInterviewer([rateLimitedTurn("propose-round")]);
+
+    await expect(requestNextRound.run({ sessionId: id })).rejects.toThrow(/rate limited/);
+
+    const after = await row(id);
+    expect(after.pendingDepth).toBe("proof-of-concept");
+    expect(after.depth).toBe("first-working-version");
+    expect(after.readinessOverrideJson).not.toBeNull();
   });
 });
