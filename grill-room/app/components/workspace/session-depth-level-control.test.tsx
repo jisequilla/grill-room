@@ -70,6 +70,15 @@ function element(markup: string, testId: string): { tag: string; text: string } 
   return { tag: match[2]!, text: match[3]!.replace(/<[^>]+>/g, "") };
 }
 
+/** The text of the paragraph holding the depth and level notes, as the owner reads it. */
+function notes(markup: string): string {
+  const match = /<p[^>]*>(<span data-testid="depth-control-note"[\s\S]*?)<\/p>/.exec(
+    markup,
+  );
+  if (!match) throw new Error("no paragraph holding depth-control-note");
+  return match[1]!.replace(/<[^>]+>/g, "");
+}
+
 describe("SessionDepthLevelControl", () => {
   it("N1", () => {
     expect(render({ ...H5, hasRound: undefined })).toBe("");
@@ -89,6 +98,15 @@ describe("SessionDepthLevelControl", () => {
     );
     expect(element(markup, "depth-control-note").text).toBe(
       "Applies from the next round.",
+    );
+    expect(notes(markup)).toBe(
+      "Applies from the next round. Applies from the next round, in every session.",
+    );
+    const depthControl = element(markup, "depth-control").tag;
+    expect(depthControl).not.toMatch(/\sdisabled=""/);
+    expect(depthControl).toMatch(/\saria-label="Session depth"/);
+    expect(element(markup, "level-control").tag).toMatch(
+      /\saria-label="Your technical level"/,
     );
   });
 
