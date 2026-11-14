@@ -9,8 +9,10 @@ import type {
   SharpenCardsResult,
   SharpenRewriteResult,
 } from "./schemas.js";
+import { consistencySpecMarkdown, consistencyTickets } from "./fake.js";
 import type {
   AssessReadinessRequest,
+  CheckConsistencyRequest,
   DecisionSnapshot,
   FindSupersededRequest,
   HandoffScoutRequest,
@@ -121,6 +123,26 @@ export function aSynthesizeSpecRequest(
     openQuestions: [],
     reopenedRepoDecisions: [],
     rejectionReason: null,
+    ...overrides,
+  };
+}
+
+export function aCheckConsistencyRequest(
+  overrides: Partial<Omit<CheckConsistencyRequest, "kind">> = {},
+): CheckConsistencyRequest {
+  return {
+    kind: "check-consistency",
+    context: aContext(),
+    specMarkdown: consistencySpecMarkdown(),
+    tickets: consistencyTickets().map(({ number, title, body, kind, waitsFor }) => ({
+      number,
+      title,
+      body,
+      kind,
+      waitsFor,
+    })),
+    rejectionReason: null,
+    previousResult: null,
     ...overrides,
   };
 }

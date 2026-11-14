@@ -1,7 +1,7 @@
 import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { buildPrompt } from "../server/interviewer/prompt.js";
+import { buildPrompt, DEPTH_SPEC_SENTENCES } from "../server/interviewer/prompt.js";
 import { aSynthesizeSpecRequest } from "../server/interviewer/test-fixtures.js";
 import {
   resetInterviewer,
@@ -15,7 +15,10 @@ import createSession from "./create-session.js";
 import getSession from "./get-session.js";
 import getSpec from "./get-spec.js";
 import getTurn from "./get-turn.js";
-import synthesizeSpec, { specRefusalReasons } from "./synthesize-spec.js";
+import synthesizeSpec, {
+  specRefusalReasons,
+  withDepthSentence,
+} from "./synthesize-spec.js";
 
 function aSession() {
   return createSession.run({
@@ -519,9 +522,13 @@ describe("synthesize-spec", () => {
     });
   });
 
-  it("regenerates the spec, replacing its markdown and marking any generated tickets out of date", async () => {
+  it("regenerates the spec, replacing its markdown and marking any generated tickets out of date (A1b: naming its depth)", async () => {
     const session = await aSession();
     await confirm(session.id);
+    await getDb()
+      .update(schema.sessions)
+      .set({ depth: "proof-of-concept" })
+      .where(eq(schema.sessions.id, session.id));
     scriptInterviewer([specTurn(goodSpecMarkdown("First version."))]);
     await synthesizeSpec.run({ sessionId: session.id });
 
@@ -531,14 +538,16 @@ describe("synthesize-spec", () => {
       true,
     );
 
-    scriptInterviewer([specTurn(goodSpecMarkdown("Second version."))]);
+    const second = goodSpecMarkdown("Second version.");
+    scriptInterviewer([specTurn(second)]);
     const result = await synthesizeSpec.run({ sessionId: session.id });
 
     expect(result.markdown).toContain("Second version.");
     expect(result.markdown).not.toContain("First version.");
+    expect(result.markdown).toBe(withDepthSentence(second, "proof-of-concept"));
 
     const after = await getSpec.run({ sessionId: session.id });
-    expect(after.spec?.markdown).toContain("Second version.");
+    expect(after.spec?.markdown).toBe(withDepthSentence(second, "proof-of-concept"));
     expect(after.ticketsCurrent).toBe(false);
   });
 
@@ -620,7 +629,41 @@ describe("synthesize-spec", () => {
       (interviewer.requests[0] as { readinessOverride?: unknown }).readinessOverride,
     ).toEqual({ missing: M });
     expect(interviewer.requests[1]?.rejectionReason).toContain(OVERRIDE_REASON);
-    expect(stored.markdown).toBe(retry);
+    expect(stored.markdown).toBe(withDepthSentence(retry, "first-working-version"));
+  });
+
+  it("A1: sends the session's depth, no technical level, and stores the spec naming its depth", async () => {
+    const session = await aSession();
+    await confirm(session.id);
+    await getDb()
+      .update(schema.sessions)
+      .set({ depth: "proof-of-concept" })
+      .where(eq(schema.sessions.id, session.id));
+    const scripted = goodSpecMarkdown();
+    const interviewer = scriptInterviewer([specTurn(scripted)]);
+
+    const stored = await synthesizeSpec.run({ sessionId: session.id });
+
+    const context = interviewer.requests[0]!.context;
+    expect(context.depth).toBe("proof-of-concept");
+    expect("technicalLevel" in context).toBe(false);
+    expect(stored.markdown).toBe(withDepthSentence(scripted, "proof-of-concept"));
+    expect(stored.markdown).not.toBe(scripted);
+  });
+
+  it("A2: reads the session's depth, never its pending depth", async () => {
+    const session = await aSession();
+    await confirm(session.id);
+    await getDb()
+      .update(schema.sessions)
+      .set({ depth: "first-working-version", pendingDepth: "proof-of-concept" })
+      .where(eq(schema.sessions.id, session.id));
+    scriptInterviewer([specTurn(goodSpecMarkdown())]);
+
+    const stored = await synthesizeSpec.run({ sessionId: session.id });
+
+    expect(stored.markdown).toContain(DEPTH_SPEC_SENTENCES["first-working-version"]);
+    expect(stored.markdown).not.toContain(DEPTH_SPEC_SENTENCES["proof-of-concept"]);
   });
 
   it("a session started without an override sends none", async () => {

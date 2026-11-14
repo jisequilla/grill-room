@@ -41,7 +41,7 @@ import listTickets from "./list-tickets.js";
 import registerProject from "./register-project.js";
 import setAdrWorthy from "./set-adr-worthy.js";
 import setTicketBlockedBy from "./set-ticket-blocked-by.js";
-import synthesizeSpec from "./synthesize-spec.js";
+import synthesizeSpec, { withDepthSentence } from "./synthesize-spec.js";
 
 const repos = useTempGitRepos();
 
@@ -283,7 +283,7 @@ describe("ground-briefs", () => {
     const [request] = scoutRequests(interviewer.requests);
     expect(request).toMatchObject({
       projectRoot: root,
-      specMarkdown: SPEC_MARKDOWN,
+      specMarkdown: withDepthSentence(SPEC_MARKDOWN, "first-working-version"),
       tickets: [
         { number: 1, title: "Ticket 1", body: "Do the work of ticket 1.", blockedBy: [] },
         { number: 2, title: "Ticket 2", body: "Do the work of ticket 2.", blockedBy: [1] },
