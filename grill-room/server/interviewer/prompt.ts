@@ -120,6 +120,34 @@ export const SUMMARY_MAX_BULLETS = 10;
 export const READINESS_OVERRIDE_SENTENCE =
   "The owner chose to grill this idea although readiness judged it not ready.";
 
+/** What a spec's Further Notes says about the depth it was grilled to; the server adds it. */
+export const DEPTH_SPEC_SENTENCES: Record<Depth, string> = {
+  "proof-of-concept":
+    "This spec was grilled as a proof of concept: scale, edge cases and operations were left to the builder.",
+  "first-working-version":
+    "This spec was grilled as a first working version: scale and operations were left to the builder.",
+  "full-spec": "This spec was grilled as a full spec: every branch was asked.",
+};
+
+/** The synthesis rule that names the depth in the spec's Summary. */
+export const DEPTH_SUMMARY_RULES: Record<Depth, string> = {
+  "proof-of-concept":
+    "- One `## Summary` bullet says, in plain words, that this spec is for a proof of concept.",
+  "first-working-version":
+    "- One `## Summary` bullet says, in plain words, that this spec is for a first working version.",
+  "full-spec":
+    "- One `## Summary` bullet says, in plain words, that this spec is for a full spec.",
+};
+
+/** The consistency check's bar for what a builder may decide alone, per depth; null keeps the full bar. */
+export const CONSISTENCY_DEPTH_BARS: Record<Depth, string | null> = {
+  "proof-of-concept":
+    "This spec was grilled as a proof of concept, so more is left to the builder on purpose. Report only a statement whose answer only the owner can give. A threshold, value, choice or target the builder can pick for the experiment is not a finding at this depth.",
+  "first-working-version":
+    "This spec was grilled as a first working version, so scale and operations are left to the builder. Report only a statement whose answer the owner would see or pay for: what a user can do, what they see, or what it costs. A gap only the builder would notice, such as a scale limit, an operational setting or an internal timeout, is not a finding at this depth.",
+  "full-spec": null,
+};
+
 /**
  * Every turn carries the full instructions and the full decision history, even
  * when the conversation is resumed. Resume then buys continuity of the model's
@@ -588,6 +616,7 @@ function renderTask(
         "Further rules for this app:",
         "",
         `- The \`## Summary\` section holds ${SUMMARY_MIN_BULLETS} to ${SUMMARY_MAX_BULLETS} top-level \`- \` bullets, in plain words a non-technical owner can read: who can do what, the platform, the payment or money model if there is one, and what is out of scope. No headings, no nested bullets, no file paths and no code inside it.`,
+        ...(request.context.depth ? [DEPTH_SUMMARY_RULES[request.context.depth]] : []),
         "- There is no codebase to explore and no test seams to negotiate. Base",
         "  the spec only on the decisions above.",
         "- The user stories list must be extremely extensive.",
@@ -1694,7 +1723,8 @@ function renderConsistencyTicket(ticket: ConsistencyTicket): string[] {
  * (`server/consistency.ts`) is the check behind it: a finding shaped as this
  * section describes, examples included, passes it.
  */
-function consistencyTaskSection(): string[] {
+function consistencyTaskSection(depth: Depth | undefined): string[] {
+  const bar = depth ? CONSISTENCY_DEPTH_BARS[depth] : null;
   return [
     "## Your task: find what a builder would have to decide alone",
     "",
@@ -1749,6 +1779,7 @@ function consistencyTaskSection(): string[] {
     "to 48 hours. Detail a builder can settle alone without changing what the",
     "owner gets, such as a name or a file layout, is not a finding. An empty list",
     "is the right answer when nothing is left open.",
+    ...(bar ? ["", bar] : []),
   ];
 }
 
@@ -1770,7 +1801,7 @@ function buildConsistencyPrompt(request: CheckConsistencyRequest): string {
     "## The tickets",
     ...request.tickets.flatMap(renderConsistencyTicket),
     "",
-    ...consistencyTaskSection(),
+    ...consistencyTaskSection(request.context.depth),
     renderRetryWithPreviousResult(request.rejectionReason, request.previousResult),
   ]
     .join("\n")

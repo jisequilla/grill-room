@@ -33,7 +33,7 @@ import dismissConsistencyFinding from "./dismiss-consistency-finding.js";
 import getSession from "./get-session.js";
 import listConsistencyFindings from "./list-consistency-findings.js";
 import reopenDecision from "./reopen-decision.js";
-import synthesizeSpec from "./synthesize-spec.js";
+import synthesizeSpec, { withDepthSentence } from "./synthesize-spec.js";
 
 type Ticket = ResultFor<"break-into-tickets">["tickets"][number];
 
@@ -233,7 +233,9 @@ describe("check-consistency", () => {
         "check-consistency",
         "check-consistency",
       ]);
-      expect(requests[0]!.specMarkdown).toBe(consistencySpecMarkdown());
+      expect(requests[0]!.specMarkdown).toBe(
+        withDepthSentence(consistencySpecMarkdown(), "first-working-version"),
+      );
       expect(requests[0]!.tickets).toEqual(
         [...tickets, gate].map(({ number, title, body, kind, waitsFor }) => ({
           number,
@@ -250,6 +252,21 @@ describe("check-consistency", () => {
       expect(requests[0]!.previousResult).toBeNull();
       expect(requests[1]!.previousResult).toEqual({ findings: refused });
       expect((await getSession.run({ id: sessionId })).conversationId).toBe(before.conversationId);
+    });
+
+    it("A3: sends the session's depth and no technical level", async () => {
+      const sessionId = await aSessionWithTickets();
+      await getDb()
+        .update(schema.sessions)
+        .set({ depth: "proof-of-concept" })
+        .where(eq(schema.sessions.id, sessionId));
+      const interviewer = scriptInterviewer([checkTurn([])]);
+
+      await checkConsistency.run({ sessionId });
+
+      const context = (interviewer.requests[0] as CheckConsistencyRequest).context;
+      expect(context.depth).toBe("proof-of-concept");
+      expect("technicalLevel" in context).toBe(false);
     });
   });
 

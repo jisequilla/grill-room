@@ -38,7 +38,7 @@ import getTurn from "./get-turn.js";
 import listConsistencyFindings from "./list-consistency-findings.js";
 import listTickets from "./list-tickets.js";
 import registerProject from "./register-project.js";
-import synthesizeSpec from "./synthesize-spec.js";
+import synthesizeSpec, { withDepthSentence } from "./synthesize-spec.js";
 
 function aSession() {
   return createSession.run({
@@ -203,7 +203,7 @@ describe("break-into-tickets", () => {
 
     expect(interviewer.requests[0]).toMatchObject({
       kind: "break-into-tickets",
-      specMarkdown: GOOD_SPEC_MARKDOWN,
+      specMarkdown: withDepthSentence(GOOD_SPEC_MARKDOWN, "first-working-version"),
     });
   });
 

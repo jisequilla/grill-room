@@ -371,6 +371,7 @@ async function scan(
             conversationId: null,
             decisions: await decisionSnapshots(rows),
             projectContext: await projectContextFor(session),
+            depth: session.depth,
           },
           specMarkdown: spec.markdown,
           tickets,

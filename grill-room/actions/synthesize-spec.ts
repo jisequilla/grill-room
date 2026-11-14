@@ -7,7 +7,9 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import { normaliseQuote, specSections } from "../server/consistency.js";
 import { getInterviewer } from "../server/interviewer/index.js";
+import type { Depth } from "../shared/session-constants.js";
 import {
+  DEPTH_SPEC_SENTENCES,
   READINESS_OVERRIDE_SENTENCE,
   SUMMARY_MAX_BULLETS,
   SUMMARY_MIN_BULLETS,
@@ -71,6 +73,29 @@ function readinessOverrideReasons(
   const sentence = normaliseQuote(READINESS_OVERRIDE_SENTENCE);
   if (normaliseQuote(furtherNotes.text).includes(sentence)) return [];
   return [`## Further Notes must include this sentence: ${READINESS_OVERRIDE_SENTENCE}`];
+}
+
+/**
+ * The spec with the sentence naming its depth at the end of its
+ * `## Further Notes` section, which runs to the next `# ` or `## ` line or to
+ * the end. Unchanged when the section already holds the sentence, or when the
+ * spec has no such section.
+ */
+export function withDepthSentence(markdown: string, depth: Depth): string {
+  const sentence = DEPTH_SPEC_SENTENCES[depth];
+  const lines = markdown.split("\n");
+  const start = lines.findIndex((line) => /^## Further Notes\s*$/.test(line));
+  if (start === -1) return markdown;
+  const next = lines.findIndex(
+    (line, index) => index > start && (line.startsWith("# ") || line.startsWith("## ")),
+  );
+  const end = next === -1 ? lines.length : next;
+  const body = lines.slice(start + 1, end);
+  if (body.some((line) => line.includes(sentence))) return markdown;
+  while (body.length > 0 && body[body.length - 1]!.trim() === "") body.pop();
+  const section = [lines[start]!, ...body, "", sentence];
+  if (next === -1) return [...lines.slice(0, start), ...section].join("\n") + "\n";
+  return [...lines.slice(0, start), ...section, "", ...lines.slice(end)].join("\n");
 }
 
 /**
@@ -213,6 +238,7 @@ export default defineAction({
           .map(formatDisposition);
         const reopenedRepoDecisions = rows.flatMap(reopenedRepoDecision);
         const override = readinessOverride(session!);
+        const depth = session!.depth;
 
         const interviewer = getInterviewer();
 
@@ -233,6 +259,7 @@ export default defineAction({
                   conversationId,
                   decisions: await decisionSnapshots(rows),
                   projectContext: await projectContextFor(session!),
+                  depth,
                 },
                 outOfScope,
                 openQuestions,
@@ -253,6 +280,7 @@ export default defineAction({
             ),
         });
 
+        const markdown = withDepthSentence(accepted.result.markdown, depth);
         const now = new Date().toISOString();
         const [existing] = await db
           .select()
@@ -264,7 +292,7 @@ export default defineAction({
           [stored] = await db
             .update(schema.specs)
             .set({
-              markdown: accepted.result.markdown,
+              markdown,
               current: true,
               turnId: recorder?.turnId ?? null,
               updatedAt: now,
@@ -277,7 +305,7 @@ export default defineAction({
             .values({
               id: randomUUID(),
               sessionId,
-              markdown: accepted.result.markdown,
+              markdown,
               current: true,
               turnId: recorder?.turnId ?? null,
               createdAt: now,
