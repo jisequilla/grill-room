@@ -427,6 +427,22 @@ describe("the readiness prompt by depth", () => {
       expect(text).not.toContain(bar);
     }
   });
+
+  it("P3: with no depth, the project section runs straight into the task, as today", () => {
+    const text = buildPrompt(anAssessReadinessRequest());
+    const beforeTask = text.slice(0, text.indexOf(TASK_HEADING));
+    expect(beforeTask.endsWith(
+      [
+        "## The project",
+        "",
+        "This session has no current scout report of its project (no project is",
+        "registered, or none has been scouted yet). Every evidence item you",
+        "return must be sourced from the idea.",
+        "",
+        "",
+      ].join("\n"),
+    )).toBe(true);
+  });
 });
 
 describe("storeReadiness and the depth", () => {

@@ -1,6 +1,8 @@
+import { AgentNativeI18nProvider } from "@agent-native/core/client/i18n";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { i18nCatalog } from "@/i18n";
 import enUS from "@/i18n/en-US";
 import {
   ReadinessPanel,
@@ -66,17 +68,33 @@ function section(html: string, testId: string): string {
 describe("ReadinessPanel and the depth a judgment was made for", () => {
   const BEFORE_DEPTH = 'data-testid="readiness-judged-before-depth"';
 
+  /** Renders with the app's English messages, as the page does. */
+  function renderWithCopy(readiness: Readiness) {
+    return renderToStaticMarkup(
+      <AgentNativeI18nProvider catalog={i18nCatalog} initialLocale="en-US" persistPreference={false}>
+        <ReadinessPanel
+          readiness={readiness}
+          working={false}
+          isAssessing={false}
+          onAssess={() => {}}
+          onEditIdea={() => {}}
+          onGrillAsIs={() => {}}
+          canAssess
+        />
+      </AgentNativeI18nProvider>,
+    );
+  }
+
   it("U1: labels a judgment with no depth, absent or null", () => {
-    // `render()` has no i18n catalog wired up, so `useT()` humanizes the key
-    // instead of returning the copy: the label's text is pinned against
-    // `en-US.ts` itself, and its presence against the markup.
     expect(enUS.workspace.readinessJudgedBeforeDepth).toBe(
       "Judged before depth existed",
     );
     for (const readiness of [judged(), { ...judged(), depth: null }]) {
-      const html = render(readiness);
+      const html = renderWithCopy(readiness);
       expect(html).toContain(BEFORE_DEPTH);
-      expect(section(html, "readiness-judged-before-depth")).not.toBe("");
+      expect(section(html, "readiness-judged-before-depth")).toMatch(
+        /data-testid="readiness-judged-before-depth"[^>]*>Judged before depth existed</,
+      );
     }
   });
 
