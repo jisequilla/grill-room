@@ -24,138 +24,175 @@ import {
 } from "../server/turn.js";
 import { scoutProjectCore } from "./scout-project.js";
 
+/**
+ * One judgment of the session as it stands now: the scout when a project has
+ * no current report, then the judge, stored on the session with the depth
+ * read at the start. Never reads the pending depth.
+ */
+async function judge(sessionId: string) {
+  const db = getDb();
+
+  const [session] = await db
+    .select()
+    .from(schema.sessions)
+    .where(eq(schema.sessions.id, sessionId))
+    .limit(1);
+
+  if (!session) fail(`Session not found: ${sessionId}`, { statusCode: 404 });
+
+  failIfPastFirstRound(
+    session,
+    await sessionHasRounds(sessionId),
+    "An idea can be judged for readiness",
+  );
+
+  if (session.state !== "interviewing") {
+    fail(
+      `Only a session still being interviewed can have its idea judged. This session is ${session.state}.`,
+      { errorCode: "wrong-session-state", statusCode: 409 },
+    );
+  }
+
+  // The depth the judgment is made for, as the session stands now: never
+  // the pending depth, which takes effect only once it is applied.
+  const depth = session.depth;
+
+  // With a project, ground the judgment in the project: run the scout first
+  // when there is no current report (none yet, or the one there has gone
+  // stale), then read whatever report is now current. Without a project,
+  // readiness is exactly as it was before this: idea only.
+  const project = session.projectId
+    ? await getProject(session.projectId)
+    : undefined;
+  let report = project ? await currentScoutReport(session) : null;
+  if (project && (!report || report.stale)) {
+    report = await scoutProjectCore({ session, project });
+  }
+
+  // The judgment is not part of the interview: it runs in a conversation of
+  // its own and leaves the session's untouched, so the first round starts
+  // fresh and the model stays unlocked, whatever idea is judged.
+  await runTurn({
+    sessionId,
+    failedMessage: "The readiness turn failed.",
+    record: { turnKind: "assess-readiness", model: session.model },
+    take: async (recorder) => {
+      // The judge never resumes a conversation, so a retry starts fresh:
+      // it gets the answer it is correcting in the request instead.
+      let previousResult: AssessReadinessResult | null = null;
+      const accepted = await askUntilAccepted<AssessReadinessResult>({
+        conversationId: null,
+        recorder,
+        ask: async ({ rejectionReason, observer }) => {
+          const turn = await getInterviewer().assessReadiness(
+            {
+              kind: "assess-readiness",
+              context: {
+                sessionId: session.id,
+                idea: session.idea,
+                title: session.title,
+                model: session.model,
+                answeringMode: session.answeringMode,
+                docsFolder: session.docsFolder,
+                conversationId: null,
+                decisions: [],
+                projectContext: await projectContextFor(session),
+                depth,
+              },
+              scoutReport: report ? scoutReportForReadiness(report) : null,
+              rejectionReason,
+              previousResult: rejectionReason === null ? null : previousResult,
+            },
+            observer,
+          );
+          const clamped = project
+            ? clampReadinessCitations(turn.result, project.rootPath)
+            : turn.result;
+          previousResult = clamped;
+          return { ...turn, result: clamped };
+        },
+        reasonsToRefuse: (result) =>
+          reasonsToRefuseReadiness(
+            result,
+            session.idea,
+            project?.rootPath ?? null,
+            depth,
+          ),
+        exhausted: (lastReason) =>
+          new TurnRejected(
+            "invalid-readiness",
+            `The interviewer returned a readiness verdict that contradicts its own findings ${MAX_TURN_RETRIES + 1} times. Last reason: ${lastReason}`,
+          ),
+      });
+
+      const now = new Date().toISOString();
+      await db
+        .update(schema.sessions)
+        .set({
+          readinessJson: storeReadiness(
+            session.idea,
+            accepted.result,
+            now,
+            report?.id ?? null,
+            depth,
+          ),
+          readinessTurnId: recorder?.turnId ?? null,
+          readinessOverrideJson: null,
+          updatedAt: now,
+        })
+        .where(eq(schema.sessions.id, sessionId));
+
+      return session.conversationId;
+    },
+  });
+
+  const [judged] = await db
+    .select()
+    .from(schema.sessions)
+    .where(eq(schema.sessions.id, sessionId))
+    .limit(1);
+
+  return {
+    sessionId,
+    readiness: judged ? await currentReadiness(judged) : null,
+  };
+}
+
 export default defineAction({
   description:
-    "Ask the interviewer whether a session's idea is ready to be grilled: the evidence it states, sourced from the idea or, with a project, from the project's scout report, the single buildable objective (or none), whether that objective is a process, the expected outcome, the unknowns it raises, a ready or not-ready verdict, and what is missing. With a project and no current scout report, runs the scout first (a second turn) so the judgment is grounded; with a current report, only the judge runs. Stores the judgment on the session with the idea and, when one was read, the scout report it judged from, and returns it. Only before the first round: refused with has-rounds once any round exists, turn-working while a turn is working, and wrong-session-state outside interviewing. It never blocks starting the interview.",
+    "Ask the interviewer whether a session's idea is ready to be grilled: the evidence it states, sourced from the idea or, with a project, from the project's scout report, the single buildable objective (or none), whether that objective is a process, the expected outcome, the unknowns it raises, a ready or not-ready verdict, and what is missing. With a project and no current scout report, runs the scout first (a second turn) so the judgment is grounded; with a current report, only the judge runs. Stores the judgment on the session with the idea and, when one was read, the scout report it judged from, and returns it. Only before the first round: refused with has-rounds once any round exists, turn-working while a turn is working, and wrong-session-state outside interviewing. A depth queued while a turn was working is applied once the judgment is stored, and the idea is judged again at it; that second judgment is the one returned. It never blocks starting the interview.",
   schema: z.object({
     sessionId: z.string().min(1).describe("Session id"),
   }),
   run: async ({ sessionId }) => {
-    const db = getDb();
+    const first = await judge(sessionId);
 
-    const [session] = await db
+    // A depth queued while a turn was working takes effect once this judgment
+    // is stored, and the idea is judged again at it. A second judge that
+    // fails keeps the applied depth.
+    const [row] = await getDb()
       .select()
       .from(schema.sessions)
       .where(eq(schema.sessions.id, sessionId))
       .limit(1);
+    if (!row || row.pendingDepth == null) return first;
 
-    if (!session) fail(`Session not found: ${sessionId}`, { statusCode: 404 });
-
-    failIfPastFirstRound(
-      session,
-      await sessionHasRounds(sessionId),
-      "An idea can be judged for readiness",
-    );
-
-    if (session.state !== "interviewing") {
-      fail(
-        `Only a session still being interviewed can have its idea judged. This session is ${session.state}.`,
-        { errorCode: "wrong-session-state", statusCode: 409 },
-      );
+    if (row.pendingDepth === row.depth) {
+      await getDb()
+        .update(schema.sessions)
+        .set({ pendingDepth: null })
+        .where(eq(schema.sessions.id, sessionId));
+      return first;
     }
 
-    // The depth the judgment is made for, as the session stands now: never
-    // the pending depth, which takes effect only once it is applied.
-    const depth = session.depth;
-
-    // With a project, ground the judgment in the project: run the scout first
-    // when there is no current report (none yet, or the one there has gone
-    // stale), then read whatever report is now current. Without a project,
-    // readiness is exactly as it was before this: idea only.
-    const project = session.projectId
-      ? await getProject(session.projectId)
-      : undefined;
-    let report = project ? await currentScoutReport(session) : null;
-    if (project && (!report || report.stale)) {
-      report = await scoutProjectCore({ session, project });
-    }
-
-    // The judgment is not part of the interview: it runs in a conversation of
-    // its own and leaves the session's untouched, so the first round starts
-    // fresh and the model stays unlocked, whatever idea is judged.
-    await runTurn({
-      sessionId,
-      failedMessage: "The readiness turn failed.",
-      record: { turnKind: "assess-readiness", model: session.model },
-      take: async (recorder) => {
-        // The judge never resumes a conversation, so a retry starts fresh:
-        // it gets the answer it is correcting in the request instead.
-        let previousResult: AssessReadinessResult | null = null;
-        const accepted = await askUntilAccepted<AssessReadinessResult>({
-          conversationId: null,
-          recorder,
-          ask: async ({ rejectionReason, observer }) => {
-            const turn = await getInterviewer().assessReadiness(
-              {
-                kind: "assess-readiness",
-                context: {
-                  sessionId: session.id,
-                  idea: session.idea,
-                  title: session.title,
-                  model: session.model,
-                  answeringMode: session.answeringMode,
-                  docsFolder: session.docsFolder,
-                  conversationId: null,
-                  decisions: [],
-                  projectContext: await projectContextFor(session),
-                  depth,
-                },
-                scoutReport: report ? scoutReportForReadiness(report) : null,
-                rejectionReason,
-                previousResult: rejectionReason === null ? null : previousResult,
-              },
-              observer,
-            );
-            const clamped = project
-              ? clampReadinessCitations(turn.result, project.rootPath)
-              : turn.result;
-            previousResult = clamped;
-            return { ...turn, result: clamped };
-          },
-          reasonsToRefuse: (result) =>
-            reasonsToRefuseReadiness(
-              result,
-              session.idea,
-              project?.rootPath ?? null,
-              depth,
-            ),
-          exhausted: (lastReason) =>
-            new TurnRejected(
-              "invalid-readiness",
-              `The interviewer returned a readiness verdict that contradicts its own findings ${MAX_TURN_RETRIES + 1} times. Last reason: ${lastReason}`,
-            ),
-        });
-
-        const now = new Date().toISOString();
-        await db
-          .update(schema.sessions)
-          .set({
-            readinessJson: storeReadiness(
-              session.idea,
-              accepted.result,
-              now,
-              report?.id ?? null,
-              depth,
-            ),
-            readinessTurnId: recorder?.turnId ?? null,
-            readinessOverrideJson: null,
-            updatedAt: now,
-          })
-          .where(eq(schema.sessions.id, sessionId));
-
-        return session.conversationId;
-      },
-    });
-
-    const [judged] = await db
-      .select()
-      .from(schema.sessions)
-      .where(eq(schema.sessions.id, sessionId))
-      .limit(1);
-
-    return {
-      sessionId,
-      readiness: judged ? await currentReadiness(judged) : null,
-    };
+    await getDb()
+      .update(schema.sessions)
+      .set({
+        depth: row.pendingDepth,
+        pendingDepth: null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.sessions.id, sessionId));
+    return await judge(sessionId);
   },
 });

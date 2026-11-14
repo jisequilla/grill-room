@@ -28,6 +28,7 @@ describe("get-session", () => {
       modelLocked: false,
       exportRetired: false,
       retiredWorkingFolder: null,
+      technicalLevel: null,
     });
   });
 

@@ -5,6 +5,7 @@ import type { Depth } from "../shared/session-constants.js";
 import { getDb, schema } from "../server/db/index.js";
 import { parseStoredReadiness } from "../server/readiness.js";
 import {
+  rateLimitedTurn,
   resetInterviewer,
   scriptInterviewer,
   type AssessReadinessRequest,
@@ -200,22 +201,135 @@ describe("assess-readiness", () => {
       );
       expect(await storedDepth(session.id)).toBe("full-spec");
     });
+  });
 
-    it("A3: the session's depth is used, never its pending depth", async () => {
-      const session = await sessionAt("first-working-version", "proof-of-concept");
-      const interviewer = scriptInterviewer([
-        { kind: "assess-readiness", result: readyWithNoEvidence() },
-        { kind: "assess-readiness", result: anAssessReadinessResult() },
-      ]);
+  describe("a queued depth", () => {
+    const OVERRIDE = JSON.stringify({
+      missing: ["A buildable objective"],
+      verdictJudgedAt: "2026-10-31T09:00:00.000Z",
+      at: "2026-10-31T10:00:00.000Z",
+    });
 
-      await assessReadiness.run({ sessionId: session.id });
+    async function queued(
+      columns: Partial<typeof schema.sessions.$inferInsert> = {},
+      projectId?: string,
+    ) {
+      const session = await createSession.run({
+        title: "Marathon tracker",
+        idea: "A local app that helps a runner follow a 16-week marathon plan.",
+        model: "opus",
+        ...(projectId ? { projectId } : {}),
+      });
+      await getDb()
+        .update(schema.sessions)
+        .set({
+          depth: "first-working-version",
+          pendingDepth: "full-spec",
+          readinessOverrideJson: OVERRIDE,
+          ...columns,
+        })
+        .where(eq(schema.sessions.id, session.id));
+      return session.id;
+    }
+
+    async function row(sessionId: string) {
+      const [found] = await getDb()
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, sessionId))
+        .limit(1);
+      return found!;
+    }
+
+    const judgment = () => ({
+      kind: "assess-readiness" as const,
+      result: anAssessReadinessResult(),
+    });
+
+    it("Q3: applies the queue after the judgment and judges again at it", async () => {
+      const id = await queued();
+      const interviewer = scriptInterviewer([judgment(), judgment()]);
+
+      const result = await assessReadiness.run({ sessionId: id });
 
       const requests = readinessRequests(interviewer.requests);
+      expect(requests.map((request) => request.context.depth)).toEqual([
+        "first-working-version",
+        "full-spec",
+      ]);
+      const after = await row(id);
+      expect(after.depth).toBe("full-spec");
+      expect(after.pendingDepth).toBeNull();
+      expect(after.readinessOverrideJson).toBeNull();
+      expect(parseStoredReadiness(after)?.depth).toBe("full-spec");
+      expect(result.readiness!.depth).toBe("full-spec");
+    });
+
+    it("Q4: with a project, the scout runs once and the queue applies only after the judge", async () => {
+      const root = repos.create({
+        files: {
+          "src/ingest/metrics.ts": lines(30),
+          "docs/adr/0003-queue.md": lines(9),
+        },
+      });
+      const project = await registerProject.run({
+        root,
+        verifyCommand: "pnpm test",
+        workingExportFolder: ".scratch",
+      });
+      const id = await queued({}, project.id);
+      const interviewer = scriptInterviewer([
+        { kind: "scout-project", result: aScoutProjectResult() },
+        judgment(),
+        judgment(),
+      ]);
+
+      await assessReadiness.run({ sessionId: id });
+
+      expect(
+        interviewer.requests.filter((request) => request.kind === "scout-project"),
+      ).toHaveLength(1);
+      const requests = readinessRequests(interviewer.requests);
       expect(requests).toHaveLength(2);
-      for (const request of requests) {
-        expect(request.context.depth).toBe("first-working-version");
-      }
-      expect(await storedDepth(session.id)).toBe("first-working-version");
+      expect(requests[1]!.context.depth).toBe("full-spec");
+      expect(parseStoredReadiness(await row(id))?.depth).toBe("full-spec");
+    });
+
+    it("Q5: a first judge that fails leaves the queue as it was", async () => {
+      const id = await queued();
+      scriptInterviewer([rateLimitedTurn("assess-readiness")]);
+
+      await expect(assessReadiness.run({ sessionId: id })).rejects.toThrow(/rate limited/);
+
+      const after = await row(id);
+      expect(after.pendingDepth).toBe("full-spec");
+      expect(after.depth).toBe("first-working-version");
+      expect(after.readinessOverrideJson).toBe(OVERRIDE);
+    });
+
+    it("Q6: a second judge that fails keeps the applied depth", async () => {
+      const id = await queued();
+      scriptInterviewer([judgment(), rateLimitedTurn("assess-readiness")]);
+
+      await expect(assessReadiness.run({ sessionId: id })).rejects.toThrow(/rate limited/);
+
+      const after = await row(id);
+      expect(after.depth).toBe("full-spec");
+      expect(after.pendingDepth).toBeNull();
+      expect(after.readinessOverrideJson).toBeNull();
+      expect(parseStoredReadiness(after)?.depth).toBe("first-working-version");
+    });
+
+    it("Q7: a queue equal to the depth is cleared with no second judge", async () => {
+      const id = await queued({ pendingDepth: "first-working-version" });
+      const interviewer = scriptInterviewer([judgment(), judgment()]);
+
+      await assessReadiness.run({ sessionId: id });
+
+      expect(readinessRequests(interviewer.requests)).toHaveLength(1);
+      const after = await row(id);
+      expect(after.pendingDepth).toBeNull();
+      expect(after.depth).toBe("first-working-version");
     });
   });
 });
