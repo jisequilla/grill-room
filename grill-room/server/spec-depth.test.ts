@@ -119,6 +119,21 @@ describe("the synthesis prompt names the depth in the Summary", () => {
     const prompt = buildPrompt(aSynthesizeSpecRequest());
     for (const depth of DEPTHS) expect(prompt).not.toContain(DEPTH_SUMMARY_RULES[depth]);
   });
+
+  it("T5 seam: the depth rule is the only line a depth adds", () => {
+    const withDepth = buildPrompt(
+      aSynthesizeSpecRequest({ context: aContext({ depth: "full-spec" }) }),
+    );
+    const without = buildPrompt(aSynthesizeSpecRequest());
+    expect(withDepth.replace("\n" + DEPTH_SUMMARY_RULES["full-spec"], "")).toBe(without);
+    const lines = without.split("\n");
+    const summaryRule = lines.findIndex((line) =>
+      line.startsWith("- The `## Summary` section holds"),
+    );
+    expect(lines[summaryRule + 1]).toBe(
+      "- There is no codebase to explore and no test seams to negotiate. Base",
+    );
+  });
 });
 
 describe("the depth constants are the ticket's literals", () => {
@@ -245,6 +260,54 @@ describe("withDepthSentence", () => {
   it("W11: matches the heading the way the spec check does", () => {
     expect(withDepthSentence("##  Further Notes  \n\n- A.\n", "full-spec")).toBe(
       "##  Further Notes  \n\n- A.\n\n" + S("full-spec") + "\n",
+    );
+  });
+
+  it("W12: a spec with a title heading before Further Notes still gets the sentence", () => {
+    expect(withDepthSentence("# Title\n\n## Further Notes\n\n- A.\n", "full-spec")).toBe(
+      "# Title\n\n## Further Notes\n\n- A.\n\n" + S("full-spec") + "\n",
+    );
+  });
+
+  it("W13: a depth sentence that is the last line, with no trailing newline, is replaced", () => {
+    expect(
+      withDepthSentence("## Further Notes\n\n- A.\n\n" + S("proof-of-concept"), "full-spec"),
+    ).toBe("## Further Notes\n\n- A.\n\n" + S("full-spec") + "\n");
+  });
+
+  it("W14: a removed sentence's previous line is kept when it is not blank", () => {
+    expect(
+      withDepthSentence("## Further Notes\n" + S("proof-of-concept") + "\n\n- B.\n", "full-spec"),
+    ).toBe("## Further Notes\n- B.\n\n" + S("full-spec") + "\n");
+  });
+
+  it("W15: the line after a removed sentence is kept when it is not blank", () => {
+    expect(
+      withDepthSentence("## Further Notes\n\n" + S("proof-of-concept") + "\n- B.\n", "full-spec"),
+    ).toBe("## Further Notes\n\n- B.\n\n" + S("full-spec") + "\n");
+  });
+
+  it("W16: a whitespace-only line after a removed sentence is removed with it", () => {
+    expect(
+      withDepthSentence(
+        "## Further Notes\n\n" + S("proof-of-concept") + "\n  \n- B.\n",
+        "full-spec",
+      ),
+    ).toBe("## Further Notes\n\n- B.\n\n" + S("full-spec") + "\n");
+  });
+
+  it("W17: a whitespace-only line trailing the section is trimmed", () => {
+    expect(withDepthSentence("## Further Notes\n\n- A.\n  \n", "full-spec")).toBe(
+      "## Further Notes\n\n- A.\n\n" + S("full-spec") + "\n",
+    );
+  });
+
+  it("W18: an empty section followed directly by the next heading keeps that heading", () => {
+    expect(withDepthSentence("## Further Notes\n## Appendix\n", "full-spec")).toBe(
+      "## Further Notes\n\n" + S("full-spec") + "\n\n## Appendix\n",
+    );
+    expect(withDepthSentence("## Further Notes\n## Next\n\nx\n", "full-spec")).toBe(
+      "## Further Notes\n\n" + S("full-spec") + "\n\n## Next\n\nx\n",
     );
   });
 });

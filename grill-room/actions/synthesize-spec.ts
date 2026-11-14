@@ -109,7 +109,6 @@ export function withDepthSentence(markdown: string, depth: Depth): string {
   }
   while (body.length > 0 && body[body.length - 1]!.trim() === "") body.pop();
   const section = [lines[start]!, ...body, "", DEPTH_SPEC_SENTENCES[depth]];
-  if (next === -1) return [...lines.slice(0, start), ...section, ""].join("\n");
   return [...lines.slice(0, start), ...section, "", ...lines.slice(end)].join("\n");
 }
 
