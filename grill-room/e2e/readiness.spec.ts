@@ -72,3 +72,24 @@ test("readiness shows a not-ready idea's verdict and a ready idea's evidence", a
     readyPanel.getByTestId("readiness-expected-outcome"),
   ).toContainText("A plan the runner can follow week by week.");
 });
+
+test("a fresh judgment is stored with its depth, so the panel shows no pre-depth label", async ({
+  page,
+  request,
+}) => {
+  const sessionId = await createSession(page, {
+    title: "Marathon Tracker",
+    idea: "A 16-week marathon training tracker for one runner.",
+  });
+  await chooseScenario(request, sessionId, "readiness-ready");
+
+  const panel = page.getByTestId("readiness-panel");
+  await expect(panel).toBeVisible();
+  await panel.getByTestId("readiness-assess").click();
+
+  await expect(panel.getByTestId("readiness-verdict")).toHaveAttribute(
+    "data-verdict",
+    "ready",
+  );
+  await expect(panel.getByTestId("readiness-judged-before-depth")).toHaveCount(0);
+});

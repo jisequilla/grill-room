@@ -1,6 +1,9 @@
+import { AgentNativeI18nProvider } from "@agent-native/core/client/i18n";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { i18nCatalog } from "@/i18n";
+import enUS from "@/i18n/en-US";
 import {
   ReadinessPanel,
   ScoutReportPanel,
@@ -61,6 +64,45 @@ function section(html: string, testId: string): string {
   const end = next === -1 ? html.length : html.lastIndexOf("<", next);
   return html.slice(start, end);
 }
+
+describe("ReadinessPanel and the depth a judgment was made for", () => {
+  const BEFORE_DEPTH = 'data-testid="readiness-judged-before-depth"';
+
+  /** Renders with the app's English messages, as the page does. */
+  function renderWithCopy(readiness: Readiness) {
+    return renderToStaticMarkup(
+      <AgentNativeI18nProvider catalog={i18nCatalog} initialLocale="en-US" persistPreference={false}>
+        <ReadinessPanel
+          readiness={readiness}
+          working={false}
+          isAssessing={false}
+          onAssess={() => {}}
+          onEditIdea={() => {}}
+          onGrillAsIs={() => {}}
+          canAssess
+        />
+      </AgentNativeI18nProvider>,
+    );
+  }
+
+  it("U1: labels a judgment with no depth, absent or null", () => {
+    expect(enUS.workspace.readinessJudgedBeforeDepth).toBe(
+      "Judged before depth existed",
+    );
+    for (const readiness of [judged(), { ...judged(), depth: null }]) {
+      const html = renderWithCopy(readiness);
+      expect(html).toContain(BEFORE_DEPTH);
+      expect(section(html, "readiness-judged-before-depth")).toMatch(
+        /data-testid="readiness-judged-before-depth"[^>]*>Judged before depth existed</,
+      );
+    }
+  });
+
+  it("U2: no label for a judgment with a depth, or for no judgment", () => {
+    expect(render({ ...judged(), depth: "proof-of-concept" })).not.toContain(BEFORE_DEPTH);
+    expect(render(null)).not.toContain(BEFORE_DEPTH);
+  });
+});
 
 describe("ReadinessPanel", () => {
   it("invites an assessment when the idea has not been judged", () => {

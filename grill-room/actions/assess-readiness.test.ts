@@ -1,5 +1,9 @@
+import { eq } from "@agent-native/core/db/schema";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { Depth } from "../shared/session-constants.js";
+import { getDb, schema } from "../server/db/index.js";
+import { parseStoredReadiness } from "../server/readiness.js";
 import {
   resetInterviewer,
   scriptInterviewer,
@@ -137,5 +141,81 @@ describe("assess-readiness", () => {
     expect(readinessRequests(interviewer.requests)).toHaveLength(1);
     expect(judged.readiness!.result.evidence[1]!.citation).toBe("docs/adr/0003-queue.md:5-9");
     expect(raw.evidence[1]!.citation).toBe("docs/adr/0003-queue.md:5-10");
+  });
+
+  describe("the session's depth", () => {
+    async function sessionAt(depth: Depth, pendingDepth: Depth | null = null) {
+      const session = await createSession.run({
+        title: "Marathon tracker",
+        idea: "A local app that helps a runner follow a 16-week marathon plan.",
+        model: "opus",
+      });
+      await getDb()
+        .update(schema.sessions)
+        .set({ depth, pendingDepth })
+        .where(eq(schema.sessions.id, session.id));
+      return session;
+    }
+
+    async function storedDepth(sessionId: string) {
+      const [row] = await getDb()
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, sessionId))
+        .limit(1);
+      return parseStoredReadiness(row!)?.depth;
+    }
+
+    const readyWithNoEvidence = () =>
+      anAssessReadinessResult({ verdict: "ready", evidence: [] });
+
+    it("A1: a proof of concept reaches the request, the check and the store", async () => {
+      const session = await sessionAt("proof-of-concept");
+      const interviewer = scriptInterviewer([
+        { kind: "assess-readiness", result: readyWithNoEvidence() },
+      ]);
+
+      const judged = await assessReadiness.run({ sessionId: session.id });
+
+      const requests = readinessRequests(interviewer.requests);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]!.context.depth).toBe("proof-of-concept");
+      expect(await storedDepth(session.id)).toBe("proof-of-concept");
+      expect(judged.readiness!.result.verdict).toBe("ready");
+    });
+
+    it("A2: a full spec refuses a ready verdict with no evidence and stores its depth", async () => {
+      const session = await sessionAt("full-spec");
+      const interviewer = scriptInterviewer([
+        { kind: "assess-readiness", result: readyWithNoEvidence() },
+        { kind: "assess-readiness", result: anAssessReadinessResult() },
+      ]);
+
+      await assessReadiness.run({ sessionId: session.id });
+
+      const requests = readinessRequests(interviewer.requests);
+      expect(requests).toHaveLength(2);
+      expect(requests[1]!.rejectionReason).toContain(
+        "A ready verdict needs at least one evidence item.",
+      );
+      expect(await storedDepth(session.id)).toBe("full-spec");
+    });
+
+    it("A3: the session's depth is used, never its pending depth", async () => {
+      const session = await sessionAt("first-working-version", "proof-of-concept");
+      const interviewer = scriptInterviewer([
+        { kind: "assess-readiness", result: readyWithNoEvidence() },
+        { kind: "assess-readiness", result: anAssessReadinessResult() },
+      ]);
+
+      await assessReadiness.run({ sessionId: session.id });
+
+      const requests = readinessRequests(interviewer.requests);
+      expect(requests).toHaveLength(2);
+      for (const request of requests) {
+        expect(request.context.depth).toBe("first-working-version");
+      }
+      expect(await storedDepth(session.id)).toBe("first-working-version");
+    });
   });
 });

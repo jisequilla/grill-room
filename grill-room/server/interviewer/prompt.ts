@@ -17,6 +17,7 @@ import {
   MAX_HANDOFF_SCOUT_REACH,
   MAX_HANDOFF_SCOUT_TICKETS,
   MAX_READY_UNKNOWNS,
+  MAX_READY_UNKNOWNS_PROOF_OF_CONCEPT,
   MAX_SCOUT_CURRENT_STATE,
   MAX_SCOUT_PROPOSED_DECISIONS,
   MAX_SHARPENED_IDEA_LENGTH,
@@ -63,6 +64,25 @@ export const DEPTH_SECTIONS: Record<Depth, string> = {
     "## How deep to grill: a full spec",
     "",
     `The owner wants a full spec. Open every branch, scale, edge cases and operations included. Propose \`done\` only when nothing is left to the builder's guesswork. ${DONE_WHILE_ASKED_RULE}`,
+  ].join("\n"),
+};
+
+/** How deep to sharpen, by the session's depth. Rendered into the two Sharpening tasks only. */
+export const SHARPEN_DEPTH_SECTIONS: Record<Depth, string> = {
+  "proof-of-concept": [
+    "## How deep to sharpen: a proof of concept",
+    "",
+    "The owner wants a proof of concept: the smallest thing that tries the idea. Do not ask about scale, edge cases or operations (hosting, monitoring, backups, on-call): the builder makes those calls.",
+  ].join("\n"),
+  "first-working-version": [
+    "## How deep to sharpen: a first working version",
+    "",
+    "The owner wants a first working version that real users can use. Ask about edge cases a user would meet, but not about scale or operations (hosting, monitoring, backups, on-call): the builder makes those calls.",
+  ].join("\n"),
+  "full-spec": [
+    "## How deep to sharpen: a full spec",
+    "",
+    "The owner wants a full spec. Any branch may be asked, scale, edge cases and operations included.",
   ].join("\n"),
 };
 
@@ -814,6 +834,35 @@ function renderReadinessScoutReport(
   ];
 }
 
+/** The readiness `verdict` rule at a first working version and a full spec, and with no depth. */
+export const READINESS_VERDICT_RULE = [
+  "- `verdict`: `ready` only when all three hold — at least one evidence",
+  "  item, a non-null objective that is not process, and at most",
+  `  ${MAX_READY_UNKNOWNS} unknowns. Otherwise \`not-ready\`.`,
+].join("\n");
+
+/** The readiness `verdict` rule at a proof of concept, where evidence is optional. */
+export const READINESS_VERDICT_RULE_PROOF_OF_CONCEPT = `- \`verdict\`: \`ready\` only when both hold — a non-null objective that is not process, and at most ${MAX_READY_UNKNOWNS_PROOF_OF_CONCEPT} unknowns. Evidence is not required at this depth: an empty evidence list can still be \`ready\`. Otherwise \`not-ready\`.`;
+
+/** The bar readiness holds the idea to, by the session's depth. Rendered just before the readiness task. */
+export const READINESS_DEPTH_BARS: Record<Depth, string> = {
+  "proof-of-concept": [
+    "## The depth the owner chose: a proof of concept",
+    "",
+    "The owner wants to try the idea, not build it out. The bar is low: the idea is ready once it names one clear thing to try. The verdict rule below still applies.",
+  ].join("\n"),
+  "first-working-version": [
+    "## The depth the owner chose: a first working version",
+    "",
+    "The owner wants a first version real users can use. The idea is ready once it says who it is for and the core flows they go through. The verdict rule below still applies.",
+  ].join("\n"),
+  "full-spec": [
+    "## The depth the owner chose: a full spec",
+    "",
+    "The owner wants a full spec. Hold the idea to the full bar: what it is, who it is for, and the facts it rests on. The verdict rule below still applies.",
+  ].join("\n"),
+};
+
 /**
  * The readiness judge is not an interview turn, so it carries none of the
  * grilling method: only the idea, the session's scout report when it has one,
@@ -844,6 +893,7 @@ function buildReadinessPrompt(request: AssessReadinessRequest): string {
         ]
       : []),
     ...renderReadinessScoutReport(request.scoutReport),
+    ...(context.depth ? [READINESS_DEPTH_BARS[context.depth], ""] : []),
     "## Your task: judge whether the idea is ready to grill",
     "",
     "A grilling interview settles the design decisions of one buildable thing.",
@@ -871,9 +921,9 @@ function buildReadinessPrompt(request: AssessReadinessRequest): string {
     "  the idea does not say.",
     "- `unknowns`: the open questions the idea raises that an interview would",
     "  have to settle before building could start.",
-    "- `verdict`: `ready` only when all three hold — at least one evidence",
-    "  item, a non-null objective that is not process, and at most",
-    `  ${MAX_READY_UNKNOWNS} unknowns. Otherwise \`not-ready\`.`,
+    context.depth === "proof-of-concept"
+      ? READINESS_VERDICT_RULE_PROOF_OF_CONCEPT
+      : READINESS_VERDICT_RULE,
     "- `missing`: what the idea needs before it is worth grilling, each item",
     "  naming one gap the user could fill by editing the idea. Empty when the",
     "  verdict is `ready` and nothing is missing. Name gaps only; do not",
@@ -979,6 +1029,19 @@ function renderSharpeningTreeAndDocs(context: InterviewContext): string[] {
 }
 
 /**
+ * The Sharpening depth and level sections, each only when its field is set,
+ * each followed by a blank line: they follow blocks that already end with one.
+ */
+function renderSharpeningPitch(context: InterviewContext): string[] {
+  return [
+    ...(context.depth ? [SHARPEN_DEPTH_SECTIONS[context.depth], ""] : []),
+    ...(context.technicalLevel
+      ? [LEVEL_SECTIONS[context.technicalLevel], ""]
+      : []),
+  ];
+}
+
+/**
  * Direction cards are not an interview turn, so the prompt carries none of
  * the grilling method: the idea, the verdict, the earlier rounds, the tree,
  * and the rules the app checks the cards against.
@@ -991,6 +1054,7 @@ function buildSharpenCardsPrompt(request: SharpenCardsRequest): string {
     "",
     ...renderSharpeningState(request),
     ...renderSharpeningTreeAndDocs(request.context),
+    ...renderSharpeningPitch(request.context),
     "## Your task: direction cards",
     "",
     "Ask the owner a few direction cards. Each card is one question whose",
@@ -1051,6 +1115,7 @@ function buildSharpenRewritePrompt(request: SharpenRewriteRequest): string {
       "",
     ]),
     ...renderSharpeningTreeAndDocs(request.context),
+    ...renderSharpeningPitch(request.context),
     "## Your task: rewrite the idea",
     "",
     "Return:",

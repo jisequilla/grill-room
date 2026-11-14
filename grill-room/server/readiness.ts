@@ -13,12 +13,17 @@ import { fail } from "@agent-native/core/action";
 import { eq } from "@agent-native/core/db/schema";
 import { z } from "zod";
 
-import { DEPTHS } from "../shared/session-constants.js";
+import {
+  DEFAULT_DEPTH,
+  DEPTHS,
+  type Depth,
+} from "../shared/session-constants.js";
 import { getDb, schema } from "./db/index.js";
 import {
   assessReadinessEvidenceItem,
   assessReadinessResultSchema,
   MAX_READY_UNKNOWNS,
+  MAX_READY_UNKNOWNS_PROOF_OF_CONCEPT,
   type AssessReadinessResult,
 } from "./interviewer/index.js";
 import {
@@ -125,18 +130,23 @@ export function readinessVerdict(
   return parseStoredReadiness(session)?.result.verdict ?? null;
 }
 
-/** Serializes a judgment of `idea`, made reading `scoutReportId`, for storage. */
+/**
+ * Serializes a judgment of `idea`, made reading `scoutReportId` at `depth`,
+ * for storage. Without a depth, the stored JSON carries no `depth` key.
+ */
 export function storeReadiness(
   idea: string,
   result: AssessReadinessResult,
   judgedAt: string,
   scoutReportId: string | null,
+  depth?: Depth,
 ): string {
   const stored: StoredReadiness = {
     ideaJudged: idea,
     result,
     judgedAt,
     scoutReportId,
+    ...(depth ? { depth } : {}),
   };
   return JSON.stringify(stored);
 }
@@ -225,13 +235,21 @@ export function clampReadinessCitations(
  * the verdict is `ready` — the rule says what ready requires, and a judge may
  * still find an idea that meets it not ready. `projectRoot` is the session's
  * project, when it has one; without it, a `repo`-sourced item's citation
- * cannot be resolved and is refused outright.
+ * cannot be resolved and is refused outright. At `proof-of-concept` a ready
+ * verdict needs no evidence item and allows
+ * {@link MAX_READY_UNKNOWNS_PROOF_OF_CONCEPT} unknowns; the other depths hold
+ * it to the full rule.
  */
 export function reasonsToRefuseReadiness(
   result: AssessReadinessResult,
   idea: string,
   projectRoot: string | null = null,
+  depth: Depth = DEFAULT_DEPTH,
 ): string[] {
+  const proofOfConcept = depth === "proof-of-concept";
+  const maxUnknowns = proofOfConcept
+    ? MAX_READY_UNKNOWNS_PROOF_OF_CONCEPT
+    : MAX_READY_UNKNOWNS;
   const reasons: string[] = [];
 
   for (const item of result.evidence) {
@@ -257,7 +275,7 @@ export function reasonsToRefuseReadiness(
 
   if (result.verdict !== "ready") return reasons;
 
-  if (result.evidence.length === 0) {
+  if (!proofOfConcept && result.evidence.length === 0) {
     reasons.push("A ready verdict needs at least one evidence item.");
   }
 
@@ -285,9 +303,9 @@ export function reasonsToRefuseReadiness(
   } else if (result.objectiveIsProcess) {
     reasons.push("A ready verdict needs an objective that is not a process.");
   }
-  if (result.unknowns.length > MAX_READY_UNKNOWNS) {
+  if (result.unknowns.length > maxUnknowns) {
     reasons.push(
-      `A ready verdict allows at most ${MAX_READY_UNKNOWNS} unknowns; this one has ${result.unknowns.length}.`,
+      `A ready verdict allows at most ${maxUnknowns} unknowns; this one has ${result.unknowns.length}.`,
     );
   }
   return reasons;
