@@ -93,7 +93,10 @@ test("creates a session through the setup step", async ({ page, request }) => {
   await on(page, "setup-depth-full-spec");
   await on(page, "setup-level-builder");
 
+  // A closing dialog keeps its heading visible through the exit animation, so
+  // the open state on the dialog itself is what proves nothing closed.
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveAttribute("data-state", "open");
   await expect(page.getByRole("heading", { name: SETUP_HEADING })).toBeVisible();
 
   await page.getByRole("button", { name: "Create", exact: true }).click();

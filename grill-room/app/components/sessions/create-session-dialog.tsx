@@ -124,8 +124,6 @@ export function CreateSessionDialog({
   const levelIsUsersRef = useRef(false);
   const levelRef = useRef(level);
   levelRef.current = level;
-  const profileLevelRef = useRef(profileLevel);
-  profileLevelRef.current = profileLevel;
 
   // The latest form, so two quick edits never write a stale draft.
   const formRef = useRef(form);
@@ -166,14 +164,9 @@ export function CreateSessionDialog({
     if (!open) return;
     setScreen(1);
     setDepth(DEFAULT_DEPTH);
+    // The level effect below runs after this one on every open and fills the
+    // level from the profile.
     levelIsUsersRef.current = false;
-    setLevel(
-      levelOnProfileLoad({
-        userPicked: false,
-        pickedLevel: null,
-        profileLevel: profileLevelRef.current,
-      }),
-    );
     const stored = readSessionDraft(draftStorage());
     const draft =
       projectId === null ? stored : draftInProject(stored, projectId);
@@ -202,8 +195,8 @@ export function CreateSessionDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultModel]);
 
-  // The profile loads asynchronously; it fills the level only while the level
-  // is not the owner's pick.
+  // Every open, and a profile that loads or changes while open, fills the
+  // level from the profile, unless the owner has picked one.
   useEffect(() => {
     if (!open) return;
     setLevel(
