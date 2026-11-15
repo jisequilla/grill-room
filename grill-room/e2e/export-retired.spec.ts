@@ -65,6 +65,7 @@ test("notices a deleted working folder, refuses re-export, and re-exports on the
 
   await page.getByLabel("Title").fill("Retired export e2e");
   await page.getByLabel("Idea").fill("A session whose build finished and whose working folder was deleted.");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
 
   await page.waitForURL(/\/sessions\/[^/]+$/);
@@ -188,6 +189,7 @@ async function walkToFirstExport(page: Page, request: APIRequestContext, repo: s
 
   await page.getByLabel("Title").fill("Retired export e2e");
   await page.getByLabel("Idea").fill("A session whose build finished and whose working folder was deleted.");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
 
   await page.waitForURL(/\/sessions\/[^/]+$/);

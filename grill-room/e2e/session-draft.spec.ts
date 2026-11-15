@@ -50,6 +50,7 @@ test("keeps the New session text through a stray click, Escape, Cancel, a refuse
   await expectDraftRestored(page, "");
 
   await page.getByLabel(/docs folder/i).fill("relative/path");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(
     page.getByText("The docs folder must be an absolute path."),
@@ -75,6 +76,7 @@ test("keeps the New session text through a stray click, Escape, Cancel, a refuse
   await openDialog(page);
   await page.getByLabel("Title").fill("Draft e2e");
   await page.getByLabel("Idea").fill(IDEA);
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.waitForURL(/\/sessions\/[^/]+$/);
 

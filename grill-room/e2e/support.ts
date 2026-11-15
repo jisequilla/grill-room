@@ -3,7 +3,8 @@ import { expect } from "@playwright/test";
 
 /**
  * Creates a session through the real UI — the same "New session" dialog
- * `smoke.spec.ts` drives — and returns its id, read off the workspace URL
+ * `smoke.spec.ts` drives, skipping its setup step so the session gets the
+ * default depth — and returns its id, read off the workspace URL
  * once the session lands there. Every flow test starts here: a fresh
  * session with its own fake-interviewer queue (see {@link chooseScenario}),
  * untouched by any other test or session.
@@ -20,7 +21,11 @@ export async function createSession(
 
   await page.getByLabel("Title").fill(title);
   await page.getByLabel("Idea").fill(idea);
-  await page.getByRole("button", { name: "Create", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Set up the grill" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Skip", exact: true }).click();
 
   await page.waitForURL(/\/sessions\/[^/]+$/);
   const match = /\/sessions\/([^/]+)$/.exec(page.url());

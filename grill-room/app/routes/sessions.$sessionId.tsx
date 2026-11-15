@@ -31,6 +31,7 @@ import { ReadinessPanel, ScoutReportPanel } from "@/components/workspace/readine
 import { RoundHistory } from "@/components/workspace/round-history";
 import { RoundPanel, roundsExist } from "@/components/workspace/round-panel";
 import { SessionIdea } from "@/components/workspace/session-idea";
+import { SessionDepthLevelControl } from "@/components/workspace/session-depth-level-control";
 import { SessionModelControl } from "@/components/workspace/session-model-control";
 import { TreeFooter } from "@/components/workspace/tree-footer";
 import { TreeSheet, TreeSheetTrigger } from "@/components/workspace/tree-sheet";
@@ -277,6 +278,12 @@ export default function SessionWorkspaceRoute() {
     { enabled, refetchInterval: pollInterval },
   );
 
+  const { data: spec } = useActionQuery(
+    "get-spec",
+    { sessionId: id },
+    { enabled },
+  );
+
   // The turn the session's current turn status belongs to, of any kind: a
   // round proposal, a readiness judgment, a stale review, or a supersession
   // check all share the same turn lock, so the live turn status must read
@@ -493,6 +500,21 @@ export default function SessionWorkspaceRoute() {
               sessionId={id}
               model={session.model as SessionModel}
               modelLocked={session.modelLocked}
+              onChanged={refresh}
+            />
+            <SessionDepthLevelControl
+              sessionId={id}
+              depth={session.depth}
+              pendingDepth={session.pendingDepth}
+              state={session.state as SessionState}
+              turnStatus={round?.turnStatus ?? session.turnStatus}
+              technicalLevel={session.technicalLevel}
+              hasRound={
+                rounds === undefined ? undefined : rounds.rounds.length > 0
+              }
+              specCurrent={
+                spec === undefined ? undefined : spec.spec?.current === true
+              }
               onChanged={refresh}
             />
             <DocsFolderChip

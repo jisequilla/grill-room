@@ -152,6 +152,7 @@ test("walks the canned interview from a new session to broken-out tickets", asyn
   await page
     .getByLabel("Idea")
     .fill("A workspace app that grills a loose idea into a spec.");
+  await page.getByRole("button", { name: "Next", exact: true }).click();
   await page.getByRole("button", { name: "Create", exact: true }).click();
 
   // ---- Land on the workspace -------------------------------------------

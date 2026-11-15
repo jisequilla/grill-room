@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { useTestDatabase } from "../test/db.js";
+import { getDb, schema, useTestDatabase } from "../test/db.js";
 import createSession from "./create-session.js";
 import setDefaultModel from "./set-default-model.js";
 
@@ -56,5 +56,44 @@ describe("create-session", () => {
     });
 
     expect(session.answeringMode).toBe("whole-round");
+  });
+
+  it("C1 stores the chosen depth", async () => {
+    const session = await createSession.run({
+      title: "Micro SaaS",
+      idea: "A tiny paid tool",
+      depth: "full-spec",
+    });
+
+    expect(session.depth).toBe("full-spec");
+  });
+
+  it("C2 defaults the depth", async () => {
+    const session = await createSession.run({
+      title: "Micro SaaS",
+      idea: "A tiny paid tool",
+    });
+
+    expect(session.depth).toBe("first-working-version");
+  });
+
+  it("C3 rejects an unknown depth", async () => {
+    await expect(
+      createSession.run({
+        title: "Micro SaaS",
+        idea: "A tiny paid tool",
+        // @ts-expect-error not a depth
+        depth: "deep",
+      }),
+    ).rejects.toThrow();
+    expect(await getDb().select().from(schema.sessions)).toHaveLength(0);
+
+    const session = await createSession.run({
+      title: "Micro SaaS",
+      idea: "A tiny paid tool",
+      depth: "full-spec",
+    });
+    expect(session.depth).toBe("full-spec");
+    expect(await getDb().select().from(schema.sessions)).toHaveLength(1);
   });
 });
